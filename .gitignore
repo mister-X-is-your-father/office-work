@@ -1,0 +1,5 @@
+# build artifacts
+会議ファシリテーション_テンプレ.xlsx
+*.xlsx
+__pycache__/
+*.pyc
