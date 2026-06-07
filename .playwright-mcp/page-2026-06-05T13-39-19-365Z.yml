@@ -1,0 +1,209 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - heading "ガントチャート — タスク進捗" [level=1] [ref=e4]
+    - generic [ref=e5]: ※ モック（サンプルデータ）。本番は Vikunja API（期日・担当・進捗）から自動算出。
+  - generic [ref=e6]:
+    - generic [ref=e7]:
+      - generic [ref=e8]:
+        - generic [ref=e9]: プロジェクト
+        - generic [ref=e10]:
+          - button "Backend" [pressed] [ref=e11] [cursor=pointer]: Backend
+          - button "Frontend" [pressed] [ref=e13] [cursor=pointer]: Frontend
+          - button "QA" [pressed] [ref=e15] [cursor=pointer]: QA
+          - button "共通" [pressed] [ref=e17] [cursor=pointer]: 共通
+      - generic [ref=e19]:
+        - generic [ref=e20]: 担当者
+        - generic [ref=e21]:
+          - button "森田" [pressed] [ref=e22] [cursor=pointer]: 森田
+          - button "田中" [pressed] [ref=e24] [cursor=pointer]: 田中
+          - button "佐藤" [pressed] [ref=e26] [cursor=pointer]: 佐藤
+          - button "鈴木" [pressed] [ref=e28] [cursor=pointer]: 鈴木
+      - generic [ref=e30]:
+        - generic [ref=e31]: 表示オプション
+        - generic [ref=e32] [cursor=pointer]:
+          - checkbox "完了(100%)を隠す" [ref=e33]
+          - text: 完了(100%)を隠す
+      - generic [ref=e34]:
+        - generic [ref=e35]: ソート
+        - generic [ref=e36]:
+          - combobox [ref=e37] [cursor=pointer]:
+            - option "開始日" [selected]
+            - option "締切"
+            - option "担当"
+            - option "進捗"
+            - option "プロジェクト"
+          - button "↑ 昇順" [ref=e38] [cursor=pointer]
+      - generic [ref=e39]: 9件中 9件 表示
+    - generic [ref=e41]:
+      - generic [ref=e42]:
+        - generic [ref=e43]: タスク (9件)
+        - generic [ref=e44]:
+          - generic [ref=e45]: "2"
+          - generic [ref=e46]: 火
+        - generic [ref=e47]:
+          - generic [ref=e48]: "3"
+          - generic [ref=e49]: 水
+        - generic [ref=e50]:
+          - generic [ref=e51]: "4"
+          - generic [ref=e52]: 木
+        - generic [ref=e53]:
+          - generic [ref=e54]: "5"
+          - generic [ref=e55]: 金
+        - generic [ref=e56]:
+          - generic [ref=e57]: "6"
+          - generic [ref=e58]: 土
+        - generic [ref=e59]:
+          - generic [ref=e60]: "7"
+          - generic [ref=e61]: 日
+        - generic [ref=e62]:
+          - generic [ref=e63]: "8"
+          - generic [ref=e64]: 月
+        - generic [ref=e65]:
+          - generic [ref=e66]: "9"
+          - generic [ref=e67]: 火
+        - generic [ref=e68]:
+          - generic [ref=e69]: "10"
+          - generic [ref=e70]: 水
+        - generic [ref=e71]:
+          - generic [ref=e72]: "11"
+          - generic [ref=e73]: 木
+        - generic [ref=e74]:
+          - generic [ref=e75]: "12"
+          - generic [ref=e76]: 金
+        - generic [ref=e77]:
+          - generic [ref=e78]: "13"
+          - generic [ref=e79]: 土
+      - generic [ref=e80]:
+        - generic [ref=e81]:
+          - generic [ref=e84]:
+            - generic [ref=e85]: 設計ドキュメント
+            - generic [ref=e86]:
+              - generic [ref=e87]:
+                - generic [ref=e88]: 鈴
+                - text: 鈴木
+              - generic [ref=e89]: ·
+              - generic [ref=e90]: 共通
+              - generic [ref=e91]: ·
+              - generic [ref=e92]: 締切なし
+          - generic "設計ドキュメント / 鈴木 / 6/2–6/3 / 進捗100%" [ref=e94]:
+            - generic [ref=e96]: 100%
+        - generic [ref=e97]:
+          - generic [ref=e100]:
+            - generic [ref=e101]: API設計
+            - generic [ref=e102]:
+              - generic [ref=e103]:
+                - generic [ref=e104]: 森
+                - text: 森田
+              - generic [ref=e105]: ·
+              - generic [ref=e106]: Backend
+              - generic [ref=e107]: ·
+              - generic [ref=e108]: 締切なし
+          - generic "API設計 / 森田 / 6/2–6/4 / 進捗100%" [ref=e110]:
+            - generic [ref=e112]: 100%
+        - generic [ref=e113]:
+          - generic [ref=e116]:
+            - generic [ref=e117]: ダッシュ画面実装
+            - generic [ref=e118]:
+              - generic [ref=e119]:
+                - generic [ref=e120]: 田
+                - text: 田中
+              - generic [ref=e121]: ·
+              - generic [ref=e122]: Frontend
+              - generic [ref=e123]: ·
+              - generic [ref=e124]: 締切なし
+          - generic "ダッシュ画面実装 / 田中 / 6/3–6/9 / 進捗60%" [ref=e126]:
+            - generic [ref=e128]: 60%
+        - generic [ref=e129]:
+          - generic [ref=e132]:
+            - generic [ref=e133]: DBマイグレーション
+            - generic [ref=e134]:
+              - generic [ref=e135]:
+                - generic [ref=e136]: 森
+                - text: 森田
+              - generic [ref=e137]: ·
+              - generic [ref=e138]: Backend
+              - generic [ref=e139]: ·
+              - generic [ref=e140]: 締切なし
+          - generic "DBマイグレーション / 森田 / 6/4–6/5 / 進捗80%" [ref=e142]:
+            - generic [ref=e144]: 80%
+        - generic [ref=e145]:
+          - generic [ref=e148]:
+            - generic [ref=e149]: ログインバグ修正 遅延リスク
+            - generic [ref=e150]:
+              - generic [ref=e151]:
+                - generic [ref=e152]: 森
+                - text: 森田
+              - generic [ref=e153]: ·
+              - generic [ref=e154]: Backend
+              - generic [ref=e155]: ·
+              - generic [ref=e156]: 締切6/6
+          - generic [ref=e157]:
+            - generic "ログインバグ修正 / 森田 / 6/4–6/6 / 進捗20%" [ref=e158]:
+              - generic [ref=e160]: 20%
+            - generic "締切 6/6" [ref=e161]
+        - generic [ref=e162]:
+          - generic [ref=e165]:
+            - generic [ref=e166]: 認証フロー実装
+            - generic [ref=e167]:
+              - generic [ref=e168]:
+                - generic [ref=e169]: 佐
+                - text: 佐藤
+              - generic [ref=e170]: ·
+              - generic [ref=e171]: Backend
+              - generic [ref=e172]: ·
+              - generic [ref=e173]: 締切なし
+          - generic "認証フロー実装 / 佐藤 / 6/5–6/9 / 進捗40%" [ref=e175]:
+            - generic [ref=e177]: 40%
+        - generic [ref=e178]:
+          - generic [ref=e181]:
+            - generic [ref=e182]: LP制作
+            - generic [ref=e183]:
+              - generic [ref=e184]:
+                - generic [ref=e185]: 田
+                - text: 田中
+              - generic [ref=e186]: ·
+              - generic [ref=e187]: Frontend
+              - generic [ref=e188]: ·
+              - generic [ref=e189]: 締切6/12
+          - generic [ref=e190]:
+            - generic "LP制作 / 田中 / 6/8–6/12 / 進捗0%" [ref=e191]:
+              - generic [ref=e192]: 0%
+            - generic "締切 6/12" [ref=e193]
+        - generic [ref=e194]:
+          - generic [ref=e197]:
+            - generic [ref=e198]: 結合テスト
+            - generic [ref=e199]:
+              - generic [ref=e200]:
+                - generic [ref=e201]: 佐
+                - text: 佐藤
+              - generic [ref=e202]: ·
+              - generic [ref=e203]: QA
+              - generic [ref=e204]: ·
+              - generic [ref=e205]: 締切なし
+          - generic "結合テスト / 佐藤 / 6/9–6/11 / 進捗0%" [ref=e207]:
+            - generic [ref=e208]: 0%
+        - generic [ref=e209]:
+          - generic [ref=e212]:
+            - generic [ref=e213]: リリース準備
+            - generic [ref=e214]:
+              - generic [ref=e215]:
+                - generic [ref=e216]: 森
+                - text: 森田
+              - generic [ref=e217]: ·
+              - generic [ref=e218]: 共通
+              - generic [ref=e219]: ·
+              - generic [ref=e220]: 締切6/13
+          - generic [ref=e221]:
+            - generic "リリース準備 / 森田 / 6/12–6/13 / 進捗0%" [ref=e222]:
+              - generic [ref=e223]: 0%
+            - generic "締切 6/13" [ref=e224]
+        - generic:
+          - generic: 今日 6/4
+        - img
+    - generic [ref=e225]:
+      - generic [ref=e226]: 進捗バー
+      - generic [ref=e228]: 完了
+      - generic [ref=e230]: 遅延リスク
+      - generic [ref=e232]: 締切
+      - generic [ref=e234]: 締切超過リスク
+      - generic [ref=e236]: 今日(6/4)
