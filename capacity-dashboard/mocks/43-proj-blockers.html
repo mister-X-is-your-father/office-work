@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ブロッカー / リスク一覧 — 新ダッシュボード機能 (Release v1.2)</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee;
+    --track:#eef1f5;
+    --green:#2fa66b; --yellow:#f5a623; --red:#e5484d;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{font-size:15px}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    line-height:1.55; padding:28px 20px 64px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1000px;margin:0 auto}
+  .tnum{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+
+  header{margin-bottom:20px}
+  .title-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  h1{font-size:1.42rem;font-weight:700;letter-spacing:.01em}
+  .proj-pick{
+    display:inline-flex;align-items:center;gap:7px;
+    background:var(--card);border:1px solid var(--line);border-radius:9px;
+    padding:6px 12px;font-size:.86rem;color:var(--ink);font-weight:600;
+    box-shadow:0 1px 2px rgba(20,30,50,.04);cursor:pointer;
+  }
+  .proj-pick .caret{color:var(--muted);font-size:.8rem}
+  .note{margin-top:8px;font-size:.78rem;color:var(--muted)}
+
+  /* summary chips */
+  .summary{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}
+  .chip{
+    display:inline-flex;align-items:center;gap:8px;background:var(--card);
+    border:1px solid var(--line);border-radius:10px;padding:9px 14px;
+    box-shadow:0 1px 3px rgba(20,30,50,.05);font-size:.82rem;font-weight:600;
+  }
+  .chip .n{font-size:1.15rem;font-weight:700}
+  .chip.red .n{color:var(--red)} .chip.yellow .n{color:var(--yellow)}
+  .chip .dot{width:9px;height:9px;border-radius:50%}
+  .dot.red{background:var(--red)} .dot.yellow{background:var(--yellow)} .dot.green{background:var(--green)}
+
+  /* risk card */
+  .list{display:flex;flex-direction:column;gap:14px}
+  .risk{
+    position:relative;background:var(--card);border:1px solid var(--line);border-radius:14px;
+    box-shadow:0 1px 3px rgba(20,30,50,.05);padding:18px 20px 18px 22px;overflow:hidden;
+  }
+  .risk::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px}
+  .risk.sev-red::before{background:var(--red)}
+  .risk.sev-yellow::before{background:var(--yellow)}
+
+  .risk.featured{box-shadow:0 4px 16px rgba(229,72,77,.16);border-color:rgba(229,72,77,.4)}
+
+  .r-top{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap}
+  .sev-badge{
+    flex:none;display:inline-flex;align-items:center;gap:6px;font-size:.72rem;font-weight:700;
+    padding:4px 10px;border-radius:7px;letter-spacing:.02em;
+  }
+  .sev-badge.red{background:rgba(229,72,77,.12);color:var(--red)}
+  .sev-badge.yellow{background:rgba(245,166,35,.15);color:#a86c00}
+  .sev-badge .d{width:7px;height:7px;border-radius:50%}
+  .sev-badge.red .d{background:var(--red)} .sev-badge.yellow .d{background:var(--yellow)}
+
+  .r-title{font-size:1.04rem;font-weight:700;flex:1;min-width:200px}
+  .stall{
+    flex:none;display:inline-flex;align-items:center;gap:6px;font-size:.78rem;font-weight:700;color:#fff;
+    background:var(--red);padding:5px 11px;border-radius:8px;
+  }
+  .stall.warn{background:#a86c00}
+  .stall .big{font-size:.95rem}
+
+  .r-desc{margin-top:10px;font-size:.88rem;color:var(--ink)}
+
+  .r-meta{
+    display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:14px;
+  }
+  @media(max-width:680px){.r-meta{grid-template-columns:1fr}.summary .chip{flex:1 1 40%}}
+  .meta{background:#fafbfc;border:1px solid var(--line);border-radius:9px;padding:9px 12px}
+  .meta .k{font-size:.7rem;color:var(--muted);font-weight:600;letter-spacing:.02em;text-transform:uppercase}
+  .meta .v{font-size:.86rem;font-weight:600;margin-top:3px;display:flex;align-items:center;gap:7px}
+  .avatar{width:9px;height:9px;border-radius:50%;flex:none}
+  .meta .v.over{color:var(--red)}
+
+  .r-action{
+    margin-top:14px;border-top:1px dashed var(--line);padding-top:12px;
+    display:flex;gap:10px;align-items:flex-start;
+  }
+  .r-action .lab{flex:none;font-size:.72rem;font-weight:700;color:var(--muted);
+    background:var(--track);padding:3px 8px;border-radius:6px;margin-top:1px}
+  .r-action .body{font-size:.84rem;color:var(--ink)}
+  .r-action .placeholder{color:var(--muted);font-style:normal}
+
+  .impact-tags{margin-top:8px;display:flex;gap:6px;flex-wrap:wrap}
+  .tag{font-size:.72rem;font-weight:600;color:var(--muted);background:var(--track);
+    border-radius:6px;padding:3px 9px}
+  .tag.red{background:rgba(229,72,77,.1);color:var(--red)}
+
+  .foot{margin-top:18px;font-size:.72rem;color:var(--muted);text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="title-row">
+      <h1>ブロッカー / リスク一覧</h1>
+      <span class="proj-pick">プロジェクト: 新ダッシュボード機能 <span class="caret">▾</span></span>
+    </div>
+    <div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</div>
+  </header>
+
+  <div class="summary">
+    <div class="chip red"><span class="dot red"></span><span class="n tnum">2</span>件 深刻（赤）</div>
+    <div class="chip yellow"><span class="dot yellow"></span><span class="n tnum">2</span>件 注意（黄）</div>
+    <div class="chip"><span class="dot red"></span>最長停滞 <span class="n tnum">3</span>日</div>
+    <div class="chip"><span class="dot red"></span>着地 6/16 / 締切 6/13（3日遅延）</div>
+  </div>
+
+  <div class="list">
+
+    <!-- ① featured red blocker -->
+    <div class="risk sev-red featured">
+      <div class="r-top">
+        <span class="sev-badge red"><span class="d"></span>赤・最優先</span>
+        <div class="r-title">認証フロー実装が停止中</div>
+        <span class="stall"><span>⏸</span><span class="big tnum">3日</span>停滞</span>
+      </div>
+      <div class="r-desc">
+        外部認証API（IdP）の応答待ちで実装が <b>3日間ストップ</b>。担当の佐藤の手が完全に止まっており、
+        この間に消化できるはずだった工数が積み残しになっています。クリティカルパス上のため遅延が直接プロジェクト全体に波及します。
+      </div>
+      <div class="impact-tags">
+        <span class="tag red">クリティカルパス</span>
+        <span class="tag red">M2 / 結合テストに波及</span>
+        <span class="tag">外部依存</span>
+      </div>
+      <div class="r-meta">
+        <div class="meta">
+          <div class="k">影響範囲</div>
+          <div class="v">M2 マイルストーン・結合テスト</div>
+        </div>
+        <div class="meta">
+          <div class="k">滞留日数</div>
+          <div class="v over tnum">3日（6/2〜継続中）</div>
+        </div>
+        <div class="meta">
+          <div class="k">担当</div>
+          <div class="v"><span class="avatar" style="background:var(--m-sato)"></span>佐藤（残16h・ブロック中）</div>
+        </div>
+      </div>
+      <div class="r-action">
+        <span class="lab">打ち手</span>
+        <span class="body placeholder">（記入欄）外部APIベンダーへエスカレーション期日／モックIdPでの暫定先行実装／佐藤の一時アサイン替えを検討 …</span>
+      </div>
+    </div>
+
+    <!-- ② red schedule delay -->
+    <div class="risk sev-red">
+      <div class="r-top">
+        <span class="sev-badge red"><span class="d"></span>赤</span>
+        <div class="r-title">スケジュール遅延</div>
+        <span class="stall"><span>⏱</span><span class="big tnum">+3日</span>超過</span>
+      </div>
+      <div class="r-desc">
+        現ペースでの着地見込みは <b>6/16</b>、締切は <b>6/13</b>。最終消化見込み 132h（見積り120hに対し +12h / +10%）で、
+        工数・日程の両面で予算超過の見込みです。
+      </div>
+      <div class="impact-tags">
+        <span class="tag red">締切超過</span>
+        <span class="tag red">予算 +10%</span>
+      </div>
+      <div class="r-meta">
+        <div class="meta">
+          <div class="k">影響範囲</div>
+          <div class="v">リリース日・後続PJ</div>
+        </div>
+        <div class="meta">
+          <div class="k">乖離</div>
+          <div class="v over tnum">+3日 / +12h</div>
+        </div>
+        <div class="meta">
+          <div class="k">担当</div>
+          <div class="v">PM（全体）</div>
+        </div>
+      </div>
+      <div class="r-action">
+        <span class="lab">打ち手</span>
+        <span class="body placeholder">（記入欄）スコープ削減候補の選定／締切再交渉／①のブロッカー解消によるペース回復見込みの再試算 …</span>
+      </div>
+    </div>
+
+    <!-- ③ yellow bus factor -->
+    <div class="risk sev-yellow">
+      <div class="r-top">
+        <span class="sev-badge yellow"><span class="d"></span>黄</span>
+        <div class="r-title">Frontend が田中に集中（バス係数1）</div>
+        <span class="stall warn"><span>👤</span>属人化</span>
+      </div>
+      <div class="r-desc">
+        Frontend 領域の作業が田中ひとりに集中。田中が不在・離脱すると Frontend が止まるリスク（バス係数1）。
+        現状の田中の残工数は14hで負荷も高め。
+      </div>
+      <div class="impact-tags">
+        <span class="tag">属人化</span>
+        <span class="tag">Frontend 全体</span>
+      </div>
+      <div class="r-meta">
+        <div class="meta">
+          <div class="k">影響範囲</div>
+          <div class="v">Frontend 全機能</div>
+        </div>
+        <div class="meta">
+          <div class="k">状態</div>
+          <div class="v">継続中（恒常リスク）</div>
+        </div>
+        <div class="meta">
+          <div class="k">担当</div>
+          <div class="v"><span class="avatar" style="background:var(--m-tanaka)"></span>田中（残14h）</div>
+        </div>
+      </div>
+      <div class="r-action">
+        <span class="lab">打ち手</span>
+        <span class="body placeholder">（記入欄）鈴木へのペア作業／コンポーネント分割による分散／設計ドキュメント整備で知識共有 …</span>
+      </div>
+    </div>
+
+    <!-- ④ yellow scope increase -->
+    <div class="risk sev-yellow">
+      <div class="r-top">
+        <span class="sev-badge yellow"><span class="d"></span>黄</span>
+        <div class="r-title">スコープ増加（+12h）</div>
+        <span class="stall warn"><span>＋</span><span class="big tnum">+12h</span>増</span>
+      </div>
+      <div class="r-desc">
+        5/27 に追加要件でスコープが <b>+12h</b> 増加。見積り超過分（+12h）とちょうど同規模で、
+        当初予算を圧迫している主因のひとつです。
+      </div>
+      <div class="impact-tags">
+        <span class="tag">スコープクリープ</span>
+        <span class="tag">予算圧迫</span>
+      </div>
+      <div class="r-meta">
+        <div class="meta">
+          <div class="k">影響範囲</div>
+          <div class="v">見積り全体（+10%）</div>
+        </div>
+        <div class="meta">
+          <div class="k">発生日</div>
+          <div class="v tnum">5/27</div>
+        </div>
+        <div class="meta">
+          <div class="k">担当</div>
+          <div class="v">PM / ステークホルダー</div>
+        </div>
+      </div>
+      <div class="r-action">
+        <span class="lab">打ち手</span>
+        <span class="body placeholder">（記入欄）追加分の v1.3 への切り出し可否／優先度合意の再確認／追加工数の正式承認 …</span>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="foot">深刻度（赤→黄）順に表示。停滞中の「認証フロー実装」を最上段に強調。</div>
+</div>
+</body>
+</html>

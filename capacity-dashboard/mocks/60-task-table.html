@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>タスク一覧 — 新ダッシュボード機能</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480;
+    --line:#e6e9ee; --track:#eef1f5;
+    --done:#2fa66b; --doing:#3a86ff; --todo:#9aa3af; --blocked:#e5484d;
+    --pri:#e5484d;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+    --pj-backend:#3a86ff; --pj-frontend:#2fa66b; --pj-qa:#b657d6; --pj-common:#8a93a0;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"tnum"; -webkit-font-smoothing:antialiased;
+  }
+  .nums{font-variant-numeric:tabular-nums;}
+  header.page{padding:20px 24px 14px; border-bottom:1px solid var(--line); background:#fff;}
+  .page .crumb{font-size:12px; color:var(--muted); margin-bottom:6px;}
+  .page h1{margin:0 0 4px; font-size:18px; letter-spacing:.02em;}
+  .page .sub{font-size:12.5px; color:var(--muted);}
+  .note{
+    margin-top:10px; font-size:11.5px; color:var(--muted);
+    background:#fbfbfc; border:1px dashed var(--line); border-radius:8px;
+    padding:6px 10px; display:inline-block;
+  }
+  .wrap{padding:16px 24px 40px;}
+  .toolbar{
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    padding:10px 12px; margin-bottom:12px; box-shadow:0 1px 2px rgba(20,30,50,.04);
+  }
+  .toolbar .group{display:flex; align-items:center; gap:6px;}
+  .toolbar label{font-size:11.5px; color:var(--muted);}
+  select, .sortbtn{
+    font:inherit; font-size:12.5px; color:var(--ink);
+    border:1px solid var(--line); background:#fff; border-radius:8px;
+    padding:5px 9px; cursor:pointer;
+  }
+  select:hover, .sortbtn:hover{border-color:#cfd5dd;}
+  .spacer{flex:1;}
+  .countbadge{
+    font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums;
+  }
+  .countbadge b{color:var(--ink);}
+  .selinfo{
+    font-size:11.5px; color:#fff; background:var(--doing); border-radius:999px;
+    padding:2px 10px; display:none;
+  }
+  .selinfo.show{display:inline-block;}
+  table{
+    width:100%; border-collapse:separate; border-spacing:0;
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    overflow:hidden; box-shadow:0 1px 2px rgba(20,30,50,.04);
+  }
+  thead th{
+    font-size:11px; color:var(--muted); font-weight:600; text-align:left;
+    padding:9px 12px; background:#fbfbfc; border-bottom:1px solid var(--line);
+    white-space:nowrap; user-select:none;
+  }
+  th.sortable{cursor:pointer;}
+  th.sortable:hover{color:var(--ink);}
+  th .arr{font-size:9px; color:var(--doing); margin-left:3px;}
+  tbody td{
+    font-size:12.5px; padding:8px 12px; border-bottom:1px solid var(--line);
+    vertical-align:middle;
+  }
+  tbody tr:last-child td{border-bottom:none;}
+  tbody tr:hover{background:#fafbfc;}
+  tbody tr.sel{background:#eef4ff;}
+  tbody tr.sel:hover{background:#e6efff;}
+  .c-check{width:34px; text-align:center;}
+  input[type=checkbox]{width:14px; height:14px; cursor:pointer; accent-color:var(--doing);}
+  .tname{font-weight:600;}
+  .tname .pj{
+    display:inline-block; font-size:9.5px; font-weight:700; color:#fff;
+    border-radius:5px; padding:1px 6px; margin-left:7px; vertical-align:1px;
+  }
+  .assignee{display:flex; align-items:center; gap:7px;}
+  .avatar{
+    width:20px; height:20px; border-radius:50%; color:#fff;
+    font-size:10px; font-weight:700; display:flex; align-items:center; justify-content:center; flex:none;
+  }
+  .badge{
+    display:inline-flex; align-items:center; gap:5px;
+    font-size:11px; font-weight:600; border-radius:999px; padding:2px 9px;
+  }
+  .badge .d{width:7px; height:7px; border-radius:50%;}
+  .b-Done{background:#e6f6ee; color:#1e7e4c;}
+  .b-Doing{background:#e8f0ff; color:#2563d6;}
+  .b-Todo{background:#f0f2f5; color:#5a6270;}
+  .b-Blocked{background:#fbe9e9; color:#c23838;}
+  .pri-high{
+    font-size:10.5px; font-weight:700; color:#fff; background:var(--pri);
+    border-radius:5px; padding:1px 7px;
+  }
+  .pri-norm{font-size:11px; color:var(--muted);}
+  .due{font-variant-numeric:tabular-nums;}
+  .due.over{color:var(--blocked); font-weight:700;}
+  .due.today{color:var(--blocked); font-weight:700;}
+  .est{color:var(--muted); font-variant-numeric:tabular-nums; text-align:right;}
+  .prog{display:flex; align-items:center; gap:7px; min-width:120px;}
+  .bar{flex:1; height:5px; border-radius:999px; background:var(--track); overflow:hidden;}
+  .bar > i{display:block; height:100%; border-radius:999px;}
+  .pct{font-size:11px; color:var(--muted); width:34px; text-align:right; font-variant-numeric:tabular-nums;}
+  .hidden{display:none;}
+  .blockhint{font-size:10px; color:#c23838; margin-left:6px;}
+</style>
+</head>
+<body>
+<header class="page">
+  <div class="crumb">プロジェクト / 新ダッシュボード機能</div>
+  <h1>タスク一覧</h1>
+  <div class="sub nums">本日 6/4(木)・スプレッドシート的に素早く確認</div>
+  <div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</div>
+</header>
+
+<div class="wrap">
+  <div class="toolbar">
+    <div class="group">
+      <label>状態</label>
+      <select id="fState">
+        <option value="">すべて</option>
+        <option>Todo</option><option>Doing</option><option>Blocked</option><option>Done</option>
+      </select>
+    </div>
+    <div class="group">
+      <label>担当</label>
+      <select id="fWho">
+        <option value="">すべて</option>
+        <option>森田</option><option>田中</option><option>佐藤</option><option>鈴木</option><option>未アサイン</option>
+      </select>
+    </div>
+    <div class="group">
+      <label>プロジェクト</label>
+      <select id="fPj">
+        <option value="">すべて</option>
+        <option>Backend</option><option>Frontend</option><option>QA</option><option>共通</option>
+      </select>
+    </div>
+    <div class="group">
+      <label>ソート</label>
+      <select id="sortKey">
+        <option value="default">デフォルト</option>
+        <option value="due">締切</option>
+        <option value="pct">進捗</option>
+        <option value="est">見積</option>
+        <option value="name">タスク名</option>
+      </select>
+      <button class="sortbtn" id="sortDir" title="昇順/降順">▲ 昇順</button>
+    </div>
+    <div class="spacer"></div>
+    <span class="selinfo" id="selinfo">0件選択中</span>
+    <span class="countbadge nums" id="count"><b>10</b> 件表示</span>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th class="c-check"><input type="checkbox" id="checkAll"></th>
+        <th class="sortable" data-k="name">タスク</th>
+        <th>担当</th>
+        <th class="sortable" data-k="state">状態</th>
+        <th class="sortable" data-k="pri">優先</th>
+        <th class="sortable" data-k="due">締切</th>
+        <th class="sortable" data-k="est" style="text-align:right">見積</th>
+        <th class="sortable" data-k="pct">進捗</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+
+<script>
+const MEMBERS = {
+  '森田':{c:'var(--m-morita)', i:'森'},
+  '田中':{c:'var(--m-tanaka)', i:'田'},
+  '佐藤':{c:'var(--m-sato)', i:'佐'},
+  '鈴木':{c:'var(--m-suzuki)', i:'鈴'},
+  '未アサイン':{c:'#c3c9d2', i:'?'},
+};
+const PJ = {'Backend':'var(--pj-backend)','Frontend':'var(--pj-frontend)','QA':'var(--pj-qa)','共通':'var(--pj-common)'};
+const STATECOL = {Todo:'var(--todo)', Doing:'var(--doing)', Blocked:'var(--blocked)', Done:'var(--done)'};
+const STORDER = {Doing:0, Blocked:1, Todo:2, Done:3};
+
+const tasks = [
+  {n:'設計ドキュメント', who:'鈴木', pj:'共通', st:'Done', pct:100, due:'5/27', est:2},
+  {n:'API設計', who:'森田', pj:'Backend', st:'Done', pct:100, due:null, est:4},
+  {n:'DBマイグレーション', who:'森田', pj:'Backend', st:'Doing', pct:80, due:'6/5', est:3},
+  {n:'ログイン障害対応', who:'森田', pj:'Backend', st:'Doing', pct:20, due:'6/4', est:2, pri:'最高'},
+  {n:'ダッシュ画面実装', who:'田中', pj:'Frontend', st:'Doing', pct:60, due:'6/9', est:4},
+  {n:'認証フロー実装', who:'佐藤', pj:'Backend', st:'Blocked', pct:40, due:'6/6', est:5, block:'外部API待ち'},
+  {n:'結合テスト', who:'佐藤', pj:'QA', st:'Todo', pct:0, due:'6/11', est:6},
+  {n:'LP制作', who:'田中', pj:'Frontend', st:'Todo', pct:0, due:'6/12', est:8},
+  {n:'リリースノート作成', who:'未アサイン', pj:'共通', st:'Todo', pct:0, due:'6/13', est:1},
+  {n:'リリース準備', who:'森田', pj:'共通', st:'Todo', pct:0, due:'6/13', est:4},
+];
+tasks.forEach((t,i)=>{t._id=i; t._sel=false;});
+
+const TODAY = {m:6, d:4};
+function dueVal(due){ if(!due) return Infinity; const [m,d]=due.split('/').map(Number); return m*100+d; }
+function dueClass(due){
+  if(!due) return '';
+  const v = dueVal(due), today = TODAY.m*100+TODAY.d;
+  if(v===today) return 'today';
+  if(v<today) return 'over';
+  return '';
+}
+
+let state = {fState:'', fWho:'', fPj:'', sortKey:'default', asc:true};
+
+function visible(){
+  let arr = tasks.filter(t=>
+    (!state.fState || t.st===state.fState) &&
+    (!state.fWho || t.who===state.fWho) &&
+    (!state.fPj || t.pj===state.fPj)
+  );
+  const k = state.sortKey;
+  if(k!=='default'){
+    arr = arr.slice().sort((a,b)=>{
+      let x,y;
+      if(k==='due'){x=dueVal(a.due); y=dueVal(b.due);}
+      else if(k==='pct'){x=a.pct; y=b.pct;}
+      else if(k==='est'){x=a.est; y=b.est;}
+      else if(k==='name'){x=a.n; y=b.n; return state.asc? x.localeCompare(y,'ja'): y.localeCompare(x,'ja');}
+      return state.asc? x-y : y-x;
+    });
+  } else {
+    arr = arr.slice().sort((a,b)=> STORDER[a.st]-STORDER[b.st] || dueVal(a.due)-dueVal(b.due));
+  }
+  return arr;
+}
+
+function rowHtml(t){
+  const mem = MEMBERS[t.who];
+  const dc = dueClass(t.due);
+  const dueTxt = t.due ? `${t.due}${dc==='today'?'（今日）':dc==='over'?'（超過）':''}` : '—';
+  return `
+  <tr data-id="${t._id}" class="${t._sel?'sel':''}">
+    <td class="c-check"><input type="checkbox" class="rowchk" ${t._sel?'checked':''}></td>
+    <td class="tname">${t.n}<span class="pj" style="background:${PJ[t.pj]}">${t.pj}</span>${t.block?`<span class="blockhint">⛔ ${t.block}</span>`:''}</td>
+    <td><span class="assignee"><span class="avatar" style="background:${mem.c}">${mem.i}</span>${t.who}</span></td>
+    <td><span class="badge b-${t.st}"><span class="d" style="background:${STATECOL[t.st]}"></span>${t.st}</span></td>
+    <td>${t.pri==='最高'?'<span class="pri-high">最高</span>':'<span class="pri-norm">通常</span>'}</td>
+    <td class="due ${dc} nums">${dueTxt}</td>
+    <td class="est">${t.est}h</td>
+    <td>
+      <div class="prog">
+        <span class="bar"><i style="width:${t.pct}%;background:${STATECOL[t.st]}"></i></span>
+        <span class="pct">${t.pct}%</span>
+      </div>
+    </td>
+  </tr>`;
+}
+
+function render(){
+  const arr = visible();
+  document.getElementById('tbody').innerHTML = arr.map(rowHtml).join('');
+  document.getElementById('count').innerHTML = `<b>${arr.length}</b> 件表示（全${tasks.length}件）`;
+  const selN = tasks.filter(t=>t._sel).length;
+  const si = document.getElementById('selinfo');
+  si.textContent = `${selN}件選択中`;
+  si.classList.toggle('show', selN>0);
+  const allVis = arr.length>0 && arr.every(t=>t._sel);
+  document.getElementById('checkAll').checked = allVis;
+
+  document.querySelectorAll('.rowchk').forEach(cb=>{
+    cb.addEventListener('change', e=>{
+      const id = +e.target.closest('tr').dataset.id;
+      tasks[id]._sel = e.target.checked;
+      render();
+    });
+  });
+}
+
+document.getElementById('fState').addEventListener('change', e=>{state.fState=e.target.value; render();});
+document.getElementById('fWho').addEventListener('change', e=>{state.fWho=e.target.value; render();});
+document.getElementById('fPj').addEventListener('change', e=>{state.fPj=e.target.value; render();});
+document.getElementById('sortKey').addEventListener('change', e=>{state.sortKey=e.target.value; render();});
+const dirBtn = document.getElementById('sortDir');
+dirBtn.addEventListener('click', ()=>{
+  state.asc=!state.asc;
+  dirBtn.textContent = state.asc? '▲ 昇順':'▼ 降順';
+  render();
+});
+document.getElementById('checkAll').addEventListener('change', e=>{
+  const vis = visible();
+  vis.forEach(t=>{ tasks[t._id]._sel = e.target.checked; });
+  render();
+});
+
+render();
+</script>
+</body>
+</html>

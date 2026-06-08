@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>デイリースタンドアップ — 新ダッシュボード機能</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480;
+    --line:#e6e9ee; --track:#eef1f5;
+    --done:#2fa66b; --doing:#3a86ff; --todo:#9aa3af; --blocked:#e5484d;
+    --pri:#e5484d;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+    --pj-backend:#3a86ff; --pj-frontend:#2fa66b; --pj-qa:#b657d6; --pj-common:#8a93a0;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"tnum"; -webkit-font-smoothing:antialiased;
+  }
+  .nums{font-variant-numeric:tabular-nums;}
+  header.page{padding:20px 24px 14px; border-bottom:1px solid var(--line); background:#fff;}
+  .page .crumb{font-size:12px; color:var(--muted); margin-bottom:6px;}
+  .page .titlerow{display:flex; align-items:baseline; gap:12px; flex-wrap:wrap;}
+  .page h1{margin:0 0 2px; font-size:18px; letter-spacing:.02em;}
+  .page .date{font-size:13px; color:var(--doing); font-weight:600; font-variant-numeric:tabular-nums;}
+  .page .sub{font-size:12.5px; color:var(--muted); margin-top:2px;}
+  .note{
+    margin-top:10px; font-size:11.5px; color:var(--muted);
+    background:#fbfbfc; border:1px dashed var(--line); border-radius:8px;
+    padding:6px 10px; display:inline-block;
+  }
+  .legend{display:flex; gap:14px; margin-top:10px; flex-wrap:wrap;}
+  .legend span{font-size:11px; color:var(--muted); display:flex; align-items:center; gap:5px;}
+  .legend .d{width:9px; height:9px; border-radius:50%;}
+
+  .roster{padding:18px 24px 40px; display:flex; flex-direction:column; gap:14px;}
+  .member{
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04); overflow:hidden;
+  }
+  .member.has-blocker{border-color:#f1c6c6;}
+  .m-head{
+    display:flex; align-items:center; gap:11px; padding:12px 16px;
+    border-bottom:1px solid var(--line); background:#fbfbfc;
+  }
+  .avatar{
+    width:34px; height:34px; border-radius:50%; color:#fff;
+    font-size:14px; font-weight:700; display:flex; align-items:center; justify-content:center; flex:none;
+  }
+  .m-name{font-size:14px; font-weight:700;}
+  .m-role{font-size:11px; color:var(--muted); margin-left:2px;}
+  .m-stat{margin-left:auto; display:flex; gap:8px; font-size:11px;}
+  .chip{
+    border-radius:999px; padding:2px 9px; font-weight:600; font-variant-numeric:tabular-nums;
+    background:#f0f2f5; color:var(--muted);
+  }
+  .chip.warn{background:#fbe9e9; color:#c23838;}
+
+  .cols{display:grid; grid-template-columns:1fr 1fr 1fr; gap:0;}
+  .col{padding:12px 16px; border-right:1px solid var(--line);}
+  .col:last-child{border-right:none;}
+  .col-h{
+    font-size:11px; font-weight:700; color:var(--muted); letter-spacing:.04em;
+    display:flex; align-items:center; gap:6px; margin-bottom:9px; text-transform:uppercase;
+  }
+  .col-h .d{width:8px; height:8px; border-radius:50%;}
+  .col.blocker .col-h{color:#c23838;}
+
+  ul.items{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:7px;}
+  li.item{
+    display:flex; align-items:flex-start; gap:8px; font-size:12.5px; line-height:1.4;
+  }
+  li.item .ico{flex:none; margin-top:1px; font-size:12px;}
+  li.item .body{flex:1;}
+  li.item .tags{margin-top:3px; display:flex; gap:6px; flex-wrap:wrap; align-items:center;}
+  .pj{font-size:9.5px; font-weight:700; color:#fff; border-radius:5px; padding:1px 6px;}
+  .meta{font-size:10.5px; color:var(--muted); font-variant-numeric:tabular-nums;}
+  .meta.due-over{color:var(--blocked); font-weight:700;}
+  .meta.due-today{color:var(--blocked); font-weight:700;}
+  .pri{font-size:9.5px; font-weight:700; color:#fff; background:var(--pri); border-radius:5px; padding:1px 6px;}
+  .done-txt{color:var(--muted); text-decoration:line-through; text-decoration-color:#bcc3cc;}
+
+  .blocker-card{
+    background:#fbe9e9; border:1px solid #f1c6c6; border-radius:9px; padding:8px 10px;
+    font-size:12.5px; color:#b03a3a; display:flex; gap:8px; align-items:flex-start;
+  }
+  .blocker-card b{font-weight:700;}
+  .blocker-card .sub{display:block; font-size:10.5px; color:#c23838; margin-top:3px; font-weight:500;}
+  .empty{font-size:12px; color:#aab1bb;}
+
+  @media(max-width:760px){ .cols{grid-template-columns:1fr;} .col{border-right:none; border-bottom:1px solid var(--line);} }
+</style>
+</head>
+<body>
+<header class="page">
+  <div class="crumb">プロジェクト / 新ダッシュボード機能</div>
+  <div class="titlerow">
+    <h1>デイリースタンドアップ</h1>
+    <span class="date nums">2026/6/4(木) 朝会</span>
+  </div>
+  <div class="sub">メンバーごとに 昨日やったこと / 今日やること / ブロッカー を確認</div>
+  <div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</div>
+  <div class="legend">
+    <span><span class="d" style="background:var(--done)"></span>Done</span>
+    <span><span class="d" style="background:var(--doing)"></span>Doing</span>
+    <span><span class="d" style="background:var(--todo)"></span>Todo</span>
+    <span><span class="d" style="background:var(--blocked)"></span>Blocked</span>
+  </div>
+</header>
+
+<main class="roster" id="roster"></main>
+
+<script>
+const MEMBERS = {
+  '森田':{c:'var(--m-morita)', i:'森', role:'Backend'},
+  '田中':{c:'var(--m-tanaka)', i:'田', role:'Frontend'},
+  '佐藤':{c:'var(--m-sato)', i:'佐', role:'Backend / QA'},
+  '鈴木':{c:'var(--m-suzuki)', i:'鈴', role:'共通'},
+};
+const PJ = {'Backend':'var(--pj-backend)','Frontend':'var(--pj-frontend)','QA':'var(--pj-qa)','共通':'var(--pj-common)'};
+const STATECOL = {Todo:'var(--todo)', Doing:'var(--doing)', Blocked:'var(--blocked)', Done:'var(--done)'};
+
+// 朝会の3区分: 昨日やったこと=Done / 今日やること=Doing+Todo / ブロッカー=Blocked
+// 今日=6/4
+const tasks = [
+  {n:'設計ドキュメント', who:'鈴木', pj:'共通', st:'Done', pct:100, due:'5/27', est:2},
+  {n:'API設計', who:'森田', pj:'Backend', st:'Done', pct:100, due:null, est:4},
+  {n:'DBマイグレーション', who:'森田', pj:'Backend', st:'Doing', pct:80, due:'6/5', est:3},
+  {n:'ログイン障害対応', who:'森田', pj:'Backend', st:'Doing', pct:20, due:'6/4', est:2, pri:'最高'},
+  {n:'ダッシュ画面実装', who:'田中', pj:'Frontend', st:'Doing', pct:60, due:'6/9', est:4},
+  {n:'認証フロー実装', who:'佐藤', pj:'Backend', st:'Blocked', pct:40, due:'6/6', est:5, block:'外部API待ち（3日）'},
+  {n:'結合テスト', who:'佐藤', pj:'QA', st:'Todo', pct:0, due:'6/11', est:6},
+  {n:'LP制作', who:'田中', pj:'Frontend', st:'Todo', pct:0, due:'6/12', est:8},
+  {n:'リリース準備', who:'森田', pj:'共通', st:'Todo', pct:0, due:'6/13', est:4},
+  // リリースノート作成は未アサインのため朝会の個人カラムには出さない
+];
+
+const ORDER = ['森田','田中','佐藤','鈴木'];
+const TODAY = {m:6, d:4};
+function dueCls(due){
+  if(!due) return '';
+  const [m,d]=due.split('/').map(Number);
+  const v=m*100+d, t=TODAY.m*100+TODAY.d;
+  if(v===t) return 'due-today';
+  if(v<t) return 'due-over';
+  return '';
+}
+function dueTxt(t){
+  if(!t.due) return '';
+  const c=dueCls(t.due);
+  return `締切 ${t.due}${c==='due-today'?'（今日）':c==='due-over'?'（超過）':''}`;
+}
+function pjTag(t){ return `<span class="pj" style="background:${PJ[t.pj]}">${t.pj}</span>`; }
+
+function doneItem(t){
+  return `<li class="item">
+    <span class="ico">✅</span>
+    <span class="body"><span class="done-txt">${t.n}</span>
+      <span class="tags">${pjTag(t)}<span class="meta">完了・${t.est}h</span></span>
+    </span></li>`;
+}
+function todayItem(t){
+  const c=dueCls(t.due);
+  const icon = t.st==='Doing'?'🔵':'⚪';
+  return `<li class="item">
+    <span class="ico">${icon}</span>
+    <span class="body">${t.n}
+      <span class="tags">${pjTag(t)}
+        ${t.pri?'<span class="pri">最優先</span>':''}
+        <span class="meta ${c}">${t.st} ${t.pct}%・${t.est}h${t.due?'・'+dueTxt(t):''}</span>
+      </span>
+    </span></li>`;
+}
+function blockerItem(t){
+  return `<div class="blocker-card">
+    <span>⛔</span>
+    <span><b>${t.n}</b> — ${t.block}
+      <span class="sub">${t.pj}・進捗 ${t.pct}%・${dueTxt(t)}</span>
+    </span>
+  </div>`;
+}
+
+function memberHtml(name){
+  const m = MEMBERS[name];
+  const mine = tasks.filter(t=>t.who===name);
+  const done = mine.filter(t=>t.st==='Done');
+  const today = mine.filter(t=>t.st==='Doing' || t.st==='Todo')
+                    .sort((a,b)=> (a.st==='Doing'?0:1)-(b.st==='Doing'?0:1));
+  const blockers = mine.filter(t=>t.st==='Blocked');
+
+  return `
+  <section class="member ${blockers.length?'has-blocker':''}">
+    <div class="m-head">
+      <span class="avatar" style="background:${m.c}">${m.i}</span>
+      <span><span class="m-name">${name}</span> <span class="m-role">${m.role}</span></span>
+      <span class="m-stat">
+        <span class="chip nums">Done ${done.length}</span>
+        <span class="chip nums">今日 ${today.length}</span>
+        ${blockers.length?`<span class="chip warn nums">ブロッカー ${blockers.length}</span>`:''}
+      </span>
+    </div>
+    <div class="cols">
+      <div class="col">
+        <div class="col-h"><span class="d" style="background:var(--done)"></span>昨日やったこと</div>
+        <ul class="items">${done.map(doneItem).join('') || '<li class="empty">— なし</li>'}</ul>
+      </div>
+      <div class="col">
+        <div class="col-h"><span class="d" style="background:var(--doing)"></span>今日やること</div>
+        <ul class="items">${today.map(todayItem).join('') || '<li class="empty">— なし</li>'}</ul>
+      </div>
+      <div class="col blocker">
+        <div class="col-h"><span class="d" style="background:var(--blocked)"></span>ブロッカー</div>
+        <ul class="items">${blockers.length? blockers.map(blockerItem).join('') : '<li class="empty">— なし</li>'}</ul>
+      </div>
+    </div>
+  </section>`;
+}
+
+document.getElementById('roster').innerHTML = ORDER.map(memberHtml).join('');
+</script>
+</body>
+</html>

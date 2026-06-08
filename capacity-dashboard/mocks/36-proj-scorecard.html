@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>プロジェクト健全性スコアカード</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480;
+    --line:#e6e9ee; --track:#eef1f5;
+    --green:#2fa66b; --yellow:#f5a623; --red:#e5484d;
+    --blue:#3a86ff;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"tnum" 1; -webkit-font-smoothing:antialiased;
+    line-height:1.5;
+  }
+  .wrap{max-width:1000px; margin:0 auto; padding:24px 20px 56px;}
+
+  /* Header */
+  .head{display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:8px;}
+  .head h1{font-size:19px; margin:0 0 6px; letter-spacing:.01em;}
+  .selector{
+    display:inline-flex; align-items:center; gap:8px;
+    background:var(--card); border:1px solid var(--line); border-radius:10px;
+    padding:8px 12px; font-size:13.5px; font-weight:600; color:var(--ink);
+    box-shadow:0 1px 2px rgba(20,30,50,.04); cursor:pointer; user-select:none;
+  }
+  .selector .dot{width:8px;height:8px;border-radius:50%;background:var(--blue);}
+  .selector .car{color:var(--muted); font-weight:400;}
+  .note{font-size:11.5px; color:var(--muted); max-width:380px; text-align:right; line-height:1.45;}
+
+  /* Overall banner */
+  .overall{
+    margin:18px 0 20px; background:var(--card); border:1px solid var(--line);
+    border-radius:14px; padding:0; overflow:hidden;
+    box-shadow:0 1px 3px rgba(20,30,50,.05);
+    display:grid; grid-template-columns:6px 1fr;
+  }
+  .overall .stripe{background:var(--red);}
+  .overall .obody{padding:20px 22px; display:flex; align-items:center; gap:24px; flex-wrap:wrap;}
+  .overall .ostatus{display:flex; align-items:center; gap:14px; min-width:300px;}
+  .ostatus .badge{
+    width:52px;height:52px;border-radius:14px; flex:none;
+    background:rgba(229,72,77,.12); color:var(--red);
+    display:flex;align-items:center;justify-content:center; font-size:26px;
+  }
+  .ostatus .label{font-size:12px;color:var(--muted);letter-spacing:.04em;font-weight:600;}
+  .ostatus .big{font-size:26px;font-weight:700;color:var(--red);line-height:1.15;letter-spacing:.01em;}
+  .ostatus .sub{font-size:12.5px;color:var(--muted);}
+  .overall .ometrics{display:flex;gap:28px;flex-wrap:wrap;margin-left:auto;}
+  .ometric{display:flex;flex-direction:column;gap:2px;}
+  .ometric .k{font-size:11px;color:var(--muted);letter-spacing:.03em;}
+  .ometric .v{font-size:20px;font-weight:700;}
+  .ometric .v small{font-size:12px;font-weight:500;color:var(--muted);}
+
+  /* Scorecard grid */
+  .grid{display:grid; grid-template-columns:repeat(2,1fr); gap:16px;}
+  @media(max-width:720px){.grid{grid-template-columns:1fr;}}
+  .scard{
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    padding:18px 18px 16px; box-shadow:0 1px 3px rgba(20,30,50,.05);
+    position:relative; overflow:hidden;
+  }
+  .scard::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;}
+  .scard.g::before{background:var(--green);}
+  .scard.y::before{background:var(--yellow);}
+  .scard.r::before{background:var(--red);}
+  .scard .top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;}
+  .scard .title{display:flex;align-items:center;gap:9px;font-size:14px;font-weight:700;}
+  .scard .ico{width:26px;height:26px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;}
+  .scard.g .ico{background:rgba(47,166,107,.12);}
+  .scard.y .ico{background:rgba(245,166,35,.14);}
+  .scard.r .ico{background:rgba(229,72,77,.12);}
+  .pill{font-size:11px;font-weight:700;padding:4px 10px;border-radius:999px;letter-spacing:.03em;display:inline-flex;align-items:center;gap:5px;}
+  .pill .pd{width:7px;height:7px;border-radius:50%;}
+  .pill.g{background:rgba(47,166,107,.12);color:var(--green);}
+  .pill.g .pd{background:var(--green);}
+  .pill.y{background:rgba(245,166,35,.16);color:#b9791a;}
+  .pill.y .pd{background:var(--yellow);}
+  .pill.r{background:rgba(229,72,77,.12);color:var(--red);}
+  .pill.r .pd{background:var(--red);}
+
+  .scard .metric{display:flex;align-items:baseline;gap:8px;margin-bottom:4px;}
+  .scard .metric .num{font-size:30px;font-weight:700;letter-spacing:.01em;}
+  .scard .metric .unit{font-size:13px;color:var(--muted);}
+  .scard .reason{font-size:12.5px;color:var(--muted);margin:8px 0 0;line-height:1.5;}
+  .scard .reason b{color:var(--ink);font-weight:600;}
+
+  /* mini bar */
+  .mbar{height:8px;border-radius:6px;background:var(--track);overflow:hidden;margin:12px 0 4px;display:flex;}
+  .mbar i{height:100%;display:block;}
+  .seglbl{display:flex;gap:14px;flex-wrap:wrap;margin-top:9px;font-size:11px;color:var(--muted);}
+  .seglbl span{display:inline-flex;align-items:center;gap:5px;}
+  .seglbl .sw{width:9px;height:9px;border-radius:2px;}
+
+  /* schedule track */
+  .track-wrap{margin:14px 0 2px;}
+  .tl{position:relative;height:30px;}
+  .tl .base{position:absolute;left:0;right:0;top:14px;height:3px;background:var(--track);border-radius:3px;}
+  .tl .prog{position:absolute;left:0;top:14px;height:3px;background:var(--blue);border-radius:3px;}
+  .tl .over{position:absolute;top:14px;height:3px;background:repeating-linear-gradient(45deg,var(--red),var(--red) 4px,#f2a3a5 4px,#f2a3a5 8px);border-radius:3px;}
+  .tl .mk{position:absolute;top:7px;transform:translateX(-50%);text-align:center;}
+  .tl .mk .pt{width:11px;height:11px;border-radius:50%;border:2px solid #fff;margin:0 auto;box-shadow:0 0 0 1px var(--line);}
+  .tl .mk .cap{font-size:9.5px;color:var(--muted);white-space:nowrap;margin-top:1px;}
+  .tl .mk.done .pt{background:var(--green);box-shadow:0 0 0 1px var(--green);}
+  .tl .mk.now .pt{background:#fff;border-color:var(--blue);box-shadow:0 0 0 2px var(--blue);}
+  .tl .mk.due .pt{background:var(--red);box-shadow:0 0 0 1px var(--red);}
+  .tl .mk.land .pt{background:#fff;border-color:var(--red);box-shadow:0 0 0 1px var(--red);}
+
+  /* milestone list */
+  .ms{list-style:none;margin:12px 0 0;padding:0;display:flex;flex-direction:column;gap:9px;}
+  .ms li{display:flex;align-items:center;gap:10px;font-size:12.5px;}
+  .ms .st{width:18px;height:18px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:700;}
+  .ms .st.g{background:var(--green);}
+  .ms .st.y{background:var(--yellow);}
+  .ms .st.r{background:var(--red);}
+  .ms .mname{font-weight:600;flex:none;}
+  .ms .mdate{color:var(--muted);margin-left:auto;font-size:11.5px;}
+  .ms .mtag{font-size:10.5px;padding:2px 7px;border-radius:6px;font-weight:600;}
+  .ms .mtag.g{background:rgba(47,166,107,.12);color:var(--green);}
+  .ms .mtag.y{background:rgba(245,166,35,.16);color:#b9791a;}
+  .ms .mtag.r{background:rgba(229,72,77,.12);color:var(--red);}
+
+  /* blocker box */
+  .blk{display:flex;gap:11px;align-items:flex-start;margin-top:12px;background:rgba(229,72,77,.05);border:1px solid rgba(229,72,77,.18);border-radius:10px;padding:11px 12px;}
+  .blk .bi{font-size:16px;flex:none;}
+  .blk .bt{font-size:12.5px;line-height:1.5;}
+  .blk .bt b{color:var(--red);}
+
+  .footer{margin-top:24px;font-size:11px;color:var(--muted);text-align:center;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- Header -->
+  <div class="head">
+    <div>
+      <h1>プロジェクト健全性スコアカード</h1>
+      <div class="selector">
+        <span class="dot"></span>
+        <span class="car">プロジェクト:</span>
+        <span>新ダッシュボード機能</span>
+        <span style="color:var(--muted)">▾</span>
+      </div>
+    </div>
+    <div class="note">※ モック（サンプルデータ）。本番は Vikunja API（状態・期日・進捗・実績時間）から自動算出。</div>
+  </div>
+
+  <!-- Overall status banner -->
+  <div class="overall">
+    <div class="stripe"></div>
+    <div class="obody">
+      <div class="ostatus">
+        <div class="badge">⚠</div>
+        <div>
+          <div class="label">総合ステータス</div>
+          <div class="big">遅延リスク</div>
+          <div class="sub">4観点中 1緑 / 1黄 / 2赤 — スケジュールと工数が要対応</div>
+        </div>
+      </div>
+      <div class="ometrics">
+        <div class="ometric"><span class="k">全体進捗</span><span class="v">58<small>%</small></span></div>
+        <div class="ometric"><span class="k">締切まで</span><span class="v">9<small>日</small></span></div>
+        <div class="ometric"><span class="k">着地予測</span><span class="v" style="color:var(--red)">6/16<small> (+3)</small></span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scorecard grid -->
+  <div class="grid">
+
+    <!-- 1. 進捗 (yellow) -->
+    <div class="scard y">
+      <div class="top">
+        <div class="title"><span class="ico">📊</span>進捗</div>
+        <span class="pill y"><span class="pd"></span>注意</span>
+      </div>
+      <div class="metric"><span class="num">58</span><span class="unit">% 完了 ・ 24件中14件</span></div>
+      <div class="mbar">
+        <i style="width:58.3%;background:var(--green)" title="完了 14"></i>
+        <i style="width:20.8%;background:var(--blue)" title="進行中 5"></i>
+        <i style="width:4.2%;background:var(--red)" title="ブロック 1"></i>
+        <i style="width:16.7%;background:#9aa3af" title="未着手 4"></i>
+      </div>
+      <div class="seglbl">
+        <span><i class="sw" style="background:var(--green)"></i>完了 14</span>
+        <span><i class="sw" style="background:var(--blue)"></i>進行中 5</span>
+        <span><i class="sw" style="background:var(--red)"></i>ブロック 1</span>
+        <span><i class="sw" style="background:#9aa3af"></i>未着手 4</span>
+      </div>
+      <p class="reason"><b>残り9日で10件</b>を消化する必要あり。ベロシティ低下(3→5→4→2)で消化ペースが追いついていない。</p>
+    </div>
+
+    <!-- 2. スケジュール (red) -->
+    <div class="scard r">
+      <div class="top">
+        <div class="title"><span class="ico">📅</span>スケジュール</div>
+        <span class="pill r"><span class="pd"></span>遅延</span>
+      </div>
+      <div class="metric"><span class="num" style="color:var(--red)">+3</span><span class="unit">日 超過見込み</span></div>
+      <div class="track-wrap">
+        <div class="tl">
+          <!-- 5/20(0%) .. 6/13 due(100%) .. 6/16 land(~112%) -->
+          <div class="base" style="left:0;width:100%"></div>
+          <div class="prog" style="left:0;width:58%"></div>
+          <div class="over" style="left:100%;width:12%"></div>
+          <div class="mk done" style="left:29%"><div class="pt"></div><div class="cap">M1 5/27</div></div>
+          <div class="mk now" style="left:58%"><div class="pt"></div><div class="cap">今 6/4</div></div>
+          <div class="mk due" style="left:100%"><div class="pt"></div><div class="cap">締切 6/13</div></div>
+          <div class="mk land" style="left:112%"><div class="pt"></div><div class="cap">着地 6/16</div></div>
+        </div>
+      </div>
+      <p class="reason"><b>着地6/16、締切6/13を3日超過。</b>現ペース(残42h)では締切内に収まらない。スコープ調整かリソース追加が必要。</p>
+    </div>
+
+    <!-- 3. 工数 (red) -->
+    <div class="scard r">
+      <div class="top">
+        <div class="title"><span class="ico">⏱</span>工数</div>
+        <span class="pill r"><span class="pd"></span>超過ペース</span>
+      </div>
+      <div class="metric"><span class="num">78</span><span class="unit">/ 120h 消化 ・ 残42h</span></div>
+      <div class="mbar">
+        <i style="width:65%;background:var(--blue)" title="消化 78h"></i>
+        <i style="width:35%;background:var(--track)"></i>
+      </div>
+      <div class="seglbl">
+        <span><i class="sw" style="background:var(--blue)"></i>消化 78h (65%)</span>
+        <span><i class="sw" style="background:#cfd5dd"></i>残 42h</span>
+      </div>
+      <p class="reason"><b>進捗58%に対し工数消化65%</b> — 投入時間に進捗が見合っていない。残9日で42h消化は1日4.7h、休日考慮で綱渡り。</p>
+    </div>
+
+    <!-- 4. ブロッカー / 品質 (yellow→red mix, show as red because active blocker) -->
+    <div class="scard r">
+      <div class="top">
+        <div class="title"><span class="ico">🚧</span>ブロッカー</div>
+        <span class="pill r"><span class="pd"></span>1件 停滞中</span>
+      </div>
+      <div class="metric"><span class="num">3</span><span class="unit">日 停滞 ・ アクティブ1件</span></div>
+      <div class="blk">
+        <span class="bi">⛔</span>
+        <div class="bt"><b>認証フロー実装</b>が外部API待ちで <b>3日停滞</b>。担当=佐藤(2/5完了)。M2(実装完了 6/6)のクリティカルパス上にあり、解消遅延がそのまま全体遅延に直結。</div>
+      </div>
+      <p class="reason">外部API回答待ち。<b>エスカレーション or 代替実装の判断が今日必要。</b></p>
+    </div>
+
+  </div>
+
+  <!-- Milestone strip (full width card) -->
+  <div class="scard" style="margin-top:16px;border-left:4px solid var(--line);">
+    <div class="top">
+      <div class="title"><span class="ico" style="background:var(--track)">🏁</span>マイルストーン</div>
+      <span class="pill y"><span class="pd"></span>2/3 オントラック</span>
+    </div>
+    <ul class="ms">
+      <li><span class="st g">✓</span><span class="mname">M1 設計完了</span><span class="mtag g">達成</span><span class="mdate">5/27</span></li>
+      <li><span class="st y">!</span><span class="mname">M2 実装完了</span><span class="mtag y">危うい</span><span class="mdate">6/6</span></li>
+      <li><span class="st r">✕</span><span class="mname">M3 リリース</span><span class="mtag r">遅延見込み</span><span class="mdate">6/13</span></li>
+    </ul>
+  </div>
+
+  <div class="footer">最終更新: 2026/06/04 (木) ・ データソース: Vikunja API（モック表示）</div>
+</div>
+</body>
+</html>

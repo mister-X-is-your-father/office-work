@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>設定 — キャパダッシュボード</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0; --cap:#9aa3af;
+    --p-backend:#3a86ff; --p-frontend:#2fa66b; --p-qa:#b657d6; --p-common:#8a93a0;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased; line-height:1.5;
+    font-variant-numeric:tabular-nums; font-feature-settings:"tnum";
+  }
+  .wrap{max-width:760px; margin:0 auto; padding:28px 20px 64px;}
+  h1{font-size:20px; margin:0 0 2px; letter-spacing:.01em;}
+  .sub{color:var(--muted); font-size:13px; margin:0 0 14px;}
+  .note{
+    color:var(--muted); font-size:12px; background:#fffaf2; border:1px solid #f1e4cf;
+    border-radius:10px; padding:8px 12px; margin:0 0 20px;
+  }
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    padding:18px 18px; box-shadow:0 1px 2px rgba(20,28,45,.04); margin-bottom:16px;
+  }
+  .sechd{display:flex; align-items:center; gap:9px; margin-bottom:4px;}
+  .secnum{
+    width:22px; height:22px; border-radius:7px; background:var(--ink); color:#fff;
+    font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center; flex:none;
+  }
+  .sechd h2{font-size:15px; margin:0;}
+  .secdesc{font-size:12px; color:var(--muted); margin:0 0 16px 31px;}
+
+  label{font-size:13px;}
+  .muted{color:var(--muted);}
+
+  /* セグメントトグル */
+  .seg{display:inline-flex; border:1px solid var(--line); border-radius:9px; overflow:hidden; background:var(--track);}
+  .seg label{padding:7px 14px; font-size:13px; cursor:pointer; color:var(--muted); user-select:none;}
+  .seg input{display:none;}
+  .seg input:checked + label{background:var(--card); color:var(--ink); font-weight:700; box-shadow:0 1px 2px rgba(20,28,45,.06);}
+
+  /* スイッチ */
+  .switch{position:relative; display:inline-block; width:42px; height:24px; flex:none;}
+  .switch input{display:none;}
+  .slider{position:absolute; inset:0; background:#cfd6df; border-radius:999px; transition:.18s;}
+  .slider::before{content:""; position:absolute; width:18px; height:18px; left:3px; top:3px; background:#fff; border-radius:50%; transition:.18s; box-shadow:0 1px 2px rgba(0,0,0,.2);}
+  .switch input:checked + .slider{background:var(--fill);}
+  .switch input:checked + .slider::before{transform:translateX(18px);}
+
+  /* 人ごと入力 */
+  .perperson{margin-top:16px; border-top:1px solid var(--line); padding-top:14px;}
+  .pprow{display:flex; align-items:center; gap:12px; padding:7px 0;}
+  .pav{width:28px; height:28px; border-radius:50%; flex:none; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:12px;}
+  .pname{font-size:13px; width:54px;}
+  .num-in{width:64px; padding:6px 8px; border:1px solid var(--line); border-radius:8px; font-size:13px; text-align:right; font-family:inherit;}
+  .num-in:focus{outline:none; border-color:var(--fill); box-shadow:0 0 0 3px rgba(58,134,255,.12);}
+  .unit{font-size:12px; color:var(--muted);}
+  .disabled-hint{font-size:11px; color:var(--muted); margin-left:auto; font-style:italic;}
+  fieldset[disabled] .pprow{opacity:.45;}
+
+  /* 解析ルール */
+  .rulerow{display:flex; align-items:flex-start; gap:12px; padding:12px 0; border-top:1px solid var(--line);}
+  .rulerow:first-of-type{border-top:none;}
+  .ruleinfo{flex:1;}
+  .ruletitle{font-size:13px; font-weight:700; display:flex; align-items:center; gap:7px;}
+  code{font-family:"SF Mono",Menlo,Consolas,monospace; font-size:12px; background:var(--track); padding:2px 6px; border-radius:5px; color:var(--ink);}
+  .ruledesc{font-size:12px; color:var(--muted); margin-top:3px;}
+  .preview{margin-top:14px; background:#f9fafb; border:1px solid var(--line); border-radius:10px; padding:12px 14px;}
+  .preview .pl{font-size:11px; color:var(--muted); margin-bottom:8px; letter-spacing:.04em;}
+  .prrow{display:flex; align-items:center; gap:8px; font-size:13px; padding:4px 0;}
+  .prow .src{flex:1; color:var(--ink);}
+  .prow .arrow{color:var(--muted);}
+  .prow .res{font-weight:700; color:var(--free);}
+  .prow .res.miss{color:var(--muted); font-weight:500;}
+  .hl{background:#fff2cc; border-radius:4px; padding:0 3px;}
+
+  /* プロジェクト選択 */
+  .projrow{display:flex; align-items:center; gap:11px; padding:9px 0; border-top:1px solid var(--line);}
+  .projrow:first-of-type{border-top:none;}
+  .pdot{width:11px; height:11px; border-radius:4px; flex:none;}
+  .pjname{font-size:13px; flex:1;}
+  .pjcount{font-size:11px; color:var(--muted);}
+  .chk{width:18px; height:18px; accent-color:var(--fill);}
+
+  /* 勤務時間帯 */
+  .timegrid{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+  .time-in{padding:6px 10px; border:1px solid var(--line); border-radius:8px; font-size:13px; font-family:inherit;}
+  .time-in:focus{outline:none; border-color:var(--fill); box-shadow:0 0 0 3px rgba(58,134,255,.12);}
+  .small{font-size:12px; color:var(--muted);}
+  .breakrow{margin-top:12px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+  .calcd{margin-top:14px; font-size:13px; background:#eef5ff; border:1px solid #d4e4ff; color:#1f4a8a; border-radius:9px; padding:9px 12px;}
+  .calcd b{font-weight:700;}
+
+  /* 保存バー */
+  .savebar{display:flex; gap:10px; justify-content:flex-end; margin-top:4px;}
+  .btn{font-size:13px; padding:9px 18px; border-radius:9px; border:1px solid var(--line); background:var(--card); color:var(--ink); cursor:pointer; font-family:inherit;}
+  .btn.primary{background:var(--fill); border-color:var(--fill); color:#fff; font-weight:700;}
+  .btn.primary:hover{background:#2f78f0;}
+  .btn:hover{border-color:#c9d2de;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>キャパダッシュボード設定</h1>
+  <p class="sub">容量モデル・見積り解析・対象プロジェクト・勤務時間帯</p>
+  <div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</div>
+
+  <!-- ① 容量モデル -->
+  <div class="card">
+    <div class="sechd"><span class="secnum">1</span><h2>容量モデル</h2></div>
+    <p class="secdesc">1人あたり1日の作業可能時間。チーム一律か、人ごとに設定できます。</p>
+
+    <div class="seg">
+      <input type="radio" name="capmodel" id="cap-uniform" checked>
+      <label for="cap-uniform">全員一律</label>
+      <input type="radio" name="capmodel" id="cap-perperson">
+      <label for="cap-perperson">人ごとに設定</label>
+    </div>
+
+    <div style="margin-top:14px; display:flex; align-items:center; gap:10px;">
+      <label class="muted">一律の容量</label>
+      <input class="num-in" type="number" value="8" step="0.5" min="0">
+      <span class="unit">h / 日</span>
+    </div>
+
+    <fieldset disabled style="border:none; padding:0; margin:0;">
+      <div class="perperson">
+        <div style="display:flex; align-items:center; margin-bottom:4px;">
+          <span class="small" style="font-weight:700;">人ごとの容量（入力例）</span>
+          <span class="disabled-hint">「人ごとに設定」を選ぶと編集可能</span>
+        </div>
+        <div class="pprow">
+          <span class="pav" style="background:#e5772d;">森</span><span class="pname">森田</span>
+          <input class="num-in" type="number" value="8" step="0.5"><span class="unit">h / 日</span>
+        </div>
+        <div class="pprow">
+          <span class="pav" style="background:#3a86ff;">田</span><span class="pname">田中</span>
+          <input class="num-in" type="number" value="6" step="0.5"><span class="unit">h / 日 <span class="small">（時短勤務）</span></span>
+        </div>
+        <div class="pprow">
+          <span class="pav" style="background:#2fa66b;">佐</span><span class="pname">佐藤</span>
+          <input class="num-in" type="number" value="8" step="0.5"><span class="unit">h / 日</span>
+        </div>
+        <div class="pprow">
+          <span class="pav" style="background:#b657d6;">鈴</span><span class="pname">鈴木</span>
+          <input class="num-in" type="number" value="4" step="0.5"><span class="unit">h / 日 <span class="small">（兼務50%）</span></span>
+        </div>
+      </div>
+    </fieldset>
+  </div>
+
+  <!-- ② 見積り解析ルール -->
+  <div class="card">
+    <div class="sechd"><span class="secnum">2</span><h2>見積り時間の解析ルール</h2></div>
+    <p class="secdesc">Vikunja のタスクから見積り時間を読み取る方法。複数ルールを併用できます（上が優先）。</p>
+
+    <div class="rulerow">
+      <div class="ruleinfo">
+        <div class="ruletitle">ラベル <code>est:4h</code> から取得</div>
+        <div class="ruledesc">タスクラベルに付いた <code>est:</code> プレフィックスの値を見積りとして使用。</div>
+      </div>
+      <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+    </div>
+
+    <div class="rulerow">
+      <div class="ruleinfo">
+        <div class="ruletitle">タイトル末尾 <code>[4h]</code> から取得</div>
+        <div class="ruledesc">タスク名の末尾にある <code>[ 数値h ]</code> を見積りとして抽出。</div>
+      </div>
+      <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+    </div>
+
+    <div class="rulerow">
+      <div class="ruleinfo">
+        <div class="ruletitle">どちらも無い場合のデフォルト</div>
+        <div class="ruledesc">見積り未設定タスクに割り当てる時間。</div>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <input class="num-in" type="number" value="2" step="0.5" style="width:56px;"><span class="unit">h</span>
+      </div>
+    </div>
+
+    <div class="preview">
+      <div class="pl">プレビュー（現在のルールでの解析結果）</div>
+      <div class="prow">
+        <span class="src">API設計 <span class="hl">[4h]</span></span>
+        <span class="arrow">→</span><span class="res">4h</span>
+      </div>
+      <div class="prow">
+        <span class="src">認証実装 <span class="hl muted" style="background:#e7f6ee;">est:5h</span></span>
+        <span class="arrow">→</span><span class="res">5h</span>
+      </div>
+      <div class="prow">
+        <span class="src">設計ドキュメント整備 <span class="muted">（見積りなし）</span></span>
+        <span class="arrow">→</span><span class="res miss">2h（デフォルト）</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ③ 対象プロジェクト -->
+  <div class="card">
+    <div class="sechd"><span class="secnum">3</span><h2>対象プロジェクト</h2></div>
+    <p class="secdesc">容量計算に含める Vikunja プロジェクト。チェックを外すと集計から除外されます。</p>
+
+    <div class="projrow">
+      <input class="chk" type="checkbox" checked id="pj1">
+      <span class="pdot" style="background:var(--p-backend);"></span>
+      <label class="pjname" for="pj1">Backend</label>
+      <span class="pjcount">3タスク・12h</span>
+    </div>
+    <div class="projrow">
+      <input class="chk" type="checkbox" checked id="pj2">
+      <span class="pdot" style="background:var(--p-frontend);"></span>
+      <label class="pjname" for="pj2">Frontend</label>
+      <span class="pjcount">1タスク・4h</span>
+    </div>
+    <div class="projrow">
+      <input class="chk" type="checkbox" checked id="pj3">
+      <span class="pdot" style="background:var(--p-qa);"></span>
+      <label class="pjname" for="pj3">QA</label>
+      <span class="pjcount">1タスク・3h</span>
+    </div>
+    <div class="projrow">
+      <input class="chk" type="checkbox" checked id="pj4">
+      <span class="pdot" style="background:var(--p-common);"></span>
+      <label class="pjname" for="pj4">共通</label>
+      <span class="pjcount">2タスク・5h</span>
+    </div>
+  </div>
+
+  <!-- ④ 勤務時間帯 -->
+  <div class="card">
+    <div class="sechd"><span class="secnum">4</span><h2>勤務時間帯</h2></div>
+    <p class="secdesc">表示の参考に使う標準勤務時間。容量(h)は上の容量モデルが優先されます。</p>
+
+    <div class="timegrid">
+      <input class="time-in" type="time" value="09:00">
+      <span class="small">〜</span>
+      <input class="time-in" type="time" value="18:00">
+    </div>
+    <div class="breakrow">
+      <label class="small">休憩</label>
+      <input class="num-in" type="number" value="1" step="0.5" style="width:56px;"><span class="unit">h</span>
+      <label class="small" style="margin-left:14px; display:inline-flex; align-items:center; gap:6px;">
+        <input class="chk" type="checkbox" checked> 土日を稼働日から除外
+      </label>
+    </div>
+    <div class="calcd">
+      勤務 9h − 休憩 1h = <b>実働 8h</b> ／ 容量モデル「全員一律 8h」と一致しています。
+    </div>
+  </div>
+
+  <!-- 保存 -->
+  <div class="savebar">
+    <button class="btn">リセット</button>
+    <button class="btn primary">設定を保存</button>
+  </div>
+
+</div>
+</body>
+</html>

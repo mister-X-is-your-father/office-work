@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>今日の空き容量さがし — 円時計ビュー</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee;
+    --track:#eef1f5; --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0;
+    --caplinecol:#9aa3af;
+    --p-backend:#3a86ff; --p-frontend:#2fa66b; --p-qa:#b657d6; --p-common:#8a93a0;
+    --font:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink); font-family:var(--font);
+    font-feature-settings:"tnum" 1; -webkit-font-smoothing:antialiased;
+    line-height:1.5; padding:28px 22px 64px;
+  }
+  .tnum{font-variant-numeric:tabular-nums;}
+  .wrap{max-width:1120px; margin:0 auto;}
+
+  /* ---- header ---- */
+  header.top{display:flex; flex-wrap:wrap; align-items:flex-end; gap:18px 26px; margin-bottom:6px;}
+  .title h1{font-size:21px; margin:0; letter-spacing:.01em; font-weight:700;}
+  .title p.sub{margin:4px 0 0; color:var(--muted); font-size:12.5px;}
+  .daynav{display:flex; align-items:center; gap:4px; margin-left:auto;
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:5px 6px; box-shadow:0 1px 2px rgba(20,30,50,.04);}
+  .daynav button{border:none; background:transparent; color:var(--muted); cursor:pointer;
+    font-size:17px; line-height:1; width:30px; height:30px; border-radius:8px;}
+  .daynav button:hover{background:var(--track); color:var(--ink);}
+  .daynav .cur{font-size:14px; font-weight:600; padding:0 8px; min-width:118px; text-align:center;}
+  .daynav .today-pill{font-size:11px; color:var(--free); background:#eaf7ef;
+    border-radius:999px; padding:2px 8px; margin-left:2px;}
+
+  .note{font-size:11.5px; color:var(--muted); margin:10px 0 22px;
+    background:#fbfcfd; border:1px dashed var(--line); border-radius:9px; padding:7px 11px; display:inline-block;}
+
+  /* ---- team summary strip ---- */
+  .teamstrip{display:flex; flex-wrap:wrap; gap:14px; margin-bottom:26px;}
+  .kpi{background:var(--card); border:1px solid var(--line); border-radius:14px;
+    padding:14px 18px; box-shadow:0 1px 2px rgba(20,30,50,.04); flex:1 1 180px;}
+  .kpi .lbl{font-size:11.5px; color:var(--muted); margin-bottom:3px;}
+  .kpi .val{font-size:24px; font-weight:700; letter-spacing:.01em;}
+  .kpi .val small{font-size:13px; color:var(--muted); font-weight:500;}
+  .kpi.free .val{color:var(--free);}
+  .kpi.over .val{color:var(--over);}
+  .teambar{height:8px; border-radius:6px; background:var(--track); overflow:hidden; margin-top:9px; display:flex;}
+  .teambar i{display:block; height:100%;}
+
+  /* ---- grid of clocks ---- */
+  .clockgrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(248px,1fr)); gap:18px;}
+  .clockcard{background:var(--card); border:1px solid var(--line); border-radius:16px;
+    padding:18px 16px 16px; box-shadow:0 1px 3px rgba(20,30,50,.05); position:relative;}
+  .clockcard.is-over{border-color:#f3c9cb;}
+  .ch{display:flex; align-items:center; gap:10px; margin-bottom:2px;}
+  .avatar{width:30px; height:30px; border-radius:50%; flex:none; display:grid; place-items:center;
+    color:#fff; font-size:13px; font-weight:700;}
+  .ch .nm{font-size:15px; font-weight:600;}
+  .badge{margin-left:auto; font-size:11px; font-weight:600; border-radius:999px; padding:3px 9px;}
+  .badge.free{color:var(--free); background:#eaf7ef;}
+  .badge.over{color:var(--over); background:#fdecec;}
+  .badge.just{color:var(--full); background:#f0f1f4;}
+
+  .dial{display:block; margin:6px auto 4px;}
+  .center-num{font-size:23px; font-weight:700;}
+  .center-lbl{font-size:10.5px;}
+
+  /* task legend under each clock */
+  .tasklist{margin-top:6px; border-top:1px solid var(--line); padding-top:9px;}
+  .trow{display:flex; align-items:center; gap:8px; font-size:12px; padding:2.5px 0;}
+  .dot{width:9px; height:9px; border-radius:3px; flex:none;}
+  .trow .tn{color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .trow .th{margin-left:auto; color:var(--muted); font-variant-numeric:tabular-nums;}
+  .trow.free .tn{color:var(--free); font-weight:600;}
+  .trow.over .tn{color:var(--over); font-weight:600;}
+
+  .cta{margin-top:11px; width:100%; border:1px solid var(--line); background:#fff; color:var(--fill);
+    font-weight:600; font-size:12.5px; border-radius:9px; padding:7px; cursor:pointer; font-family:inherit;}
+  .cta:hover{background:#f3f8ff; border-color:#cfe0ff;}
+  .cta.dim{color:var(--muted); cursor:default;}
+  .cta.dim:hover{background:#fff; border-color:var(--line);}
+
+  /* project legend footer */
+  .plegend{display:flex; flex-wrap:wrap; gap:16px; margin-top:28px; padding-top:16px;
+    border-top:1px solid var(--line); font-size:12px; color:var(--muted);}
+  .plegend span{display:inline-flex; align-items:center; gap:6px;}
+  .plegend .sw{width:11px; height:11px; border-radius:3px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="title">
+      <h1>今日の空き容量さがし</h1>
+      <p class="sub">円時計ビュー — 誰にあと何時間振れる？ 空き多い順</p>
+    </div>
+    <div class="daynav" role="group" aria-label="日送り">
+      <button title="前日">‹</button>
+      <span class="cur tnum">6/4(木)</span>
+      <span class="today-pill">今日</span>
+      <button title="翌日">›</button>
+    </div>
+  </header>
+
+  <div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。容量は一律 8h/日。</div>
+
+  <!-- team summary -->
+  <div class="teamstrip">
+    <div class="kpi">
+      <div class="lbl">チーム稼働</div>
+      <div class="val tnum">24<small> / 32h</small></div>
+      <div class="teambar">
+        <i style="width:75%;background:var(--fill);"></i>
+        <i style="width:25%;background:var(--track);"></i>
+      </div>
+    </div>
+    <div class="kpi free">
+      <div class="lbl">空き容量（合計）</div>
+      <div class="val tnum">8h</div>
+      <div class="teambar"><i style="width:100%;background:var(--free);opacity:.85;"></i></div>
+    </div>
+    <div class="kpi over">
+      <div class="lbl">超過（合計）</div>
+      <div class="val tnum">+2h</div>
+      <div class="teambar"><i style="width:100%;background:var(--over);opacity:.85;"></i></div>
+    </div>
+    <div class="kpi">
+      <div class="lbl">充足率</div>
+      <div class="val tnum">75<small>%</small></div>
+      <div class="teambar"><i style="width:75%;background:var(--full);"></i></div>
+    </div>
+  </div>
+
+  <!-- clocks (sorted: most free first) -->
+  <div class="clockgrid" id="grid"></div>
+
+  <!-- project legend -->
+  <div class="plegend">
+    <span><i class="sw" style="background:var(--p-backend)"></i>Backend</span>
+    <span><i class="sw" style="background:var(--p-frontend)"></i>Frontend</span>
+    <span><i class="sw" style="background:var(--p-qa)"></i>QA</span>
+    <span><i class="sw" style="background:var(--p-common)"></i>共通</span>
+    <span style="margin-left:auto"><i class="sw" style="background:var(--free);opacity:.25"></i>薄いアーク = 空き容量</span>
+    <span><i class="sw" style="background:var(--over)"></i>外側リング = 超過</span>
+  </div>
+
+</div>
+
+<script>
+/* ---------- sample data (task-level, exact) ---------- */
+const CAP = 8;
+const PCOL = {Backend:'#3a86ff', Frontend:'#2fa66b', QA:'#b657d6', '共通':'#8a93a0'};
+const members = [
+  { name:'森田', color:'#e5772d', tasks:[
+    {t:'API設計', h:4, p:'Backend'},
+    {t:'DBマイグレ', h:3, p:'Backend'},
+    {t:'PRレビュー', h:3, p:'共通'},
+  ]},
+  { name:'田中', color:'#3a86ff', tasks:[
+    {t:'ダッシュ画面実装', h:4, p:'Frontend'},
+  ]},
+  { name:'佐藤', color:'#2fa66b', tasks:[
+    {t:'認証フロー実装', h:5, p:'Backend'},
+    {t:'結合テスト', h:3, p:'QA'},
+  ]},
+  { name:'鈴木', color:'#b657d6', tasks:[
+    {t:'設計ドキュメント', h:2, p:'共通'},
+  ]},
+];
+
+/* derived */
+members.forEach(m=>{
+  m.used = m.tasks.reduce((s,t)=>s+t.h,0);
+  m.free = Math.max(0, CAP - m.used);
+  m.over = Math.max(0, m.used - CAP);
+});
+/* sort: most free first, then least over */
+members.sort((a,b)=> (b.free - a.free) || (a.over - b.over));
+
+/* ---------- geometry ---------- */
+const R=84, CX=100, CY=100, STROKE=15;
+const C = 2*Math.PI*R;
+// 12 o'clock start, clockwise
+function polar(frac){ // frac 0..1 -> point on circle
+  const ang = -Math.PI/2 + frac*2*Math.PI;
+  return [CX + R*Math.cos(ang), CY + R*Math.sin(ang)];
+}
+function arc(r, fromFrac, toFrac){
+  const a0=-Math.PI/2+fromFrac*2*Math.PI, a1=-Math.PI/2+toFrac*2*Math.PI;
+  const x0=CX+r*Math.cos(a0), y0=CY+r*Math.sin(a0);
+  const x1=CX+r*Math.cos(a1), y1=CY+r*Math.sin(a1);
+  const large = (toFrac-fromFrac)>0.5 ? 1 : 0;
+  return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+}
+
+function clockSVG(m){
+  const segs=[];
+  // background empty track (full ring)
+  segs.push(`<circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="var(--track)" stroke-width="${STROKE}"/>`);
+
+  // hour ticks (8h work-day quarters)
+  let ticks='';
+  for(let i=0;i<8;i++){
+    const f=i/8;
+    const [ox,oy]=polar(f); // outer
+    const ir=R-STROKE/2-3, orr=R+STROKE/2+3;
+    const a=-Math.PI/2+f*2*Math.PI;
+    const x1=CX+ir*Math.cos(a), y1=CY+ir*Math.sin(a);
+    const x2=CX+orr*Math.cos(a), y2=CY+orr*Math.sin(a);
+    ticks+=`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${i===0?'#c2c9d4':'#dde2e9'}" stroke-width="${i===0?2:1}"/>`;
+  }
+
+  // task arcs around the dial (each hour = 1/8 of circle)
+  let acc=0;
+  m.tasks.forEach(t=>{
+    const within = Math.min(t.h, Math.max(0, CAP-acc)); // portion within 8h cap
+    if(within>0){
+      const f0=acc/CAP, f1=(acc+within)/CAP;
+      segs.push(`<path d="${arc(R,f0,f1)}" fill="none" stroke="${PCOL[t.p]}" stroke-width="${STROKE}" stroke-linecap="butt"/>`);
+    }
+    acc+=t.h;
+  });
+
+  // free arc (light green) for remaining capacity
+  if(m.free>0){
+    const f0=m.used/CAP, f1=1;
+    segs.push(`<path d="${arc(R,f0,f1)}" fill="none" stroke="var(--free)" stroke-opacity="0.22" stroke-width="${STROKE}" stroke-linecap="butt"/>`);
+    // dashed boundary marker at start of free
+    const [bx,by]=polar(m.used/CAP);
+  }
+
+  // overflow ring (outer, red) when over capacity — wraps beyond 1 turn
+  if(m.over>0){
+    const OR=R+STROKE/2+6;
+    const f1=Math.min(1, m.over/CAP);
+    segs.push(`<path d="${arc(OR,0,f1)}" fill="none" stroke="var(--over)" stroke-width="6" stroke-linecap="round"/>`);
+    // little caret at overflow tip
+    const [tx,ty]=(function(){const a=-Math.PI/2+f1*2*Math.PI;return [CX+OR*Math.cos(a),CY+OR*Math.sin(a)];})();
+  }
+
+  // capacity line (12 o'clock baseline, where ring closes)
+  const [capx,capy]=polar(0);
+  const capInner=R-STROKE/2-6, capOuter=R+STROKE/2+(m.over>0?13:6);
+  segs.push(`<line x1="${CX}" y1="${(CY-capInner).toFixed(1)}" x2="${CX}" y2="${(CY-capOuter).toFixed(1)}" stroke="var(--caplinecol)" stroke-width="2"/>`);
+
+  // center text
+  const big = m.over>0 ? `+${m.over}h` : (m.free>0 ? `${m.free}h` : '満');
+  const bigcol = m.over>0 ? 'var(--over)' : (m.free>0 ? 'var(--free)' : 'var(--full)');
+  const sub = m.over>0 ? '超過' : (m.free>0 ? '空き' : 'ちょうど');
+
+  return `<svg class="dial" width="200" height="200" viewBox="0 0 200 200" role="img" aria-label="${m.name} ${sub} ${big}">
+    ${ticks}
+    ${segs.join('\n    ')}
+    <text x="${CX}" y="${CY-3}" text-anchor="middle" class="center-num" fill="${bigcol}" style="font-variant-numeric:tabular-nums">${big}</text>
+    <text x="${CX}" y="${CY+14}" text-anchor="middle" class="center-lbl" fill="var(--muted)">${sub} · ${m.used}/${CAP}h</text>
+  </svg>`;
+}
+
+function cardHTML(m){
+  const stateCls = m.over>0?'over':(m.free>0?'free':'just');
+  const stateTxt = m.over>0?`超過 +${m.over}h`:(m.free>0?`空き ${m.free}h`:'ちょうど');
+  // task rows
+  let rows = m.tasks.map(t=>`
+    <div class="trow"><i class="dot" style="background:${PCOL[t.p]}"></i>
+      <span class="tn">${t.t}</span><span class="th tnum">${t.h}h</span></div>`).join('');
+  if(m.free>0){
+    rows += `<div class="trow free"><i class="dot" style="background:var(--free);opacity:.4"></i>
+      <span class="tn">空き</span><span class="th tnum">${m.free}h</span></div>`;
+  }
+  if(m.over>0){
+    rows += `<div class="trow over"><i class="dot" style="background:var(--over)"></i>
+      <span class="tn">超過分</span><span class="th tnum">+${m.over}h</span></div>`;
+  }
+  let cta;
+  if(m.free>0) cta=`<button class="cta">＋ ${m.name}に振る（あと${m.free}h）</button>`;
+  else if(m.over>0) cta=`<button class="cta dim">超過中 — まず${m.over}h外す</button>`;
+  else cta=`<button class="cta dim">空きなし</button>`;
+
+  return `<div class="clockcard ${m.over>0?'is-over':''}">
+    <div class="ch">
+      <span class="avatar" style="background:${m.color}">${m.name[0]}</span>
+      <span class="nm">${m.name}</span>
+      <span class="badge ${stateCls}">${stateTxt}</span>
+    </div>
+    ${clockSVG(m)}
+    <div class="tasklist">${rows}</div>
+    ${cta}
+  </div>`;
+}
+
+document.getElementById('grid').innerHTML = members.map(cardHTML).join('');
+</script>
+</body>
+</html>

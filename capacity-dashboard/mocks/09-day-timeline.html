@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>今日の空きさがし — デイタイムライン</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0; --capline:#9aa3af;
+    --backend:#3a86ff; --frontend:#2fa66b; --qa:#b657d6; --common:#8a93a0;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .tnum{font-variant-numeric:tabular-nums;}
+
+  /* header */
+  header.top{
+    padding:18px 28px 14px; background:var(--bg);
+    position:sticky; top:0; z-index:20; border-bottom:1px solid var(--line);
+  }
+  .top-row{display:flex; align-items:center; gap:18px; flex-wrap:wrap;}
+  .title{font-size:19px; font-weight:700; letter-spacing:.01em;}
+  .title .accent{color:var(--free);}
+  .daynav{
+    display:inline-flex; align-items:center; gap:2px; background:var(--card);
+    border:1px solid var(--line); border-radius:10px; padding:3px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04);
+  }
+  .daynav button{
+    border:none; background:transparent; color:var(--muted); font-size:15px;
+    width:30px; height:30px; border-radius:7px; cursor:pointer; line-height:1;
+  }
+  .daynav button:hover{background:var(--track); color:var(--ink);}
+  .daynav .today{
+    font-size:13.5px; font-weight:700; color:var(--ink); padding:0 12px;
+    height:30px; display:inline-flex; align-items:center; gap:7px;
+  }
+  .daynav .today .pill{
+    background:var(--free); color:#fff; font-size:10.5px; font-weight:700;
+    padding:2px 7px; border-radius:20px;
+  }
+  .note{font-size:11.5px; color:var(--muted); margin-top:6px;}
+  .head-spacer{flex:1;}
+  .teamstat{
+    display:flex; align-items:center; gap:14px; background:var(--card);
+    border:1px solid var(--line); border-radius:10px; padding:8px 16px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04);
+  }
+  .teamstat .big{font-size:20px; font-weight:800; letter-spacing:-.01em;}
+  .teamstat .lbl{font-size:11px; color:var(--muted); line-height:1.3;}
+  .teamstat .freebox .big{color:var(--free);}
+  .teamstat .divider{width:1px; height:30px; background:var(--line);}
+
+  /* layout */
+  main{padding:22px 28px 60px;}
+  .board{
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    box-shadow:0 2px 10px rgba(20,30,50,.05); overflow:hidden;
+  }
+
+  /* grid columns: name | timeline | summary */
+  .row{
+    display:grid; grid-template-columns:148px 1fr 96px; align-items:stretch;
+    border-bottom:1px solid var(--line);
+  }
+  .row:last-child{border-bottom:none;}
+  .row.head{background:#fbfcfd; position:sticky; top:0;}
+
+  /* time axis header */
+  .axis{position:relative; height:34px;}
+  .axis .ticks{position:absolute; inset:0; display:flex;}
+  .axis .tick{
+    flex:1; border-left:1px solid var(--line); font-size:11px; color:var(--muted);
+    padding:9px 0 0 6px; position:relative;
+  }
+  .axis .tick:first-child{border-left:none;}
+  .axis .lunch-lbl{
+    position:absolute; top:8px; font-size:10px; color:var(--muted);
+    transform:translateX(-50%);
+  }
+  .head .namecell{padding:9px 14px; font-size:11px; color:var(--muted); font-weight:600;}
+  .head .sumcell{padding:9px 12px; font-size:11px; color:var(--muted); font-weight:600; text-align:right;}
+
+  /* member rows */
+  .namecell{
+    padding:12px 14px; display:flex; flex-direction:column; gap:3px; justify-content:center;
+    border-right:1px solid var(--line);
+  }
+  .namecell .nm{font-size:14px; font-weight:700; display:flex; align-items:center; gap:8px;}
+  .avatar{width:20px; height:20px; border-radius:50%; flex:none; box-shadow:inset 0 0 0 1px rgba(0,0,0,.06);}
+  .namecell .role{font-size:11px; color:var(--muted);}
+
+  .lane{position:relative; height:62px; background:repeating-linear-gradient(90deg,transparent,transparent calc(100%/9 - 1px),var(--line) calc(100%/9 - 1px),var(--line) calc(100%/9));}
+  /* lunch shade */
+  .lunch-shade{position:absolute; top:0; bottom:0; background:rgba(138,147,160,.07); border-left:1px dashed var(--line); border-right:1px dashed var(--line);}
+
+  .blk{
+    position:absolute; top:9px; height:44px; border-radius:8px; color:#fff;
+    padding:6px 9px; font-size:11.5px; font-weight:600; overflow:hidden;
+    box-shadow:0 1px 3px rgba(20,30,50,.18); display:flex; flex-direction:column; justify-content:center; gap:2px;
+  }
+  .blk .t{font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .blk .h{font-size:10px; opacity:.85; font-weight:600;}
+  .blk.backend{background:var(--backend);}
+  .blk.frontend{background:var(--frontend);}
+  .blk.qa{background:var(--qa);}
+  .blk.common{background:var(--common);}
+
+  /* free gap highlight */
+  .gap{
+    position:absolute; top:9px; height:44px; border-radius:8px;
+    border:1.5px dashed rgba(47,166,107,.55); background:rgba(47,166,107,.08);
+    display:flex; align-items:center; justify-content:center; gap:5px;
+    color:var(--free); font-size:11px; font-weight:700; cursor:default;
+  }
+  .gap .ico{font-size:13px;}
+  .gap.small{font-size:0;}
+  .gap.small .ico{font-size:12px; opacity:.6;}
+
+  /* overflow block dragged outside */
+  .over-rail{
+    position:absolute; top:9px; height:44px; border-radius:8px;
+    background:repeating-linear-gradient(45deg,rgba(229,72,77,.14),rgba(229,72,77,.14) 7px,rgba(229,72,77,.22) 7px,rgba(229,72,77,.22) 14px);
+    border:1.5px solid var(--over); color:var(--over);
+    display:flex; flex-direction:column; justify-content:center; padding:6px 9px;
+    font-size:11px; font-weight:700;
+  }
+  .over-rail .t{display:flex; align-items:center; gap:5px;}
+  .over-rail .sub{font-size:9.5px; opacity:.8; font-weight:600;}
+
+  .sumcell{
+    padding:10px 12px; display:flex; flex-direction:column; gap:5px; justify-content:center;
+    border-left:1px solid var(--line); text-align:right;
+  }
+  .sumcell .load{font-size:16px; font-weight:800;}
+  .sumcell .mini{height:5px; border-radius:3px; background:var(--track); overflow:hidden; position:relative;}
+  .sumcell .mini > span{position:absolute; left:0; top:0; bottom:0; border-radius:3px;}
+  .sumcell .tag{font-size:10.5px; font-weight:700; padding:1px 0;}
+  .tag.over{color:var(--over);} .tag.free{color:var(--free);} .tag.full{color:var(--full);}
+  .load.over{color:var(--over);}
+
+  /* legend */
+  .legend{display:flex; gap:18px; flex-wrap:wrap; margin-top:16px; align-items:center; font-size:11.5px; color:var(--muted);}
+  .legend .item{display:flex; align-items:center; gap:6px;}
+  .legend .sw{width:13px; height:13px; border-radius:4px;}
+  .legend .sw.gapsw{border:1.5px dashed rgba(47,166,107,.55); background:rgba(47,166,107,.08);}
+  .legend .sw.oversw{border:1.5px solid var(--over); background:repeating-linear-gradient(45deg,rgba(229,72,77,.14),rgba(229,72,77,.14) 4px,rgba(229,72,77,.24) 4px,rgba(229,72,77,.24) 8px);}
+
+  /* suggestion banner */
+  .suggest{
+    margin-top:18px; background:linear-gradient(180deg,#f1fbf5,#fff);
+    border:1px solid #cdeed9; border-radius:13px; padding:16px 20px;
+    display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+  }
+  .suggest .badge{
+    background:var(--free); color:#fff; font-size:11px; font-weight:800;
+    padding:5px 12px; border-radius:20px; letter-spacing:.02em; flex:none;
+  }
+  .suggest .txt{font-size:13.5px; line-height:1.6;}
+  .suggest .txt b{color:var(--free);}
+  .suggest .chip{
+    display:inline-flex; align-items:center; gap:6px; background:#fff; border:1px solid #cdeed9;
+    border-radius:8px; padding:4px 10px; font-size:12px; font-weight:700; margin:0 3px;
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-row">
+    <div>
+      <div class="title">今日、誰に振れる？ <span class="accent">空きさがし</span> ・ デイタイムライン</div>
+    </div>
+    <div class="daynav">
+      <button title="前日">‹</button>
+      <span class="today">6/4(木) <span class="pill">今日</span></span>
+      <button title="翌日">›</button>
+    </div>
+    <div class="head-spacer"></div>
+    <div class="teamstat">
+      <div>
+        <div class="big tnum">24<span style="font-size:13px;color:var(--muted);font-weight:600;">/32h</span></div>
+        <div class="lbl">チーム稼働 (75%)</div>
+      </div>
+      <div class="divider"></div>
+      <div class="freebox">
+        <div class="big tnum">+8h</div>
+        <div class="lbl">空き容量<br>あり</div>
+      </div>
+    </div>
+  </div>
+  <div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。 — 勤務 9:00–18:00 / 昼休 12:00–13:00 / 容量 8h・人</div>
+</header>
+
+<main>
+  <div class="board">
+    <!-- axis header -->
+    <div class="row head">
+      <div class="namecell">メンバー</div>
+      <div class="axis">
+        <div class="ticks">
+          <div class="tick">9:00</div>
+          <div class="tick">10</div>
+          <div class="tick">11</div>
+          <div class="tick">12</div>
+          <div class="tick">13</div>
+          <div class="tick">14</div>
+          <div class="tick">15</div>
+          <div class="tick">16</div>
+          <div class="tick">17</div>
+        </div>
+        <div class="lunch-lbl" style="left:38.9%;">昼</div>
+      </div>
+      <div class="sumcell">本日合計</div>
+    </div>
+
+    <!-- 森田 — 超過 +2h -->
+    <div class="row">
+      <div class="namecell">
+        <div class="nm"><span class="avatar" style="background:#e5772d;"></span>森田</div>
+        <div class="role">Backend</div>
+      </div>
+      <div class="lane">
+        <div class="lunch-shade" style="left:33.33%; width:11.11%;"></div>
+        <!-- 9-12 API設計4h... 詰めて: API設計 9-12(3枠表示でも4h), DB移行 13-16, レビュー 16-18 → 詰まってる -->
+        <div class="blk backend" style="left:0%; width:33.0%;">
+          <span class="t">API設計</span><span class="h">9:00–12:00 ・ 4h</span>
+        </div>
+        <div class="blk backend" style="left:33.5%; width:22.0%;">
+          <span class="t">DBマイグレ</span><span class="h">13–14:30 ・ 3h</span>
+        </div>
+        <div class="blk common" style="left:56.0%; width:33.0%;">
+          <span class="t">PRレビュー</span><span class="h">14:30–17:30 ・ 3h</span>
+        </div>
+        <!-- overflow rail -->
+        <div class="over-rail" style="left:89.4%; width:10.0%;">
+          <span class="t">⚠ +2h</span>
+          <span class="sub">枠外あふれ</span>
+        </div>
+      </div>
+      <div class="sumcell">
+        <div class="load over tnum">10h</div>
+        <div class="mini"><span style="width:100%;background:var(--over);"></span></div>
+        <div class="tag over">超過 +2h</div>
+      </div>
+    </div>
+
+    <!-- 田中 — 空き4h -->
+    <div class="row">
+      <div class="namecell">
+        <div class="nm"><span class="avatar" style="background:#3a86ff;"></span>田中</div>
+        <div class="role">Frontend</div>
+      </div>
+      <div class="lane">
+        <div class="lunch-shade" style="left:33.33%; width:11.11%;"></div>
+        <div class="blk frontend" style="left:0%; width:33.0%;">
+          <span class="t">ダッシュ画面実装</span><span class="h">9:00–12:00 ・ 4h</span>
+        </div>
+        <div class="gap" style="left:33.5%; width:65.5%;">
+          <span class="ico">＋</span> 午後まるごと空き ・ 4h
+        </div>
+      </div>
+      <div class="sumcell">
+        <div class="load tnum">4h</div>
+        <div class="mini"><span style="width:50%;background:var(--fill);"></span></div>
+        <div class="tag free">空き 4h</div>
+      </div>
+    </div>
+
+    <!-- 佐藤 — ちょうど8h -->
+    <div class="row">
+      <div class="namecell">
+        <div class="nm"><span class="avatar" style="background:#2fa66b;"></span>佐藤</div>
+        <div class="role">Backend / QA</div>
+      </div>
+      <div class="lane">
+        <div class="lunch-shade" style="left:33.33%; width:11.11%;"></div>
+        <div class="blk backend" style="left:0%; width:33.0%;">
+          <span class="t">認証フロー実装</span><span class="h">9:00–12:00 ・ 5h</span>
+        </div>
+        <div class="blk backend" style="left:33.5%; width:22.0%;">
+          <span class="t">（続き）</span><span class="h">13–14:30 ・ 2h</span>
+        </div>
+        <div class="blk qa" style="left:56.0%; width:33.0%;">
+          <span class="t">結合テスト</span><span class="h">14:30–17:30 ・ 3h</span>
+        </div>
+      </div>
+      <div class="sumcell">
+        <div class="load tnum">8h</div>
+        <div class="mini"><span style="width:100%;background:var(--full);"></span></div>
+        <div class="tag full">ちょうど満</div>
+      </div>
+    </div>
+
+    <!-- 鈴木 — 空き6h -->
+    <div class="row">
+      <div class="namecell">
+        <div class="nm"><span class="avatar" style="background:#b657d6;"></span>鈴木</div>
+        <div class="role">共通</div>
+      </div>
+      <div class="lane">
+        <div class="lunch-shade" style="left:33.33%; width:11.11%;"></div>
+        <div class="blk common" style="left:0%; width:22.0%;">
+          <span class="t">設計ドキュメント</span><span class="h">9–11 ・ 2h</span>
+        </div>
+        <div class="gap" style="left:22.5%; width:76.5%;">
+          <span class="ico">＋</span> 11時以降 ぽっかり空き ・ 6h
+        </div>
+      </div>
+      <div class="sumcell">
+        <div class="load tnum">2h</div>
+        <div class="mini"><span style="width:25%;background:var(--fill);"></span></div>
+        <div class="tag free">空き 6h</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="item"><span class="sw" style="background:var(--backend);"></span>Backend</div>
+    <div class="item"><span class="sw" style="background:var(--frontend);"></span>Frontend</div>
+    <div class="item"><span class="sw" style="background:var(--qa);"></span>QA</div>
+    <div class="item"><span class="sw" style="background:var(--common);"></span>共通</div>
+    <div class="item"><span class="sw gapsw"></span>空き帯（ここに振れる）</div>
+    <div class="item"><span class="sw oversw"></span>容量あふれ（要・再配分）</div>
+  </div>
+
+  <div class="suggest">
+    <span class="badge">空きさがし結果</span>
+    <div class="txt">
+      今すぐ振れる空き帯は計 <b>10h</b>。
+      <span class="chip"><span class="avatar" style="width:14px;height:14px;background:#b657d6;"></span>鈴木 11時〜 6h</span>
+      <span class="chip"><span class="avatar" style="width:14px;height:14px;background:#3a86ff;"></span>田中 午後 4h</span>
+      が最有力。
+      森田の <b style="color:var(--over);">超過+2h</b>（PRレビュー）を鈴木へ移すと全員が容量内に収まります。
+    </div>
+  </div>
+</main>
+</body>
+</html>

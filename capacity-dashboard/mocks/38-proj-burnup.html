@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>バーンアップチャート — 新ダッシュボード機能 (Release v1.2)</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480;
+    --line:#e6e9ee; --track:#eef1f5;
+    --green:#2fa66b; --amber:#f5a623; --red:#e5484d;
+    --ideal:#9aa3af; --actual:#3a86ff; --scope:#1d2430;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"tnum"; -webkit-font-smoothing:antialiased;
+    padding:24px; line-height:1.5;
+  }
+  .wrap{max-width:980px;margin:0 auto;}
+
+  .head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px;flex-wrap:wrap;}
+  .head h1{font-size:20px;margin:0 0 6px;font-weight:700;letter-spacing:.01em;}
+  .proj-pick{
+    display:inline-flex;align-items:center;gap:6px;
+    background:var(--card);border:1px solid var(--line);border-radius:10px;
+    padding:6px 12px;font-size:13.5px;font-weight:600;color:var(--ink);cursor:pointer;
+    box-shadow:0 1px 2px rgba(20,30,50,.04);
+  }
+  .proj-pick .car{color:var(--muted);font-size:11px;}
+  .note{font-size:12px;color:var(--muted);margin-top:8px;}
+  .head-right{text-align:right;}
+  .badge{
+    display:inline-flex;align-items:center;gap:7px;
+    background:rgba(229,72,77,.10);color:var(--red);
+    border:1px solid rgba(229,72,77,.28);border-radius:999px;
+    padding:6px 13px;font-size:13px;font-weight:700;
+  }
+  .badge .dot{width:8px;height:8px;border-radius:50%;background:var(--red);}
+  .badge-sub{font-size:11.5px;color:var(--muted);margin-top:6px;}
+
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:16px;
+    box-shadow:0 1px 3px rgba(20,30,50,.05),0 8px 24px rgba(20,30,50,.03);
+    padding:22px 24px 18px;
+  }
+  .card-title{font-size:14px;font-weight:700;margin:0 0 2px;}
+  .card-sub{font-size:12px;color:var(--muted);margin:0 0 14px;}
+
+  .kpis{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;}
+  .kpi{
+    flex:1 1 120px;background:var(--bg);border:1px solid var(--line);border-radius:12px;
+    padding:11px 13px;min-width:120px;
+  }
+  .kpi .k-lbl{font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.02em;}
+  .kpi .k-val{font-size:21px;font-weight:700;margin-top:3px;}
+  .kpi .k-val small{font-size:12px;color:var(--muted);font-weight:600;}
+  .kpi.scope .k-val small{color:var(--amber);}
+
+  .chart-area{position:relative;}
+  svg{display:block;width:100%;height:auto;}
+  text{font-family:inherit;}
+  .axis-label{font-size:11px;fill:var(--muted);}
+  .axis-title{font-size:11.5px;fill:var(--muted);font-weight:600;}
+  .grid{stroke:var(--line);stroke-width:1;}
+  .grid-soft{stroke:var(--track);stroke-width:1;}
+  .scope-line{stroke:var(--scope);stroke-width:2.4;fill:none;}
+  .scope-step{stroke:var(--amber);stroke-width:1.6;stroke-dasharray:3 3;}
+  .actual{stroke:var(--actual);stroke-width:2.6;fill:none;}
+  .actual-dot{fill:#fff;stroke:var(--actual);stroke-width:2.4;}
+  .ideal{stroke:var(--ideal);stroke-width:2;stroke-dasharray:5 4;fill:none;}
+  .gap-fill{fill:rgba(58,134,255,.07);}
+  .scope-add-fill{fill:rgba(245,166,35,.10);}
+  .forecast{stroke:var(--red);stroke-width:2;stroke-dasharray:2 4;fill:none;opacity:.85;}
+  .today-line{stroke:var(--ink);stroke-width:1.4;stroke-dasharray:3 3;opacity:.5;}
+  .deadline-line{stroke:var(--red);stroke-width:1.6;opacity:.6;}
+
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin-top:16px;padding-top:14px;border-top:1px solid var(--line);}
+  .leg{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink);}
+  .leg .swatch{width:22px;height:0;border-top-width:3px;border-top-style:solid;border-radius:2px;}
+  .leg .sw-scope{border-color:var(--scope);}
+  .leg .sw-actual{border-color:var(--actual);}
+  .leg .sw-ideal{border-top-style:dashed;border-color:var(--ideal);}
+  .leg .sw-gap{width:14px;height:12px;border:none;border-radius:3px;background:rgba(58,134,255,.16);}
+  .leg-muted{color:var(--muted);}
+
+  .callout{
+    position:absolute;background:var(--card);border:1px solid rgba(245,166,35,.45);
+    border-radius:10px;padding:8px 11px;box-shadow:0 4px 14px rgba(20,30,50,.10);
+    font-size:11.5px;line-height:1.4;max-width:170px;
+  }
+  .callout b{color:var(--amber);}
+  .callout .c-sub{color:var(--muted);font-size:10.5px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="head">
+    <div>
+      <h1>バーンアップチャート</h1>
+      <span class="proj-pick">プロジェクト: 新ダッシュボード機能 <span class="car">▾</span></span>
+      <div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</div>
+    </div>
+    <div class="head-right">
+      <span class="badge"><span class="dot"></span>3日遅延リスク</span>
+      <div class="badge-sub">スコープ +12h ・ 締切 6/13</div>
+    </div>
+  </header>
+
+  <section class="card">
+    <div class="card-title">完了の積み上げ vs スコープ（Release v1.2）</div>
+    <div class="card-sub">期間 5/20 〜 6/13（リリース締切） ・ 今日 6/4（木） ・ 縦軸＝累積工数</div>
+
+    <div class="kpis">
+      <div class="kpi scope"><div class="k-lbl">スコープ（総量）</div><div class="k-val">132<small> h ・ +12</small></div></div>
+      <div class="kpi"><div class="k-lbl">完了</div><div class="k-val" style="color:var(--green)">78<small> h</small></div></div>
+      <div class="kpi"><div class="k-lbl">残り（差分）</div><div class="k-val">54<small> h</small></div></div>
+      <div class="kpi"><div class="k-lbl">進捗率</div><div class="k-val">59<small> %</small></div></div>
+    </div>
+
+    <div class="chart-area">
+      <!--
+        Geometry:
+        plot left=58 right=900 top=24 bottom=300
+        X: 5/20 day0 .. 6/13 day24. px=58 + day*35.083
+        Y: 0h..140h. py = 300 - (h/140)*(300-24)=300 - h*1.9714
+        Key X:
+          day0=58  day7(5/27)=303.6  day14(6/3)=549.2  day15(6/4 today)=584.25  day24(6/13)=900
+        Scope: 120 until 5/27(day7) then steps to 132.
+          120h -> py=300-236.57=63.43
+          132h -> py=300-260.23=39.77
+        Actual completed: 0,24,54,78
+          0 -> 300 ; 24 -> 300-47.31=252.69 ; 54 -> 300-106.46=193.54 ; 78 -> 300-153.77=146.23
+        Ideal (linear to scope 132 by deadline): 0 at day0 -> 132 at day24
+      -->
+      <svg viewBox="0 0 940 360" role="img" aria-label="バーンアップチャート">
+        <!-- Y grid (0,30,60,90,120, +132) -->
+        <g>
+          <line class="grid" x1="58" y1="39.77" x2="900" y2="39.77"/>
+          <text class="axis-label" x="50" y="43.8" text-anchor="end" style="fill:var(--amber);font-weight:700">132</text>
+          <line class="grid-soft" x1="58" y1="59.14" x2="900" y2="59.14"/>
+          <text class="axis-label" x="50" y="63" text-anchor="end">120</text>
+          <line class="grid-soft" x1="58" y1="118.29" x2="900" y2="118.29"/>
+          <text class="axis-label" x="50" y="122" text-anchor="end">90</text>
+          <line class="grid-soft" x1="58" y1="177.43" x2="900" y2="177.43"/>
+          <text class="axis-label" x="50" y="181" text-anchor="end">60</text>
+          <line class="grid-soft" x1="58" y1="236.57" x2="900" y2="236.57"/>
+          <text class="axis-label" x="50" y="240" text-anchor="end">30</text>
+          <line class="grid" x1="58" y1="300" x2="900" y2="300"/>
+          <text class="axis-label" x="50" y="304" text-anchor="end">0</text>
+        </g>
+        <text class="axis-title" x="16" y="170" transform="rotate(-90 16 170)" text-anchor="middle">累積工数 (h)</text>
+
+        <!-- X labels -->
+        <g>
+          <text class="axis-label" x="58" y="318" text-anchor="middle">5/20</text>
+          <text class="axis-label" x="304" y="318" text-anchor="middle">5/27</text>
+          <text class="axis-label" x="549" y="318" text-anchor="middle">6/3</text>
+          <text class="axis-label" x="584" y="332" text-anchor="middle" style="fill:var(--ink);font-weight:700">6/4 今日</text>
+          <text class="axis-label" x="795" y="318" text-anchor="middle">6/10</text>
+          <text class="axis-label" x="900" y="318" text-anchor="middle" style="fill:var(--red);font-weight:700">6/13 締切</text>
+        </g>
+        <text class="axis-title" x="479" y="350" text-anchor="middle">日付</text>
+
+        <!-- Scope-add band: highlight the +12h zone (between 120 and 132 lines, from 5/27 onward) -->
+        <rect class="scope-add-fill" x="303.6" y="39.77" width="596.4" height="19.37"/>
+
+        <!-- Gap fill between scope and actual (the "remaining" 54h) up to today -->
+        <!--
+          top boundary = scope line (120 until day7, 132 after)
+          bottom = actual completed line
+          polygon along actual (left->right to today) then back along scope (today->left)
+        -->
+        <path class="gap-fill" d="
+          M58,300
+          L303.6,252.69
+          L549.2,193.54
+          L584.25,146.23
+          L584.25,39.77
+          L303.6,39.77
+          L303.6,63.43
+          L58,63.43
+          Z"/>
+
+        <!-- Ideal line: 0 -> 132 across full period -->
+        <line class="ideal" x1="58" y1="300" x2="900" y2="39.77"/>
+
+        <!-- Scope line: 120 flat until 5/27 then step up to 132 flat to deadline -->
+        <path class="scope-line" d="M58,63.43 L303.6,63.43 L303.6,39.77 L900,39.77"/>
+        <!-- vertical step marker emphasis -->
+        <line class="scope-step" x1="303.6" y1="63.43" x2="303.6" y2="39.77"/>
+
+        <!-- Actual completed line + forecast -->
+        <!--
+          forecast: from today(78h@day15) at current pace to deadline.
+          last week burned 24h (54->78). To reach 132 need 54 more h.
+          at deadline day24 (9 days from today) pace ~ project lands 6/16 -> at deadline completed ≈ 78 + (9/12)*54 = 78+40.5=118.5h
+          118.5 -> py=300-233.62=66.38
+        -->
+        <line class="forecast" x1="584.25" y1="146.23" x2="900" y2="66.38"/>
+        <circle cx="900" cy="66.38" r="3.2" fill="var(--red)"/>
+
+        <polyline class="actual" points="58,300 303.6,252.69 549.2,193.54 584.25,146.23"/>
+        <circle class="actual-dot" cx="58" cy="300" r="4"/>
+        <circle class="actual-dot" cx="303.6" cy="252.69" r="4"/>
+        <circle class="actual-dot" cx="549.2" cy="193.54" r="4"/>
+        <circle class="actual-dot" cx="584.25" cy="146.23" r="4.5" stroke-width="3"/>
+
+        <!-- Today / deadline verticals -->
+        <line class="today-line" x1="584.25" y1="18" x2="584.25" y2="300"/>
+        <line class="deadline-line" x1="900" y1="18" x2="900" y2="300"/>
+        <text class="axis-label" x="896" y="16" text-anchor="end" style="fill:var(--red);font-weight:700">締切</text>
+
+        <!-- scope add label -->
+        <text class="axis-label" x="310" y="34" text-anchor="start" style="fill:var(--amber);font-weight:700">+12h (5/27)</text>
+      </svg>
+
+      <div class="callout" style="left:33%;top:7%;">
+        <b>スコープ +12h</b>（5/27）<br>
+        <span class="c-sub">ゴールが上振れ → 完了線が追いつかず遅延に直結</span>
+      </div>
+    </div>
+
+    <div class="legend">
+      <div class="leg"><span class="swatch sw-scope"></span>スコープ（総量）</div>
+      <div class="leg"><span class="swatch sw-actual"></span>完了（積み上げ）</div>
+      <div class="leg"><span class="swatch sw-ideal"></span>理想線</div>
+      <div class="leg"><span class="sw-gap"></span>残り（スコープ − 完了）</div>
+      <div class="leg leg-muted"><span class="swatch" style="border-color:var(--ink);border-top-style:dashed;width:18px;"></span>今日 6/4</div>
+      <div class="leg leg-muted"><span class="swatch" style="border-color:var(--red);width:18px;"></span>締切 6/13</div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

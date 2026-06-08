@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>マイルストーン・タイムライン — 新ダッシュボード機能</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --done:#2fa66b; --doing:#3a86ff; --todo:#9aa3af; --blocked:#e5484d;
+    --sig-green:#2fa66b; --sig-yellow:#f5a623; --sig-red:#e5484d;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"tnum" 1; -webkit-font-smoothing:antialiased;
+    line-height:1.5; padding:28px 20px 60px;
+  }
+  .wrap{max-width:980px;margin:0 auto;}
+  .tnum{font-variant-numeric:tabular-nums;}
+
+  header.top{margin-bottom:22px;}
+  .titlerow{display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+  h1{font-size:20px;font-weight:700;margin:0;letter-spacing:.01em;}
+  .projpick{
+    display:inline-flex;align-items:center;gap:6px;
+    background:var(--card);border:1px solid var(--line);border-radius:9px;
+    padding:6px 12px;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer;
+    box-shadow:0 1px 2px rgba(20,30,50,.04);
+  }
+  .projpick .caret{color:var(--muted);font-size:11px;}
+  .note{font-size:12px;color:var(--muted);margin-top:8px;}
+
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:14px;
+    box-shadow:0 1px 3px rgba(20,30,50,.05);padding:22px 24px;margin-bottom:18px;
+  }
+  .card h2{font-size:14px;font-weight:700;margin:0 0 4px;}
+  .card h2 .sub{font-size:12px;font-weight:500;color:var(--muted);margin-left:8px;}
+
+  /* ===== Gantt-style timeline axis ===== */
+  .axisbox{margin-top:20px;}
+  .axis{position:relative;height:34px;margin:0 0 4px;}
+  .axis .tick{position:absolute;top:0;transform:translateX(-50%);text-align:center;}
+  .axis .tick .d{font-size:11px;color:var(--muted);font-weight:600;}
+  .axis .tick .ln{position:absolute;top:20px;left:50%;width:1px;height:9px;background:var(--line);}
+  .axis .today{position:absolute;top:-2px;bottom:0;width:2px;background:var(--sig-yellow);}
+  .axis .today .tag{
+    position:absolute;top:-2px;left:50%;transform:translateX(-50%);
+    background:var(--sig-yellow);color:#fff;font-size:10px;font-weight:700;border-radius:5px;padding:2px 7px;white-space:nowrap;
+  }
+
+  .laneband{position:relative;height:1px;background:var(--line);margin:8px 0 0;}
+  .todayline{position:absolute;top:0;bottom:0;width:2px;background:rgba(245,166,35,.5);}
+
+  /* timeline rows: each milestone is a marker on the axis */
+  .tlrows{position:relative;margin-top:14px;}
+  .tlrow{position:relative;height:78px;border-bottom:1px dashed var(--line);}
+  .tlrow:last-child{border-bottom:none;}
+
+  /* planned vs forecast markers */
+  .ms{position:absolute;top:14px;transform:translateX(-50%);width:max-content;}
+  .ms .pin{
+    display:flex;flex-direction:column;align-items:center;gap:5px;
+  }
+  .ms .diamond{
+    width:18px;height:18px;border-radius:4px;transform:rotate(45deg);border:2px solid #fff;
+    box-shadow:0 1px 3px rgba(20,30,50,.18);
+  }
+  .ms .mlabel{
+    font-size:12px;font-weight:700;white-space:nowrap;
+    background:var(--card);border:1px solid var(--line);border-radius:8px;padding:4px 10px;
+    box-shadow:0 1px 2px rgba(20,30,50,.05);display:flex;align-items:center;gap:7px;
+  }
+  .ms .mlabel .sig{font-size:12px;}
+  .ms .mdate{font-size:10.5px;color:var(--muted);margin-top:2px;font-weight:600;}
+
+  /* forecast marker (hollow, dashed) for slipped M3 */
+  .fc{position:absolute;top:14px;transform:translateX(-50%);}
+  .fc .diamond{
+    width:18px;height:18px;border-radius:4px;transform:rotate(45deg);
+    border:2px dashed var(--sig-red);background:rgba(229,72,77,.12);
+  }
+  .fc .fclbl{font-size:10px;font-weight:700;color:var(--sig-red);white-space:nowrap;margin-top:8px;text-align:center;transform:translateX(-50%);position:absolute;left:50%;}
+  /* slip connector */
+  .slip{position:absolute;top:22px;height:3px;background:repeating-linear-gradient(90deg,var(--sig-red) 0 5px,transparent 5px 9px);border-radius:2px;}
+  .slip .slipbadge{
+    position:absolute;top:-26px;left:50%;transform:translateX(-50%);
+    background:var(--sig-red);color:#fff;font-size:10px;font-weight:700;border-radius:5px;padding:2px 8px;white-space:nowrap;
+  }
+
+  /* ===== milestone detail cards ===== */
+  .mscards{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;}
+  @media(max-width:780px){.mscards{grid-template-columns:1fr;}}
+  .mscard{
+    background:var(--card);border:1px solid var(--line);border-radius:14px;
+    box-shadow:0 1px 3px rgba(20,30,50,.05);padding:18px 18px 16px;position:relative;overflow:hidden;
+  }
+  .mscard .topbar{position:absolute;top:0;left:0;right:0;height:4px;}
+  .mscard .hd{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:12px;}
+  .mscard .mname{font-size:14px;font-weight:700;}
+  .mscard .mname .code{color:var(--muted);font-weight:700;font-size:12px;margin-right:6px;}
+  .statpill{
+    display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;
+    border-radius:999px;padding:4px 11px;white-space:nowrap;color:#fff;
+  }
+  .dates{display:flex;flex-direction:column;gap:7px;margin-bottom:14px;}
+  .drow{display:flex;align-items:baseline;justify-content:space-between;font-size:12.5px;}
+  .drow .k{color:var(--muted);}
+  .drow .v{font-weight:700;}
+  .drow .v.late{color:var(--sig-red);}
+  .drow .v.ok{color:var(--sig-green);}
+  .slipnote{
+    font-size:11.5px;font-weight:700;color:var(--sig-red);
+    background:rgba(229,72,77,.08);border-radius:7px;padding:6px 10px;margin-bottom:13px;
+    display:flex;align-items:center;gap:6px;
+  }
+  .warnnote{
+    font-size:11.5px;font-weight:700;color:#b9791a;
+    background:rgba(245,166,35,.12);border-radius:7px;padding:6px 10px;margin-bottom:13px;
+    display:flex;align-items:center;gap:6px;
+  }
+  .oknote{
+    font-size:11.5px;font-weight:700;color:var(--sig-green);
+    background:rgba(47,166,107,.10);border-radius:7px;padding:6px 10px;margin-bottom:13px;
+    display:flex;align-items:center;gap:6px;
+  }
+  .achwrap{margin-top:2px;}
+  .achlbl{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);margin-bottom:6px;}
+  .achlbl b{color:var(--ink);font-weight:700;}
+  .achtrack{height:8px;background:var(--track);border-radius:6px;overflow:hidden;}
+  .achfill{height:100%;border-radius:6px;}
+  .tcount{font-size:11px;color:var(--muted);margin-top:7px;}
+  .tcount .seg-done{color:var(--done);font-weight:700;}
+  .tcount .seg-rest{color:var(--muted);}
+
+  .legendrow{display:flex;flex-wrap:wrap;gap:16px;margin-top:6px;font-size:12px;color:var(--muted);}
+  .legendrow .it{display:flex;align-items:center;gap:7px;}
+  .legendrow .dia{width:12px;height:12px;border-radius:3px;transform:rotate(45deg);}
+  .legendrow .dia.fc{border:2px dashed var(--sig-red);background:rgba(229,72,77,.12);}
+
+  footer{font-size:11px;color:var(--muted);text-align:center;margin-top:26px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="titlerow">
+      <h1>マイルストーン・タイムライン</h1>
+      <span class="projpick">プロジェクト: 新ダッシュボード機能 <span class="caret">▾</span></span>
+    </div>
+    <div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。 ｜ Release v1.2 ・ 期間 5/20〜6/13 ・ 本日 6/4(木)</div>
+  </header>
+
+  <!-- timeline card -->
+  <div class="card">
+    <h2>タイムライン <span class="sub">予定日 vs 着地見込み（5/20 → 6/16）</span></h2>
+
+    <div class="axisbox">
+      <!-- axis ticks; map dates over 5/20..6/16 (27 days) to 0..100%
+           5/20=0% ; 5/27=25.9% ; 6/4=51.9% ; 6/6=59.3% ; 6/13=85.2% ; 6/16=100% -->
+      <div class="axis">
+        <div class="tick" style="left:0%"><span class="d">5/20</span><span class="ln"></span></div>
+        <div class="tick" style="left:25.9%"><span class="d">5/27</span><span class="ln"></span></div>
+        <div class="tick" style="left:51.9%"><span class="d">6/4</span><span class="ln"></span></div>
+        <div class="tick" style="left:85.2%"><span class="d">6/13</span><span class="ln"></span></div>
+        <div class="tick" style="left:100%"><span class="d">6/16</span><span class="ln"></span></div>
+        <div class="today" style="left:51.9%"><span class="tag">本日 6/4</span></div>
+      </div>
+
+      <div class="laneband">
+        <div class="todayline" style="left:51.9%"></div>
+      </div>
+
+      <div class="tlrows">
+        <!-- M1: achieved 5/27 -->
+        <div class="tlrow">
+          <div class="ms" style="left:25.9%">
+            <div class="pin">
+              <span class="diamond" style="background:var(--sig-green)"></span>
+              <span class="mlabel"><span class="sig">✅</span>M1 設計完了</span>
+              <span class="mdate tnum">予定 5/27 ・ 達成 5/27</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- M2: at risk 6/6 -->
+        <div class="tlrow">
+          <div class="ms" style="left:59.3%">
+            <div class="pin">
+              <span class="diamond" style="background:var(--sig-yellow)"></span>
+              <span class="mlabel"><span class="sig">⚠</span>M2 実装完了</span>
+              <span class="mdate tnum">予定 6/6 ・ 危うい</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- M3: delayed, planned 6/13, forecast 6/16 -->
+        <div class="tlrow">
+          <!-- planned marker at 6/13 -->
+          <div class="ms" style="left:85.2%">
+            <div class="pin">
+              <span class="diamond" style="background:var(--sig-red)"></span>
+              <span class="mlabel"><span class="sig">🔴</span>M3 リリース</span>
+              <span class="mdate tnum">予定 6/13</span>
+            </div>
+          </div>
+          <!-- slip connector 6/13 -> 6/16 -->
+          <div class="slip" style="left:85.2%;width:14.8%">
+            <span class="slipbadge">+3日 遅延</span>
+          </div>
+          <!-- forecast marker at 6/16 -->
+          <div class="fc" style="left:100%">
+            <span class="diamond"></span>
+            <span class="fclbl tnum">着地見込 6/16</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="legendrow">
+      <span class="it"><span class="dia" style="background:var(--sig-green)"></span>達成</span>
+      <span class="it"><span class="dia" style="background:var(--sig-yellow)"></span>危うい</span>
+      <span class="it"><span class="dia" style="background:var(--sig-red)"></span>遅延（予定日）</span>
+      <span class="it"><span class="dia fc"></span>着地見込み（予測）</span>
+      <span class="it"><span style="width:14px;height:2px;background:var(--sig-yellow);display:inline-block;"></span>本日 6/4</span>
+    </div>
+  </div>
+
+  <!-- milestone detail cards -->
+  <div class="mscards">
+    <!-- M1 -->
+    <div class="mscard">
+      <div class="topbar" style="background:var(--sig-green)"></div>
+      <div class="hd">
+        <div class="mname"><span class="code">M1</span>設計完了</div>
+        <span class="statpill" style="background:var(--sig-green)">✅ 達成</span>
+      </div>
+      <div class="dates">
+        <div class="drow"><span class="k">予定日</span><span class="v tnum">5/27</span></div>
+        <div class="drow"><span class="k">着地見込み</span><span class="v ok tnum">5/27 達成</span></div>
+      </div>
+      <div class="oknote">✓ 予定通り達成。後続フェーズへ移行済み。</div>
+      <div class="achwrap">
+        <div class="achlbl"><span>タスク達成率</span><b class="tnum">100%</b></div>
+        <div class="achtrack"><div class="achfill" style="width:100%;background:var(--sig-green)"></div></div>
+        <div class="tcount"><span class="seg-done">完了 6</span> / 6 件</div>
+      </div>
+    </div>
+
+    <!-- M2 -->
+    <div class="mscard">
+      <div class="topbar" style="background:var(--sig-yellow)"></div>
+      <div class="hd">
+        <div class="mname"><span class="code">M2</span>実装完了</div>
+        <span class="statpill" style="background:var(--sig-yellow)">⚠ 危うい</span>
+      </div>
+      <div class="dates">
+        <div class="drow"><span class="k">予定日</span><span class="v tnum">6/6</span></div>
+        <div class="drow"><span class="k">着地見込み</span><span class="v tnum">6/6（残り2日）</span></div>
+      </div>
+      <div class="warnnote">⚠ 実装中タスクが多数（進行中5件）。残2日で完了は綱渡り。</div>
+      <div class="achwrap">
+        <div class="achlbl"><span>タスク達成率</span><b class="tnum">42%</b></div>
+        <div class="achtrack"><div class="achfill" style="width:42%;background:var(--sig-yellow)"></div></div>
+        <div class="tcount"><span class="seg-done">完了 5</span> <span class="seg-rest">/ 12 件（進行中5・未着手1・ブロック1）</span></div>
+      </div>
+    </div>
+
+    <!-- M3 -->
+    <div class="mscard">
+      <div class="topbar" style="background:var(--sig-red)"></div>
+      <div class="hd">
+        <div class="mname"><span class="code">M3</span>リリース</div>
+        <span class="statpill" style="background:var(--sig-red)">🔴 遅延見込み</span>
+      </div>
+      <div class="dates">
+        <div class="drow"><span class="k">予定日</span><span class="v tnum">6/13</span></div>
+        <div class="drow"><span class="k">着地見込み</span><span class="v late tnum">6/16（+3日）</span></div>
+      </div>
+      <div class="slipnote">🔴 締切 6/13 に対し 6/16 着地予測。M2 遅延の波及。</div>
+      <div class="achwrap">
+        <div class="achlbl"><span>タスク達成率</span><b class="tnum">17%</b></div>
+        <div class="achtrack"><div class="achfill" style="width:17%;background:var(--sig-red)"></div></div>
+        <div class="tcount"><span class="seg-done">完了 1</span> <span class="seg-rest">/ 6 件（未着手3・進行中2）</span></div>
+      </div>
+    </div>
+  </div>
+
+  <footer>新ダッシュボード機能 (Release v1.2) ・ マイルストーン ・ 集計時刻 6/4 09:00（モック）</footer>
+</div>
+</body>
+</html>

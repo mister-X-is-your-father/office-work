@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>キャパダッシュボード — サマリー俯瞰</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee;
+    --track:#eef1f5; --fill:#3a86ff; --red:#e5484d; --green:#2fa66b; --full:#8a93a0; --amber:#f5a623;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+    --pj-be:#3a86ff; --pj-fe:#2fa66b; --pj-qa:#b657d6; --pj-common:#8a93a0;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased;
+    font-variant-numeric:tabular-nums; font-feature-settings:"tnum";
+  }
+  .wrap{max-width:1080px; margin:0 auto; padding:20px 22px 60px;}
+
+  header.top{display:flex; align-items:flex-end; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:6px;}
+  header.top h1{font-size:20px; font-weight:700; margin:0; letter-spacing:.01em;}
+  header.top .sub{font-size:12px; color:var(--muted); margin-top:3px;}
+  .nav{display:flex; align-items:center; gap:6px;}
+  .nav button{
+    background:var(--card); border:1px solid var(--line); color:var(--ink);
+    border-radius:9px; height:32px; padding:0 10px; font-size:13px; cursor:pointer;
+    font-family:inherit; display:inline-flex; align-items:center; gap:5px;
+  }
+  .nav button:hover{background:#fafbfc;}
+  .nav .cur{font-weight:600; padding:0 12px; font-size:13px; white-space:nowrap;}
+  .nav .today{border-color:#cfd6df;}
+  .note{
+    font-size:11.5px; color:var(--muted); background:#fff7ec; border:1px solid #f3e2c4;
+    border-radius:8px; padding:6px 10px; margin:12px 0 18px; display:inline-block;
+  }
+
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    padding:16px 16px 14px; box-shadow:0 1px 2px rgba(20,30,50,.04);
+  }
+  .card h2{font-size:13px; font-weight:700; margin:0 0 2px; display:flex; align-items:center; gap:8px;}
+  .card .lead{font-size:11.5px; color:var(--muted); margin:0 0 12px;}
+  .hd{display:flex; align-items:flex-start; justify-content:space-between; gap:10px;}
+  .more{
+    font-size:11.5px; color:var(--fill); text-decoration:none; white-space:nowrap;
+    display:inline-flex; align-items:center; gap:3px; padding:2px 6px; border-radius:6px;
+  }
+  .more:hover{background:#eef4ff;}
+  .more .arr{font-size:13px;}
+
+  /* KPI cards row */
+  .kpis{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:14px;}
+  .kpi{
+    background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px 16px 14px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04); position:relative; overflow:hidden;
+  }
+  .kpi .accent{position:absolute; left:0; top:0; bottom:0; width:4px;}
+  .kpi .ktop{display:flex; align-items:center; justify-content:space-between;}
+  .kpi .klabel{font-size:11.5px; color:var(--muted); font-weight:600;}
+  .kpi .kbadge{font-size:10px; font-weight:700; padding:2px 7px; border-radius:20px;}
+  .kpi .kval{font-size:36px; font-weight:800; line-height:1; margin:12px 0 3px; letter-spacing:-.02em;}
+  .kpi .kval .u{font-size:15px; font-weight:600; color:var(--muted); margin-left:2px;}
+  .kpi .ksub{font-size:11.5px; color:var(--muted);}
+  .kpi .ktrend{font-size:11px; font-weight:600; margin-top:8px; display:inline-flex; align-items:center; gap:4px;}
+  .spark{display:flex; align-items:flex-end; gap:3px; height:26px; margin-top:9px;}
+  .spark i{flex:1; border-radius:2px 2px 0 0; min-height:3px; opacity:.85;}
+
+  /* two-col charts */
+  .grid2{display:grid; grid-template-columns:1.15fr 1fr; gap:14px;}
+
+  /* week load mini bars */
+  .wbars{display:flex; align-items:flex-end; gap:0; height:170px; padding:8px 4px 0; border-bottom:1px solid var(--line);}
+  .wcol{flex:1; display:flex; flex-direction:column; align-items:center; gap:0; justify-content:flex-end; height:100%;}
+  .wcol .barbox{width:38px; height:100%; display:flex; flex-direction:column; justify-content:flex-end; position:relative;}
+  .wcol .b{width:100%; border-radius:6px 6px 0 0; position:relative;}
+  .wcol .cap{position:absolute; top:-17px; left:0; right:0; text-align:center; font-size:11px; font-weight:700;}
+  .wcol .capm{position:absolute; top:-17px; left:0; right:0; text-align:center; font-size:10px; font-weight:700; color:var(--full);}
+  .capline{position:relative;}
+  .limit{position:absolute; left:0; right:0; border-top:2px dashed #cdd4dd;}
+  .wlabels{display:flex; margin-top:8px;}
+  .wlabels .wl{flex:1; text-align:center; font-size:11.5px; color:var(--muted); display:flex; flex-direction:column; align-items:center; gap:3px;}
+  .wlabels .wl .nm{font-weight:600; color:var(--ink); display:inline-flex; align-items:center; gap:5px;}
+  .dot{width:8px; height:8px; border-radius:50%; display:inline-block;}
+  .limitkey{font-size:10.5px; color:var(--muted); margin-top:12px; display:flex; align-items:center; gap:6px;}
+  .limitkey i{width:18px; border-top:2px dashed #cdd4dd; display:inline-block;}
+
+  /* PJ allocation stacked bar + legend */
+  .pjbar{display:flex; height:34px; border-radius:9px; overflow:hidden; margin:6px 0 14px;}
+  .pjbar div{height:100%; display:flex; align-items:center; justify-content:center; color:#fff; font-size:11px; font-weight:700;}
+  .pjlist{display:flex; flex-direction:column; gap:9px;}
+  .pjrow{display:flex; align-items:center; gap:9px; font-size:12.5px;}
+  .pjrow .sw{width:11px; height:11px; border-radius:3px; flex:none;}
+  .pjrow .nm{flex:1;}
+  .pjrow .hh{font-weight:700;} .pjrow .pp{color:var(--muted); font-size:11px; min-width:42px; text-align:right;}
+
+  /* member util mini list */
+  .mutil{display:flex; flex-direction:column; gap:10px; margin-top:4px;}
+  .mrow{display:grid; grid-template-columns:54px 1fr 64px; align-items:center; gap:10px;}
+  .mrow .who{display:flex; align-items:center; gap:6px; font-weight:600; font-size:12.5px;}
+  .mrow .track{height:12px; background:var(--track); border-radius:6px; overflow:hidden;}
+  .mrow .bar{height:100%; border-radius:6px;}
+  .mrow .barfull{background:var(--full);}
+  .mrow .pc{font-size:12px; text-align:right; font-weight:700;}
+
+  .footnote{font-size:11px; color:var(--muted); margin-top:14px; padding-top:11px; border-top:1px dashed var(--line);}
+
+  @media(max-width:880px){ .kpis{grid-template-columns:1fr 1fr;} .grid2{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div>
+      <h1>キャパダッシュボード · サマリー俯瞰</h1>
+      <div class="sub">チーム全体像を数字で把握 — エグゼクティブビュー</div>
+    </div>
+    <div class="nav">
+      <button class="today">今週</button>
+      <button>‹</button>
+      <span class="cur">第23週 · 6/1〜6/5</span>
+      <button>›</button>
+    </div>
+  </header>
+
+  <div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</div>
+
+  <!-- KPI row -->
+  <div class="kpis">
+    <div class="kpi">
+      <div class="accent" style="background:var(--fill)"></div>
+      <div class="ktop"><span class="klabel">チーム稼働率</span><span class="kbadge" style="background:#eef4ff;color:var(--fill)">適正</span></div>
+      <div class="kval">63<span class="u">%</span></div>
+      <div class="ksub">101 / 160h（週・4名）</div>
+      <div class="spark">
+        <i style="height:55%;background:var(--m-morita)"></i>
+        <i style="height:40%;background:var(--m-tanaka)"></i>
+        <i style="height:100%;background:var(--full)"></i>
+        <i style="height:24%;background:var(--m-suzuki)"></i>
+      </div>
+    </div>
+
+    <div class="kpi">
+      <div class="accent" style="background:var(--green)"></div>
+      <div class="ktop"><span class="klabel">週の空き</span><span class="kbadge" style="background:#e9f6ef;color:var(--green)">余力あり</span></div>
+      <div class="kval">59<span class="u">h</span></div>
+      <div class="ksub">今日の空き 8h（24/32h）</div>
+      <div class="ktrend" style="color:var(--green)">▼ 受け入れ余地あり</div>
+    </div>
+
+    <div class="kpi">
+      <div class="accent" style="background:var(--red)"></div>
+      <div class="ktop"><span class="klabel">着地リスク（赤）</span><span class="kbadge" style="background:#fdeaea;color:var(--red)">要対応</span></div>
+      <div class="kval" style="color:var(--red)">1<span class="u" style="color:var(--red);opacity:.6">件</span></div>
+      <div class="ksub">ログイン機能 — 締切6/6→着地6/9</div>
+      <div class="ktrend" style="color:var(--red)">▲ 3日遅延の見込み</div>
+    </div>
+
+    <div class="kpi">
+      <div class="accent" style="background:var(--amber)"></div>
+      <div class="ktop"><span class="klabel">燃え尽き注意</span><span class="kbadge" style="background:#fdf3e0;color:#b9791a">注意</span></div>
+      <div class="kval" style="color:var(--amber)">1<span class="u" style="color:var(--amber);opacity:.7">名</span></div>
+      <div class="ksub">森田 — 週90%・本日 +2h 超過</div>
+      <div class="ktrend" style="color:#b9791a">＋ 満稼働常態 1名（佐藤）</div>
+    </div>
+  </div>
+
+  <!-- second KPI strip: small context -->
+  <div class="kpis" style="grid-template-columns:repeat(4,1fr); margin-bottom:18px;">
+    <div class="kpi" style="padding:13px 16px;">
+      <div class="klabel">本日のキャパ</div>
+      <div class="kval" style="font-size:26px; margin:8px 0 2px;">24<span class="u" style="font-size:13px;">/32h</span></div>
+      <div class="ksub">稼働率 75% · 空き 8h</div>
+    </div>
+    <div class="kpi" style="padding:13px 16px;">
+      <div class="klabel">未アサイン</div>
+      <div class="kval" style="font-size:26px; margin:8px 0 2px;">4<span class="u" style="font-size:13px;">件 · 12h</span></div>
+      <div class="ksub">空き59h内に収容可</div>
+    </div>
+    <div class="kpi" style="padding:13px 16px;">
+      <div class="klabel">満稼働メンバー</div>
+      <div class="kval" style="font-size:26px; margin:8px 0 2px;">1<span class="u" style="font-size:13px;">/4名</span></div>
+      <div class="ksub">佐藤 40/40h（バッファ無）</div>
+    </div>
+    <div class="kpi" style="padding:13px 16px;">
+      <div class="klabel">アラート総数</div>
+      <div class="kval" style="font-size:26px; margin:8px 0 2px; color:var(--red)">3<span class="u" style="font-size:13px;color:var(--muted)">件</span></div>
+      <div class="ksub">過負荷2 · 遅延1</div>
+    </div>
+  </div>
+
+  <!-- charts -->
+  <div class="grid2">
+
+    <!-- week load chart -->
+    <div class="card">
+      <div class="hd">
+        <div>
+          <h2>📊 今週のメンバー負荷</h2>
+          <p class="lead">6/1〜6/5 · 上限 40h/人（破線）</p>
+        </div>
+        <a class="more" href="#">週ヒートマップ <span class="arr">→</span></a>
+      </div>
+
+      <div class="wbars capline">
+        <!-- limit line at 40h = 100% of 170px area we treat 50h as full height; 40h => 80% -->
+        <div class="limit" style="top:calc(8px + 20%);"></div>
+        <div class="wcol"><div class="barbox"><div class="b" style="height:72%;background:var(--m-morita)"><span class="cap" style="color:var(--m-morita)">36h</span></div></div></div>
+        <div class="wcol"><div class="barbox"><div class="b" style="height:32%;background:var(--m-tanaka)"><span class="cap" style="color:var(--m-tanaka)">16h</span></div></div></div>
+        <div class="wcol"><div class="barbox"><div class="b" style="height:80%;background:var(--full)"><span class="capm">40h 満</span></div></div></div>
+        <div class="wcol"><div class="barbox"><div class="b" style="height:18%;background:var(--m-suzuki)"><span class="cap" style="color:var(--m-suzuki)">9h</span></div></div></div>
+      </div>
+      <div class="wlabels">
+        <div class="wl"><span class="nm"><span class="dot" style="background:var(--m-morita)"></span>森田</span>90%</div>
+        <div class="wl"><span class="nm"><span class="dot" style="background:var(--m-tanaka)"></span>田中</span>40%</div>
+        <div class="wl"><span class="nm"><span class="dot" style="background:var(--m-sato)"></span>佐藤</span>100%</div>
+        <div class="wl"><span class="nm"><span class="dot" style="background:var(--m-suzuki)"></span>鈴木</span>23%</div>
+      </div>
+      <div class="limitkey"><i></i>40h 上限ライン · 森田は超え気味、鈴木に余裕</div>
+    </div>
+
+    <!-- PJ allocation -->
+    <div class="card">
+      <div class="hd">
+        <div>
+          <h2>🧩 PJ別 配分（今週）</h2>
+          <p class="lead">稼働 101h の内訳</p>
+        </div>
+        <a class="more" href="#">PJ別ビュー <span class="arr">→</span></a>
+      </div>
+
+      <div class="pjbar">
+        <div style="width:43.6%;background:var(--pj-be)">Backend</div>
+        <div style="width:26.7%;background:var(--pj-fe)">FE</div>
+        <div style="width:17.8%;background:var(--pj-qa)">QA</div>
+        <div style="width:11.9%;background:var(--pj-common)">共通</div>
+      </div>
+
+      <div class="pjlist">
+        <div class="pjrow"><span class="sw" style="background:var(--pj-be)"></span><span class="nm">Backend</span><span class="hh">44h</span><span class="pp">44%</span></div>
+        <div class="pjrow"><span class="sw" style="background:var(--pj-fe)"></span><span class="nm">Frontend</span><span class="hh">27h</span><span class="pp">27%</span></div>
+        <div class="pjrow"><span class="sw" style="background:var(--pj-qa)"></span><span class="nm">QA</span><span class="hh">18h</span><span class="pp">18%</span></div>
+        <div class="pjrow"><span class="sw" style="background:var(--pj-common)"></span><span class="nm">共通</span><span class="hh">12h</span><span class="pp">12%</span></div>
+      </div>
+
+      <div class="footnote">Backendに負荷集中。ログイン機能（BE）の遅延と相関。</div>
+    </div>
+
+  </div>
+
+  <!-- member util summary full width -->
+  <div class="card" style="margin-top:14px;">
+    <div class="hd">
+      <div>
+        <h2>👥 メンバー別 週稼働率</h2>
+        <p class="lead">余力の偏り — 鈴木・田中に振替余地</p>
+      </div>
+      <a class="more" href="#">メンバー詳細 <span class="arr">→</span></a>
+    </div>
+    <div class="mutil">
+      <div class="mrow"><span class="who"><span class="dot" style="background:var(--m-morita)"></span>森田</span><div class="track"><div class="bar" style="width:90%;background:var(--m-morita)"></div></div><span class="pc" style="color:var(--amber)">90%</span></div>
+      <div class="mrow"><span class="who"><span class="dot" style="background:var(--m-tanaka)"></span>田中</span><div class="track"><div class="bar" style="width:40%;background:var(--m-tanaka)"></div></div><span class="pc" style="color:var(--green)">40%</span></div>
+      <div class="mrow"><span class="who"><span class="dot" style="background:var(--m-sato)"></span>佐藤</span><div class="track"><div class="bar barfull" style="width:100%"></div></div><span class="pc" style="color:var(--full)">100%</span></div>
+      <div class="mrow"><span class="who"><span class="dot" style="background:var(--m-suzuki)"></span>鈴木</span><div class="track"><div class="bar" style="width:23%;background:var(--m-suzuki)"></div></div><span class="pc" style="color:var(--green)">23%</span></div>
+    </div>
+    <div class="footnote">チーム平均 63%。森田↔鈴木の再配分で平準化余地（最大▲約27pt）。</div>
+  </div>
+
+</div>
+</body>
+</html>

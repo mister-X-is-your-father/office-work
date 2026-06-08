@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>過負荷ヒストリー / 燃え尽き検知 — キャパダッシュボード</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee;
+    --track:#eef1f5; --fill:#3a86ff; --red:#e5484d; --green:#2fa66b; --full:#8a93a0; --amber:#f5a623;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif}
+  body{background:var(--bg);color:var(--ink);font-size:14px;line-height:1.5;
+    font-feature-settings:"tnum";font-variant-numeric:tabular-nums;
+    -webkit-font-smoothing:antialiased;padding:24px}
+  .wrap{max-width:1180px;margin:0 auto}
+
+  /* header */
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:4px}
+  header h1{font-size:20px;font-weight:700;letter-spacing:.01em}
+  header .sub{color:var(--muted);font-size:13px}
+  .note{color:var(--muted);font-size:12px;margin:6px 0 18px}
+
+  /* period nav */
+  .nav{display:flex;align-items:center;gap:8px;margin-bottom:18px}
+  .nav button{background:var(--card);border:1px solid var(--line);border-radius:8px;
+    width:32px;height:32px;cursor:pointer;color:var(--ink);font-size:15px;line-height:1;
+    display:flex;align-items:center;justify-content:center}
+  .nav button:hover{background:var(--track)}
+  .nav .range{font-weight:600;font-size:14px;padding:0 4px}
+  .nav .today{background:var(--card);border:1px solid var(--line);border-radius:8px;
+    height:32px;padding:0 12px;cursor:pointer;color:var(--muted);font-size:13px}
+  .nav .today:hover{background:var(--track)}
+
+  .grid{display:grid;grid-template-columns:1fr 320px;gap:18px;align-items:start}
+  @media(max-width:900px){.grid{grid-template-columns:1fr}}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    box-shadow:0 1px 2px rgba(29,36,48,.04);padding:18px 20px}
+  .card h2{font-size:14px;font-weight:700;margin-bottom:2px}
+  .card .cap{color:var(--muted);font-size:12px;margin-bottom:16px}
+
+  /* heatmap table */
+  table{border-collapse:separate;border-spacing:4px;width:100%}
+  th{font-weight:600;font-size:11px;color:var(--muted);text-align:center;padding:0 0 4px}
+  th.name{text-align:left;width:90px}
+  .wk-sep{width:8px;padding:0}
+  td.name{font-weight:600;text-align:left;white-space:nowrap}
+  td.name .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .cell{width:34px;height:34px;border-radius:8px;text-align:center;vertical-align:middle;
+    font-size:12px;font-weight:600;position:relative;color:#fff}
+  .cell.zero{background:var(--track);color:var(--muted);font-weight:400}
+  .cell .warn{position:absolute;top:-5px;right:-5px;width:14px;height:14px;border-radius:50%;
+    background:var(--red);color:#fff;font-size:9px;line-height:14px;font-weight:700;
+    border:1.5px solid #fff;box-shadow:0 0 0 1px rgba(229,72,77,.25)}
+  .grouphead{text-align:center;font-size:11px;font-weight:700;color:var(--muted);
+    letter-spacing:.04em;padding-bottom:2px}
+
+  /* legend */
+  .legend{display:flex;align-items:center;gap:14px;margin-top:16px;flex-wrap:wrap;
+    font-size:11px;color:var(--muted)}
+  .legend .scale{display:flex;align-items:center;gap:3px}
+  .legend .sw{width:18px;height:14px;border-radius:4px}
+  .legend .item{display:flex;align-items:center;gap:5px}
+
+  /* alert panel */
+  .alerts h2{margin-bottom:14px}
+  .alert{border:1px solid var(--line);border-radius:11px;padding:13px 14px;margin-bottom:12px;
+    display:flex;gap:11px;align-items:flex-start}
+  .alert:last-child{margin-bottom:0}
+  .alert.crit{background:#fdf3f3;border-color:#f6d3d4}
+  .alert.warn{background:#fff8ec;border-color:#f6e3c2}
+  .alert .ic{flex:none;width:26px;height:26px;border-radius:7px;display:flex;
+    align-items:center;justify-content:center;font-size:15px;color:#fff;margin-top:1px}
+  .alert.crit .ic{background:var(--red)}
+  .alert.warn .ic{background:var(--amber)}
+  .alert .body{flex:1}
+  .alert .body .who{font-weight:700;font-size:13px}
+  .alert .body .who .tag{font-weight:600;font-size:10px;padding:1px 6px;border-radius:6px;
+    margin-left:7px;vertical-align:middle}
+  .alert.crit .tag{background:var(--red);color:#fff}
+  .alert.warn .tag{background:var(--amber);color:#fff}
+  .alert .body .msg{font-size:12px;color:var(--muted);margin-top:4px;line-height:1.55}
+  .alert .body .metric{font-size:11px;color:var(--ink);margin-top:6px;font-weight:600}
+  .alert .body .metric b{color:var(--red)}
+
+  .okrow{display:flex;gap:10px;align-items:center;padding:10px 12px;border:1px dashed var(--line);
+    border-radius:10px;font-size:12px;color:var(--muted)}
+  .okrow .dot{width:8px;height:8px;border-radius:50%;background:var(--green)}
+
+  .summ{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+  .pill{font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;border:1px solid var(--line)}
+  .pill.red{background:#fdf3f3;color:var(--red);border-color:#f6d3d4}
+  .pill.amber{background:#fff8ec;color:#c5820f;border-color:#f6e3c2}
+  .pill.green{background:#eefaf3;color:var(--green);border-color:#cdeedc}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>③ リスク・健全性 — 過負荷ヒストリー / 燃え尽き検知</h1>
+    <span class="sub">メンバー別 日次アサイン時間（直近2週間・基準8h/日）</span>
+  </header>
+
+  <div class="nav">
+    <button title="前の期間">‹</button>
+    <span class="range">2026/05/25 — 2026/06/05</span>
+    <button title="次の期間">›</button>
+    <button class="today">今週へ</button>
+  </div>
+
+  <div class="grid">
+    <!-- heatmap -->
+    <div class="card">
+      <h2>日次負荷ヒートマップ</h2>
+      <div class="cap">8h超 = 過負荷（赤）。連続超過に <span style="color:var(--red);font-weight:700">!</span> 警告。土日は除外。</div>
+
+      <table>
+        <thead>
+          <tr>
+            <th class="name"></th>
+            <th colspan="5" class="grouphead">先週 05/25–05/29</th>
+            <th class="wk-sep"></th>
+            <th colspan="5" class="grouphead">今週 06/01–06/05</th>
+          </tr>
+          <tr>
+            <th class="name">メンバー</th>
+            <th>月</th><th>火</th><th>水</th><th>木</th><th>金</th>
+            <th class="wk-sep"></th>
+            <th>月</th><th>火</th><th>水</th><th>木</th><th>金</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+
+      <div class="legend">
+        <span class="scale">
+          <span style="color:var(--muted)">低</span>
+          <span class="sw" style="background:#dbe7fb"></span>
+          <span class="sw" style="background:#a9c8f6"></span>
+          <span class="sw" style="background:#6ea2f1"></span>
+          <span class="sw" style="background:var(--fill)"></span>
+          <span style="color:var(--muted)">満(8h)</span>
+        </span>
+        <span class="item"><span class="sw" style="background:var(--red)"></span>過負荷(8h超)</span>
+        <span class="item"><span class="sw" style="background:var(--track)"></span>休/0h</span>
+        <span class="item"><span style="color:var(--red);font-weight:700;font-size:13px">!</span>連続超過</span>
+      </div>
+    </div>
+
+    <!-- alerts -->
+    <div class="card alerts">
+      <h2>要注意メンバー</h2>
+      <div class="summ">
+        <span class="pill red">過負荷 1名</span>
+        <span class="pill amber">継続リスク 1名</span>
+        <span class="pill green">健全 2名</span>
+      </div>
+
+      <div class="alert crit">
+        <div class="ic">🔥</div>
+        <div class="body">
+          <div class="who">森田<span class="tag">燃え尽き注意</span></div>
+          <div class="msg">2週間で <b style="color:var(--red)">4日</b> 過負荷。先週は月〜木で連続超過（最大11h）。高負荷が常態化しており、燃え尽きリスクが高い。</div>
+          <div class="metric">過負荷日 <b>4日</b> ・ 2週平均 <b>8.2h/日</b> ・ 最大 <b>11h</b></div>
+        </div>
+      </div>
+
+      <div class="alert warn">
+        <div class="ic">⚠️</div>
+        <div class="body">
+          <div class="who">佐藤<span class="tag">満稼働常態</span></div>
+          <div class="msg">10営業日すべて 8h ぴったり（稼働率100%）。バッファゼロのため、割り込み・遅延を吸収できない継続リスク。</div>
+          <div class="metric">稼働率 <b style="color:var(--amber)">100%</b> ・ 空き <b style="color:var(--amber)">0h</b> ・ 2週平均 8.0h/日</div>
+        </div>
+      </div>
+
+      <div class="okrow"><span class="dot"></span>田中・鈴木は余裕あり（平均3〜4h台）。再配分の受け皿候補。</div>
+    </div>
+  </div>
+
+  <p class="note" style="margin-top:18px">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</p>
+</div>
+
+<script>
+  const members = [
+    {name:"森田", color:"#e5772d", w1:[8,9,10,11,8], w2:[8,6,8,10,4]},
+    {name:"田中", color:"#3a86ff", w1:[4,5,3,4,2],   w2:[4,6,2,4,0]},
+    {name:"佐藤", color:"#2fa66b", w1:[8,8,8,8,8],   w2:[8,8,8,8,8]},
+    {name:"鈴木", color:"#b657d6", w1:[2,2,3,2,1],   w2:[2,3,2,2,0]},
+  ];
+
+  // color ramp 0..8 (blue scale), >8 red
+  function cellStyle(h){
+    if(h===0) return {cls:"cell zero", bg:""};
+    if(h>8)  return {cls:"cell", bg:"#e5484d"};
+    // ramp from light blue to fill blue across 1..8
+    const t = h/8;
+    const stops = [
+      [219,231,251], // #dbe7fb
+      [58,134,255]   // #3a86ff
+    ];
+    const r = Math.round(stops[0][0]+(stops[1][0]-stops[0][0])*t);
+    const g = Math.round(stops[0][1]+(stops[1][1]-stops[0][1])*t);
+    const b = Math.round(stops[0][2]+(stops[1][2]-stops[0][2])*t);
+    // text color: dark for light cells
+    return {cls:"cell", bg:`rgb(${r},${g},${b})`, dark: t<0.45};
+  }
+
+  function buildCells(arr, runState){
+    return arr.map((h,i)=>{
+      const s = cellStyle(h);
+      // track consecutive overload
+      if(h>8){ runState.run++; } else { runState.run=0; }
+      const warn = (h>8 && runState.run>=2) ? '<span class="warn">!</span>' : '';
+      const style = s.bg ? `style="background:${s.bg};${s.dark?'color:#1d2430':''}"` : '';
+      return `<td class="${s.cls}" ${style}>${h}${warn}</td>`;
+    }).join("");
+  }
+
+  const tbody = document.getElementById("rows");
+  tbody.innerHTML = members.map(m=>{
+    const run = {run:0};
+    const c1 = buildCells(m.w1, run);
+    const sep = '<td class="wk-sep"></td>';
+    const c2 = buildCells(m.w2, run);
+    return `<tr>
+      <td class="name"><span class="dot" style="background:${m.color}"></span>${m.name}</td>
+      ${c1}${sep}${c2}
+    </tr>`;
+  }).join("");
+</script>
+</body>
+</html>

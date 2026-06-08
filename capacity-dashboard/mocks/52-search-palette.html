@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>検索 / コマンドパレット</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee;
+    --track:#eef1f5; --accent:#3a86ff;
+    --done:#2fa66b; --doing:#3a86ff; --todo:#9aa3af; --blocked:#e5484d;
+    --c-morita:#e5772d; --c-tanaka:#3a86ff; --c-sato:#2fa66b; --c-suzuki:#b657d6;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"palt"; line-height:1.6; -webkit-font-smoothing:antialiased;
+  }
+  .num{font-variant-numeric:tabular-nums}
+
+  /* faux app backdrop */
+  .backdrop{
+    position:fixed; inset:0;
+    background:
+      radial-gradient(900px 500px at 80% -10%, #eef3ff 0%, transparent 60%),
+      var(--bg);
+    padding:24px;
+  }
+  .hint{position:fixed; top:18px; left:24px; color:var(--muted); font-size:13px}
+  .hint kbd{
+    font-family:inherit; background:#fff; border:1px solid var(--line); border-bottom-width:2px;
+    border-radius:6px; padding:1px 7px; font-size:12px; font-weight:600; color:var(--ink);
+  }
+  .note{
+    position:fixed; top:18px; right:24px; max-width:420px;
+    padding:7px 13px; border-radius:10px;
+    background:#fff7ed; border:1px solid #ffe2c2; color:#9a5a16; font-size:12px;
+  }
+
+  /* the palette */
+  .scrim{
+    position:fixed; inset:0; background:rgba(20,30,48,.18);
+    display:flex; align-items:flex-start; justify-content:center; padding-top:96px;
+  }
+  .palette{
+    width:min(680px,calc(100% - 32px));
+    background:var(--card); border:1px solid var(--line); border-radius:16px;
+    box-shadow:0 24px 60px rgba(20,30,48,.22), 0 2px 6px rgba(20,30,48,.06);
+    overflow:hidden;
+  }
+  .searchrow{display:flex; align-items:center; gap:12px; padding:16px 18px; border-bottom:1px solid var(--line)}
+  .searchrow .ico{color:var(--muted); font-size:18px}
+  #q{
+    flex:1; border:0; outline:0; font-size:18px; color:var(--ink); background:transparent;
+    font-family:inherit;
+  }
+  #q::placeholder{color:#aeb4be}
+  .kbadge{font-size:11px;color:var(--muted);background:var(--track);border-radius:6px;padding:3px 7px;font-weight:600}
+
+  .results{max-height:60vh; overflow:auto; padding:6px 8px 10px}
+  .ghead{font-size:11px; color:var(--muted); font-weight:700; letter-spacing:.05em; padding:12px 12px 6px; text-transform:uppercase}
+
+  .item{
+    display:flex; align-items:flex-start; gap:12px; padding:10px 12px; border-radius:11px; cursor:pointer;
+    text-decoration:none; color:inherit;
+  }
+  .item:hover, .item.sel{background:#f1f5ff}
+  .ibox{
+    width:34px;height:34px;border-radius:9px;flex:none;display:flex;align-items:center;justify-content:center;
+    font-size:15px;font-weight:700;color:#fff;
+  }
+  .ic-task{background:#eaf1ff;color:var(--accent)}
+  .ic-pj{background:#eefaf3;color:var(--done)}
+  .ibody{flex:1;min-width:0}
+  .ititle{font-size:14.5px;font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .isum{font-size:12.5px;color:var(--muted);margin-top:2px}
+  .isum b{color:#3a4250;font-weight:600}
+  mark{background:#fff2b0;color:inherit;border-radius:3px;padding:0 1px}
+
+  .chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;line-height:1.5}
+  .chip .dot{width:6px;height:6px;border-radius:50%}
+  .st-doing{background:#eaf1ff;color:#2a63c4}
+  .st-blocked{background:#fdecec;color:#c1342f}
+  .st-todo{background:#eef1f5;color:#5b626d}
+  .pri{background:#fdecec;color:#c1342f}
+  .due{background:#fff4e5;color:#9a5a16}
+  .avatar{width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700}
+
+  .typehint{margin-left:auto;font-size:11px;color:#b6bcc6;align-self:center}
+
+  .empty{padding:34px 18px;text-align:center;color:var(--muted);font-size:13px}
+  .footer{display:flex;gap:16px;align-items:center;padding:9px 16px;border-top:1px solid var(--line);font-size:11px;color:var(--muted)}
+  .footer kbd{font-family:inherit;background:var(--track);border-radius:5px;padding:1px 6px;font-weight:600;color:#4a515c}
+  .footer .right{margin-left:auto}
+  .scope{display:flex;gap:6px}
+  .scope button{font:inherit;font-size:11px;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:999px;padding:2px 10px;cursor:pointer}
+  .scope button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="backdrop">
+  <div class="hint"><kbd>⌘</kbd> <kbd>K</kbd> — どこからでも検索</div>
+  <div class="note">※ モック（サンプルデータ）。本番は Vikunja API ＋ Claude で要約。</div>
+</div>
+
+<div class="scrim">
+  <div class="palette">
+    <div class="searchrow">
+      <span class="ico">⌕</span>
+      <input id="q" placeholder="タスク・プロジェクト・人を横断検索…（例: ログイン）" autocomplete="off" autofocus>
+      <div class="scope">
+        <button class="on" data-f="all">すべて</button>
+        <button data-f="task">タスク</button>
+        <button data-f="pj">PJ</button>
+        <button data-f="person">人</button>
+      </div>
+      <span class="kbadge">esc</span>
+    </div>
+    <div class="results" id="results"></div>
+    <div class="footer">
+      <span><kbd>↑</kbd><kbd>↓</kbd> 移動</span>
+      <span><kbd>↵</kbd> 開く</span>
+      <span class="right" id="count"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+const av = (txt,color)=>`<span class="avatar" style="background:${color}">${txt}</span>`;
+const DATA = [
+  // tasks
+  { type:'task', title:'ログイン障害対応', tags:['ログイン','障害','森田','本番'],
+    icon:'⚑', iclass:'ic-task',
+    sum:`<span class="chip pri">最優先</span> <span class="chip st-doing"><span class="dot" style="background:var(--doing)"></span>Doing</span> <span class="chip due">今日中</span> ${av('森','var(--c-morita)')} 森田 ・ <b>本番障害の調査中</b>` },
+  { type:'task', title:'認証フロー実装', tags:['認証','ログイン','佐藤','auth'],
+    icon:'⚑', iclass:'ic-task',
+    sum:`<span class="chip st-blocked">⛔ Blocked</span> ${av('佐','var(--c-sato)')} 佐藤 ・ <b>外部API待ちで3日停滞</b>・進捗40% / 期日6/6` },
+  { type:'task', title:'結合テスト準備', tags:['テスト','佐藤','結合'],
+    icon:'⚑', iclass:'ic-task',
+    sum:`<span class="chip st-todo"><span class="dot" style="background:var(--todo)"></span>Todo</span> ${av('佐','var(--c-sato)')} 佐藤 ・ 認証完了待ち。前倒し着手の候補` },
+  // projects / features
+  { type:'pj', title:'ログイン機能', tags:['ログイン','機能','feature'],
+    icon:'◇', iclass:'ic-pj',
+    sum:`PJ要素 ・ <b>機能実装 60%</b>・障害対応が最優先で進行中` },
+  { type:'pj', title:'新ダッシュボード機能 (Release v1.2)', tags:['ダッシュボード','release','v1.2','プロジェクト'],
+    icon:'◆', iclass:'ic-pj',
+    sum:`プロジェクト ・ 進捗58% ・ <b style="color:#c1342f">3日遅延リスク🔴</b>・ブロッカー1` },
+  // people
+  { type:'person', title:'佐藤', tags:['佐藤','sato','backend','人'],
+    icon:'佐', iclass:'', icolor:'var(--c-sato)',
+    sum:`Backend ・ 担当2/5完了 ・ <b>認証がブロック中で手空き気味</b>` },
+  { type:'person', title:'森田', tags:['森田','morita','人'],
+    icon:'森', iclass:'', icolor:'var(--c-morita)',
+    sum:`担当8/10完了 ・ <b>ログイン障害対応を本番対応中</b>` },
+];
+const RECENT = [
+  { type:'pj', title:'新ダッシュボード機能 (Release v1.2)', sum:'プロジェクト ・ 進捗58%' },
+  { type:'task', title:'認証フロー実装', sum:'⛔ Blocked ・ 佐藤' },
+];
+
+let filter = 'all';
+const $q = document.getElementById('q');
+const $r = document.getElementById('results');
+const $c = document.getElementById('count');
+
+function hl(text, q){
+  if(!q) return text;
+  try{ return text.replace(new RegExp('('+q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi'),'<mark>$1</mark>'); }
+  catch(e){ return text; }
+}
+function iconHTML(d){
+  if(d.type==='person') return `<div class="ibox" style="background:${d.icolor};color:#fff">${d.icon}</div>`;
+  return `<div class="ibox ${d.iclass}">${d.icon}</div>`;
+}
+const typeLabel = {task:'タスク', pj:'プロジェクト / 機能', person:'メンバー'};
+const typeHint  = {task:'タスク', pj:'PJ', person:'人'};
+
+function render(){
+  const q = $q.value.trim();
+  if(!q){
+    // recent view
+    let html = `<div class="ghead">最近見た</div>`;
+    RECENT.forEach((d,i)=>{
+      html += `<a class="item ${i===0?'sel':''}" href="#">
+        ${iconHTML(d.type==='person'?{...d,icolor:'#999'}: {type:d.type, iclass:d.type==='task'?'ic-task':'ic-pj', icon:d.type==='task'?'⚑':'◆'})}
+        <div class="ibody"><div class="ititle">${d.title}</div><div class="isum">${d.sum}</div></div>
+        <span class="typehint">${typeHint[d.type]}</span></a>`;
+    });
+    $r.innerHTML = html;
+    $c.textContent = '入力して横断検索';
+    return;
+  }
+  const ql = q.toLowerCase();
+  let hits = DATA.filter(d=>{
+    if(filter!=='all' && d.type!==filter) return false;
+    return d.title.toLowerCase().includes(ql) || d.tags.some(t=>t.toLowerCase().includes(ql));
+  });
+  if(!hits.length){
+    $r.innerHTML = `<div class="empty">「${q}」に一致する結果はありません</div>`;
+    $c.textContent = '0 件';
+    return;
+  }
+  // group by type
+  const order = ['task','pj','person'];
+  let html = '';
+  let idx = 0;
+  order.forEach(t=>{
+    const grp = hits.filter(h=>h.type===t);
+    if(!grp.length) return;
+    html += `<div class="ghead">${typeLabel[t]}（${grp.length}）</div>`;
+    grp.forEach(d=>{
+      html += `<a class="item ${idx===0?'sel':''}" href="#">
+        ${iconHTML(d)}
+        <div class="ibody">
+          <div class="ititle">${hl(d.title, q)}</div>
+          <div class="isum">${d.sum}</div>
+        </div>
+        <span class="typehint">${typeHint[d.type]}</span>
+      </a>`;
+      idx++;
+    });
+  });
+  $r.innerHTML = html;
+  $c.textContent = hits.length + ' 件';
+}
+
+// scope buttons
+document.querySelectorAll('.scope button').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    document.querySelectorAll('.scope button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+    filter = b.dataset.f;
+    render();
+  });
+});
+
+// keyboard nav (visual only)
+$q.addEventListener('keydown', e=>{
+  const items = [...$r.querySelectorAll('.item')];
+  let cur = items.findIndex(x=>x.classList.contains('sel'));
+  if(e.key==='ArrowDown'){ e.preventDefault(); if(cur<items.length-1){items[cur]?.classList.remove('sel'); items[cur+1].classList.add('sel'); items[cur+1].scrollIntoView({block:'nearest'});} }
+  if(e.key==='ArrowUp'){ e.preventDefault(); if(cur>0){items[cur].classList.remove('sel'); items[cur-1].classList.add('sel'); items[cur-1].scrollIntoView({block:'nearest'});} }
+});
+
+$q.addEventListener('input', render);
+// preload sample query so reviewer immediately sees the cross-cutting hits
+$q.value = 'ログイン';
+render();
+$q.setSelectionRange($q.value.length,$q.value.length);
+</script>
+</body>
+</html>

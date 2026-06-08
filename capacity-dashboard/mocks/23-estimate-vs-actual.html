@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>⑤実績：見積り vs 実績</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee;
+    --track:#eef1f5; --est:#9aa3af; --act:#3a86ff; --over:#e5484d; --under:#2fa66b; --amber:#f5a623;
+    --be:#3a86ff; --fe:#2fa66b; --qa:#b657d6; --com:#8a93a0;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"tnum"; -webkit-font-smoothing:antialiased;
+    padding:24px; line-height:1.5;
+  }
+  .wrap{max-width:1040px;margin:0 auto}
+  .tnum{font-variant-numeric:tabular-nums}
+
+  /* header */
+  header{margin-bottom:18px}
+  .titlerow{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+  h1{font-size:20px;font-weight:700;margin:0;letter-spacing:.02em}
+  .sub{color:var(--muted);font-size:13px}
+  .navrow{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+  .seg{display:inline-flex;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;box-shadow:0 1px 2px rgba(20,30,50,.04)}
+  .seg button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:13px;padding:7px 14px;cursor:pointer}
+  .seg button.on{background:var(--ink);color:#fff}
+  .navbtn{width:32px;height:32px;border:1px solid var(--line);background:var(--card);border-radius:9px;color:var(--muted);cursor:pointer;font-size:14px;display:inline-flex;align-items:center;justify-content:center}
+  .period{font-size:13px;color:var(--ink);font-weight:600}
+  .note{margin-top:10px;font-size:12px;color:var(--muted);background:#fff;border:1px dashed var(--line);border-radius:8px;padding:8px 12px;display:inline-block}
+
+  /* card */
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 1px 3px rgba(20,30,50,.05);padding:18px 20px;margin-bottom:16px}
+  .card h2{font-size:14px;font-weight:700;margin:0 0 14px;display:flex;align-items:center;gap:8px}
+  .card h2 .tag{font-size:11px;font-weight:600;color:var(--muted);background:var(--track);border-radius:6px;padding:2px 8px}
+
+  /* summary */
+  .summary{display:grid;grid-template-columns:1.1fr 1fr 1fr;gap:14px;margin-bottom:16px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 1px 3px rgba(20,30,50,.05);padding:16px 18px}
+  .kpi .lbl{font-size:12px;color:var(--muted);margin-bottom:6px}
+  .kpi .big{font-size:30px;font-weight:700;letter-spacing:-.01em}
+  .kpi .big small{font-size:15px;font-weight:600;color:var(--muted)}
+  .kpi .meta{font-size:12px;color:var(--muted);margin-top:4px}
+  .pill{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
+  .pill.over{background:#fde9ea;color:var(--over)}
+  .pill.under{background:#e3f5ec;color:var(--under)}
+  .pill.flat{background:var(--track);color:var(--muted)}
+  .miniline{height:6px;border-radius:4px;background:var(--track);margin-top:12px;overflow:hidden;display:flex}
+  .miniline span{display:block;height:100%}
+
+  /* legend */
+  .legend{display:flex;gap:16px;align-items:center;font-size:12px;color:var(--muted);margin-bottom:8px;flex-wrap:wrap}
+  .legend i{display:inline-block;width:22px;height:9px;border-radius:3px;vertical-align:middle;margin-right:6px}
+  .sw-est{background:var(--est)} .sw-act{background:var(--act)} .sw-over{background:var(--over)} .sw-under{background:var(--under)}
+
+  /* task rows */
+  .rows{display:flex;flex-direction:column;gap:2px}
+  .row{display:grid;grid-template-columns:200px 1fr 92px;gap:14px;align-items:center;padding:10px 6px;border-radius:9px}
+  .row:hover{background:#fafbfc}
+  .tname{display:flex;flex-direction:column;gap:3px;min-width:0}
+  .tname .n{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tmeta{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:0 0 auto}
+  .pj-be{background:var(--be)} .pj-fe{background:var(--fe)} .pj-qa{background:var(--qa)} .pj-com{background:var(--com)}
+  .who{font-weight:600}
+
+  /* bars: estimate vs actual paired */
+  .bars{display:flex;flex-direction:column;gap:5px}
+  .bar{position:relative;height:16px;background:var(--track);border-radius:5px;overflow:hidden}
+  .bar .fill{position:absolute;left:0;top:0;height:100%;border-radius:5px;display:flex;align-items:center;justify-content:flex-end;padding-right:7px}
+  .bar.est .fill{background:var(--est)}
+  .bar .fill .v{font-size:10px;font-weight:700;color:#fff;line-height:1}
+  .bar .lab{position:absolute;left:7px;top:50%;transform:translateY(-50%);font-size:10px;font-weight:700;color:rgba(255,255,255,.85);line-height:1;letter-spacing:.04em}
+  .delta{font-size:13px;font-weight:700;text-align:right}
+  .delta small{display:block;font-size:10px;font-weight:600;color:var(--muted)}
+  .d-over{color:var(--over)} .d-under{color:var(--under)} .d-flat{color:var(--muted)}
+
+  /* per-person */
+  .ppl{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .pcard{border:1px solid var(--line);border-radius:11px;padding:12px 14px}
+  .pcard .ph{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+  .av{width:24px;height:24px;border-radius:50%;color:#fff;font-size:11px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .pcard .pn{font-size:13px;font-weight:700}
+  .pcard .acc{font-size:11px;color:var(--muted)}
+  .pbar{height:8px;border-radius:5px;background:var(--track);position:relative;margin:10px 0 6px;overflow:hidden}
+  .pbar .center{position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:var(--line)}
+  .pbar .fill{position:absolute;top:0;height:100%;border-radius:5px}
+  .pmeta{display:flex;justify-content:space-between;font-size:11px;color:var(--muted)}
+  .pmeta b{color:var(--ink)}
+  .badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px}
+  .b-over{background:#fde9ea;color:var(--over)} .b-under{background:#e3f5ec;color:var(--under)} .b-ok{background:#e9f0fb;color:var(--act)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="titlerow">
+      <h1>⑤ 実績：見積り vs 実績</h1>
+      <span class="sub">完了タスクの見積り時間と実績時間の対比</span>
+    </div>
+    <div class="navrow">
+      <button class="navbtn" aria-label="前の期間">‹</button>
+      <span class="period">2026/05/06 – 2026/06/05</span>
+      <button class="navbtn" aria-label="次の期間">›</button>
+      <div class="seg" style="margin-left:6px">
+        <button>直近7日</button>
+        <button class="on">直近30日</button>
+        <button>四半期</button>
+      </div>
+    </div>
+    <div class="note">※ モック（サンプルデータ）。本番は Vikunja のタイムトラッキング実績と見積りから自動算出。</div>
+  </header>
+
+  <!-- summary -->
+  <div class="summary">
+    <div class="kpi">
+      <div class="lbl">全体の見積り精度（実績 / 見積り）</div>
+      <div class="big">+17% <small>超過</small></div>
+      <div class="meta">見積り合計 <b>21.0h</b> → 実績 <b>24.5h</b>（+3.5h）</div>
+      <div class="miniline">
+        <span style="width:85.7%;background:var(--act)"></span>
+        <span style="width:14.3%;background:var(--over)"></span>
+      </div>
+    </div>
+    <div class="kpi">
+      <div class="lbl">最も外したタスク</div>
+      <div class="big" style="font-size:18px;line-height:1.25;margin-top:4px">ダッシュ画面実装</div>
+      <div class="meta">Frontend・田中 ／ 見積4h → 実績7h</div>
+      <div style="margin-top:10px"><span class="pill over">+75% 大幅超過</span></div>
+    </div>
+    <div class="kpi">
+      <div class="lbl">タスク内訳（6件）</div>
+      <div class="big" style="font-size:18px;line-height:1.25;margin-top:4px;display:flex;gap:6px;flex-wrap:wrap">
+        <span class="pill over">超過 2</span>
+        <span class="pill flat">±0 2</span>
+        <span class="pill under">短縮 2</span>
+      </div>
+      <div class="meta" style="margin-top:10px">超過分が全体を押し上げ。見積りやや過小傾向。</div>
+    </div>
+  </div>
+
+  <!-- per task comparison -->
+  <div class="card">
+    <h2>タスク別 見積り vs 実績 <span class="tag">並置バー</span></h2>
+    <div class="legend">
+      <span><i class="sw-est"></i>見積り</span>
+      <span><i class="sw-act"></i>実績（収まり）</span>
+      <span><i class="sw-over"></i>実績（超過分）</span>
+      <span><i class="sw-under"></i>短縮</span>
+      <span style="margin-left:auto;font-size:11px">スケール: 1h ≈ 56px（最大8h）</span>
+    </div>
+    <div class="rows" id="rows"></div>
+  </div>
+
+  <!-- per person accuracy -->
+  <div class="card">
+    <h2>人別の見積り精度 <span class="tag">傾向</span></h2>
+    <div class="ppl" id="ppl"></div>
+  </div>
+
+</div>
+
+<script>
+  // scale: max 8h => bar area width via flex; we render bars proportionally to a maxH
+  const maxH = 8; // hours for full width
+  const tasks = [
+    {name:"API設計", pj:"be", who:"森田", avc:"--m-morita", est:4, act:6},
+    {name:"DBマイグレ", pj:"be", who:"森田", avc:"--m-morita", est:3, act:3},
+    {name:"ダッシュ画面実装", pj:"fe", who:"田中", avc:"--m-tanaka", est:4, act:7},
+    {name:"認証フロー実装", pj:"be", who:"佐藤", avc:"--m-sato", est:5, act:4},
+    {name:"結合テスト", pj:"qa", who:"佐藤", avc:"--m-sato", est:3, act:3},
+    {name:"設計ドキュメント", pj:"com", who:"鈴木", avc:"--m-suzuki", est:2, act:1.5},
+  ];
+  const pjLabel = {be:"Backend", fe:"Frontend", qa:"QA", com:"共通"};
+
+  function pct(h){ return (h / maxH * 100); }
+  function fmt(h){ return Number.isInteger(h) ? h+"h" : h.toFixed(1)+"h"; }
+
+  const rowsEl = document.getElementById('rows');
+  tasks.forEach(t=>{
+    const diff = t.act - t.est;
+    const ratio = Math.round(diff / t.est * 100);
+    let dcls, dtxt, sub;
+    if (Math.abs(diff) < 0.001){ dcls="d-flat"; dtxt="±0%"; sub="想定通り"; }
+    else if (diff > 0){ dcls="d-over"; dtxt="+"+ratio+"%"; sub="+"+fmt(diff); }
+    else { dcls="d-under"; dtxt=ratio+"%"; sub=fmt(diff); }
+
+    // actual bar: base portion up to est = blue, overflow = red
+    let actHTML;
+    if (t.act > t.est){
+      const baseW = pct(t.est), overW = pct(t.act - t.est);
+      actHTML = `<div class="bar act">
+        <span class="lab">実績</span>
+        <div class="fill" style="width:${pct(t.act)}%;background:linear-gradient(90deg,var(--act) 0,var(--act) ${ (t.est/t.act*100).toFixed(1) }%,var(--over) ${ (t.est/t.act*100).toFixed(1) }%,var(--over) 100%)"><span class="v">${fmt(t.act)}</span></div>
+      </div>`;
+    } else if (t.act < t.est){
+      actHTML = `<div class="bar act">
+        <span class="lab">実績</span>
+        <div class="fill" style="width:${pct(t.act)}%;background:var(--under)"><span class="v">${fmt(t.act)}</span></div>
+      </div>`;
+    } else {
+      actHTML = `<div class="bar act">
+        <span class="lab">実績</span>
+        <div class="fill" style="width:${pct(t.act)}%;background:var(--act)"><span class="v">${fmt(t.act)}</span></div>
+      </div>`;
+    }
+
+    const row = document.createElement('div');
+    row.className='row';
+    row.innerHTML = `
+      <div class="tname">
+        <span class="n">${t.name}</span>
+        <span class="tmeta"><i class="dot pj-${t.pj}"></i>${pjLabel[t.pj]} ・ <span class="who" style="color:var(${t.avc})">${t.who}</span></span>
+      </div>
+      <div class="bars">
+        <div class="bar est">
+          <span class="lab" style="color:rgba(255,255,255,.9)">見積</span>
+          <div class="fill" style="width:${pct(t.est)}%"><span class="v">${fmt(t.est)}</span></div>
+        </div>
+        ${actHTML}
+      </div>
+      <div class="delta ${dcls}">${dtxt}<small>${sub}</small></div>
+    `;
+    rowsEl.appendChild(row);
+  });
+
+  // per person
+  const people = [
+    {who:"森田", avc:"--m-morita", ini:"森", est:7, act:9, tag:"やや超過寄り", badge:"b-over", note:"+29%"},
+    {who:"田中", avc:"--m-tanaka", ini:"田", est:4, act:7, tag:"超過大きい（見積り甘い）", badge:"b-over", note:"+75%"},
+    {who:"佐藤", avc:"--m-sato", ini:"佐", est:8, act:7, tag:"ほぼ正確", badge:"b-ok", note:"-13%"},
+    {who:"鈴木", avc:"--m-suzuki", ini:"鈴", est:2, act:1.5, tag:"やや短縮", badge:"b-under", note:"-25%"},
+  ];
+  const pplEl = document.getElementById('ppl');
+  people.forEach(p=>{
+    const diff = p.act - p.est;
+    const ratio = Math.round(diff/p.est*100);
+    // fill from center: over => right(red), under => left(green)
+    const span = Math.min(Math.abs(ratio),100)/2; // half-width max 50%
+    let fillStyle, fillColor;
+    if (diff>0){ fillColor="var(--over)"; fillStyle=`left:50%;width:${span}%;background:${fillColor}`; }
+    else if (diff<0){ fillColor="var(--under)"; fillStyle=`right:50%;width:${span}%;background:${fillColor}`; }
+    else { fillColor="var(--act)"; fillStyle=`left:49.5%;width:1%;background:${fillColor}`; }
+
+    const el=document.createElement('div');
+    el.className='pcard';
+    el.innerHTML=`
+      <div class="ph">
+        <span class="av" style="background:var(${p.avc})">${p.ini}</span>
+        <div><div class="pn">${p.who}</div><div class="acc">${fmt(p.est)} → ${fmt(p.act)}</div></div>
+        <span class="badge ${p.badge}" style="margin-left:auto">${p.note}</span>
+      </div>
+      <div class="pbar"><div class="center"></div><div class="fill" style="${fillStyle}"></div></div>
+      <div class="pmeta"><span>← 短縮</span><span>${p.tag}</span><span>超過 →</span></div>
+    `;
+    pplEl.appendChild(el);
+  });
+</script>
+</body>
+</html>

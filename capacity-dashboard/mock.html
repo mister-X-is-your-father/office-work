@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>今日のキャパ — Capacity Board (mock)</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#ffffff; --ink:#1d2430; --muted:#6b7480;
+    --line:#e6e9ee; --track:#eef1f5;
+    --fill:#3a86ff; --fill-soft:#cfe0ff;
+    --over:#e5484d; --over-soft:#f7c5c7;
+    --free:#2fa66b; --full:#8a93a0;
+    --cap-line:#9aa3af;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;line-height:1.5}
+  .wrap{max-width:780px;margin:0 auto;padding:28px 20px 60px}
+
+  header.top{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:6px}
+  .title{font-size:20px;font-weight:700;letter-spacing:.02em}
+  .title small{font-weight:500;color:var(--muted);font-size:13px;margin-left:8px}
+  .datenav{display:flex;align-items:center;gap:6px;font-size:14px;color:var(--ink)}
+  .datenav button{border:1px solid var(--line);background:var(--card);width:30px;height:30px;
+    border-radius:8px;cursor:pointer;font-size:15px;color:var(--ink)}
+  .datenav button:hover{background:#f0f3f7}
+  .datenav .d{min-width:120px;text-align:center;font-weight:600}
+  .mocknote{font-size:12px;color:var(--muted);margin:0 0 18px}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04),0 8px 24px rgba(20,30,50,.04);overflow:hidden}
+
+  .row{display:block;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line);
+    padding:14px 18px;cursor:pointer;font:inherit;color:inherit}
+  .row:last-child{border-bottom:0}
+  .row:hover{background:#fafbfc}
+  .rowhead{display:flex;align-items:center;gap:12px}
+  .who{display:flex;align-items:center;gap:10px;width:120px;flex:none}
+  .ava{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;
+    font-size:13px;font-weight:700;color:#fff;flex:none}
+  .name{font-weight:600;font-size:15px}
+  .cap{font-size:11px;color:var(--muted)}
+
+  .barwrap{flex:1;position:relative;height:26px}
+  .track{position:absolute;inset:0;background:var(--track);border-radius:8px}
+  .capline{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--cap-line);
+    border-radius:2px}
+  .capline::after{content:"8h";position:absolute;top:-15px;left:50%;transform:translateX(-50%);
+    font-size:9px;color:var(--muted);white-space:nowrap}
+  .fill{position:absolute;top:0;bottom:0;left:0;border-radius:8px;display:flex;align-items:center}
+  .seg-in{height:100%;background:var(--fill);border-radius:8px 0 0 8px}
+  .seg-over{height:100%;background:var(--over);border-radius:0 8px 8px 0}
+  .fill.exact .seg-in{border-radius:8px}
+  .fill.under .seg-in{border-radius:8px}
+
+  .meta{width:150px;flex:none;text-align:right;display:flex;flex-direction:column;gap:1px}
+  .hours{font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}
+  .hours b{font-weight:800}
+  .status{font-size:11px;font-weight:600}
+  .s-over{color:var(--over)} .s-free{color:var(--free)} .s-full{color:var(--full)}
+
+  .detail{display:none;padding:4px 18px 16px 142px}
+  .row.open + .detail{display:block}
+  .task{display:flex;align-items:center;gap:10px;font-size:13px;padding:5px 0;color:var(--ink)}
+  .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .task .tname{flex:1}
+  .task .th{color:var(--muted);font-variant-numeric:tabular-nums}
+  .proj{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:1px 8px}
+
+  footer.sum{display:flex;align-items:center;justify-content:space-between;
+    padding:14px 18px;background:#fbfcfe;border-top:1px solid var(--line)}
+  .sum .big{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums}
+  .sum .muted{color:var(--muted);font-size:13px}
+  .legend{display:flex;gap:16px;margin-top:14px;font-size:11px;color:var(--muted);flex-wrap:wrap}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .chip{width:10px;height:10px;border-radius:3px;display:inline-block}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="title">今日のキャパ <small>Capacity Board</small></div>
+    <div class="datenav">
+      <button title="前の日">‹</button>
+      <div class="d">6/4 (木) 今日</div>
+      <button title="次の日">›</button>
+    </div>
+  </header>
+  <p class="mocknote">※ モック（サンプルデータ）。本番は Vikunja API から 担当者・期日・見積り時間 を読んで自動算出。</p>
+
+  <div class="card" id="board"></div>
+
+  <div class="legend">
+    <span><i class="chip" style="background:var(--fill)"></i>アサイン済み（容量内）</span>
+    <span><i class="chip" style="background:var(--over)"></i>容量超過</span>
+    <span><i class="chip" style="background:var(--track)"></i>空き</span>
+    <span>｜ 縦線 = 1日の容量(8h)</span>
+  </div>
+</div>
+
+<script>
+// ---- sample data (本番では Vikunja /api/v1 から) ----
+const SCALE_MAX = 12;            // バー横軸の最大(h)。容量超過を見せるため余白を取る
+const members = [
+  { name:"森田", color:"#e5772d", cap:8, tasks:[
+      {t:"API 設計",      h:4, proj:"Backend",  c:"#3a86ff"},
+      {t:"DB マイグレ",   h:3, proj:"Backend",  c:"#3a86ff"},
+      {t:"PR レビュー",   h:3, proj:"共通",     c:"#8a93a0"},
+  ]},
+  { name:"田中", color:"#3a86ff", cap:8, tasks:[
+      {t:"ダッシュ画面実装", h:4, proj:"Frontend", c:"#2fa66b"},
+  ]},
+  { name:"佐藤", color:"#2fa66b", cap:8, tasks:[
+      {t:"認証フロー実装", h:5, proj:"Backend",  c:"#3a86ff"},
+      {t:"結合テスト",     h:3, proj:"QA",       c:"#b657d6"},
+  ]},
+  { name:"鈴木", color:"#b657d6", cap:8, tasks:[
+      {t:"設計ドキュメント", h:2, proj:"共通",   c:"#8a93a0"},
+  ]},
+];
+
+function pct(h){ return Math.min(h, SCALE_MAX) / SCALE_MAX * 100; }
+
+const board = document.getElementById("board");
+let totA=0, totC=0;
+
+members.forEach((m, i)=>{
+  const used = m.tasks.reduce((s,t)=>s+t.h,0);
+  totA += used; totC += m.cap;
+  const over = Math.max(0, used - m.cap);
+  const inCap = Math.min(used, m.cap);
+  const cls = over>0 ? "over" : (used===m.cap ? "exact":"under");
+  let status, scls;
+  if(over>0){ status = "⚠ +"+over+"h 超過"; scls="s-over"; }
+  else if(used===m.cap){ status="◎ ちょうど"; scls="s-full"; }
+  else { status="空き "+(m.cap-used)+"h"; scls="s-free"; }
+
+  const row = document.createElement("button");
+  row.className="row"; row.type="button";
+  row.innerHTML = `
+    <div class="rowhead">
+      <div class="who">
+        <div class="ava" style="background:${m.color}">${m.name[0]}</div>
+        <div><div class="name">${m.name}</div><div class="cap">容量 ${m.cap}h/日</div></div>
+      </div>
+      <div class="barwrap">
+        <div class="track"></div>
+        <div class="capline" style="left:${pct(m.cap)}%"></div>
+        <div class="fill ${cls}" style="width:${pct(used)}%">
+          <div class="seg-in" style="width:${ used>0 ? inCap/used*100 : 0 }%"></div>
+          ${ over>0 ? `<div class="seg-over" style="width:${over/used*100}%"></div>`:`` }
+        </div>
+      </div>
+      <div class="meta">
+        <div class="hours"><b>${used}</b> / ${m.cap}h</div>
+        <div class="status ${scls}">${status}</div>
+      </div>
+    </div>`;
+  const det = document.createElement("div");
+  det.className="detail";
+  det.innerHTML = m.tasks.map(t=>`
+    <div class="task">
+      <span class="dot" style="background:${t.c}"></span>
+      <span class="tname">${t.t}</span>
+      <span class="proj">${t.proj}</span>
+      <span class="th">${t.h}h</span>
+    </div>`).join("") || `<div class="task"><span class="tname" style="color:var(--muted)">今日のアサインなし</span></div>`;
+  row.addEventListener("click", ()=> row.classList.toggle("open"));
+  board.appendChild(row); board.appendChild(det);
+});
+
+const footer = document.createElement("footer");
+footer.className="sum";
+const rate = Math.round(totA/totC*100);
+footer.innerHTML = `<div class="muted">チーム計</div>
+  <div><span class="big">${totA} / ${totC}h</span>
+  <span class="muted">（${rate}%）　空き ${Math.max(0,totC-totA)}h</span></div>`;
+board.appendChild(footer);
+</script>
+</body>
+</html>

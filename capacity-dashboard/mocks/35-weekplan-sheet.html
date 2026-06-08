@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>週プランニング — スプレッドシート密度型</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee;
+    --track:#eef1f5; --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0;
+    --cap:#9aa3af; --amber:#f5a623;
+    --backend:#3a86ff; --frontend:#2fa66b; --qa:#b657d6; --common:#8a93a0;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--bg);color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"tnum";font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1560px;margin:0 auto;padding:20px 24px 60px}
+
+  header.top{display:flex;align-items:flex-end;gap:18px;flex-wrap:wrap;margin-bottom:6px}
+  .title h1{font-size:20px;font-weight:700}
+  .title .sub{font-size:12px;color:var(--muted);margin-top:3px}
+  .weeknav{display:flex;align-items:center;gap:2px;background:var(--card);border:1px solid var(--line);
+    border-radius:10px;padding:4px;margin-left:auto}
+  .weeknav button{border:none;background:transparent;color:var(--muted);font-size:15px;cursor:pointer;
+    width:30px;height:30px;border-radius:7px}
+  .weeknav button:hover{background:var(--track);color:var(--ink)}
+  .weeknav .wk{font-size:13px;font-weight:600;padding:0 10px;white-space:nowrap}
+  .note{font-size:11px;color:var(--muted);margin:10px 0 14px;padding:7px 11px;background:#fff;
+    border:1px dashed var(--line);border-radius:8px;display:inline-block}
+
+  .toolbar{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+  .toolbar .sortlbl{font-size:11px;color:var(--muted)}
+  .seg{display:inline-flex;background:var(--card);border:1px solid var(--line);border-radius:9px;overflow:hidden}
+  .seg button{border:none;background:transparent;font-size:12px;padding:6px 12px;cursor:pointer;color:var(--muted)}
+  .seg button.on{background:var(--ink);color:#fff}
+  .toolbar .tip{margin-left:auto;font-size:11px;color:var(--muted)}
+  .toolbar .tip b{color:var(--ink);font-weight:600}
+
+  /* unassigned strip */
+  .ustrip{display:flex;align-items:center;gap:10px;background:#fffaf0;border:1px solid #f3e2c0;
+    border-radius:11px;padding:9px 13px;margin-bottom:14px;flex-wrap:wrap}
+  .ustrip .ulbl{font-size:11px;font-weight:700;color:#9a6a14;white-space:nowrap}
+  .uchip{display:inline-flex;align-items:center;gap:6px;background:#fff;border:1px solid var(--line);
+    border-left-width:4px;border-radius:8px;padding:5px 9px;font-size:11px;cursor:grab}
+  .uchip .uh{color:var(--muted);font-size:10px;background:var(--track);border-radius:4px;padding:1px 4px}
+  .uchip.dragging{opacity:.4}
+  .uchip.done{opacity:.4;text-decoration:line-through;pointer-events:none}
+  .p-backend{border-left-color:var(--backend)} .p-frontend{border-left-color:var(--frontend)}
+  .p-qa{border-left-color:var(--qa)} .p-common{border-left-color:var(--common)}
+
+  /* sheet */
+  .sheetscroll{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:var(--card);
+    box-shadow:0 1px 3px rgba(20,30,50,.05)}
+  table.sheet{border-collapse:separate;border-spacing:0;width:100%;min-width:1120px}
+  table.sheet th,table.sheet td{border-right:1px solid var(--line);border-bottom:1px solid var(--line);
+    vertical-align:top}
+  table.sheet thead th{position:sticky;top:0;background:#fbfcfd;z-index:3;padding:10px 10px;
+    font-size:11px;font-weight:700;color:var(--muted);text-align:left;border-bottom:2px solid var(--line)}
+  thead th.dcol{text-align:center}
+  thead th .cap{font-weight:500;color:#aab1bb;font-size:10px}
+  /* sticky member col */
+  .mcol{position:sticky;left:0;background:var(--card);z-index:2;width:172px;min-width:172px}
+  thead th.mcol{z-index:4;background:#fbfcfd}
+  .mcell{padding:11px 12px}
+  .mcell .row1{display:flex;align-items:center;gap:8px}
+  .ava{width:26px;height:26px;border-radius:50%;color:#fff;font-size:11px;font-weight:700;
+    display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .mcell .nm{font-size:13px;font-weight:700}
+  .mcell .wtot{margin-top:8px;font-size:11px;color:var(--muted)}
+  .mcell .wtot b{font-size:13px;color:var(--ink);font-variant-numeric:tabular-nums}
+  .mcell .wtot b.over{color:var(--over)}
+  .mcell .wbar{height:5px;border-radius:3px;background:var(--track);margin-top:4px;overflow:hidden}
+  .mcell .wbar i{display:block;height:100%}
+  .mcell .freelbl{font-size:10px;margin-top:4px}
+  .mcell .freelbl .f{color:var(--free);font-weight:700}
+  .mcell .freelbl .o{color:var(--over);font-weight:700}
+
+  td.cell{width:178px;min-width:178px;padding:7px;background:#fff}
+  td.cell.over{background:#fdeced}
+  td.cell.full{background:#fbfbfc}
+  td.cell.dragover{outline:2px solid var(--fill);outline-offset:-2px;background:#eef5ff}
+  td.cell.over-cap{outline:2px solid var(--over);outline-offset:-2px;background:#fdeced}
+  .cellchips{display:flex;flex-direction:column;gap:4px;min-height:30px}
+  .tchip{font-size:11px;border-radius:6px;padding:4px 7px;color:#fff;font-weight:600;
+    display:flex;align-items:center;justify-content:space-between;gap:5px;line-height:1.2;cursor:default}
+  .tchip .th{font-size:10px;opacity:.85}
+  .tchip.ghost{background:#eef5ff;border:1.5px dashed var(--fill);color:var(--fill)}
+  .bg-backend{background:var(--backend)} .bg-frontend{background:var(--frontend)}
+  .bg-qa{background:var(--qa)} .bg-common{background:var(--common)}
+  .addrow{margin-top:4px;font-size:10px;color:#c0c6cf;text-align:center;border:1px dashed transparent;
+    border-radius:5px;padding:2px;cursor:text}
+  td.cell:hover .addrow{border-color:var(--line);color:var(--muted)}
+  .celltot{display:flex;align-items:center;justify-content:space-between;margin-top:6px;
+    padding-top:5px;border-top:1px solid var(--line)}
+  .celltot .dt{font-size:11px;font-variant-numeric:tabular-nums;font-weight:700}
+  .celltot .dt.over{color:var(--over)} .celltot .dt.ok{color:var(--muted)}
+  .celltot .minibar{flex:1;height:4px;border-radius:3px;background:var(--track);margin-left:8px;overflow:hidden}
+  .celltot .minibar i{display:block;height:100%}
+
+  .legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:18px;font-size:11px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:5px}
+  .sw{width:11px;height:11px;border-radius:3px;display:inline-block}
+  .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(20px);
+    background:#1d2430;color:#fff;font-size:12px;padding:9px 16px;border-radius:9px;opacity:0;
+    transition:.25s;pointer-events:none;z-index:50}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="title">
+      <h1>② 計画：週プランニング — 稼働シート</h1>
+      <div class="sub">メンバー×曜日のセルにタスクを積む高密度ビュー。セルをクリックで追記、超過は赤。</div>
+    </div>
+    <div class="weeknav">
+      <button title="前の週">‹</button>
+      <span class="wk">6/1〜6/5（今週）</span>
+      <button title="次の週">›</button>
+    </div>
+  </header>
+  <div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</div>
+
+  <div class="toolbar">
+    <span class="sortlbl">並び替え</span>
+    <div class="seg" id="sortseg">
+      <button data-sort="free" class="on">空き多い順</button>
+      <button data-sort="load">稼働多い順</button>
+      <button data-sort="name">名前順</button>
+    </div>
+    <span class="tip">セルクリックで<b>追記</b>／未アサインチップをセルへ<b>ドラッグ配置</b></span>
+  </div>
+
+  <div class="ustrip" id="ustrip">
+    <span class="ulbl">未アサイン（今週置きたい）</span>
+  </div>
+
+  <div class="sheetscroll">
+    <table class="sheet" id="sheet"></table>
+  </div>
+
+  <div class="legend">
+    <span><i class="sw bg-backend"></i>Backend</span>
+    <span><i class="sw bg-frontend"></i>Frontend</span>
+    <span><i class="sw bg-qa"></i>QA</span>
+    <span><i class="sw bg-common"></i>共通</span>
+    <span><i class="sw" style="background:var(--fill)"></i>容量内</span>
+    <span><i class="sw" style="background:var(--full)"></i>満稼働</span>
+    <span><i class="sw" style="background:var(--over)"></i>超過セル</span>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const DAYS=[{k:"mon",n:"月",d:"6/1"},{k:"tue",n:"火",d:"6/2"},{k:"wed",n:"水",d:"6/3"},
+            {k:"thu",n:"木",d:"6/4"},{k:"fri",n:"金",d:"6/5"}];
+const CAP=8, WEEKCAP=40;
+const PROJLABEL={backend:"Backend",frontend:"Frontend",qa:"QA",common:"共通"};
+
+const MEMBERS=[
+  {id:"morita",name:"森田",color:"var(--m-morita)",
+   days:{mon:[["API設計",5,"backend"],["MTG",3,"common"]],
+         tue:[["DBマイグレ",4,"backend"],["PRレビュー",2,"backend"]],
+         wed:[["認証実装",6,"backend"],["調査",2,"backend"]],
+         thu:[["認証実装",6,"backend"],["障害対応",4,"backend"]],
+         fri:[["設計ドキュメント",4,"backend"]]}},
+  {id:"tanaka",name:"田中",color:"var(--m-tanaka)",
+   days:{mon:[["ダッシュ画面実装",4,"frontend"]],
+         tue:[["ダッシュ画面実装",4,"frontend"],["MTG",2,"common"]],
+         wed:[["PRレビュー",2,"frontend"]],
+         thu:[["ダッシュ画面実装",4,"frontend"]],
+         fri:[]}},
+  {id:"sato",name:"佐藤",color:"var(--m-sato)",
+   days:{mon:[["結合テスト",5,"qa"],["MTG",3,"common"]],
+         tue:[["結合テスト",8,"qa"]],
+         wed:[["E2E整備",5,"qa"],["調査",3,"qa"]],
+         thu:[["結合テスト",8,"qa"]],
+         fri:[["結合テスト",5,"qa"],["リリース準備",3,"common"]]}},
+  {id:"suzuki",name:"鈴木",color:"var(--m-suzuki)",
+   days:{mon:[["LP制作",2,"frontend"]],
+         tue:[["LP制作",3,"frontend"]],
+         wed:[["調査",2,"frontend"]],
+         thu:[["設計ドキュメント",2,"frontend"]],
+         fri:[]}},
+];
+
+let UNASSIGNED=[
+  {id:"p1",name:"ログインバグ修正",hrs:3,proj:"backend",placed:false},
+  {id:"p2",name:"LP文言",hrs:2,proj:"frontend",placed:false},
+  {id:"p3",name:"リリースノート",hrs:1,proj:"common",placed:false},
+  {id:"p4",name:"E2E整備",hrs:6,proj:"qa",placed:false},
+];
+
+let SORT="free", drag=null;
+const dayHrs=(m,d)=>(m.days[d]||[]).reduce((s,t)=>s+t[1],0);
+const weekHrs=m=>DAYS.reduce((s,d)=>s+dayHrs(m,d.k),0);
+
+function sortedMembers(){
+  const a=[...MEMBERS];
+  if(SORT==="free")a.sort((x,y)=>weekHrs(x)-weekHrs(y));
+  else if(SORT==="load")a.sort((x,y)=>weekHrs(y)-weekHrs(x));
+  else a.sort((x,y)=>x.name.localeCompare(y.name,"ja"));
+  return a;
+}
+
+function renderStrip(){
+  const s=document.getElementById("ustrip");
+  s.querySelectorAll(".uchip").forEach(e=>e.remove());
+  UNASSIGNED.forEach(p=>{
+    const c=document.createElement("div");
+    c.className="uchip p-"+p.proj+(p.placed?" done":"");
+    c.draggable=!p.placed; c.dataset.pid=p.id;
+    c.innerHTML=`<span>${p.name}</span><span class="uh">${p.hrs}h·${PROJLABEL[p.proj]}</span>`;
+    if(!p.placed){
+      c.addEventListener("dragstart",()=>{drag=p.id;c.classList.add("dragging");});
+      c.addEventListener("dragend",()=>{c.classList.remove("dragging");clearGhosts();});
+    }
+    s.appendChild(c);
+  });
+}
+
+function renderSheet(){
+  const t=document.getElementById("sheet");
+  let html="<thead><tr>";
+  html+=`<th class="mcol">メンバー / 週合計</th>`;
+  DAYS.forEach(d=>{html+=`<th class="dcol">${d.n} <span style="color:#aab1bb">${d.d}</span><br><span class="cap">cap ${CAP}h</span></th>`;});
+  html+="</tr></thead><tbody>";
+  sortedMembers().forEach(m=>{
+    const wk=weekHrs(m), over=wk>WEEKCAP, full=wk===WEEKCAP, free=Math.max(0,WEEKCAP-wk);
+    const ucolor=over?"var(--over)":(full?"var(--full)":"var(--fill)");
+    html+="<tr>";
+    html+=`<td class="mcol"><div class="mcell">
+      <div class="row1"><span class="ava" style="background:${m.color}">${m.name[0]}</span>
+        <span class="nm">${m.name}</span></div>
+      <div class="wtot">週 <b class="${over?'over':''}">${wk}</b> / ${WEEKCAP}h</div>
+      <div class="wbar"><i style="width:${Math.min(100,wk/WEEKCAP*100)}%;background:${ucolor}"></i></div>
+      <div class="freelbl">${over?`<span class="o">超過 +${wk-WEEKCAP}h</span>`:(full?'<span style="color:var(--full)">満稼働</span>':`空き <span class="f">${free}h</span>`)}</div>
+    </div></td>`;
+    DAYS.forEach(d=>{
+      const dh=dayHrs(m,d.k), dover=dh>CAP, dfull=dh===CAP;
+      const cls=dover?"over":(dfull?"full":"");
+      const bc=dover?"var(--over)":(dfull?"var(--full)":"var(--fill)");
+      let chips="";
+      (m.days[d.k]||[]).forEach(tk=>{
+        chips+=`<div class="tchip bg-${tk[2]}"><span>${tk[0]}</span><span class="th">${tk[1]}h</span></div>`;
+      });
+      html+=`<td class="cell ${cls}" data-mid="${m.id}" data-day="${d.k}">
+        <div class="cellchips">${chips}</div>
+        <div class="addrow">＋ タスク追記</div>
+        <div class="celltot"><span class="dt ${dover?'over':'ok'}">${dh}/${CAP}h</span>
+          <span class="minibar"><i style="width:${Math.min(100,dh/CAP*100)}%;background:${bc}"></i></span></div>
+      </td>`;
+    });
+    html+="</tr>";
+  });
+  html+="</tbody>";
+  t.innerHTML=html;
+  wireCells();
+}
+
+function wireCells(){
+  document.querySelectorAll("td.cell").forEach(td=>{
+    const mid=td.dataset.mid, day=td.dataset.day;
+    const m=MEMBERS.find(x=>x.id===mid);
+    td.addEventListener("dragover",e=>{e.preventDefault();
+      const p=UNASSIGNED.find(x=>x.id===drag); if(!p)return;
+      const willOver=(dayHrs(m,day)+p.hrs)>CAP;
+      td.classList.remove("dragover","over-cap");
+      td.classList.add(willOver?"over-cap":"dragover");
+      showGhost(td,p,willOver);});
+    td.addEventListener("dragleave",()=>{td.classList.remove("dragover","over-cap");removeGhost(td);});
+    td.addEventListener("drop",e=>{e.preventDefault();
+      td.classList.remove("dragover","over-cap");
+      const p=UNASSIGNED.find(x=>x.id===drag); if(!p||p.placed)return;
+      m.days[day]=m.days[day]||[]; m.days[day].push([p.name,p.hrs,p.proj]);
+      p.placed=true; drag=null;
+      const nd=dayHrs(m,day);
+      renderStrip(); renderSheet();
+      toast(`${m.name}・${DAYS.find(x=>x.k===day).n}曜 に「${p.name}」(${p.hrs}h) → 日計 ${nd}/${CAP}h`);
+    });
+    // inline add hint
+    td.querySelector(".addrow").addEventListener("click",()=>{
+      toast(`${m.name}・${DAYS.find(x=>x.k===day).n}曜 にタスク追記（モック：本番はインライン入力）`);
+    });
+  });
+}
+
+function showGhost(td,p,over){
+  removeGhost(td);
+  const wrap=td.querySelector(".cellchips");
+  const g=document.createElement("div");
+  g.className="tchip ghost _ghost";
+  g.innerHTML=`<span>${p.name}${over?' ⚠超過':''}</span><span class="th">${p.hrs}h</span>`;
+  wrap.appendChild(g);
+}
+function removeGhost(td){const g=td.querySelector("._ghost");if(g)g.remove();}
+function clearGhosts(){document.querySelectorAll("._ghost").forEach(g=>g.remove());
+  document.querySelectorAll("td.cell").forEach(d=>d.classList.remove("dragover","over-cap"));}
+
+document.getElementById("sortseg").addEventListener("click",e=>{
+  const b=e.target.closest("button"); if(!b)return;
+  document.querySelectorAll("#sortseg button").forEach(x=>x.classList.remove("on"));
+  b.classList.add("on"); SORT=b.dataset.sort; renderSheet();
+});
+
+let toastT;
+function toast(msg){const t=document.getElementById("toast");t.textContent=msg;t.classList.add("show");
+  clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("show"),2600);}
+
+renderStrip(); renderSheet();
+</script>
+</body>
+</html>

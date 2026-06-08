@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>今日のトリアージ — アイゼンハワー・マトリクス</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --red:#e5484d; --amber:#f5a623; --green:#2fa66b; --block:#9aa3af;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+    --p-backend:#3a86ff; --p-frontend:#2fa66b; --p-qa:#b657d6; --p-common:#8a93a0;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    background:var(--bg); color:var(--ink); line-height:1.5;
+    font-feature-settings:"tnum"; -webkit-font-smoothing:antialiased;
+    padding:24px; max-width:1080px; margin:0 auto;
+  }
+  .tnum{font-variant-numeric:tabular-nums}
+  header{margin-bottom:18px}
+  .titlerow{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+  h1{font-size:20px;font-weight:700}
+  .daynav{display:inline-flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);
+    border-radius:10px;padding:5px 10px;font-size:13px;font-weight:600}
+  .daynav button{border:none;background:none;color:var(--muted);font-size:15px;cursor:pointer;padding:0 4px;line-height:1}
+  .daynav .today{color:var(--ink)}
+  .daynav .badge{background:var(--track);color:var(--muted);font-size:11px;padding:1px 7px;border-radius:20px;font-weight:600}
+  .note{font-size:11.5px;color:var(--muted);margin-top:2px}
+
+  /* matrix layout with axes */
+  .matrixwrap{display:grid;grid-template-columns:30px 1fr;grid-template-rows:30px 1fr;gap:0;margin-top:18px}
+  .axis-y{grid-column:1;grid-row:2;writing-mode:vertical-rl;transform:rotate(180deg);
+    display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--muted);letter-spacing:.08em}
+  .axis-x{grid-column:2;grid-row:1;display:flex;align-items:center;justify-content:center;
+    font-size:12px;font-weight:700;color:var(--muted);letter-spacing:.08em}
+  .grid{grid-column:2;grid-row:2;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  /* axis tick labels */
+  .axiswrap{position:relative}
+  .quad{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;
+    display:flex;flex-direction:column;min-height:228px;position:relative;box-shadow:0 1px 2px rgba(29,36,48,.04)}
+  .quad .qhead{display:flex;align-items:flex-start;gap:10px;margin-bottom:4px}
+  .qicon{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0}
+  .qtitle{font-size:14.5px;font-weight:800;line-height:1.25}
+  .qaxis{font-size:11px;font-weight:600;color:var(--muted);margin-top:1px}
+  .qaction{font-size:11px;font-weight:800;letter-spacing:.04em;margin-left:auto;padding:3px 9px;border-radius:20px;white-space:nowrap}
+  .qguide{font-size:11px;color:#525a66;background:#f9fafb;border-radius:8px;padding:6px 9px;margin:6px 0 10px;line-height:1.5}
+  .qbody{display:flex;flex-direction:column;gap:8px;flex:1}
+  .empty{font-size:12px;color:var(--muted);font-style:italic;display:flex;align-items:center;justify-content:center;flex:1;text-align:center}
+
+  /* quadrant accents */
+  .q1{border-color:#f3c4c5;box-shadow:0 2px 12px rgba(229,72,77,.13)}
+  .q1 .qicon{background:#fdeaea} .q1 .qaction{background:var(--red);color:#fff}
+  .q2 .qicon{background:#fdf2e0} .q2 .qaction{background:#fdf2e0;color:#b87410}
+  .q3 .qicon{background:#eef1f5} .q3 .qaction{background:#eef1f5;color:#6b7480}
+  .q4 .qicon{background:#e7f5ee} .q4 .qaction{background:#e7f5ee;color:#1f8b56}
+
+  /* task pill */
+  .t{border:1px solid var(--line);border-radius:10px;padding:9px 11px;position:relative;background:#fff}
+  .t .edge{position:absolute;left:0;top:0;bottom:0;width:3.5px;border-radius:10px 0 0 10px}
+  .t.hot{border-color:#f3c4c5;background:#fffafa}
+  .t.hot .edge{background:var(--red)}
+  .t.blocked{background:repeating-linear-gradient(45deg,#fafbfc,#fafbfc 8px,#f1f3f6 8px,#f1f3f6 16px);border-style:dashed}
+  .t.blocked .edge{background:var(--block)}
+  .trow{display:flex;align-items:center;gap:7px;margin-bottom:5px;padding-left:5px}
+  .tnm{font-size:13px;font-weight:700;flex:1;line-height:1.3}
+  .t.blocked .tnm{color:#5d646e}
+  .pr{font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:5px;white-space:nowrap}
+  .pr.max{background:#fdeaea;color:#c0353a} .pr.high{background:#fdf2e0;color:#b87410}
+  .pr.mid{background:#eef1f5;color:#6b7480} .pr.low{background:#f1f3f6;color:#8a93a0}
+  .tmeta{display:flex;flex-wrap:wrap;gap:5px;padding-left:5px;font-size:10.5px;color:var(--muted)}
+  .tmeta .c{display:inline-flex;align-items:center;gap:4px;background:var(--track);border-radius:6px;padding:1px 6px}
+  .tmeta .c .who{width:6px;height:6px;border-radius:50%}
+  .tmeta .c.proj{background:#fff;border:1px solid var(--line)}
+  .tmeta .c.proj .pb{width:6px;height:6px;border-radius:2px}
+  .tmeta .dl{font-weight:600}
+  .tmeta .dl.u{color:var(--red)} .tmeta .dl.s{color:#b87410} .tmeta .dl.c{color:var(--green)} .tmeta .dl.b{color:var(--block)}
+
+  .footnote{font-size:11px;color:var(--muted);margin-top:14px;text-align:center;line-height:1.6}
+  @media(max-width:760px){
+    .grid{grid-template-columns:1fr}
+    .axis-y{writing-mode:horizontal-tb;transform:none}
+    .matrixwrap{grid-template-columns:1fr;grid-template-rows:auto auto auto}
+    .axis-y{grid-column:1;grid-row:1;justify-content:flex-start}
+    .axis-x{grid-column:1;grid-row:2;justify-content:flex-start}
+    .grid{grid-column:1;grid-row:3}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="titlerow">
+    <h1>今日のトリアージ — アイゼンハワー・マトリクス</h1>
+    <div class="daynav">
+      <button aria-label="前日">‹</button>
+      <span class="today tnum">6/4(木)</span>
+      <span class="badge">今日</span>
+      <button aria-label="翌日">›</button>
+    </div>
+  </div>
+  <p class="note">※ モック（サンプルデータ）。本番は Vikunja API（優先度・期日・依存・ブロック）から自動算出。</p>
+</header>
+
+<div class="matrixwrap">
+  <div class="axis-y">重要度 高 →</div>
+  <div class="axis-x">← 緊急度 低　　／　　緊急度 高 →</div>
+  <div class="grid">
+
+    <!-- Q1: 緊急かつ重要 -->
+    <div class="quad q1">
+      <div class="qhead">
+        <div class="qicon">🔥</div>
+        <div>
+          <div class="qtitle">緊急 × 重要</div>
+          <div class="qaxis">今すぐやる（DO）</div>
+        </div>
+        <div class="qaction">今すぐ</div>
+      </div>
+      <div class="qguide">自分で・今すぐ着手。今日の最優先。ここを片付けるまで他は触らない。</div>
+      <div class="qbody">
+        <div class="t hot">
+          <span class="edge"></span>
+          <div class="trow"><span class="tnm">🔴 ログイン障害対応</span><span class="pr max">最高</span></div>
+          <div class="tmeta">
+            <span class="c"><span class="who" style="background:var(--m-morita)"></span>森田</span>
+            <span class="c proj"><span class="pb" style="background:var(--p-backend)"></span>Backend</span>
+            <span class="c">⏱2h</span>
+            <span class="dl u">⏰ 今日中・本番障害</span>
+          </div>
+        </div>
+        <div class="t">
+          <span class="edge" style="background:var(--amber)"></span>
+          <div class="trow"><span class="tnm">DBマイグレーション</span><span class="pr high">高</span></div>
+          <div class="tmeta">
+            <span class="c"><span class="who" style="background:var(--m-morita)"></span>森田</span>
+            <span class="c proj"><span class="pb" style="background:var(--p-backend)"></span>Backend</span>
+            <span class="c">⏱3h</span>
+            <span class="dl s tnum">📅 締切 6/5（明日）</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Q2: 重要だが緊急でない -->
+    <div class="quad q2">
+      <div class="qhead">
+        <div class="qicon">🗓</div>
+        <div>
+          <div class="qtitle">重要 × 緊急でない</div>
+          <div class="qaxis">計画的にやる（SCHEDULE）</div>
+        </div>
+        <div class="qaction">予定化</div>
+      </div>
+      <div class="qguide">締切に余裕あり。今日詰めず、計画に組み込む。ブロック解消待ちのものもここ。</div>
+      <div class="qbody">
+        <div class="t blocked">
+          <span class="edge"></span>
+          <div class="trow"><span class="tnm">⛔ 認証フロー実装</span><span class="pr high">高</span></div>
+          <div class="tmeta">
+            <span class="c"><span class="who" style="background:var(--m-sato)"></span>佐藤</span>
+            <span class="c proj"><span class="pb" style="background:var(--p-backend)"></span>Backend</span>
+            <span class="c">⏱5h</span>
+            <span class="dl s tnum">📅 6/6</span>
+            <span class="dl b">外部API待ち・今日不可</span>
+          </div>
+        </div>
+        <div class="t">
+          <span class="edge" style="background:var(--green)"></span>
+          <div class="trow"><span class="tnm">ダッシュ画面実装（続き）</span><span class="pr mid">中</span></div>
+          <div class="tmeta">
+            <span class="c"><span class="who" style="background:var(--m-tanaka)"></span>田中</span>
+            <span class="c proj"><span class="pb" style="background:var(--p-frontend)"></span>Frontend</span>
+            <span class="c">⏱4h</span>
+            <span class="dl c tnum">📅 締切 6/9（余裕）</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Q3: 緊急だが重要でない -->
+    <div class="quad q3">
+      <div class="qhead">
+        <div class="qicon">👥</div>
+        <div>
+          <div class="qtitle">緊急 × 重要でない</div>
+          <div class="qaxis">任せる / 後で（DELEGATE）</div>
+        </div>
+        <div class="qaction">任せる/後で</div>
+      </div>
+      <div class="qguide">緊急感はあるが重要度低め。可能なら他者に委譲、または手が空いた時に。</div>
+      <div class="qbody">
+        <div class="t">
+          <span class="edge" style="background:var(--green)"></span>
+          <div class="trow"><span class="tnm">リリースノート作成</span><span class="pr low">低</span></div>
+          <div class="tmeta">
+            <span class="c" style="font-style:italic">未アサイン</span>
+            <span class="c proj"><span class="pb" style="background:var(--p-common)"></span>共通</span>
+            <span class="c">⏱1h</span>
+            <span class="dl c tnum">📅 6/13</span>
+          </div>
+        </div>
+        <div class="empty">委譲候補は1件。<br>未アサイン → 担当を割り当て可。</div>
+      </div>
+    </div>
+
+    <!-- Q4: どちらでもない -->
+    <div class="quad q4">
+      <div class="qhead">
+        <div class="qicon">🍃</div>
+        <div>
+          <div class="qtitle">緊急でない × 重要でない</div>
+          <div class="qaxis">やめる / 後回し（ELIMINATE）</div>
+        </div>
+        <div class="qaction">後回し</div>
+      </div>
+      <div class="qguide">急がず重要でもない。今日は触らない。余力ある日に / 不要なら整理。</div>
+      <div class="qbody">
+        <div class="t">
+          <span class="edge" style="background:var(--green)"></span>
+          <div class="trow"><span class="tnm">API設計レビュー</span><span class="pr mid">中</span></div>
+          <div class="tmeta">
+            <span class="c"><span class="who" style="background:var(--m-morita)"></span>森田</span>
+            <span class="c proj"><span class="pb" style="background:var(--p-common)"></span>共通</span>
+            <span class="c">⏱1h</span>
+            <span class="dl c">🗓 締切なし</span>
+          </div>
+        </div>
+        <div class="t">
+          <span class="edge" style="background:var(--green)"></span>
+          <div class="trow"><span class="tnm">設計ドキュメント整備</span><span class="pr low">低</span></div>
+          <div class="tmeta">
+            <span class="c"><span class="who" style="background:var(--m-suzuki)"></span>鈴木</span>
+            <span class="c proj"><span class="pb" style="background:var(--p-common)"></span>共通</span>
+            <span class="c">⏱2h</span>
+            <span class="dl c">🗓 締切なし</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<p class="footnote">
+  今日絶対やるべき = <b style="color:var(--red)">ログイン障害対応</b>（緊急×重要）。
+  ブロック中の認証フローは重要だが今日は着手不可 → 計画象限で待機。
+</p>
+</body>
+</html>

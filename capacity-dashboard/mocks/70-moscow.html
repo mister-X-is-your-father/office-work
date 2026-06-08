@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MoSCoW優先度 — 新ダッシュボード機能</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --done:#2fa66b; --doing:#3a86ff; --todo:#9aa3af; --blocked:#e5484d;
+    --must:#e5484d; --should:#f5a623; --could:#3a86ff; --wont:#9aa3af;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"tnum"; font-variant-numeric:tabular-nums;
+    line-height:1.5; padding:28px 20px;
+  }
+  .wrap{max-width:1080px;margin:0 auto}
+  header h1{font-size:20px;font-weight:700}
+  header .proj{font-size:13px;color:var(--muted);margin-top:3px}
+  .note{
+    font-size:12px;color:var(--muted);background:#fff;border:1px solid var(--line);
+    border-radius:10px;padding:9px 12px;margin:14px 0 18px;
+  }
+  .legend{display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-bottom:16px}
+  .legend .it{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:none}
+
+  .cols{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  @media(max-width:920px){.cols{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:520px){.cols{grid-template-columns:1fr}}
+
+  .col{
+    background:transparent;border-radius:14px;display:flex;flex-direction:column;
+  }
+  .col-head{
+    border-radius:12px 12px 0 0;padding:12px 14px;color:#fff;
+  }
+  .col-head .ttl{display:flex;align-items:baseline;gap:8px}
+  .col-head .name{font-size:15px;font-weight:800;letter-spacing:.02em}
+  .col-head .sub{font-size:11px;font-weight:600;opacity:.92}
+  .col-head .stats{display:flex;gap:14px;margin-top:7px;font-size:11.5px;font-weight:600}
+  .col-head .stats .v{font-size:15px;font-weight:800}
+  .col-head .stats small{font-weight:500;opacity:.9}
+
+  .col-body{
+    background:var(--card);border:1px solid var(--line);border-top:none;
+    border-radius:0 0 12px 12px;padding:10px;display:flex;flex-direction:column;gap:9px;
+    flex:1;box-shadow:0 1px 2px rgba(20,30,50,.04);min-height:120px;
+  }
+  .card{
+    border:1px solid var(--line);border-radius:10px;padding:10px 11px;background:#fff;
+    border-left-width:3px;
+  }
+  .card .cn{font-size:13.5px;font-weight:600;line-height:1.35}
+  .card .cm{display:flex;align-items:center;gap:10px;margin-top:7px;font-size:11.5px;color:var(--muted);flex-wrap:wrap}
+  .card .who{display:inline-flex;align-items:center;gap:5px}
+  .card .est{font-weight:600;color:var(--ink)}
+  .card .st{display:inline-flex;align-items:center;gap:5px;font-weight:600}
+  .col.wont .col-body{background:#fafbfc}
+  .col.wont .card{opacity:.6}
+  .col.wont .card .cn{text-decoration:line-through;text-decoration-color:#c2c8d0}
+
+  .strap{
+    text-align:center;font-size:11px;font-weight:700;letter-spacing:.04em;
+    padding:6px;border-radius:0 0 12px 12px;margin-top:-1px;
+  }
+  .footer-totals{
+    margin-top:18px;display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--muted);
+    border-top:1px solid var(--line);padding-top:14px;
+  }
+  .footer-totals b{color:var(--ink)}
+  .commit{
+    margin-top:14px;background:#fdeaea;border:1px solid #f4b9bb;border-radius:10px;
+    padding:10px 13px;font-size:12.5px;color:#9b2c2f;
+  }
+  .commit b{font-weight:800}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>MoSCoW優先度</h1>
+    <div class="proj">プロジェクト「新ダッシュボード機能」 ・ 2026/06/04（木）時点 ・ スコープ判断</div>
+  </header>
+  <div class="note">※ モック（サンプルデータ）。本番は Vikunja API（優先度ラベル等）から自動算出。</div>
+
+  <div class="legend">
+    <span class="it"><span class="dot" style="background:var(--done)"></span>Done</span>
+    <span class="it"><span class="dot" style="background:var(--doing)"></span>Doing</span>
+    <span class="it"><span class="dot" style="background:var(--todo)"></span>Todo</span>
+    <span class="it"><span class="dot" style="background:var(--blocked)"></span>Blocked</span>
+    <span class="it" style="margin-left:8px"><span class="dot" style="background:var(--m-morita)"></span>森田</span>
+    <span class="it"><span class="dot" style="background:var(--m-tanaka)"></span>田中</span>
+    <span class="it"><span class="dot" style="background:var(--m-sato)"></span>佐藤</span>
+    <span class="it"><span class="dot" style="background:var(--m-suzuki)"></span>鈴木</span>
+  </div>
+
+  <div class="cols" id="cols"></div>
+
+  <div class="commit" id="commit"></div>
+
+  <div class="footer-totals" id="totals"></div>
+</div>
+
+<script>
+const MEMBER = {森田:'var(--m-morita)',田中:'var(--m-tanaka)',佐藤:'var(--m-sato)',鈴木:'var(--m-suzuki)',共通:'#9aa3af'};
+const STATUS = {Done:'var(--done)',Doing:'var(--doing)',Todo:'var(--todo)',Blocked:'var(--blocked)'};
+
+const tasks = [
+  {name:'ログイン障害対応', area:'Backend', who:'森田', est:2, moscow:'Must', status:'Doing'},
+  {name:'認証フロー実装',   area:'Backend', who:'佐藤', est:5, moscow:'Must', status:'Blocked'},
+  {name:'ダッシュ画面実装', area:'Frontend',who:'田中', est:4, moscow:'Must', status:'Todo'},
+  {name:'結合テスト',       area:'QA',      who:'佐藤', est:6, moscow:'Must', status:'Todo'},
+  {name:'DBマイグレーション',area:'Backend',who:'森田', est:3, moscow:'Must', status:'Todo'},
+  {name:'LP制作',           area:'Frontend',who:'田中', est:8, moscow:'Should',status:'Todo'},
+  {name:'リリースノート作成',area:'共通',    who:'共通', est:1, moscow:'Could', status:'Todo'},
+  {name:'ダークモード対応', area:'Frontend',who:'田中', est:3, moscow:'Could', status:'Todo'},
+  {name:'通知機能',         area:'Backend', who:'森田', est:13,moscow:"Won't", status:'Todo'},
+];
+
+const COLS = [
+  {key:'Must',  c:'var(--must)',  sub:'外せない',     strap:'これは外せない'},
+  {key:'Should',c:'var(--should)',sub:'できれば',     strap:'余力があれば'},
+  {key:'Could', c:'var(--could)', sub:'あれば良い',   strap:'任意'},
+  {key:"Won't", c:'var(--wont)',  sub:'今回やらない', strap:'次回スコープ'},
+];
+
+const colsEl = document.getElementById('cols');
+let grandTotal = tasks.reduce((s,t)=>s+t.est,0);
+
+COLS.forEach(col=>{
+  const items = tasks.filter(t=>t.moscow===col.key);
+  const sum = items.reduce((s,t)=>s+t.est,0);
+  const div = document.createElement('div');
+  div.className='col'+(col.key==="Won't"?' wont':'');
+  div.innerHTML = `
+    <div class="col-head" style="background:${col.c}">
+      <div class="ttl"><span class="name">${col.key}</span><span class="sub">${col.sub}</span></div>
+      <div class="stats">
+        <span><span class="v">${items.length}</span><small> 件</small></span>
+        <span><span class="v">${sum}</span><small> h</small></span>
+      </div>
+    </div>
+    <div class="col-body">${items.map(cardHTML).join('') || '<div style="font-size:12px;color:var(--muted);padding:10px;text-align:center">なし</div>'}</div>
+    <div class="strap" style="background:${col.c}1a;color:${col.c}">${col.strap}</div>`;
+  colsEl.appendChild(div);
+});
+
+function cardHTML(t){
+  return `<div class="card" style="border-left-color:${MEMBER[t.who]}">
+    <div class="cn">${t.name}</div>
+    <div class="cm">
+      <span>${t.area}</span>
+      <span class="who"><span class="dot" style="background:${MEMBER[t.who]}"></span>${t.who}</span>
+      <span class="est">${t.est}h</span>
+      <span class="st"><span class="dot" style="background:${STATUS[t.status]}"></span>${t.status}</span>
+    </div>
+  </div>`;
+}
+
+// commit line: Must
+const mustItems = tasks.filter(t=>t.moscow==='Must');
+const mustSum = mustItems.reduce((s,t)=>s+t.est,0);
+const wontSum = tasks.filter(t=>t.moscow==="Won't").reduce((s,t)=>s+t.est,0);
+document.getElementById('commit').innerHTML =
+  `<b>Must ${mustItems.length}件 / 計${mustSum}h</b> はリリースの最低ライン。これが落ちるとリリース不可。` +
+  ` Won't（${wontSum}h）は今回スコープ外として明示的に切り離し。`;
+
+document.getElementById('totals').innerHTML =
+  COLS.map(c=>{
+    const it=tasks.filter(t=>t.moscow===c.key);
+    const s=it.reduce((a,t)=>a+t.est,0);
+    return `<span><span class="dot" style="background:${c.c};display:inline-block;margin-right:5px"></span>${c.key} <b>${it.length}件 / ${s}h</b></span>`;
+  }).join('') + `<span style="margin-left:auto">合計 <b>${tasks.length}件 / ${grandTotal}h</b></span>`;
+</script>
+</body>
+</html>

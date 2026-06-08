@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RICEスコアリング — 新ダッシュボード機能</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --done:#2fa66b; --doing:#3a86ff; --todo:#9aa3af; --blocked:#e5484d;
+    --must:#e5484d; --should:#f5a623; --could:#3a86ff; --wont:#9aa3af;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"tnum"; font-variant-numeric:tabular-nums;
+    line-height:1.5; padding:28px 20px;
+  }
+  .wrap{max-width:1000px;margin:0 auto}
+  header h1{font-size:20px;font-weight:700}
+  header .proj{font-size:13px;color:var(--muted);margin-top:3px}
+  .note{
+    font-size:12px;color:var(--muted);background:#fff;border:1px solid var(--line);
+    border-radius:10px;padding:9px 12px;margin:14px 0 16px;
+  }
+  .formula{
+    font-size:12px;color:var(--muted);margin-bottom:14px;
+  }
+  .formula code{
+    background:#eef1f5;border-radius:5px;padding:2px 7px;color:var(--ink);font-weight:600;
+    font-family:"SF Mono",ui-monospace,Menlo,monospace;
+  }
+  .panel{
+    background:var(--card);border:1px solid var(--line);border-radius:14px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04);overflow:hidden;
+  }
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  thead th{
+    text-align:right;font-size:11.5px;font-weight:700;color:var(--muted);
+    padding:11px 12px;border-bottom:1.5px solid var(--line);white-space:nowrap;
+    cursor:pointer;user-select:none;background:#fbfcfd;
+  }
+  thead th.tl{text-align:left}
+  thead th:hover{color:var(--ink);background:#f3f5f8}
+  thead th .arr{font-size:9px;opacity:.45;margin-left:3px}
+  thead th.sorted{color:var(--ink)}
+  thead th.sorted .arr{opacity:1;color:#3a86ff}
+  tbody td{padding:12px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+  tbody td.tl{text-align:left}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:#fafbfc}
+
+  .rk{font-weight:700;color:var(--muted);width:34px;text-align:center}
+  .tname{font-weight:600;font-size:13.5px}
+  .sub{font-size:11px;color:var(--muted);margin-top:2px;display:flex;gap:9px;align-items:center}
+  .who{display:inline-flex;align-items:center;gap:4px}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+  .tag{font-size:9.5px;font-weight:700;color:#fff;padding:1px 6px;border-radius:4px}
+
+  .num{font-variant-numeric:tabular-nums}
+  .conf{color:var(--ink)}
+  .score{font-weight:800;font-size:15px}
+  .score-cell{position:relative}
+  .bar{
+    position:absolute;left:0;right:0;bottom:6px;height:3px;border-radius:2px;
+    background:#3a86ff;opacity:.55;
+  }
+
+  tbody tr.top td{background:#f0f7ff}
+  tbody tr.top:hover td{background:#e8f2ff}
+  tbody tr.top .rk{color:#2563c9}
+  .crown{color:#f5a623;margin-right:3px}
+
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);margin-top:14px}
+  .legend .it{display:inline-flex;align-items:center;gap:6px}
+  .hint{font-size:11.5px;color:var(--muted);margin-top:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>RICEスコアリング</h1>
+    <div class="proj">プロジェクト「新ダッシュボード機能」 ・ 2026/06/04（木）時点 ・ データドリブン優先度</div>
+  </header>
+  <div class="note">※ モック（サンプルデータ）。本番は Vikunja API（優先度ラベル等）から自動算出。</div>
+  <div class="formula">
+    スコア = <code>Reach × Impact × Confidence ÷ Effort</code>
+    （Reach=影響ユーザ数 1–10 / Impact=1–3 / Confidence=50–100% / Effort=人日）。列ヘッダをクリックでソート。
+  </div>
+
+  <div class="panel">
+    <table>
+      <thead>
+        <tr>
+          <th class="tl" data-k="rank" style="cursor:default">#</th>
+          <th class="tl" data-k="name">タスク <span class="arr">↕</span></th>
+          <th data-k="reach">Reach <span class="arr">↕</span></th>
+          <th data-k="impact">Impact <span class="arr">↕</span></th>
+          <th data-k="conf">Conf. <span class="arr">↕</span></th>
+          <th data-k="effort">Effort <span class="arr">↕</span></th>
+          <th data-k="score" class="sorted">スコア <span class="arr">▼</span></th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <div class="legend">
+    <span class="it"><span class="dot" style="background:var(--m-morita)"></span>森田</span>
+    <span class="it"><span class="dot" style="background:var(--m-tanaka)"></span>田中</span>
+    <span class="it"><span class="dot" style="background:var(--m-sato)"></span>佐藤</span>
+    <span class="it"><span class="dot" style="background:var(--m-suzuki)"></span>鈴木</span>
+    <span class="it" style="margin-left:8px"><span class="tag" style="background:var(--must)">Must</span></span>
+    <span class="it"><span class="tag" style="background:var(--should)">Should</span></span>
+    <span class="it"><span class="tag" style="background:var(--could)">Could</span></span>
+    <span class="it"><span class="tag" style="background:var(--wont)">Won't</span></span>
+  </div>
+  <div class="hint">上位3件をハイライト。スコアが高い順＝投資対効果が高く、先に着手すべき項目。</div>
+</div>
+
+<script>
+const MOSCOW={Must:'var(--must)',Should:'var(--should)',Could:'var(--could)',"Won't":'var(--wont)'};
+const MEMBER={森田:'var(--m-morita)',田中:'var(--m-tanaka)',佐藤:'var(--m-sato)',鈴木:'var(--m-suzuki)',共通:'#9aa3af'};
+
+// RICE パラメータ（妥当に割り振り）。effort=人日。
+const data=[
+  {name:'ログイン障害対応',  who:'森田', moscow:'Must',  reach:9, impact:3, conf:0.95, effort:0.25},
+  {name:'認証フロー実装',    who:'佐藤', moscow:'Must',  reach:8, impact:3, conf:0.90, effort:2},
+  {name:'ダッシュ画面実装',  who:'田中', moscow:'Must',  reach:8, impact:3, conf:0.85, effort:1.5},
+  {name:'DBマイグレーション',who:'森田', moscow:'Must',  reach:7, impact:2, conf:0.85, effort:0.5},
+  {name:'結合テスト',        who:'佐藤', moscow:'Must',  reach:7, impact:2, conf:0.80, effort:2},
+  {name:'通知機能',          who:'森田', moscow:"Won't", reach:6, impact:2, conf:0.60, effort:4},
+  {name:'LP制作',            who:'田中', moscow:'Should',reach:5, impact:2, conf:0.75, effort:3},
+  {name:'リリースノート作成',who:'共通', moscow:'Could', reach:4, impact:1, conf:0.90, effort:0.5},
+  {name:'ダークモード対応',  who:'田中', moscow:'Could', reach:4, impact:1, conf:0.80, effort:1.5},
+];
+data.forEach(d=> d.score = d.reach*d.impact*d.conf/d.effort );
+
+let sortKey='score', sortDir=-1; // 降順
+const maxScore = Math.max(...data.map(d=>d.score));
+const tbody=document.getElementById('tbody');
+
+function rows(){
+  const arr=data.slice().sort((a,b)=>{
+    let av=a[sortKey], bv=b[sortKey];
+    if(sortKey==='name'){ return sortDir*(''+av).localeCompare(bv,'ja'); }
+    return sortDir*(av-bv);
+  });
+  return arr;
+}
+
+function render(){
+  const arr=rows();
+  // top3 は常にスコア上位（表示ソートに関わらず本質的優先度）
+  const top3=data.slice().sort((a,b)=>b.score-a.score).slice(0,3).map(d=>d.name);
+  tbody.innerHTML='';
+  arr.forEach((d,i)=>{
+    const tr=document.createElement('tr');
+    if(top3.includes(d.name)) tr.className='top';
+    const pct=Math.round(d.conf*100);
+    const barW=Math.max(4,Math.round(d.score/maxScore*100));
+    const crown=top3.includes(d.name)?'<span class="crown">★</span>':'';
+    tr.innerHTML=`
+      <td class="rk">${i+1}</td>
+      <td class="tl">
+        <div class="tname">${crown}${d.name}</div>
+        <div class="sub">
+          <span class="who"><span class="dot" style="background:${MEMBER[d.who]}"></span>${d.who}</span>
+          <span class="tag" style="background:${MOSCOW[d.moscow]}">${d.moscow}</span>
+        </div>
+      </td>
+      <td class="num">${d.reach}</td>
+      <td class="num">${d.impact}</td>
+      <td class="num conf">${pct}%</td>
+      <td class="num">${d.effort}</td>
+      <td class="num score-cell">
+        <span class="score">${d.score.toFixed(1)}</span>
+        <span class="bar" style="width:${barW}%"></span>
+      </td>`;
+    tbody.appendChild(tr);
+  });
+  // header indicators
+  document.querySelectorAll('thead th').forEach(th=>{
+    const k=th.dataset.k;
+    th.classList.toggle('sorted', k===sortKey);
+    const arr=th.querySelector('.arr');
+    if(arr) arr.textContent = (k===sortKey) ? (sortDir<0?'▼':'▲') : '↕';
+  });
+}
+
+document.querySelectorAll('thead th').forEach(th=>{
+  const k=th.dataset.k;
+  if(k==='rank') return;
+  th.addEventListener('click',()=>{
+    if(sortKey===k){ sortDir*=-1; }
+    else { sortKey=k; sortDir = (k==='name')?1:-1; } // 数値は降順デフォルト
+    render();
+  });
+});
+
+render();
+</script>
+</body>
+</html>

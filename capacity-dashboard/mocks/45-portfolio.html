@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>プロジェクト・ポートフォリオ俯瞰</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480;
+    --line:#e6e9ee; --track:#eef1f5;
+    --green:#2fa66b; --yellow:#f5a623; --red:#e5484d; --bar:#3a86ff;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"tnum";
+    -webkit-font-smoothing:antialiased;line-height:1.5;
+  }
+  .tnum{font-variant-numeric:tabular-nums;}
+  .wrap{max-width:1040px;margin:0 auto;padding:28px 20px 64px;}
+
+  header.page{margin-bottom:6px;}
+  .crumb .scope{
+    display:inline-flex;align-items:center;gap:8px;
+    background:var(--card);border:1px solid var(--line);border-radius:10px;
+    padding:8px 14px;font-size:15px;font-weight:700;box-shadow:0 1px 2px rgba(20,30,50,.04);
+  }
+  h1{font-size:21px;margin:14px 0 4px;}
+  .sub{color:var(--muted);font-size:13px;margin:0;}
+  .note{margin-top:12px;font-size:12px;color:var(--muted);
+    background:#fcfcfd;border:1px dashed var(--line);border-radius:8px;padding:8px 12px;display:inline-block;}
+
+  /* summary chips */
+  .summary{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0 6px;}
+  .chip{
+    background:var(--card);border:1px solid var(--line);border-radius:10px;
+    padding:9px 14px;display:flex;align-items:center;gap:9px;font-size:13px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04);
+  }
+  .chip .dot{width:9px;height:9px;border-radius:50%;}
+  .chip b{font-size:16px;font-variant-numeric:tabular-nums;}
+  .chip .c-red{background:var(--red);} .chip .c-yellow{background:var(--yellow);} .chip .c-green{background:var(--green);}
+
+  /* toolbar */
+  .toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:16px 0 10px;font-size:12.5px;}
+  .toolbar .grp{display:flex;gap:6px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:4px;}
+  .toolbar .lab{color:var(--muted);margin-right:2px;}
+  .pill{border:1px solid transparent;background:transparent;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;color:var(--muted);}
+  .pill.on{background:#eef3ff;color:#2b5fd0;border-color:#dbe6ff;font-weight:600;}
+  .pill.fred.on{background:#fdecec;color:var(--red);border-color:#f7d4d4;}
+  .hint{color:var(--muted);font-size:12px;margin-left:auto;}
+
+  /* table */
+  .table{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 1px 2px rgba(20,30,50,.04);}
+  .row.head{display:grid;grid-template-columns:2.4fr 1.6fr 1.1fr 1fr 1.2fr;gap:14px;
+    padding:11px 18px;font-size:11.5px;color:var(--muted);background:#fbfcfd;border-bottom:1px solid var(--line);}
+  .row{display:grid;grid-template-columns:2.4fr 1.6fr 1.1fr 1fr 1.2fr;gap:14px;
+    align-items:center;padding:15px 18px;border-bottom:1px solid var(--line);}
+  .row:last-child{border-bottom:none;}
+  .row.risk{background:linear-gradient(90deg,#fff6f6,#fff 60%);}
+  .row.risk{border-left:3px solid var(--red);padding-left:15px;}
+
+  .pj{display:flex;align-items:center;gap:11px;}
+  .pj .sig{font-size:15px;line-height:1;}
+  .pj .name{font-weight:700;font-size:14.5px;}
+  .pj .state{font-size:11.5px;color:var(--muted);margin-top:1px;}
+  .pj .state.red{color:var(--red);font-weight:600;}
+  .pj .state.yellow{color:#b9831b;font-weight:600;}
+  .pj .state.green{color:var(--green);}
+
+  .prog{display:flex;flex-direction:column;gap:5px;}
+  .bar-wrap{height:9px;background:var(--track);border-radius:999px;overflow:hidden;}
+  .bar-fill{height:100%;border-radius:999px;}
+  .prog .pct{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;}
+  .prog .pct b{color:var(--ink);font-size:13px;}
+
+  .due{font-size:13px;font-variant-numeric:tabular-nums;}
+  .due .sm{display:block;font-size:11px;color:var(--muted);}
+  .due.urgent{color:var(--red);font-weight:700;}
+  .due.soon{color:#b9831b;font-weight:600;}
+
+  .rem{font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;}
+
+  .lead{display:flex;align-items:center;gap:8px;font-size:13px;}
+  .ava{width:24px;height:24px;border-radius:50%;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;}
+
+  .foot{margin-top:14px;font-size:12px;color:var(--muted);display:flex;gap:18px;flex-wrap:wrap;}
+  .foot .lg{display:inline-flex;align-items:center;gap:6px;}
+  .foot .lg i{width:9px;height:9px;border-radius:50%;display:inline-block;}
+
+  @media(max-width:760px){
+    .row.head{display:none;}
+    .row{grid-template-columns:1fr 1fr;row-gap:12px;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="page">
+    <div class="crumb"><span class="scope">全プロジェクト</span></div>
+    <h1>プロジェクト・ポートフォリオ俯瞰</h1>
+    <p class="sub">基準日 2026/6/4(木) ・ 4プロジェクト横断 ・ 健全性 / 進捗 / 締切 / 残工数 / リード</p>
+    <div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</div>
+  </header>
+
+  <div class="summary">
+    <div class="chip"><span class="dot c-red"></span>遅延リスク <b class="tnum">1</b></div>
+    <div class="chip"><span class="dot c-yellow"></span>要注意 <b class="tnum">1</b></div>
+    <div class="chip"><span class="dot c-green"></span>順調 <b class="tnum">2</b></div>
+    <div class="chip">合計残工数 <b class="tnum">84h</b></div>
+  </div>
+
+  <div class="toolbar">
+    <div class="grp">
+      <span class="lab" style="padding-left:6px">並び替え</span>
+      <button class="pill on">健全性</button>
+      <button class="pill">締切</button>
+      <button class="pill">進捗</button>
+    </div>
+    <div class="grp">
+      <span class="lab" style="padding-left:6px">表示</span>
+      <button class="pill on">すべて</button>
+      <button class="pill fred">🔴 遅延のみ</button>
+      <button class="pill">🟡 要注意</button>
+    </div>
+    <span class="hint">健全性の悪い順に表示中（遅延リスクを最上段）</span>
+  </div>
+
+  <div class="table">
+    <div class="row head">
+      <div>プロジェクト / 状態</div>
+      <div>進捗</div>
+      <div>締切</div>
+      <div>残工数</div>
+      <div>リード</div>
+    </div>
+
+    <!-- 1. 遅延リスク（赤・最上段） -->
+    <div class="row risk">
+      <div class="pj">
+        <span class="sig">🔴</span>
+        <div>
+          <div class="name">新ダッシュボード機能</div>
+          <div class="state red">遅延リスク ・ ペース不足</div>
+        </div>
+      </div>
+      <div class="prog">
+        <div class="bar-wrap"><div class="bar-fill" style="width:58%;background:var(--red)"></div></div>
+        <div class="pct"><b>58%</b> 完了</div>
+      </div>
+      <div class="due soon">6/13<span class="sm">あと9日</span></div>
+      <div class="rem tnum">42h</div>
+      <div class="lead"><span class="ava" style="background:#e5772d">森</span>森田</div>
+    </div>
+
+    <!-- 2. 要注意（黄） -->
+    <div class="row">
+      <div class="pj">
+        <span class="sig">🟡</span>
+        <div>
+          <div class="name">LP制作</div>
+          <div class="state yellow">田中1人依存 ・ 属人リスク</div>
+        </div>
+      </div>
+      <div class="prog">
+        <div class="bar-wrap"><div class="bar-fill" style="width:30%;background:var(--yellow)"></div></div>
+        <div class="pct"><b>30%</b> 完了</div>
+      </div>
+      <div class="due soon">6/12<span class="sm">あと8日</span></div>
+      <div class="rem tnum">18h</div>
+      <div class="lead"><span class="ava" style="background:#3a86ff">田</span>田中</div>
+    </div>
+
+    <!-- 3. 順調（緑） -->
+    <div class="row">
+      <div class="pj">
+        <span class="sig">🟢</span>
+        <div>
+          <div class="name">認証基盤刷新</div>
+          <div class="state green">順調</div>
+        </div>
+      </div>
+      <div class="prog">
+        <div class="bar-wrap"><div class="bar-fill" style="width:80%;background:var(--green)"></div></div>
+        <div class="pct"><b>80%</b> 完了</div>
+      </div>
+      <div class="due">6/20<span class="sm">あと16日</span></div>
+      <div class="rem tnum">20h</div>
+      <div class="lead"><span class="ava" style="background:#2fa66b">佐</span>佐藤</div>
+    </div>
+
+    <!-- 4. ほぼ完了（緑） -->
+    <div class="row">
+      <div class="pj">
+        <span class="sig">🟢</span>
+        <div>
+          <div class="name">データ移行</div>
+          <div class="state green">ほぼ完了</div>
+        </div>
+      </div>
+      <div class="prog">
+        <div class="bar-wrap"><div class="bar-fill" style="width:95%;background:var(--green)"></div></div>
+        <div class="pct"><b>95%</b> 完了</div>
+      </div>
+      <div class="due soon">6/8<span class="sm">あと4日</span></div>
+      <div class="rem tnum">4h</div>
+      <div class="lead"><span class="ava" style="background:#b657d6">鈴</span>鈴木</div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span class="lg"><i style="background:var(--red)"></i>遅延リスク（締切に対しペース不足）</span>
+    <span class="lg"><i style="background:var(--yellow)"></i>要注意（属人化など）</span>
+    <span class="lg"><i style="background:var(--green)"></i>順調 / 完了間近</span>
+  </div>
+
+</div>
+</body>
+</html>

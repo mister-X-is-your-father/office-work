@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>今日のトリアージ — 優先順ToDoリスト</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --red:#e5484d; --amber:#f5a623; --green:#2fa66b; --block:#9aa3af;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+    --p-backend:#3a86ff; --p-frontend:#2fa66b; --p-qa:#b657d6; --p-common:#8a93a0;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    background:var(--bg); color:var(--ink); line-height:1.5;
+    font-feature-settings:"tnum"; -webkit-font-smoothing:antialiased;
+    padding:24px; max-width:920px; margin:0 auto;
+  }
+  .tnum{font-variant-numeric:tabular-nums}
+  header{margin-bottom:18px}
+  .titlerow{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+  h1{font-size:20px;font-weight:700}
+  .daynav{display:inline-flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);
+    border-radius:10px;padding:5px 10px;font-size:13px;font-weight:600}
+  .daynav button{border:none;background:none;color:var(--muted);font-size:15px;cursor:pointer;padding:0 4px;line-height:1}
+  .daynav .today{color:var(--ink)}
+  .daynav .badge{background:var(--track);color:var(--muted);font-size:11px;padding:1px 7px;border-radius:20px;font-weight:600}
+  .note{font-size:11.5px;color:var(--muted);margin-top:2px}
+  /* progress strip */
+  .progress{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);
+    border-radius:12px;padding:12px 16px;margin:16px 0 8px}
+  .progress .ptxt{font-size:13px;font-weight:600}
+  .progress .ptxt b{font-size:16px}
+  .ptrack{flex:1;height:8px;background:var(--track);border-radius:5px;overflow:hidden}
+  .ptrack i{display:block;height:100%;width:0;background:var(--green);border-radius:5px}
+  .progress .pct{font-size:13px;font-weight:700;color:var(--muted);min-width:38px;text-align:right}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);margin:6px 2px 14px}
+  .legend span{display:inline-flex;align-items:center;gap:5px}
+  .legend .sw{width:10px;height:10px;border-radius:3px}
+  .scorehint{font-size:11.5px;color:var(--muted);background:#f9fafb;border:1px solid var(--line);border-radius:9px;
+    padding:8px 12px;margin-bottom:14px;line-height:1.6}
+  .scorehint b{color:var(--ink)}
+  /* list */
+  .list{display:flex;flex-direction:column;gap:9px}
+  .item{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;
+    display:grid;grid-template-columns:34px 22px 1fr auto;gap:12px;align-items:center;
+    box-shadow:0 1px 2px rgba(29,36,48,.04);position:relative;overflow:hidden}
+  .item .edge{position:absolute;left:0;top:0;bottom:0;width:4px}
+  .item.t1{border-color:#f3c4c5;box-shadow:0 2px 9px rgba(229,72,77,.12)}
+  .item.t1 .edge{background:var(--red)} .item.t2 .edge{background:var(--amber)}
+  .item.t-green .edge{background:var(--green)} .item.t-block .edge{background:var(--block)}
+  .rank{font-size:19px;font-weight:800;color:var(--muted);text-align:center;font-variant-numeric:tabular-nums}
+  .item.t1 .rank{color:var(--red)}
+  .item.t-block{background:repeating-linear-gradient(45deg,#fafbfc,#fafbfc 9px,#f1f3f6 9px,#f1f3f6 18px);
+    border-style:dashed}
+  .item.t-block .rank{color:var(--block)}
+  .check{width:21px;height:21px;border:2px solid var(--line);border-radius:6px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;transition:all .12s;background:#fff}
+  .check:hover{border-color:var(--green)}
+  .check.lock{border-color:var(--red);background:#fdeaea;cursor:not-allowed;border-radius:50%}
+  .check.lock::after{content:"!";color:var(--red);font-weight:800;font-size:13px}
+  .check.dis{border-color:var(--line);background:var(--track);cursor:not-allowed}
+  .check.dis::after{content:"⛔";font-size:11px}
+  .body .nm{font-size:14.5px;font-weight:700;margin-bottom:5px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .tag{font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;letter-spacing:.02em}
+  .tag.fixed{background:#fdeaea;color:#c0353a}
+  .tag.move{background:#e7f5ee;color:#1f8b56}
+  .tag.block{background:#eef1f5;color:#6b7480}
+  .meta{display:flex;flex-wrap:wrap;gap:7px;font-size:11.5px;color:var(--muted)}
+  .meta .chip{display:inline-flex;align-items:center;gap:5px;background:var(--track);border-radius:7px;padding:2px 8px;font-weight:500}
+  .meta .chip .who{width:7px;height:7px;border-radius:50%}
+  .meta .chip.proj{background:#fff;border:1px solid var(--line)}
+  .meta .chip.proj .pb{width:7px;height:7px;border-radius:2px}
+  .meta .prio{font-weight:700}
+  .meta .prio.max{color:var(--red)} .meta .prio.high{color:#b87410} .meta .prio.mid{color:var(--muted)} .meta .prio.low{color:#9aa3af}
+  /* right side: slack + score */
+  .right{display:flex;flex-direction:column;align-items:flex-end;gap:5px;min-width:118px}
+  .slack{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600}
+  .slack .lab{color:var(--muted)}
+  .slack .bar{width:54px;height:6px;border-radius:4px;background:var(--track);overflow:hidden}
+  .slack .bar i{display:block;height:100%;border-radius:4px}
+  .slack .d{min-width:30px;text-align:right;font-variant-numeric:tabular-nums}
+  .score{font-size:11px;color:var(--muted);font-weight:600}
+  .score b{font-size:16px;color:var(--ink);font-variant-numeric:tabular-nums}
+  .item.t1 .score b{color:var(--red)}
+  .deadline{font-size:11px;font-weight:600}
+  .deadline.urgent{color:var(--red)} .deadline.soon{color:#b87410} .deadline.calm{color:var(--green)} .deadline.na{color:var(--muted)}
+  @media(max-width:680px){
+    .item{grid-template-columns:30px 20px 1fr;}
+    .right{grid-column:1/-1;flex-direction:row;justify-content:flex-end;align-items:center;gap:14px;padding-top:4px;border-top:1px dashed var(--line)}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="titlerow">
+    <h1>今日のトリアージ — 優先順ToDoリスト</h1>
+    <div class="daynav">
+      <button aria-label="前日">‹</button>
+      <span class="today tnum">6/4(木)</span>
+      <span class="badge">今日</span>
+      <button aria-label="翌日">›</button>
+    </div>
+  </div>
+  <p class="note">※ モック（サンプルデータ）。本番は Vikunja API（優先度・期日・依存・ブロック）から自動算出。</p>
+</header>
+
+<div class="progress">
+  <span class="ptxt"><b class="tnum">0</b> / 6 件 着手可</span>
+  <div class="ptrack"><i style="width:0%"></i></div>
+  <span class="pct tnum">0%</span>
+</div>
+<div class="legend">
+  <span><span class="sw" style="background:var(--red)"></span>動かせない（slack 0）</span>
+  <span><span class="sw" style="background:var(--amber)"></span>今日やるべき</span>
+  <span><span class="sw" style="background:var(--green)"></span>ずらせる（余裕あり）</span>
+  <span><span class="sw" style="background:var(--block)"></span>ブロック中（着手不可）</span>
+</div>
+<div class="scorehint">
+  並び順 = <b>優先度スコア</b>（優先度 × 締切の切迫度）。<b>上から手をつける順</b>です。
+  スコア = 優先度ウェイト ＋ 締切まで近いほど加点（slack=締切までの余裕日数。<b>0なら固定</b>）。ブロック中は着手不可のため末尾。
+</div>
+
+<div class="list">
+
+  <!-- 1 -->
+  <div class="item t1">
+    <span class="edge"></span>
+    <div class="rank tnum">1</div>
+    <div class="check lock" title="固定タスク・最優先"></div>
+    <div class="body">
+      <div class="nm">ログイン障害対応 <span class="tag fixed">動かせない</span></div>
+      <div class="meta">
+        <span class="prio max">優先度 最高</span>
+        <span class="chip"><span class="who" style="background:var(--m-morita)"></span>森田</span>
+        <span class="chip proj"><span class="pb" style="background:var(--p-backend)"></span>Backend</span>
+        <span class="chip">⏱ 2h</span>
+        <span class="deadline urgent">⏰ 今日中・本番障害</span>
+      </div>
+    </div>
+    <div class="right">
+      <div class="slack"><span class="lab">slack</span><span class="bar"><i style="width:100%;background:var(--red)"></i></span><span class="d tnum" style="color:var(--red)">0d</span></div>
+      <div class="score">score <b class="tnum">98</b></div>
+    </div>
+  </div>
+
+  <!-- 2 -->
+  <div class="item t2">
+    <span class="edge"></span>
+    <div class="rank tnum">2</div>
+    <div class="check" title="チェックで消し込み"></div>
+    <div class="body">
+      <div class="nm">DBマイグレーション <span class="tag move">今日やるべき</span></div>
+      <div class="meta">
+        <span class="prio high">優先度 高</span>
+        <span class="chip"><span class="who" style="background:var(--m-morita)"></span>森田</span>
+        <span class="chip proj"><span class="pb" style="background:var(--p-backend)"></span>Backend</span>
+        <span class="chip">⏱ 3h</span>
+        <span class="deadline soon tnum">📅 締切 6/5（明日）</span>
+      </div>
+    </div>
+    <div class="right">
+      <div class="slack"><span class="lab">slack</span><span class="bar"><i style="width:28%;background:var(--amber)"></i></span><span class="d tnum" style="color:#b87410">1d</span></div>
+      <div class="score">score <b class="tnum">81</b></div>
+    </div>
+  </div>
+
+  <!-- 3 -->
+  <div class="item t-green">
+    <span class="edge"></span>
+    <div class="rank tnum">3</div>
+    <div class="check"></div>
+    <div class="body">
+      <div class="nm">ダッシュ画面実装（続き） <span class="tag move" style="background:#e7f5ee;color:#1f8b56">ずらせる</span></div>
+      <div class="meta">
+        <span class="prio mid">優先度 中</span>
+        <span class="chip"><span class="who" style="background:var(--m-tanaka)"></span>田中</span>
+        <span class="chip proj"><span class="pb" style="background:var(--p-frontend)"></span>Frontend</span>
+        <span class="chip">⏱ 4h</span>
+        <span class="deadline calm tnum">📅 締切 6/9</span>
+      </div>
+    </div>
+    <div class="right">
+      <div class="slack"><span class="lab">slack</span><span class="bar"><i style="width:90%;background:var(--green)"></i></span><span class="d tnum" style="color:var(--green)">5d</span></div>
+      <div class="score">score <b class="tnum">52</b></div>
+    </div>
+  </div>
+
+  <!-- 4 -->
+  <div class="item t-green">
+    <span class="edge"></span>
+    <div class="rank tnum">4</div>
+    <div class="check"></div>
+    <div class="body">
+      <div class="nm">API設計レビュー <span class="tag move" style="background:#e7f5ee;color:#1f8b56">ずらせる</span></div>
+      <div class="meta">
+        <span class="prio mid">優先度 中</span>
+        <span class="chip"><span class="who" style="background:var(--m-morita)"></span>森田</span>
+        <span class="chip proj"><span class="pb" style="background:var(--p-common)"></span>共通</span>
+        <span class="chip">⏱ 1h</span>
+        <span class="deadline na">🗓 締切なし</span>
+      </div>
+    </div>
+    <div class="right">
+      <div class="slack"><span class="lab">slack</span><span class="bar"><i style="width:100%;background:var(--green)"></i></span><span class="d" style="color:var(--green)">大</span></div>
+      <div class="score">score <b class="tnum">44</b></div>
+    </div>
+  </div>
+
+  <!-- 5 -->
+  <div class="item t-green">
+    <span class="edge"></span>
+    <div class="rank tnum">5</div>
+    <div class="check"></div>
+    <div class="body">
+      <div class="nm">設計ドキュメント整備 <span class="tag move" style="background:#e7f5ee;color:#1f8b56">ずらせる</span></div>
+      <div class="meta">
+        <span class="prio low">優先度 低</span>
+        <span class="chip"><span class="who" style="background:var(--m-suzuki)"></span>鈴木</span>
+        <span class="chip proj"><span class="pb" style="background:var(--p-common)"></span>共通</span>
+        <span class="chip">⏱ 2h</span>
+        <span class="deadline na">🗓 締切なし</span>
+      </div>
+    </div>
+    <div class="right">
+      <div class="slack"><span class="lab">slack</span><span class="bar"><i style="width:100%;background:var(--green)"></i></span><span class="d" style="color:var(--green)">大</span></div>
+      <div class="score">score <b class="tnum">26</b></div>
+    </div>
+  </div>
+
+  <!-- 6 -->
+  <div class="item t-green">
+    <span class="edge"></span>
+    <div class="rank tnum">6</div>
+    <div class="check"></div>
+    <div class="body">
+      <div class="nm">リリースノート作成 <span class="tag move" style="background:#e7f5ee;color:#1f8b56">ずらせる</span></div>
+      <div class="meta">
+        <span class="prio low">優先度 低</span>
+        <span class="chip" style="font-style:italic">未アサイン</span>
+        <span class="chip proj"><span class="pb" style="background:var(--p-common)"></span>共通</span>
+        <span class="chip">⏱ 1h</span>
+        <span class="deadline calm tnum">📅 締切 6/13</span>
+      </div>
+    </div>
+    <div class="right">
+      <div class="slack"><span class="lab">slack</span><span class="bar"><i style="width:100%;background:var(--green)"></i></span><span class="d tnum" style="color:var(--green)">9d</span></div>
+      <div class="score">score <b class="tnum">19</b></div>
+    </div>
+  </div>
+
+  <!-- blocked -->
+  <div class="item t-block">
+    <span class="edge"></span>
+    <div class="rank">—</div>
+    <div class="check dis" title="ブロック中・着手不可"></div>
+    <div class="body">
+      <div class="nm" style="color:#5d646e">認証フロー実装 <span class="tag block">⛔ ブロック中</span></div>
+      <div class="meta">
+        <span class="prio high">優先度 高</span>
+        <span class="chip"><span class="who" style="background:var(--m-sato)"></span>佐藤</span>
+        <span class="chip proj"><span class="pb" style="background:var(--p-backend)"></span>Backend</span>
+        <span class="chip">⏱ 5h</span>
+        <span class="deadline soon tnum">📅 締切 6/6</span>
+        <span style="color:var(--block);font-weight:600">外部API待ち・今日は進められない</span>
+      </div>
+    </div>
+    <div class="right">
+      <div class="slack"><span class="lab" style="color:var(--block)">着手不可</span></div>
+      <div class="score" style="color:var(--block)">score <b style="color:var(--block)">—</b></div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

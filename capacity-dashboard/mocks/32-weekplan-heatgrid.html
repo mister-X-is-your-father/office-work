@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>週プランニング — ヒートグリッド型</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee;
+    --track:#eef1f5; --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0;
+    --caprule:#9aa3af; --amber:#f5a623;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"palt"; -webkit-font-smoothing:antialiased;
+    font-variant-numeric:tabular-nums; padding:22px 26px 60px;
+  }
+  .wrap{max-width:880px;margin:0 auto;}
+  header.top{display:flex;align-items:flex-end;gap:18px;flex-wrap:wrap;margin-bottom:6px;}
+  header.top h1{font-size:19px;margin:0;font-weight:700;letter-spacing:.02em;}
+  .phase{font-size:12px;color:var(--muted);font-weight:600;}
+  .weeknav{display:flex;align-items:center;gap:10px;margin-left:auto;
+    background:var(--card);border:1px solid var(--line);border-radius:10px;padding:6px 12px;}
+  .weeknav button{border:none;background:transparent;color:var(--muted);font-size:15px;cursor:pointer;
+    padding:2px 6px;border-radius:6px;line-height:1;}
+  .weeknav button:hover{background:var(--track);color:var(--ink);}
+  .weeknav .lbl{font-size:13px;font-weight:600;}
+  .note{font-size:11.5px;color:var(--muted);margin:6px 0 18px;}
+
+  .controls{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:12px;font-size:12px;color:var(--muted);}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--card);}
+  .seg button{border:none;background:transparent;padding:5px 12px;font-size:12px;cursor:pointer;color:var(--muted);font-weight:600;}
+  .seg button.on{background:var(--ink);color:#fff;}
+  .scale{display:flex;align-items:center;gap:0;margin-left:auto;}
+  .scale .lbl2{font-size:11px;color:var(--muted);margin-right:6px;}
+  .scale .gc{width:22px;height:14px;}
+  .scale .ec{width:30px;height:14px;border:1px solid var(--over);border-radius:3px;margin-left:6px;}
+  .scale .gt{font-size:10.5px;color:var(--muted);margin:0 4px;}
+
+  .gridcard{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    box-shadow:0 1px 3px rgba(20,30,50,.04);padding:16px 18px 18px;overflow-x:auto;}
+  table.heat{border-collapse:separate;border-spacing:5px;width:100%;}
+  table.heat th{font-size:12px;font-weight:600;color:var(--muted);padding:2px 0;}
+  table.heat th.day{text-align:center;}
+  table.heat th.day small{display:block;font-size:10px;font-weight:400;opacity:.8;}
+  table.heat th.today{color:var(--fill);}
+  table.heat th.corner{text-align:left;}
+  table.heat th.weekcol,table.heat th.daysum{font-size:11px;}
+  .mname{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--ink);white-space:nowrap;padding-right:6px;}
+  .mname .dot{width:11px;height:11px;border-radius:50%;flex:none;}
+
+  td.cell{position:relative;height:54px;width:88px;border-radius:9px;text-align:center;vertical-align:middle;
+    cursor:default;transition:transform .1s;}
+  td.cell:hover{transform:scale(1.04);box-shadow:0 2px 8px rgba(20,30,50,.12);z-index:2;}
+  td.cell .h{font-size:16px;font-weight:700;line-height:1;}
+  td.cell .sub{font-size:10px;margin-top:3px;opacity:.85;}
+  td.cell.over{outline:2px solid var(--over);outline-offset:-2px;}
+  td.cell.over .badge{position:absolute;top:3px;right:5px;font-size:8.5px;background:var(--over);color:#fff;
+    border-radius:4px;padding:0 4px;font-weight:700;}
+
+  td.weeksum{width:104px;text-align:center;vertical-align:middle;}
+  .wbar{background:var(--track);border-radius:6px;height:8px;overflow:hidden;margin:5px 4px 0;position:relative;}
+  .wbar .wfill{height:100%;border-radius:6px;}
+  td.weeksum .wt{font-size:13px;font-weight:700;}
+  td.weeksum .wp{font-size:10px;color:var(--muted);}
+
+  tr.daysum td{padding-top:8px;}
+  tr.daysum .scell{text-align:center;font-size:11.5px;font-weight:600;color:var(--muted);
+    border-top:1px solid var(--line);padding-top:9px;}
+  tr.daysum .scell b{display:block;font-size:14px;color:var(--ink);}
+  tr.daysum .scell.slack b{color:var(--free);}
+  tr.daysum .scell.tight b{color:var(--amber);}
+
+  .footnote{font-size:11px;color:var(--muted);margin-top:14px;line-height:1.6;}
+  .footnote b{color:var(--ink);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <div class="phase">② 計画 ／ 週プランニング</div>
+      <h1>ヒートグリッド — 空いてる人 × 日が一目で</h1>
+    </div>
+    <div class="weeknav">
+      <button title="前の週">‹</button>
+      <span class="lbl">6/1〜6/5（今週）</span>
+      <button title="次の週">›</button>
+    </div>
+  </header>
+  <p class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</p>
+
+  <div class="controls">
+    <span>セル表示:</span>
+    <div class="seg" id="modeseg">
+      <button class="on" data-mode="assign">アサインh</button>
+      <button data-mode="free">残りh（空き）</button>
+    </div>
+    <div class="scale">
+      <span class="lbl2">0h</span>
+      <span class="gc" style="background:#eef3f8;border-radius:3px 0 0 3px"></span>
+      <span class="gc" style="background:#bcd5f5"></span>
+      <span class="gc" style="background:#7fb0ee"></span>
+      <span class="gc" style="background:#3a86ff"></span>
+      <span class="gc" style="background:#1f5fd0;border-radius:0 3px 3px 0"></span>
+      <span class="gt">8h</span>
+      <span class="ec" style="background:#fce8e9"></span>
+      <span class="gt" style="color:var(--over)">超過</span>
+    </div>
+  </div>
+
+  <div class="gridcard">
+    <table class="heat" id="heat">
+      <thead>
+        <tr>
+          <th class="corner">メンバー</th>
+          <th class="day today">月<small>6/1</small></th>
+          <th class="day">火<small>6/2</small></th>
+          <th class="day">水<small>6/3</small></th>
+          <th class="day">木<small>6/4</small></th>
+          <th class="day">金<small>6/5</small></th>
+          <th class="weekcol">週合計 / 40h</th>
+        </tr>
+      </thead>
+      <tbody id="body"></tbody>
+      <tfoot>
+        <tr class="daysum">
+          <td class="scell" style="text-align:left;border-top:1px solid var(--line)">日次チーム合計<br><span style="font-weight:400;font-size:10px">容量32h/日</span></td>
+          <td class="scell"><b>22h</b>10h空</td>
+          <td class="scell"><b>23h</b>9h空</td>
+          <td class="scell"><b>20h</b>12h空</td>
+          <td class="scell tight"><b>24h</b>8h空</td>
+          <td class="scell slack"><b>12h</b>20h空</td>
+          <td class="scell"><b>101h</b><span style="font-weight:400">/160h</span></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <p class="footnote">
+    薄いセルほど空きが大きい。<b>田中</b>（火6/水2木4金0）と<b>鈴木</b>（全日2〜3h）は広く空いており、未アサイン分の受け皿になる。<br>
+    <b>森田 木6/4</b> は <b style="color:var(--over)">10h で +2h 超過</b>（赤枠）。<b>金曜</b>は列全体が薄く、チームとして 20h の余裕。
+  </p>
+</div>
+
+<script>
+  const members=[
+    {key:'morita',name:'森田',color:'#e5772d', days:[8,6,8,10,4], week:36},
+    {key:'tanaka',name:'田中',color:'#3a86ff', days:[4,6,2,4,0], week:16},
+    {key:'sato',  name:'佐藤',color:'#2fa66b', days:[8,8,8,8,8], week:40},
+    {key:'suzuki',name:'鈴木',color:'#b657d6', days:[2,3,2,2,0], week:9},
+  ];
+  const CAP=8;
+  // 連続スケール: 0h薄→8h濃。超過は赤系。
+  function bg(h){
+    if(h>CAP) return '#fce8e9';
+    const t=h/CAP; // 0..1
+    // 薄青 #eef3f8 → 濃青 #1f5fd0
+    const c0=[238,243,248], c1=[31,95,208];
+    const r=Math.round(c0[0]+(c1[0]-c0[0])*t);
+    const g=Math.round(c0[1]+(c1[1]-c0[1])*t);
+    const b=Math.round(c0[2]+(c1[2]-c0[2])*t);
+    return `rgb(${r},${g},${b})`;
+  }
+  function fg(h){
+    if(h>CAP) return '#b3262b';
+    return h/CAP>0.5 ? '#fff' : '#27405f';
+  }
+
+  let mode='assign';
+  const body=document.getElementById('body');
+  function render(){
+    body.innerHTML='';
+    members.forEach(m=>{
+      const tr=document.createElement('tr');
+      const th=document.createElement('th');
+      th.innerHTML=`<div class="mname"><span class="dot" style="background:${m.color}"></span>${m.name}</div>`;
+      tr.appendChild(th);
+      m.days.forEach((h,i)=>{
+        const td=document.createElement('td');
+        td.className='cell'+(h>CAP?' over':'');
+        td.style.background=bg(h);
+        td.style.color=fg(h);
+        const free=Math.max(0,CAP-h);
+        const shown = mode==='assign' ? `${h}h` : (h>CAP? `+${h-CAP}h` : `${free}h`);
+        const sub = mode==='assign'
+          ? (h>CAP?`残-${h-CAP}h`:`残${free}h`)
+          : (h>CAP?'超過':'空き');
+        td.innerHTML = (h>CAP?'<span class="badge">超過</span>':'')+
+          `<div class="h">${shown}</div><div class="sub">${sub}</div>`;
+        tr.appendChild(td);
+      });
+      // week sum
+      const ws=document.createElement('td');
+      ws.className='weeksum';
+      const pct=Math.round(m.week/40*100);
+      const over=m.week>40;
+      const barcol = over?'var(--over)': pct>=95?'var(--full)': 'var(--fill)';
+      ws.innerHTML=`<div class="wt">${m.week}h</div><div class="wp">${pct}%</div>
+        <div class="wbar"><div class="wfill" style="width:${Math.min(100,pct)}%;background:${barcol}"></div></div>`;
+      tr.appendChild(ws);
+      body.appendChild(tr);
+    });
+  }
+  render();
+
+  document.querySelectorAll('#modeseg button').forEach(b=>{
+    b.addEventListener('click',()=>{
+      document.querySelectorAll('#modeseg button').forEach(x=>x.classList.remove('on'));
+      b.classList.add('on'); mode=b.dataset.mode; render();
+    });
+  });
+</script>
+</body>
+</html>

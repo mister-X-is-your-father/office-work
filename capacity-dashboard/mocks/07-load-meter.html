@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>キャパダッシュボード — ロードメーター</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0; --cap:#9aa3af;
+    --font:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{background:var(--bg); color:var(--ink); font-family:var(--font); -webkit-font-smoothing:antialiased; padding:0 16px 64px;}
+  .tnum{font-variant-numeric:tabular-nums;}
+  header.app{max-width:820px; margin:0 auto; padding:26px 4px 14px;}
+  header.app h1{font-size:20px; font-weight:700; margin:0 0 4px; letter-spacing:.02em;}
+  .daynav{display:flex; align-items:center; gap:10px; margin:14px 0 6px;}
+  .daynav button{border:1px solid var(--line); background:var(--card); color:var(--ink); width:34px; height:34px; border-radius:9px; font-size:16px; cursor:pointer; line-height:1;}
+  .daynav button:hover{background:#f0f2f6;}
+  .daynav .today{font-size:16px; font-weight:700; padding:0 6px;}
+  .daynav .today small{font-weight:600; color:var(--free); margin-left:8px; font-size:12px; background:#eaf7f0; padding:3px 8px; border-radius:20px;}
+  .note{font-size:11.5px; color:var(--muted); margin:8px 0 0;}
+
+  .panel{max-width:820px; margin:18px auto 0; background:var(--card); border:1px solid var(--line); border-radius:14px; box-shadow:0 1px 2px rgba(20,30,50,.04); overflow:hidden;}
+  .panel .head{display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--line);}
+  .panel .head .title{font-size:13px; font-weight:700;}
+  .panel .head .sum{font-size:12px; color:var(--muted);}
+  .panel .head .sum b{color:var(--ink);}
+  .panel .head .sum .free{color:var(--free); font-weight:700;}
+
+  /* axis ruler */
+  .ruler{position:relative; height:18px; margin:6px 18px 0; }
+  .ruler .tick{position:absolute; top:0; font-size:10px; color:var(--muted); transform:translateX(-50%);}
+  .ruler .capline{position:absolute; top:14px; bottom:-6px; width:2px; background:var(--cap);}
+
+  .rows{padding:8px 18px 16px;}
+  .row{display:grid; grid-template-columns:78px 1fr 96px; align-items:center; gap:14px; padding:11px 0; border-bottom:1px solid #f1f3f6;}
+  .row:last-child{border-bottom:none;}
+  .who{display:flex; align-items:center; gap:8px; min-width:0;}
+  .who .name{font-size:14px; font-weight:700; white-space:nowrap;}
+  .who .swatch{width:9px; height:9px; border-radius:50%; flex:none;}
+
+  .meterwrap{position:relative;}
+  /* capacity zone (0..8h scaled to 80% of the bar; remaining 20% is overflow headroom) */
+  .meter{position:relative; height:26px; border-radius:8px; background:var(--track); overflow:hidden; display:flex;}
+  .meter .seg{height:100%;}
+  .freecap{position:absolute; top:0; bottom:0; background:repeating-linear-gradient(135deg,#e9f6ef 0 6px,#dff0e6 6px 12px);}
+  .capmark{position:absolute; top:-4px; bottom:-4px; width:2px; background:var(--cap); z-index:3;}
+  .capmark::after{content:'8h'; position:absolute; top:-15px; left:50%; transform:translateX(-50%); font-size:9.5px; color:var(--cap); font-weight:700;}
+  .meterlabel{position:absolute; top:50%; transform:translateY(-50%); font-size:11px; font-weight:700; z-index:4; pointer-events:none;}
+
+  .endcap{text-align:right;}
+  .endcap .val{font-size:15px; font-weight:800;}
+  .endcap .val.over{color:var(--over);}
+  .endcap .val.free{color:var(--free);}
+  .endcap .val.full{color:var(--full);}
+  .endcap .tag{font-size:10.5px; color:var(--muted); margin-top:1px;}
+
+  .legend{max-width:820px; margin:18px auto 0; display:flex; gap:16px; flex-wrap:wrap; font-size:11.5px; color:var(--muted); align-items:center;}
+  .legend .li{display:flex; align-items:center; gap:6px;}
+  .legend .sw{width:11px; height:11px; border-radius:3px;}
+  .legend .swfree{width:14px; height:11px; border-radius:3px; background:repeating-linear-gradient(135deg,#e9f6ef 0 4px,#dff0e6 4px 8px);}
+</style>
+</head>
+<body>
+  <header class="app">
+    <h1>キャパダッシュボード — 今日の空き容量</h1>
+    <div class="daynav">
+      <button aria-label="前日">‹</button>
+      <span class="today tnum">6/4(木) <small>今日</small></span>
+      <button aria-label="翌日">›</button>
+    </div>
+    <p class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。 ／ 容量 8h/人・日。緑キャップが「あと振れる時間」。</p>
+  </header>
+
+  <section class="panel">
+    <div class="head">
+      <span class="title">メンバー別ロードメーター</span>
+      <span class="sum tnum">チーム <b>24/32h</b> (75%) ・ <span class="free">空き 8h</span></span>
+    </div>
+    <div class="ruler" id="ruler"></div>
+    <div class="rows" id="rows"></div>
+  </section>
+
+  <div class="legend">
+    <span class="li"><span class="sw" style="background:var(--fill);"></span>容量内の稼働</span>
+    <span class="li"><span class="sw" style="background:var(--over);"></span>超過</span>
+    <span class="li"><span class="swfree"></span>空き（振れる）</span>
+    <span class="li"><span class="sw" style="background:var(--full);"></span>満（ちょうど）</span>
+    <span class="li" style="margin-left:auto;"><span class="sw" style="background:var(--cap);"></span>容量線 8h</span>
+  </div>
+
+<script>
+const CAP = 8;
+const AXIS_MAX = 10;            // bar spans 0..10h
+const CAP_PCT = CAP/AXIS_MAX*100; // 80% => position of capacity line
+const PROJ = {Backend:'#3a86ff', Frontend:'#2fa66b', QA:'#b657d6', '共通':'#8a93a0'};
+const people = [
+  {name:'森田', color:'#e5772d', tasks:[{n:'API設計',h:4,p:'Backend'},{n:'DBマイグレ',h:3,p:'Backend'},{n:'PRレビュー',h:3,p:'共通'}]},
+  {name:'佐藤', color:'#2fa66b', tasks:[{n:'認証フロー実装',h:5,p:'Backend'},{n:'結合テスト',h:3,p:'QA'}]},
+  {name:'田中', color:'#3a86ff', tasks:[{n:'ダッシュ画面実装',h:4,p:'Frontend'}]},
+  {name:'鈴木', color:'#b657d6', tasks:[{n:'設計ドキュメント',h:2,p:'共通'}]},
+];
+people.forEach(p=>{ p.total = p.tasks.reduce((s,t)=>s+t.h,0); p.free = CAP - p.total; });
+// sort by free desc so idle members surface, but keep overloaded visible at bottom? requirement: surface "振れる人". Sort free desc.
+people.sort((a,b)=> b.free - a.free);
+
+// build ruler
+const ruler = document.getElementById('ruler');
+for(let h=0; h<=AXIS_MAX; h+=2){
+  const t=document.createElement('span'); t.className='tick'; t.textContent=h+'h';
+  t.style.left=(h/AXIS_MAX*100)+'%'; ruler.appendChild(t);
+}
+const cl=document.createElement('span'); cl.className='capline'; cl.style.left=CAP_PCT+'%'; ruler.appendChild(cl);
+
+const rows = document.getElementById('rows');
+people.forEach(p=>{
+  const over = p.total>CAP, full=p.total===CAP;
+  // build filled segments (within axis) for each task, scaled to axis
+  let acc=0, segs='';
+  p.tasks.forEach(t=>{
+    const w = t.h/AXIS_MAX*100;
+    // overflow portion shown red
+    const startAfterCap = acc >= CAP;
+    let color = PROJ[t.p];
+    segs += `<div class="seg" style="width:${w}%;background:${color}" title="${t.n} ${t.h}h"></div>`;
+    acc+=t.h;
+  });
+  // overlay a red wash over overflow region
+  let overlay='';
+  if(over){
+    const ovStart=CAP_PCT, ovW=(p.total-CAP)/AXIS_MAX*100;
+    overlay=`<div class="seg" style="position:absolute;left:${ovStart}%;width:${ovW}%;top:0;bottom:0;background:var(--over);z-index:2;"></div>`;
+  }
+  // free cap (hatched) from total..cap
+  let freeCap='';
+  if(!over && !full){
+    const fStart=p.total/AXIS_MAX*100, fW=(CAP-p.total)/AXIS_MAX*100;
+    freeCap=`<div class="freecap" style="left:${fStart}%;width:${fW}%;"></div>
+             <div class="meterlabel free" style="left:${fStart+fW/2}%;transform:translate(-50%,-50%);color:var(--free);">あと${p.free}h</div>`;
+  }
+
+  let valClass, valText, tag;
+  if(over){ valClass='over'; valText='+'+(p.total-CAP)+'h'; tag='超過'; }
+  else if(full){ valClass='full'; valText='0h'; tag='ちょうど'; }
+  else { valClass='free'; valText=p.free+'h'; tag='空き'; }
+
+  const row=document.createElement('div'); row.className='row';
+  row.innerHTML=`
+    <div class="who"><span class="swatch" style="background:${p.color}"></span><span class="name">${p.name}</span></div>
+    <div class="meterwrap">
+      <div class="meter">${segs}${freeCap}${overlay}</div>
+      <div class="capmark" style="left:${CAP_PCT}%;"></div>
+    </div>
+    <div class="endcap"><div class="val ${valClass} tnum">${valText}</div><div class="tag">${tag}・稼働${p.total}h</div></div>
+  `;
+  rows.appendChild(row);
+});
+</script>
+</body>
+</html>

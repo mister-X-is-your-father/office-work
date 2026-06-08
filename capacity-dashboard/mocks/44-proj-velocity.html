@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ベロシティ / スループット — 新ダッシュボード機能</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480;
+    --line:#e6e9ee; --track:#eef1f5;
+    --green:#2fa66b; --yellow:#f5a623; --red:#e5484d;
+    --bar:#3a86ff; --avg:#9aa3af;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"tnum";
+    -webkit-font-smoothing:antialiased;
+    line-height:1.55;
+  }
+  .tnum{font-variant-numeric:tabular-nums;}
+  .wrap{max-width:920px;margin:0 auto;padding:28px 20px 64px;}
+
+  /* header */
+  header.page{margin-bottom:18px;}
+  .crumb{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+  .proj-pick{
+    display:inline-flex;align-items:center;gap:8px;
+    background:var(--card);border:1px solid var(--line);border-radius:10px;
+    padding:8px 14px;font-size:15px;font-weight:600;cursor:pointer;
+    box-shadow:0 1px 2px rgba(20,30,50,.04);
+  }
+  .proj-pick .lbl{color:var(--muted);font-weight:500;font-size:12.5px;}
+  .proj-pick .caret{color:var(--muted);font-size:11px;}
+  h1{font-size:21px;margin:14px 0 4px;letter-spacing:.01em;}
+  .sub{color:var(--muted);font-size:13px;margin:0;}
+  .note{
+    margin-top:12px;font-size:12px;color:var(--muted);
+    background:#fcfcfd;border:1px dashed var(--line);border-radius:8px;
+    padding:8px 12px;display:inline-block;
+  }
+
+  /* cards grid */
+  .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:20px 0;}
+  .stat{
+    background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:14px 15px;box-shadow:0 1px 2px rgba(20,30,50,.04);
+  }
+  .stat .k{font-size:11.5px;color:var(--muted);margin-bottom:6px;}
+  .stat .v{font-size:24px;font-weight:700;letter-spacing:-.01em;}
+  .stat .v small{font-size:13px;font-weight:600;color:var(--muted);margin-left:2px;}
+  .stat .d{font-size:11.5px;margin-top:5px;}
+  .d.down{color:var(--red);}
+  .d.flat{color:var(--muted);}
+  .d.warn{color:var(--yellow);}
+
+  .panel{
+    background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:20px 22px;box-shadow:0 1px 2px rgba(20,30,50,.04);margin-bottom:16px;
+  }
+  .panel h2{font-size:15px;margin:0 0 2px;}
+  .panel .desc{font-size:12px;color:var(--muted);margin:0 0 18px;}
+
+  /* legend */
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-bottom:6px;}
+  .legend span{display:inline-flex;align-items:center;gap:6px;}
+  .swatch{width:12px;height:12px;border-radius:3px;display:inline-block;}
+  .swatch.line{height:0;width:16px;border-top:2px dashed var(--avg);border-radius:0;}
+
+  /* chart */
+  .chart{display:flex;align-items:flex-end;gap:0;}
+  .yaxis{display:flex;flex-direction:column;justify-content:space-between;
+    height:240px;padding-bottom:42px;margin-right:10px;font-size:11px;color:var(--muted);text-align:right;width:18px;}
+  .plot{position:relative;flex:1;height:240px;border-bottom:1px solid var(--line);}
+  .gridline{position:absolute;left:0;right:0;border-top:1px dashed #f0f2f6;}
+  .avgline{position:absolute;left:0;right:0;border-top:2px dashed var(--avg);z-index:3;}
+  .avgtag{position:absolute;right:0;transform:translateY(-50%);
+    background:#fff;border:1px solid var(--line);border-radius:6px;
+    font-size:10.5px;color:#5b636e;padding:1px 6px;z-index:4;white-space:nowrap;}
+  .bars{position:absolute;left:0;right:0;bottom:0;top:0;display:flex;align-items:flex-end;
+    justify-content:space-around;padding:0 12px;}
+  .col{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;width:64px;}
+  .bar{
+    width:46px;border-radius:7px 7px 0 0;position:relative;
+    transition:.2s;display:flex;align-items:flex-start;justify-content:center;
+  }
+  .bar .num{position:absolute;top:-22px;font-size:13px;font-weight:700;color:var(--ink);}
+  .bar.partial{opacity:.92;background-image:repeating-linear-gradient(45deg,transparent,transparent 5px,rgba(255,255,255,.35) 5px,rgba(255,255,255,.35) 10px);}
+  .xlabels{display:flex;justify-content:space-around;padding:0 12px;margin-top:8px;}
+  .xlabels .xl{width:64px;text-align:center;font-size:11px;color:var(--muted);}
+  .xlabels .xl b{display:block;color:var(--ink);font-size:11.5px;font-weight:600;}
+  .xlabels .xl .tag{font-size:10px;}
+
+  /* throughput row */
+  .tp{display:flex;justify-content:space-around;margin-top:18px;padding:14px 12px 4px;border-top:1px solid var(--line);}
+  .tp .cell{width:64px;text-align:center;}
+  .tp .cell .lab{font-size:10.5px;color:var(--muted);}
+  .tp .cell .val{font-size:14px;font-weight:600;}
+  .tp .cell .val.na{color:var(--muted);font-weight:500;}
+  .tp-title{font-size:11.5px;color:var(--muted);margin:0 0 2px;padding-left:2px;}
+
+  /* forecast */
+  .forecast{
+    background:linear-gradient(0deg,#fffaf3,#fffdfa);
+    border:1px solid #f6e3c4;border-left:4px solid var(--yellow);
+    border-radius:12px;padding:16px 18px;
+  }
+  .forecast .ft{display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px;margin-bottom:8px;}
+  .forecast .badge{font-size:11px;font-weight:700;color:#fff;background:var(--yellow);border-radius:999px;padding:2px 9px;}
+  .forecast p{margin:0 0 8px;font-size:13px;color:#4a4233;}
+  .forecast .calc{
+    font-size:12px;color:#7a6b4d;background:#fff8ee;border:1px solid #f3e6cd;
+    border-radius:8px;padding:8px 11px;display:inline-block;
+  }
+  .forecast .hi{color:var(--red);font-weight:700;}
+  .forecast .ok{color:var(--green);font-weight:700;}
+
+  @media(max-width:680px){
+    .cards{grid-template-columns:repeat(2,1fr);}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="page">
+    <div class="crumb">
+      <span class="proj-pick"><span class="lbl">プロジェクト:</span> 新ダッシュボード機能 <span class="caret">▾</span></span>
+    </div>
+    <h1>ベロシティ / スループット</h1>
+    <p class="sub">Release v1.2 ・ 基準日 2026/6/4(木) ・ 週次の完了タスク数と消化ペース</p>
+    <div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</div>
+  </header>
+
+  <div class="cards">
+    <div class="stat">
+      <div class="k">平均ベロシティ</div>
+      <div class="v tnum">4<small>件/週</small></div>
+      <div class="d flat">直近4週平均</div>
+    </div>
+    <div class="stat">
+      <div class="k">今週（途中）</div>
+      <div class="v tnum">2<small>件</small></div>
+      <div class="d down">▼ 平均を下回るペース</div>
+    </div>
+    <div class="stat">
+      <div class="k">残タスク</div>
+      <div class="v tnum">10<small>件</small></div>
+      <div class="d warn">締切 6/13 まで</div>
+    </div>
+    <div class="stat">
+      <div class="k">完了見込み</div>
+      <div class="v tnum">約2.5<small>週</small></div>
+      <div class="d down">▼ 遅延気味</div>
+    </div>
+  </div>
+
+  <section class="panel">
+    <h2>週ごとの完了タスク数（ベロシティ）</h2>
+    <p class="desc">直近2週はベロシティがやや低下。今週は途中集計のため斜線で表示。</p>
+
+    <div class="legend">
+      <span><i class="swatch" style="background:var(--bar)"></i>完了タスク数</span>
+      <span><i class="swatch" style="background:var(--bar);opacity:.55;background-image:repeating-linear-gradient(45deg,transparent,transparent 3px,#fff 3px,#fff 6px)"></i>今週（途中）</span>
+      <span><i class="swatch line"></i>平均（4件/週）</span>
+    </div>
+
+    <div class="chart">
+      <div class="yaxis tnum">
+        <div>6</div><div>4</div><div>2</div><div>0</div>
+      </div>
+      <div style="flex:1">
+        <div class="plot">
+          <!-- gridlines at 6,4,2 (max=6 => 0% top) -->
+          <div class="gridline" style="top:0%"></div>
+          <div class="gridline" style="top:33.3%"></div>
+          <div class="gridline" style="top:66.6%"></div>
+          <!-- avg line at 4 of max 6 => (6-4)/6 = 33.3% from top -->
+          <div class="avgline" style="top:33.3%"></div>
+          <div class="avgtag" style="top:33.3%">平均 4件</div>
+
+          <div class="bars">
+            <!-- max scale 6 -->
+            <div class="col"><div class="bar" style="height:50%;background:var(--bar)"><span class="num tnum">3</span></div></div>
+            <div class="col"><div class="bar" style="height:83.3%;background:var(--bar)"><span class="num tnum">5</span></div></div>
+            <div class="col"><div class="bar" style="height:66.6%;background:var(--yellow)"><span class="num tnum">4</span></div></div>
+            <div class="col"><div class="bar partial" style="height:33.3%;background:var(--red)"><span class="num tnum">2</span></div></div>
+          </div>
+        </div>
+        <div class="xlabels">
+          <div class="xl"><b>第1週</b><span>5/20–</span></div>
+          <div class="xl"><b>第2週</b><span>5/27–</span></div>
+          <div class="xl"><b>第3週</b><span>6/3–</span></div>
+          <div class="xl"><b>今週</b><span class="tag">6/4〜 途中</span></div>
+        </div>
+
+        <p class="tp-title" style="margin-top:18px">スループット補助：週ごとの完了工数</p>
+        <div class="tp">
+          <div class="cell"><div class="val tnum">24h</div><div class="lab">第1週</div></div>
+          <div class="cell"><div class="val tnum">30h</div><div class="lab">第2週</div></div>
+          <div class="cell"><div class="val tnum">24h</div><div class="lab">第3週</div></div>
+          <div class="cell"><div class="val na">—</div><div class="lab">今週(途中)</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="forecast">
+    <div class="ft"><span class="badge">遅延リスク</span> 締切に間に合うか？</div>
+    <p>
+      残 <b class="tnum">10件</b> を平均 <b class="tnum">4件/週</b> のペースで消化すると
+      <span class="hi">約2.5週（〜6/22頃）</span>かかる見込み。締切 <b>6/13(金)</b> には間に合わない計算です。
+      さらに直近2週はベロシティが <span class="hi">5→4→2件</span> と低下傾向のため、実際はもっとかかる懸念があります。
+    </p>
+    <p style="margin-bottom:10px;color:#6b6452;">
+      間に合わせるには <b>残2週で5件/週ペース</b>（＝平均より25%増）への回復、もしくはスコープ調整が必要。
+    </p>
+    <span class="calc tnum">10件 ÷ 4件/週 ≈ 2.5週　｜　締切まで残り 約1.3週（9日）　→ 約9件分の不足</span>
+  </section>
+
+</div>
+</body>
+</html>

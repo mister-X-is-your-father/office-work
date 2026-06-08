@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>タスク詳細 — 認証フロー実装</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee;
+    --track:#eef1f5; --accent:#3a86ff;
+    --done:#2fa66b; --doing:#3a86ff; --todo:#9aa3af; --blocked:#e5484d;
+    --c-morita:#e5772d; --c-tanaka:#3a86ff; --c-sato:#2fa66b; --c-suzuki:#b657d6;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"palt"; line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  .num{font-variant-numeric:tabular-nums}
+  .wrap{max-width:1040px; margin:0 auto; padding:20px 20px 64px}
+
+  /* header */
+  .topbar{display:flex; align-items:center; gap:12px; padding:6px 2px 14px}
+  .crumb{color:var(--muted); font-size:13px}
+  .crumb b{color:var(--ink); font-weight:600}
+  .note{
+    margin:0 0 18px; padding:9px 14px; border-radius:10px;
+    background:#fff7ed; border:1px solid #ffe2c2; color:#9a5a16; font-size:12.5px;
+  }
+
+  .grid{display:grid; grid-template-columns:1fr 320px; gap:16px}
+  @media(max-width:860px){ .grid{grid-template-columns:1fr} }
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    box-shadow:0 1px 2px rgba(20,30,48,.04); padding:18px 20px;
+  }
+  .card + .card{margin-top:16px}
+  .card h2{font-size:13px; margin:0 0 14px; color:var(--muted); font-weight:600; letter-spacing:.02em}
+
+  /* title block */
+  .head{margin-bottom:16px}
+  .head .row1{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+  .h1{font-size:23px; font-weight:700; margin:2px 0 0}
+  .tid{color:var(--muted); font-size:13px; font-weight:600}
+  .chip{
+    display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600;
+    padding:3px 10px; border-radius:999px; line-height:1.4;
+  }
+  .chip .dot{width:7px;height:7px;border-radius:50%}
+  .st-doing{background:#eaf1ff; color:#2a63c4}
+  .st-blocked{background:#fdecec; color:#c1342f; border:1px solid #f6c9c7}
+  .pill-pri{background:#fdecec;color:#c1342f}
+  .subline{color:var(--muted); font-size:13px; margin-top:8px}
+
+  /* meta grid */
+  .meta{display:grid; grid-template-columns:repeat(4,1fr); gap:1px; background:var(--line); border-radius:12px; overflow:hidden; border:1px solid var(--line)}
+  @media(max-width:680px){ .meta{grid-template-columns:repeat(2,1fr)} }
+  .meta .cell{background:#fff; padding:12px 14px}
+  .meta .k{font-size:11px; color:var(--muted); margin-bottom:4px}
+  .meta .v{font-size:15px; font-weight:600}
+  .avatar{
+    width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
+    color:#fff;font-size:11px;font-weight:700;vertical-align:-5px;margin-right:6px;
+  }
+
+  /* progress */
+  .progwrap{margin:4px 0 2px}
+  .progmeta{display:flex; justify-content:space-between; font-size:12.5px; color:var(--muted); margin-bottom:7px}
+  .progmeta b{color:var(--ink)}
+  .bar{height:12px;border-radius:8px;background:var(--track);overflow:hidden}
+  .bar > span{display:block;height:100%;background:var(--doing);border-radius:8px}
+  .estrow{display:flex;gap:10px;margin-top:14px}
+  .estbox{flex:1;background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:10px 12px;text-align:center}
+  .estbox .n{font-size:20px;font-weight:700}
+  .estbox .l{font-size:11px;color:var(--muted)}
+
+  /* blocker banner */
+  .blocker{
+    border:1px solid #f6c9c7; background:linear-gradient(180deg,#fff5f5,#fdecec);
+    border-radius:14px; padding:16px 18px; position:relative; overflow:hidden;
+  }
+  .blocker::before{content:""; position:absolute; left:0; top:0; bottom:0; width:5px; background:var(--blocked)}
+  .blocker .bhd{display:flex; align-items:center; gap:9px; font-weight:700; color:#c1342f; font-size:15px}
+  .blocker .bico{width:22px;height:22px;border-radius:6px;background:var(--blocked);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:13px}
+  .blocker p{margin:9px 0 0; font-size:14px; color:#7a2b29}
+  .blocker .stall{display:inline-block;margin-top:10px;background:#fff;border:1px solid #f6c9c7;border-radius:999px;padding:3px 11px;font-size:12px;font-weight:700;color:#c1342f}
+
+  /* deps & impact */
+  .lst{list-style:none;margin:0;padding:0}
+  .lst li{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:14px}
+  .lst li:last-child{border-bottom:0}
+  .mini{width:9px;height:9px;border-radius:50%;flex:none}
+  .tag{font-size:11px;color:var(--muted);margin-left:auto;font-weight:600}
+  .impact li::before{content:"→";color:var(--accent);font-weight:700;margin-right:2px}
+  .impact .warn{color:var(--blocked);font-weight:600}
+
+  /* PR */
+  .pr{display:flex;align-items:center;gap:10px;font-size:14px;background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  .pr .gh{width:24px;height:24px;border-radius:6px;background:#1d2430;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
+  .pr .open{margin-left:auto;font-size:11px;font-weight:700;color:#2a8a4a;background:#e7f6ed;border-radius:999px;padding:3px 9px}
+
+  /* timeline */
+  .tl{list-style:none;margin:0;padding:0 0 0 4px;position:relative}
+  .tl li{position:relative;padding:0 0 18px 26px}
+  .tl li:last-child{padding-bottom:0}
+  .tl li::before{content:"";position:absolute;left:5px;top:3px;width:11px;height:11px;border-radius:50%;background:#fff;border:2.5px solid var(--accent);z-index:1}
+  .tl li.block::before{border-color:var(--blocked)}
+  .tl li.start::before{border-color:var(--doing)}
+  .tl li::after{content:"";position:absolute;left:10px;top:14px;bottom:-3px;width:2px;background:var(--line)}
+  .tl li:last-child::after{display:none}
+  .tl .when{font-size:11px;color:var(--muted);font-weight:600}
+  .tl .what{font-size:13.5px}
+  .tl .what b{font-weight:600}
+
+  .side h2{margin-top:0}
+  .kv{display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:1px solid var(--line)}
+  .kv:last-child{border-bottom:0}
+  .kv .muted{color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="topbar">
+    <div class="crumb">新ダッシュボード機能 <b>(Release v1.2)</b> &nbsp;›&nbsp; マイルストーン M2 &nbsp;›&nbsp; <b>認証フロー実装</b></div>
+  </div>
+
+  <p class="note">※ モック（サンプルデータ）。本番は Vikunja API ＋ Claude で要約。</p>
+
+  <div class="grid">
+    <!-- main column -->
+    <div>
+      <!-- title -->
+      <div class="head">
+        <div class="row1">
+          <span class="chip st-doing"><span class="dot" style="background:var(--doing)"></span>Doing</span>
+          <span class="chip st-blocked">⛔ ブロック中</span>
+          <span class="tid num">#138</span>
+        </div>
+        <h1 class="h1">認証フロー実装</h1>
+        <div class="subline">外部決済APIとの認証連携を含むログイン基盤の実装。M2の中核タスク。</div>
+      </div>
+
+      <!-- meta -->
+      <div class="card" style="padding:0">
+        <div class="meta">
+          <div class="cell">
+            <div class="k">担当</div>
+            <div class="v"><span class="avatar" style="background:var(--c-sato)">佐</span>佐藤</div>
+          </div>
+          <div class="cell">
+            <div class="k">領域</div>
+            <div class="v">Backend</div>
+          </div>
+          <div class="cell">
+            <div class="k">期日</div>
+            <div class="v num">6/6 (土)</div>
+          </div>
+          <div class="cell">
+            <div class="k">優先度</div>
+            <div class="v">高</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- blocker -->
+      <div class="blocker" style="margin-top:16px">
+        <div class="bhd"><span class="bico">!</span>ブロック中 — 外部決済APIのレスポンス待ち</div>
+        <p>決済プロバイダ側のサンドボックス認証エンドポイントが応答せず、認証トークンの検証フローが進められない状態。先方へ問い合わせ済み、回答待ち。</p>
+        <span class="stall num">⏱ 3日間停滞中（6/3〜）</span>
+      </div>
+
+      <!-- progress -->
+      <div class="card">
+        <h2>進捗・工数</h2>
+        <div class="progwrap">
+          <div class="progmeta"><span>完了率</span><span><b class="num">40%</b></span></div>
+          <div class="bar"><span style="width:40%"></span></div>
+        </div>
+        <div class="estrow">
+          <div class="estbox"><div class="n num">5h</div><div class="l">見積</div></div>
+          <div class="estbox"><div class="n num">2h</div><div class="l">消化</div></div>
+          <div class="estbox"><div class="n num" style="color:var(--blocked)">3h</div><div class="l">残り</div></div>
+        </div>
+      </div>
+
+      <!-- dependencies -->
+      <div class="card">
+        <h2>依存関係</h2>
+        <ul class="lst">
+          <li><span class="mini" style="background:var(--done)"></span>DBマイグレーション <span class="tag" style="color:var(--done)">✓ 完了</span></li>
+        </ul>
+      </div>
+
+      <!-- impact -->
+      <div class="card">
+        <h2>影響範囲（このタスクが詰まると…）</h2>
+        <ul class="lst impact">
+          <li>マイルストーン <b style="margin:0 3px">M2</b>（実装完了 <span class="num">6/6</span>）の達成 <span class="warn tag">遅延リスク</span></li>
+          <li>結合テストの開始が <b style="margin-left:3px">待ち</b>状態 <span class="warn tag">着手不可</span></li>
+        </ul>
+      </div>
+
+      <!-- PR -->
+      <div class="card">
+        <h2>関連PR</h2>
+        <div class="pr">
+          <span class="gh"></span>
+          <span><b class="num">#142</b> &nbsp;feat: auth flow with external payment token</span>
+          <span class="open">Open</span>
+        </div>
+      </div>
+
+      <!-- timeline -->
+      <div class="card">
+        <h2>履歴</h2>
+        <ul class="tl">
+          <li class="start">
+            <div class="when num">6/2 (火)</div>
+            <div class="what"><b>着手</b> — 認証フロー実装を開始。DBマイグレ完了を受けてDoingへ。</div>
+          </li>
+          <li class="block">
+            <div class="when num">6/3 (水)</div>
+            <div class="what"><b>ブロック化</b> — 外部決済APIのレスポンス待ちでBlockedに。以降停滞。</div>
+          </li>
+          <li>
+            <div class="when num">6/4 (木) <span style="color:var(--accent)">今日</span></div>
+            <div class="what">先方回答待ち。佐藤は手空き気味、結合テスト準備の前倒しを検討。</div>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- side column -->
+    <aside class="side">
+      <div class="card">
+        <h2>サマリー</h2>
+        <div class="kv"><span class="muted">状態</span><span style="color:#c1342f;font-weight:700">⛔ Blocked</span></div>
+        <div class="kv"><span class="muted">完了率</span><span class="num">40%</span></div>
+        <div class="kv"><span class="muted">残工数</span><span class="num">3h</span></div>
+        <div class="kv"><span class="muted">期日</span><span class="num">6/6 (土)</span></div>
+        <div class="kv"><span class="muted">停滞日数</span><span class="num" style="color:#c1342f">3日</span></div>
+        <div class="kv"><span class="muted">ブロッカー</span><span>外部API待ち</span></div>
+      </div>
+
+      <div class="card">
+        <h2>AIの見立て</h2>
+        <p style="font-size:13px;margin:0;color:#3a4250">
+          外部API待ちで<b>3日停滞</b>。このままだとM2（6/6）と結合テストが遅延します。
+          佐藤さんは現在手が空き気味なので、<b>空き時間に結合テスト準備を前倒し</b>しておくのが得策です。
+        </p>
+        <a href="53-ai-ask.html" style="display:inline-block;margin-top:12px;font-size:12.5px;color:var(--accent);text-decoration:none;font-weight:600">AIに詳しく聞く →</a>
+      </div>
+
+      <div class="card">
+        <h2>このタスクが属する</h2>
+        <div class="kv"><span class="muted">PJ</span><span>新ダッシュボード機能</span></div>
+        <div class="kv"><span class="muted">リリース</span><span>v1.2</span></div>
+        <div class="kv"><span class="muted">マイルストーン</span><span>M2 (6/6)</span></div>
+      </div>
+    </aside>
+  </div>
+</div>
+</body>
+</html>

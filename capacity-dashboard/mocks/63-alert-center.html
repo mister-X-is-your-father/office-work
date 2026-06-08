@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>アラートセンター — 新ダッシュボード機能</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --done:#2fa66b; --doing:#3a86ff; --todo:#9aa3af; --blocked:#e5484d;
+    --sig-g:#2fa66b; --sig-y:#f5a623; --sig-r:#e5484d;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"palt"; font-variant-numeric:tabular-nums;
+    line-height:1.6; padding:28px 20px 60px;
+  }
+  .wrap{max-width:820px;margin:0 auto}
+  header.page{display:flex;align-items:flex-start;gap:14px;margin-bottom:6px}
+  .titleblock{flex:1}
+  .eyebrow{font-size:12px;color:var(--muted);letter-spacing:.04em;font-weight:600}
+  h1{font-size:22px;font-weight:700;margin:2px 0 0;letter-spacing:.01em}
+  .bell{
+    position:relative;width:40px;height:40px;border-radius:11px;background:#fff;border:1px solid var(--line);
+    display:flex;align-items:center;justify-content:center;font-size:18px;flex:none;
+  }
+  .bell .badge{
+    position:absolute;top:-7px;right:-7px;min-width:20px;height:20px;border-radius:99px;
+    background:var(--sig-r);color:#fff;font-size:11px;font-weight:700;
+    display:flex;align-items:center;justify-content:center;padding:0 5px;box-shadow:0 0 0 2px var(--bg);
+  }
+  .note{
+    font-size:12px;color:var(--muted);background:#fff;border:1px solid var(--line);
+    border-radius:10px;padding:8px 12px;display:inline-flex;align-items:center;gap:6px;margin-top:12px;
+  }
+  .note .dot{width:6px;height:6px;border-radius:50%;background:var(--sig-y);flex:none}
+
+  .summary{display:flex;gap:10px;margin:18px 0 8px;flex-wrap:wrap}
+  .scard{flex:1;min-width:150px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04)}
+  .scard .n{font-size:26px;font-weight:700;line-height:1.1}
+  .scard .l{font-size:12px;color:var(--muted);font-weight:600;margin-top:2px;display:flex;align-items:center;gap:6px}
+  .scard .d{width:9px;height:9px;border-radius:50%}
+  .d-r{background:var(--sig-r)} .d-y{background:var(--sig-y)} .d-b{background:var(--doing)}
+
+  .group{margin-top:26px}
+  .ghead{display:flex;align-items:center;gap:9px;margin-bottom:12px}
+  .ghead .pill{font-size:11px;font-weight:700;color:#fff;padding:2px 10px;border-radius:999px}
+  .ghead .pill.r{background:var(--sig-r)} .ghead .pill.y{background:var(--sig-y)} .ghead .pill.b{background:var(--doing)}
+  .ghead .gt{font-size:14px;font-weight:700}
+  .ghead .gc{font-size:12px;color:var(--muted)}
+
+  .alert{
+    background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 15px 13px 16px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04);margin-bottom:10px;position:relative;overflow:hidden;
+    display:flex;gap:13px;
+  }
+  .alert::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px}
+  .alert.r::before{background:var(--sig-r)} .alert.y::before{background:var(--sig-y)} .alert.b::before{background:var(--doing)}
+  .alert.unread{box-shadow:0 1px 3px rgba(20,30,50,.07)}
+  .aicon{font-size:16px;line-height:1.4;flex:none;width:22px;text-align:center}
+  .acontent{flex:1;min-width:0}
+  .arow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .atitle{font-size:14px;font-weight:700}
+  .unreaddot{width:8px;height:8px;border-radius:50%;background:var(--doing);flex:none}
+  .atime{margin-left:auto;font-size:11.5px;color:var(--muted);white-space:nowrap}
+  .areason{font-size:12.5px;color:var(--muted);margin-top:3px}
+  .areason b{color:var(--ink);font-weight:600}
+  .ameta{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px;align-items:center}
+  .tag{font-size:11px;color:var(--muted);background:var(--track);padding:2px 9px;border-radius:6px;font-weight:600}
+  .owner{font-size:11px;font-weight:700;color:#fff;padding:2px 9px;border-radius:6px}
+  .o-morita{background:var(--m-morita)} .o-tanaka{background:var(--m-tanaka)}
+  .o-sato{background:var(--m-sato)} .o-suzuki{background:var(--m-suzuki)}
+  .action{
+    margin-top:9px;display:inline-flex;align-items:center;gap:7px;font-size:12.5px;
+    background:var(--track);border:1px solid var(--line);border-radius:8px;padding:6px 11px;color:var(--ink);font-weight:600;
+  }
+  .action .arr{color:var(--muted)}
+  .action b{color:var(--ink)}
+
+  footer{margin-top:30px;font-size:11.5px;color:var(--muted);text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="page">
+    <div class="titleblock">
+      <div class="eyebrow">プロジェクト · 新ダッシュボード機能</div>
+      <h1>アラートセンター</h1>
+    </div>
+    <div class="bell">🔔<span class="badge">6</span></div>
+  </header>
+  <div class="note"><span class="dot"></span>※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</div>
+
+  <div class="summary">
+    <div class="scard"><div class="n">3</div><div class="l"><span class="d d-r"></span>緊急 · 要対応</div></div>
+    <div class="scard"><div class="n">2</div><div class="l"><span class="d d-y"></span>注意 · 監視</div></div>
+    <div class="scard"><div class="n">1</div><div class="l"><span class="d d-b"></span>情報 · レビュー待ち</div></div>
+  </div>
+
+  <!-- RED -->
+  <div class="group">
+    <div class="ghead"><span class="pill r">緊急</span><span class="gt">いますぐ対応が必要</span><span class="gc">3件</span></div>
+
+    <div class="alert r unread">
+      <div class="aicon">🔴</div>
+      <div class="acontent">
+        <div class="arow"><span class="unreaddot"></span><span class="atitle">本日締切</span><span class="atime">今日 6/4</span></div>
+        <div class="areason">対象 <b>ログイン障害対応</b> が本日締切。状態は Doing、最優先タスク。</div>
+        <div class="ameta"><span class="owner o-morita">森田</span><span class="tag">Backend</span><span class="tag">最優先</span></div>
+        <div class="action">推奨 <span class="arr">→</span> <b>今日中に完了</b>、難しければリスケ判断を森田と確認</div>
+      </div>
+    </div>
+
+    <div class="alert r unread">
+      <div class="aicon">🔴</div>
+      <div class="acontent">
+        <div class="arow"><span class="unreaddot"></span><span class="atitle">ブロック継続（3日）</span><span class="atime">09:40〜</span></div>
+        <div class="areason">対象 <b>認証フロー実装</b> が <b>外部API待ち</b>で3日間ブロック中。締切6/6（M2）に影響。</div>
+        <div class="ameta"><span class="owner o-sato">佐藤</span><span class="tag">Backend</span><span class="tag">Blocked</span><span class="tag">締切 6/6</span></div>
+        <div class="action">推奨 <span class="arr">→</span> 外部API <b>提供元へエスカレーション</b>、代替モック実装を検討</div>
+      </div>
+    </div>
+
+    <div class="alert r unread">
+      <div class="aicon">🔴</div>
+      <div class="acontent">
+        <div class="arow"><span class="unreaddot"></span><span class="atitle">マイルストーン遅延リスク</span><span class="atime">予測</span></div>
+        <div class="areason">対象 <b>リリース（M3）</b> 予定6/13に対し着地見込み <b>6/16</b>、<b>3日遅延</b>の見込み。</div>
+        <div class="ameta"><span class="owner o-morita">森田</span><span class="tag">マイルストーン</span><span class="tag">+3日</span></div>
+        <div class="action">推奨 <span class="arr">→</span> クリティカルパス（認証→結合テスト）を <b>再見積もり</b>し関係者へ共有</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- YELLOW -->
+  <div class="group">
+    <div class="ghead"><span class="pill y">注意</span><span class="gt">早めの監視が必要</span><span class="gc">2件</span></div>
+
+    <div class="alert y unread">
+      <div class="aicon">🟠</div>
+      <div class="acontent">
+        <div class="arow"><span class="unreaddot"></span><span class="atitle">明日締切</span><span class="atime">明日 6/5</span></div>
+        <div class="areason">対象 <b>DBマイグレ</b> が明日締切。先行する <b>ログイン障害対応</b>と同担当者。</div>
+        <div class="ameta"><span class="owner o-morita">森田</span><span class="tag">締切 6/5</span></div>
+        <div class="action">推奨 <span class="arr">→</span> 本日締切タスクとの <b>並行負荷を確認</b>、必要なら着手前倒し</div>
+      </div>
+    </div>
+
+    <div class="alert y">
+      <div class="aicon">🟠</div>
+      <div class="acontent">
+        <div class="arow"><span class="atitle">担当者の過負荷</span><span class="atime">今週</span></div>
+        <div class="areason"><b>森田</b> の割当が <b>10h / 8h</b>（125%）。ログイン障害対応・DBマイグレ・リリース準備が集中。</div>
+        <div class="ameta"><span class="owner o-morita">森田</span><span class="tag">10h / 8h</span><span class="tag">+25%</span></div>
+        <div class="action">推奨 <span class="arr">→</span> リリース準備の一部を <b>再アサイン</b>、または期日調整を検討</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BLUE -->
+  <div class="group">
+    <div class="ghead"><span class="pill b">情報</span><span class="gt">確認待ち</span><span class="gc">1件</span></div>
+
+    <div class="alert b unread">
+      <div class="aicon">🔵</div>
+      <div class="acontent">
+        <div class="arow"><span class="unreaddot"></span><span class="atitle">レビュー待ち · メンション</span><span class="atime">昨日〜</span></div>
+        <div class="areason"><b>PR #142</b>（佐藤 作成）が <b>森田のレビュー待ち</b>。認証フロー実装の前提。</div>
+        <div class="ameta"><span class="owner o-sato">佐藤</span><span class="arr" style="color:var(--muted)">→</span><span class="owner o-morita">森田</span><span class="tag">PR #142</span></div>
+        <div class="action">推奨 <span class="arr">→</span> 森田が <b>レビュー実施</b>、ブロック中の認証作業を解放</div>
+      </div>
+    </div>
+  </div>
+
+  <footer>未読 5件 · 既読 1件 — すべて既読にする</footer>
+</div>
+</body>
+</html>

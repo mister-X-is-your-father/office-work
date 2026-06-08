@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>⑤実績：見積り精度の俯瞰</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee;
+    --track:#eef1f5; --est:#9aa3af; --act:#3a86ff; --over:#e5484d; --under:#2fa66b; --amber:#f5a623;
+    --be:#3a86ff; --fe:#2fa66b; --qa:#b657d6; --com:#8a93a0;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"tnum"; -webkit-font-smoothing:antialiased;
+    padding:24px; line-height:1.5;
+  }
+  .wrap{max-width:1040px;margin:0 auto}
+
+  header{margin-bottom:18px}
+  .titlerow{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+  h1{font-size:20px;font-weight:700;margin:0;letter-spacing:.02em}
+  .sub{color:var(--muted);font-size:13px}
+  .navrow{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+  .seg{display:inline-flex;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;box-shadow:0 1px 2px rgba(20,30,50,.04)}
+  .seg button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:13px;padding:7px 14px;cursor:pointer}
+  .seg button.on{background:var(--ink);color:#fff}
+  .navbtn{width:32px;height:32px;border:1px solid var(--line);background:var(--card);border-radius:9px;color:var(--muted);cursor:pointer;font-size:14px;display:inline-flex;align-items:center;justify-content:center}
+  .period{font-size:13px;color:var(--ink);font-weight:600}
+  .note{margin-top:10px;font-size:12px;color:var(--muted);background:#fff;border:1px dashed var(--line);border-radius:8px;padding:8px 12px;display:inline-block}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 1px 3px rgba(20,30,50,.05);padding:18px 20px;margin-bottom:16px}
+  .card h2{font-size:14px;font-weight:700;margin:0 0 4px;display:flex;align-items:center;gap:8px}
+  .card h2 .tag{font-size:11px;font-weight:600;color:var(--muted);background:var(--track);border-radius:6px;padding:2px 8px}
+  .card .desc{font-size:12px;color:var(--muted);margin:0 0 14px}
+
+  /* person accuracy badges */
+  .ppl{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .pcard{border:1px solid var(--line);border-radius:11px;padding:14px}
+  .ph{display:flex;align-items:center;gap:9px;margin-bottom:10px}
+  .av{width:28px;height:28px;border-radius:50%;color:#fff;font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .pn{font-size:14px;font-weight:700}
+  .psub{font-size:11px;color:var(--muted)}
+  .badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px}
+  .b-over{background:#fde9ea;color:var(--over)} .b-under{background:#e3f5ec;color:var(--under)} .b-ok{background:#e9f0fb;color:var(--act)} .b-amber{background:#fdf0d9;color:#b8770e}
+  .pbig{font-size:22px;font-weight:700;margin-top:8px}
+  .pbig small{font-size:12px;font-weight:600;color:var(--muted)}
+  .pdesc{font-size:11px;color:var(--muted);margin-top:4px}
+
+  /* scatter */
+  .scatter-wrap{display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap}
+  .plot{flex:1 1 460px;min-width:380px}
+  svg{display:block;width:100%;height:auto;overflow:visible}
+  .axis-line{stroke:var(--line);stroke-width:1}
+  .grid{stroke:var(--line);stroke-width:1;stroke-dasharray:2 4;opacity:.7}
+  .diag{stroke:var(--muted);stroke-width:1.4;stroke-dasharray:5 4}
+  .diaglab{fill:var(--muted);font-size:10px;font-weight:600}
+  .band-over{fill:var(--over);opacity:.05}
+  .band-under{fill:var(--under);opacity:.05}
+  .axlab{fill:var(--muted);font-size:11px}
+  .ticklab{fill:var(--muted);font-size:9.5px;font-variant-numeric:tabular-nums}
+  .pt{cursor:pointer;transition:r .12s}
+  .pt:hover{stroke:#1d2430;stroke-width:2}
+  .ptlab{font-size:9.5px;font-weight:600;fill:var(--ink)}
+  .leader{stroke:var(--muted);stroke-width:1;opacity:.45;stroke-dasharray:2 2}
+
+  .legend-side{flex:0 0 220px;font-size:12px}
+  .legend-side h3{font-size:12px;margin:0 0 8px;color:var(--ink)}
+  .lg{display:flex;align-items:center;gap:8px;margin-bottom:8px;color:var(--muted)}
+  .lg .sw{width:14px;height:14px;border-radius:50%;flex:0 0 auto;border:2px solid #fff;box-shadow:0 0 0 1px var(--line)}
+  .lg .ln{width:18px;height:0;border-top:2px dashed var(--muted);flex:0 0 auto}
+  .keyhint{margin-top:14px;padding:10px 12px;background:var(--track);border-radius:9px;font-size:11px;color:var(--muted);line-height:1.6}
+  .keyhint b{color:var(--ink)}
+
+  /* offender list */
+  .off{display:flex;flex-direction:column;gap:8px;margin-top:4px}
+  .offrow{display:grid;grid-template-columns:18px 1fr auto auto;gap:10px;align-items:center;font-size:13px;padding:8px 10px;border:1px solid var(--line);border-radius:9px}
+  .offrow .rank{font-weight:700;color:var(--muted);text-align:center}
+  .offrow .nm{font-weight:600}
+  .offrow .nm small{font-weight:500;color:var(--muted);margin-left:6px;font-size:11px}
+  .offrow .hh{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .offrow .pp{font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+  .pj-be{background:var(--be)} .pj-fe{background:var(--fe)} .pj-qa{background:var(--qa)} .pj-com{background:var(--com)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="titlerow">
+      <h1>⑤ 実績：見積り精度の俯瞰</h1>
+      <span class="sub">見積りh × 実績h プロット（対角線＝完璧な見積り）</span>
+    </div>
+    <div class="navrow">
+      <button class="navbtn" aria-label="前の期間">‹</button>
+      <span class="period">2026/05/06 – 2026/06/05</span>
+      <button class="navbtn" aria-label="次の期間">›</button>
+      <div class="seg" style="margin-left:6px">
+        <button>直近7日</button>
+        <button class="on">直近30日</button>
+        <button>四半期</button>
+      </div>
+    </div>
+    <div class="note">※ モック（サンプルデータ）。本番は Vikunja のタイムトラッキング実績と見積りから自動算出。</div>
+  </header>
+
+  <!-- person accuracy badges -->
+  <div class="card">
+    <h2>人別の見積り精度 <span class="tag">バッジ</span></h2>
+    <p class="desc">実績 / 見積りの傾向。「過小見積り（甘い）」は赤、「ほぼ正確」は青、「短縮寄り」は緑。</p>
+    <div class="ppl" id="ppl"></div>
+  </div>
+
+  <!-- scatter -->
+  <div class="card">
+    <h2>見積り精度プロット <span class="tag">散布図</span></h2>
+    <p class="desc">横＝見積りh、縦＝実績h。<b>対角線より上＝見積り過小（赤領域）</b>、下＝短縮（緑領域）。対角からの距離が見積りのズレ。</p>
+    <div class="scatter-wrap">
+      <div class="plot">
+        <svg viewBox="0 0 480 380" role="img" aria-label="見積り×実績 散布図">
+          <!-- plot area: x 56..440 (8h span), y 340..16 (8h span) -->
+          <defs></defs>
+          <!-- bands -->
+          <polygon class="band-over" points="56,340 440,16 56,16"/>
+          <polygon class="band-under" points="56,340 440,16 440,340"/>
+          <!-- grid + ticks -->
+          <g id="grid"></g>
+          <!-- axes -->
+          <line class="axis-line" x1="56" y1="16" x2="56" y2="340"/>
+          <line class="axis-line" x1="56" y1="340" x2="440" y2="340"/>
+          <!-- diagonal perfect line -->
+          <line class="diag" x1="56" y1="340" x2="440" y2="16"/>
+          <text class="diaglab" x="392" y="44" transform="rotate(-35 392 44)">完璧（実績=見積り）</text>
+          <!-- axis labels -->
+          <text class="axlab" x="248" y="372" text-anchor="middle">見積り (h) →</text>
+          <text class="axlab" x="18" y="178" text-anchor="middle" transform="rotate(-90 18 178)">実績 (h) →</text>
+          <!-- points injected -->
+          <g id="points"></g>
+        </svg>
+      </div>
+      <div class="legend-side">
+        <h3>凡例</h3>
+        <div class="lg"><span class="sw" style="background:var(--m-morita)"></span>森田</div>
+        <div class="lg"><span class="sw" style="background:var(--m-tanaka)"></span>田中</div>
+        <div class="lg"><span class="sw" style="background:var(--m-sato)"></span>佐藤</div>
+        <div class="lg"><span class="sw" style="background:var(--m-suzuki)"></span>鈴木</div>
+        <div class="lg" style="margin-top:10px"><span class="ln"></span>対角線＝完璧</div>
+        <div class="lg"><span class="sw" style="background:var(--over);box-shadow:none;border:none;border-radius:3px;width:14px;height:10px"></span>上側＝過小見積り</div>
+        <div class="lg"><span class="sw" style="background:var(--under);box-shadow:none;border:none;border-radius:3px;width:14px;height:10px"></span>下側＝短縮</div>
+        <div class="keyhint">
+          点が<b>対角線の上</b>にあるほど見積りが甘い（過小）。<br>
+          <b>田中</b>の「ダッシュ画面実装」が最も対角から離れ、過小見積りの常習が疑われる。
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- offenders -->
+  <div class="card">
+    <h2>過小見積りワースト <span class="tag">対角からの距離順</span></h2>
+    <div class="off" id="off"></div>
+  </div>
+
+</div>
+
+<script>
+  const people = [
+    {who:"森田", avc:"--m-morita", ini:"森", est:7, act:9, tag:"超過寄り", badge:"b-amber", ratio:"+29%", desc:"やや過小（バックエンド工数を読み切れず）"},
+    {who:"田中", avc:"--m-tanaka", ini:"田", est:4, act:7, tag:"過小（甘い）", badge:"b-over", ratio:"+75%", desc:"見積りが大きく甘い。要バッファ"},
+    {who:"佐藤", avc:"--m-sato", ini:"佐", est:8, act:7, tag:"ほぼ正確", badge:"b-ok", ratio:"-13%", desc:"安定。読みが正確"},
+    {who:"鈴木", avc:"--m-suzuki", ini:"鈴", est:2, act:1.5, tag:"短縮寄り", badge:"b-under", ratio:"-25%", desc:"やや過大見積り（余裕を持ちすぎ）"},
+  ];
+  function fmt(h){ return Number.isInteger(h) ? h+"h" : h.toFixed(1)+"h"; }
+
+  const pplEl=document.getElementById('ppl');
+  people.forEach(p=>{
+    const el=document.createElement('div');
+    el.className='pcard';
+    el.innerHTML=`
+      <div class="ph">
+        <span class="av" style="background:var(${p.avc})">${p.ini}</span>
+        <div><div class="pn">${p.who}</div><div class="psub">${fmt(p.est)} → ${fmt(p.act)}</div></div>
+      </div>
+      <span class="badge ${p.badge}">${p.tag}</span>
+      <div class="pbig">${p.ratio} <small>${p.ratio.startsWith('-')?'短縮':'超過'}</small></div>
+      <div class="pdesc">${p.desc}</div>
+    `;
+    pplEl.appendChild(el);
+  });
+
+  // scatter
+  const tasks = [
+    {name:"API設計", pj:"be", who:"森田", avc:"--m-morita", est:4, act:6},
+    {name:"DBマイグレ", pj:"be", who:"森田", avc:"--m-morita", est:3, act:3},
+    {name:"ダッシュ画面実装", pj:"fe", who:"田中", avc:"--m-tanaka", est:4, act:7},
+    {name:"認証フロー実装", pj:"be", who:"佐藤", avc:"--m-sato", est:5, act:4},
+    {name:"結合テスト", pj:"qa", who:"佐藤", avc:"--m-sato", est:3, act:3},
+    {name:"設計ドキュメント", pj:"com", who:"鈴木", avc:"--m-suzuki", est:2, act:1.5},
+  ];
+
+  // mapping: 0..8h -> x:56..440 , y:340..16
+  const X0=56, X1=440, Y0=340, Y1=16, HMAX=8;
+  const sx = h => X0 + (h/HMAX)*(X1-X0);
+  const sy = h => Y0 + (h/HMAX)*(Y1-Y0);
+
+  // grid + ticks
+  const gridEl=document.getElementById('grid');
+  let gridHTML='';
+  for(let h=0;h<=8;h+=2){
+    // vertical grid
+    gridHTML += `<line class="grid" x1="${sx(h)}" y1="${Y1}" x2="${sx(h)}" y2="${Y0}"/>`;
+    gridHTML += `<text class="ticklab" x="${sx(h)}" y="${Y0+14}" text-anchor="middle">${h}h</text>`;
+    // horizontal grid
+    gridHTML += `<line class="grid" x1="${X0}" y1="${sy(h)}" x2="${X1}" y2="${sy(h)}"/>`;
+    if(h>0) gridHTML += `<text class="ticklab" x="${X0-8}" y="${sy(h)+3}" text-anchor="end">${h}h</text>`;
+  }
+  gridEl.innerHTML=gridHTML;
+
+  // points (with small label offsets to avoid overlap)
+  const offsets = {
+    "API設計":[10,-8], "DBマイグレ":[10,-8], "ダッシュ画面実装":[10,-10],
+    "認証フロー実装":[10,14], "結合テスト":[-10,16], "設計ドキュメント":[10,16]
+  };
+  const ptEl=document.getElementById('points');
+  let ptHTML='';
+  tasks.forEach(t=>{
+    const x=sx(t.est), y=sy(t.act);
+    const diff=t.act-t.est;
+    const ring = diff>0 ? 'var(--over)' : diff<0 ? 'var(--under)' : 'var(--muted)';
+    const [ox,oy]=offsets[t.name]||[10,-8];
+    const lx=x+ox, ly=y+oy;
+    const anchor = ox<0 ? 'end' : 'start';
+    // leader line from point to label
+    ptHTML += `<line class="leader" x1="${x}" y1="${y}" x2="${lx + (ox<0?4:-4)}" y2="${ly-3}"/>`;
+    ptHTML += `<circle class="pt" cx="${x}" cy="${y}" r="7" fill="var(${t.avc})" stroke="${ring}" stroke-width="2">
+      <title>${t.name}（${t.who}）見積${fmt(t.est)} → 実績${fmt(t.act)}</title></circle>`;
+    ptHTML += `<text class="ptlab" x="${lx}" y="${ly}" text-anchor="${anchor}">${t.name}</text>`;
+  });
+  ptEl.innerHTML=ptHTML;
+
+  // offenders sorted by signed % desc (most over first)
+  const off = tasks.map(t=>{
+    const diff=t.act-t.est;
+    const ratio=Math.round(diff/t.est*100);
+    return {...t, diff, ratio};
+  }).sort((a,b)=> b.ratio - a.ratio);
+  const pjLabel={be:"Backend",fe:"Frontend",qa:"QA",com:"共通"};
+  const offEl=document.getElementById('off');
+  off.forEach((t,i)=>{
+    let pcls, ptxt;
+    if(t.ratio>0){ pcls="b-over"; ptxt="+"+t.ratio+"%"; }
+    else if(t.ratio<0){ pcls="b-under"; ptxt=t.ratio+"%"; }
+    else { pcls="b-ok"; ptxt="±0%"; }
+    const el=document.createElement('div');
+    el.className='offrow';
+    el.innerHTML=`
+      <span class="rank">${i+1}</span>
+      <span class="nm"><i class="dot pj-${t.pj}"></i> ${t.name}<small>${pjLabel[t.pj]} ・ <span style="color:var(${t.avc});font-weight:700">${t.who}</span></small></span>
+      <span class="hh">見積${fmt(t.est)} → 実績${fmt(t.act)}</span>
+      <span class="badge ${pcls} pp">${ptxt}</span>
+    `;
+    offEl.appendChild(el);
+  });
+</script>
+</body>
+</html>

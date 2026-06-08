@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>かんばんボード — 新ダッシュボード機能</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480;
+    --line:#e6e9ee; --track:#eef1f5;
+    --done:#2fa66b; --doing:#3a86ff; --todo:#9aa3af; --blocked:#e5484d;
+    --pri:#e5484d;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+    --pj-backend:#3a86ff; --pj-frontend:#2fa66b; --pj-qa:#b657d6; --pj-common:#8a93a0;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"tnum"; -webkit-font-smoothing:antialiased;
+  }
+  .nums{font-variant-numeric:tabular-nums;}
+  header.page{
+    padding:20px 24px 14px; border-bottom:1px solid var(--line); background:#fff;
+  }
+  .page h1{margin:0 0 4px; font-size:18px; letter-spacing:.02em;}
+  .page .sub{font-size:12.5px; color:var(--muted);}
+  .page .crumb{font-size:12px; color:var(--muted); margin-bottom:6px;}
+  .note{
+    margin-top:10px; font-size:11.5px; color:var(--muted);
+    background:#fbfbfc; border:1px dashed var(--line); border-radius:8px;
+    padding:6px 10px; display:inline-block;
+  }
+  .board{
+    display:grid; grid-template-columns:repeat(4, minmax(248px,1fr));
+    gap:14px; padding:18px 24px 40px; align-items:start;
+  }
+  .col{
+    background:#f0f2f5; border:1px solid var(--line); border-radius:14px;
+    padding:10px; min-height:120px;
+  }
+  .col.blocked{
+    background:#fdf2f2; border-color:#f4cdcd;
+  }
+  .col-head{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:4px 6px 10px; gap:8px;
+  }
+  .col-title{display:flex; align-items:center; gap:8px; font-size:13.5px; font-weight:600;}
+  .dot{width:9px; height:9px; border-radius:50%; flex:none;}
+  .count{
+    font-size:11.5px; color:var(--muted); font-variant-numeric:tabular-nums;
+    background:#fff; border:1px solid var(--line); border-radius:999px;
+    padding:1px 8px;
+  }
+  .col.blocked .count{background:#fff; border-color:#f0c4c4; color:#b03a3a;}
+  .wip{font-size:10.5px; color:var(--muted); white-space:nowrap;}
+  .wip.over{color:var(--blocked); font-weight:600;}
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:10px 11px; margin-bottom:9px; cursor:grab;
+    box-shadow:0 1px 2px rgba(20,30,50,.04);
+    transition:box-shadow .12s ease, transform .12s ease;
+  }
+  .card:hover{box-shadow:0 4px 12px rgba(20,30,50,.10); transform:translateY(-1px);}
+  .card:active{cursor:grabbing;}
+  .card.is-blocked{border-color:#f1c6c6;}
+  .card .top{display:flex; align-items:flex-start; gap:8px; justify-content:space-between;}
+  .card .name{font-size:13px; font-weight:600; line-height:1.35; margin:0;}
+  .pj-label{
+    font-size:10.5px; font-weight:600; color:#fff; border-radius:6px;
+    padding:1.5px 7px; white-space:nowrap;
+  }
+  .card .meta{display:flex; align-items:center; gap:8px; margin-top:9px; flex-wrap:wrap;}
+  .avatar{
+    width:22px; height:22px; border-radius:50%; color:#fff;
+    font-size:10.5px; font-weight:700; display:flex; align-items:center; justify-content:center;
+    flex:none;
+  }
+  .who{font-size:11.5px; color:var(--ink);}
+  .due{
+    margin-left:auto; font-size:11px; color:var(--muted);
+    display:flex; align-items:center; gap:4px; font-variant-numeric:tabular-nums;
+  }
+  .due.today{color:var(--blocked); font-weight:700;}
+  .due.over{color:var(--blocked); font-weight:700;}
+  .est{font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums;}
+  .progress{margin-top:9px;}
+  .bar{height:5px; border-radius:999px; background:var(--track); overflow:hidden;}
+  .bar > i{display:block; height:100%; border-radius:999px;}
+  .pct{font-size:10.5px; color:var(--muted); margin-top:3px; display:block; font-variant-numeric:tabular-nums;}
+  .pri-flag{
+    font-size:10px; font-weight:700; color:#fff; background:var(--pri);
+    border-radius:5px; padding:1px 6px; letter-spacing:.02em;
+  }
+  .block-reason{
+    margin-top:8px; font-size:11px; color:#b03a3a; background:#fbe9e9;
+    border:1px solid #f1c6c6; border-radius:7px; padding:5px 8px;
+    display:flex; gap:6px; align-items:center;
+  }
+  .block-reason b{font-weight:700;}
+  .tag-sep{color:var(--line);}
+</style>
+</head>
+<body>
+<header class="page">
+  <div class="crumb">プロジェクト / 新ダッシュボード機能</div>
+  <h1>かんばんボード</h1>
+  <div class="sub nums">本日 6/4(木)・全10タスク・ステータス別に整理</div>
+  <div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</div>
+</header>
+
+<main class="board" id="board"></main>
+
+<script>
+const MEMBERS = {
+  '森田':{c:'var(--m-morita)', i:'森'},
+  '田中':{c:'var(--m-tanaka)', i:'田'},
+  '佐藤':{c:'var(--m-sato)', i:'佐'},
+  '鈴木':{c:'var(--m-suzuki)', i:'鈴'},
+  '未アサイン':{c:'#c3c9d2', i:'?'},
+};
+const PJ = {
+  'Backend':'var(--pj-backend)','Frontend':'var(--pj-frontend)',
+  'QA':'var(--pj-qa)','共通':'var(--pj-common)',
+};
+const STATECOL = {Todo:'var(--todo)', Doing:'var(--doing)', Blocked:'var(--blocked)', Done:'var(--done)'};
+
+// 今日 = 6/4
+const tasks = [
+  {n:'設計ドキュメント', who:'鈴木', pj:'共通', st:'Done', pct:100, due:'5/27', est:'2h'},
+  {n:'API設計', who:'森田', pj:'Backend', st:'Done', pct:100, due:null, est:'4h'},
+  {n:'DBマイグレーション', who:'森田', pj:'Backend', st:'Doing', pct:80, due:'6/5', est:'3h'},
+  {n:'ログイン障害対応', who:'森田', pj:'Backend', st:'Doing', pct:20, due:'6/4', est:'2h', pri:true},
+  {n:'ダッシュ画面実装', who:'田中', pj:'Frontend', st:'Doing', pct:60, due:'6/9', est:'4h'},
+  {n:'認証フロー実装', who:'佐藤', pj:'Backend', st:'Blocked', pct:40, due:'6/6', est:'5h', reason:'外部API待ち（3日）'},
+  {n:'結合テスト', who:'佐藤', pj:'QA', st:'Todo', pct:0, due:'6/11', est:'6h'},
+  {n:'LP制作', who:'田中', pj:'Frontend', st:'Todo', pct:0, due:'6/12', est:'8h'},
+  {n:'リリースノート作成', who:'未アサイン', pj:'共通', st:'Todo', pct:0, due:'6/13', est:'1h'},
+  {n:'リリース準備', who:'森田', pj:'共通', st:'Todo', pct:0, due:'6/13', est:'4h'},
+];
+
+const COLS = [
+  {key:'Todo',  label:'Todo',  wip:null},
+  {key:'Doing', label:'Doing', wip:3},
+  {key:'Blocked', label:'Blocked', wip:null},
+  {key:'Done',  label:'Done',  wip:null},
+];
+
+const TODAY = {m:6, d:4};
+function dueClass(due){
+  if(!due) return '';
+  const [m,d] = due.split('/').map(Number);
+  if(m===TODAY.m && d===TODAY.d) return 'today';
+  if(m<TODAY.m || (m===TODAY.m && d<TODAY.d)) return 'over';
+  return '';
+}
+function dueLabel(t){
+  if(!t.due) return '';
+  const c = dueClass(t.due);
+  let suffix = '';
+  if(c==='today') suffix = '（今日）';
+  else if(c==='over') suffix = '（超過）';
+  return `締切 ${t.due}${suffix}`;
+}
+
+function cardHtml(t){
+  const mem = MEMBERS[t.who];
+  const stcol = STATECOL[t.st];
+  const dc = dueClass(t.due);
+  return `
+  <div class="card ${t.st==='Blocked'?'is-blocked':''}" draggable="true">
+    <div class="top">
+      <p class="name">${t.n}</p>
+      <span class="pj-label" style="background:${PJ[t.pj]}">${t.pj}</span>
+    </div>
+    <div class="meta">
+      <span class="avatar" style="background:${mem.c}">${mem.i}</span>
+      <span class="who">${t.who}</span>
+      ${t.pri?'<span class="pri-flag">最優先</span>':''}
+      ${t.due?`<span class="due ${dc} nums">${dueLabel(t)}</span>`:`<span class="due nums">期限なし</span>`}
+    </div>
+    <div class="progress">
+      <div class="bar"><i style="width:${t.pct}%; background:${stcol}"></i></div>
+      <span class="pct">${t.st} ${t.pct}%・見積 ${t.est}</span>
+    </div>
+    ${t.reason?`<div class="block-reason">⛔ <span><b>ブロック:</b> ${t.reason}</span></div>`:''}
+  </div>`;
+}
+
+function render(){
+  const board = document.getElementById('board');
+  board.innerHTML = COLS.map(col=>{
+    const items = tasks.filter(t=>t.st===col.key);
+    const n = items.length;
+    let wipHtml = '';
+    if(col.wip){
+      const over = n>col.wip;
+      wipHtml = `<span class="wip ${over?'over':''}">WIP目安 ${n}/${col.wip}</span>`;
+    }
+    return `
+    <section class="col ${col.key==='Blocked'?'blocked':''}">
+      <div class="col-head">
+        <span class="col-title">
+          <span class="dot" style="background:${STATECOL[col.key]}"></span>${col.label}
+          <span class="count nums">${n}</span>
+        </span>
+        ${wipHtml}
+      </div>
+      ${items.map(cardHtml).join('') || '<div style="font-size:11.5px;color:var(--muted);padding:8px 6px;">なし</div>'}
+    </section>`;
+  }).join('');
+}
+render();
+
+// pseudo drag interaction (visual only)
+document.addEventListener('dragstart', e=>{ if(e.target.classList?.contains('card')) e.target.style.opacity='.4'; });
+document.addEventListener('dragend', e=>{ if(e.target.classList?.contains('card')) e.target.style.opacity=''; });
+</script>
+</body>
+</html>

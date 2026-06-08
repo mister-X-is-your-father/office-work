@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>グルーピング一覧 — 新ダッシュボード機能</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --done:#2fa66b; --doing:#3a86ff; --todo:#9aa3af; --blocked:#e5484d;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+    --pj-be:#3a86ff; --pj-fe:#2fa66b; --pj-qa:#b657d6; --pj-common:#8a93a0;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-size:13.5px; line-height:1.5; -webkit-font-smoothing:antialiased;
+    font-variant-numeric:tabular-nums; font-feature-settings:"tnum";
+  }
+  .wrap{max-width:1040px; margin:0 auto; padding:24px 20px 70px}
+  header.page{margin-bottom:14px}
+  .crumb{font-size:12px; color:var(--muted); margin-bottom:4px}
+  h1{font-size:20px; margin:0 0 4px}
+  .sub{font-size:12.5px; color:var(--muted)}
+  .note{
+    margin:10px 0 16px; padding:8px 12px; font-size:12px; color:var(--muted);
+    background:#fbfcfd; border:1px solid var(--line); border-radius:8px;
+  }
+  .toolbar{display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-bottom:16px}
+  .seg{display:inline-flex; background:var(--card); border:1px solid var(--line); border-radius:9px; padding:3px; gap:2px}
+  .seg button{
+    font:inherit; font-size:12.5px; border:none; background:none; color:var(--muted);
+    padding:6px 14px; border-radius:7px; cursor:pointer;
+  }
+  .seg button.active{background:var(--ink); color:#fff; font-weight:600}
+  .seg-label{font-size:11.5px; color:var(--muted); margin-right:2px}
+  .spacer{flex:1}
+  .btn{font:inherit; font-size:12.5px; color:var(--ink); background:var(--card); border:1px solid var(--line); border-radius:8px; padding:6px 12px; cursor:pointer}
+  .btn:hover{background:#f1f3f6}
+
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04), 0 6px 18px rgba(20,30,50,.03);
+    overflow:hidden;
+  }
+
+  .group{border-bottom:1px solid var(--line)}
+  .group:last-child{border-bottom:none}
+  .ghead{
+    display:flex; align-items:center; gap:10px; padding:11px 16px; cursor:pointer; user-select:none;
+    background:#fbfcfd;
+  }
+  .ghead:hover{background:#f4f6f8}
+  .gtw{
+    width:16px; height:16px; flex:none; color:var(--muted); display:inline-flex; align-items:center; justify-content:center;
+    transition:transform .15s;
+  }
+  .gtw svg{width:9px;height:9px}
+  .gtw.collapsed{transform:rotate(-90deg)}
+  .gswatch{width:10px; height:10px; border-radius:3px; flex:none}
+  .gav{width:20px;height:20px;border-radius:50%;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex:none}
+  .gname{font-weight:700; font-size:14px}
+  .gcount{font-size:11px; color:var(--muted); background:var(--track); border-radius:999px; padding:1px 8px; font-weight:600}
+  .ghours{font-size:12px; color:var(--muted)}
+  .gprog{display:flex; align-items:center; gap:8px; width:170px; margin-left:auto}
+  .gbar{flex:1; height:7px; background:var(--track); border-radius:999px; overflow:hidden}
+  .gbar > i{display:block; height:100%; border-radius:999px}
+  .gpct{width:38px; text-align:right; font-size:12.5px; font-weight:700; font-variant-numeric:tabular-nums}
+
+  .rows.hidden{display:none}
+  table{width:100%; border-collapse:collapse}
+  .trow{border-top:1px solid var(--line)}
+  .trow:hover{background:#f8f9fb}
+  td{padding:9px 14px; vertical-align:middle}
+  td.t-name{padding-left:42px}
+  .t-name .nm{font-weight:500}
+  .done .t-name .nm{color:var(--muted); text-decoration:line-through; text-decoration-color:#c7cdd6}
+  .t-name .meta{font-size:11px; color:var(--muted); margin-top:1px}
+
+  .st{font-size:10px; padding:2px 8px; border-radius:999px; color:#fff; font-weight:600; white-space:nowrap}
+  .st-done{background:var(--done)} .st-doing{background:var(--doing)}
+  .st-todo{background:var(--todo)} .st-blocked{background:var(--blocked)}
+
+  .who{display:flex; align-items:center; gap:6px; font-size:12.5px; color:#404a58; white-space:nowrap}
+  .av{width:20px;height:20px;border-radius:50%;color:#fff;flex:none;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700}
+  .who.un{color:var(--muted)} .who.un .av{background:#cbd2db}
+
+  .pjtag{font-size:10px; padding:1px 6px; border-radius:5px; border:1px solid currentColor; font-weight:600; white-space:nowrap}
+
+  .t-prog{width:130px}
+  .miniwrap{display:flex; align-items:center; gap:7px}
+  .minibar{flex:1; height:6px; background:var(--track); border-radius:999px; overflow:hidden}
+  .minibar > i{display:block; height:100%; border-radius:999px}
+  .minipct{width:34px; text-align:right; font-size:11.5px; color:var(--muted)}
+
+  .t-hours{text-align:right; font-size:12.5px; color:var(--muted); white-space:nowrap}
+  .t-epic{font-size:11.5px; color:var(--muted); white-space:nowrap}
+
+  .colhead td{font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; font-weight:600; padding-top:8px; padding-bottom:8px; background:#fff}
+  .colhead{border-top:none}
+
+  @media(max-width:820px){
+    .t-epic,.t-hours,.t-prog{display:none}
+    .gprog{width:120px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="page">
+    <div class="crumb">プロジェクト / 新ダッシュボード機能</div>
+    <h1>グルーピング一覧</h1>
+    <div class="sub">大量タスクを意味のある塊で。グループヘッダに件数・合計工数・進捗　<span style="color:#404a58">今日 6/4 (木)</span></div>
+  </header>
+
+  <div class="note">※ モック（サンプルデータ）。本番は Vikunja API（親子・サブタスク）から自動算出。</div>
+
+  <div class="toolbar">
+    <span class="seg-label">グループ化：</span>
+    <div class="seg" id="seg">
+      <button data-k="epic" class="active">エピック</button>
+      <button data-k="who">担当</button>
+      <button data-k="pj">プロジェクト</button>
+    </div>
+    <div class="spacer"></div>
+    <button class="btn" id="toggleAll">すべて折りたたむ</button>
+  </div>
+
+  <div class="card" id="board"></div>
+</div>
+
+<script>
+const M = {
+  morita:{n:"森田",c:"#e5772d"}, tanaka:{n:"田中",c:"#3a86ff"},
+  sato:{n:"佐藤",c:"#2fa66b"}, suzuki:{n:"鈴木",c:"#b657d6"}, none:{n:"未",c:"#cbd2db",un:true}
+};
+const PJ = { be:{n:"Backend",c:"#3a86ff"}, fe:{n:"Frontend",c:"#2fa66b"}, qa:{n:"QA",c:"#b657d6"}, common:{n:"共通",c:"#8a93a0"} };
+const EPIC = { auth:{n:"認証"}, dash:{n:"ダッシュボード画面"}, qa:{n:"品質"}, rel:{n:"リリース"} };
+
+// flat task list (parent tasks; subtasks rolled into parent progress already)
+const TASKS = [
+  {name:"DBマイグレーション", epic:"auth", pj:"be", who:"morita", st:"done", h:3, pct:80},
+  {name:"認証フロー実装", epic:"auth", pj:"be", who:"sato", st:"blocked", h:5, pct:40, sub:"サブ 1/3 完了"},
+  {name:"PRレビュー #142", epic:"auth", pj:"be", who:"sato", st:"doing", h:1, pct:50, meta:"佐藤 → 森田"},
+  {name:"ダッシュ画面実装", epic:"dash", pj:"fe", who:"tanaka", st:"doing", h:4, pct:60, sub:"サブ 1/3 完了"},
+  {name:"LP制作", epic:"dash", pj:"fe", who:"tanaka", st:"todo", h:8, pct:0},
+  {name:"結合テスト", epic:"qa", pj:"qa", who:"sato", st:"todo", h:6, pct:0},
+  {name:"リリースノート", epic:"rel", pj:"common", who:"none", st:"todo", h:1, pct:0},
+  {name:"リリース準備", epic:"rel", pj:"common", who:"morita", st:"todo", h:4, pct:0},
+];
+
+const ST_CLASS={done:"st-done",doing:"st-doing",todo:"st-todo",blocked:"st-blocked"};
+const ST_LABEL={done:"Done",doing:"Doing",todo:"Todo",blocked:"Blocked"};
+const ST_COLOR={done:"#2fa66b",doing:"#3a86ff",todo:"#9aa3af",blocked:"#e5484d"};
+
+function barColor(pct,st){ if(ST_COLOR[st])return ST_COLOR[st]; return pct>=100?ST_COLOR.done:(pct>0?ST_COLOR.doing:ST_COLOR.todo); }
+
+const GROUPERS = {
+  epic:{ key:t=>t.epic, label:k=>EPIC[k].n, swatch:k=>({type:"sq",c:"#8a93a0"}), order:["auth","dash","qa","rel"] },
+  who: { key:t=>t.who,  label:k=>M[k].n,   swatch:k=>({type:"av",c:M[k].c,t:M[k].n[0],un:M[k].un}), order:["morita","tanaka","sato","none"] },
+  pj:  { key:t=>t.pj,   label:k=>PJ[k].n,  swatch:k=>({type:"sq",c:PJ[k].c}), order:["be","fe","qa","common"] },
+};
+
+const board=document.getElementById("board");
+let current="epic";
+
+function avg(arr){ return arr.length? Math.round(arr.reduce((a,b)=>a+b,0)/arr.length):0; }
+
+function render(grouper){
+  board.innerHTML="";
+  const G=GROUPERS[grouper];
+  const buckets={};
+  TASKS.forEach(t=>{ const k=G.key(t); (buckets[k]=buckets[k]||[]).push(t); });
+  const keys=G.order.filter(k=>buckets[k]);
+
+  keys.forEach(k=>{
+    const items=buckets[k];
+    const totalH=items.reduce((a,t)=>a+t.h,0);
+    const pct=avg(items.map(t=>t.pct));
+
+    const group=document.createElement("div"); group.className="group";
+
+    const head=document.createElement("div"); head.className="ghead";
+    const tw=document.createElement("span"); tw.className="gtw";
+    tw.innerHTML='<svg viewBox="0 0 10 10"><path d="M2 1 L8 5 L2 9 Z" fill="currentColor"/></svg>';
+    head.appendChild(tw);
+
+    const sw=G.swatch(k);
+    if(sw.type==="av"){
+      const av=document.createElement("span"); av.className="gav"; av.style.background=sw.c; av.textContent=sw.t;
+      if(sw.un){ av.style.background="#cbd2db"; }
+      head.appendChild(av);
+    } else {
+      const s=document.createElement("span"); s.className="gswatch"; s.style.background=sw.c; head.appendChild(s);
+    }
+
+    const nm=document.createElement("span"); nm.className="gname"; nm.textContent=G.label(k); head.appendChild(nm);
+    const cnt=document.createElement("span"); cnt.className="gcount"; cnt.textContent=items.length+"件"; head.appendChild(cnt);
+    const hrs=document.createElement("span"); hrs.className="ghours"; hrs.textContent="計 "+totalH+"h"; head.appendChild(hrs);
+
+    const gp=document.createElement("div"); gp.className="gprog";
+    const bar=document.createElement("div"); bar.className="gbar";
+    const fill=document.createElement("i"); fill.style.width=pct+"%"; fill.style.background=barColor(pct);
+    bar.appendChild(fill);
+    const gpct=document.createElement("span"); gpct.className="gpct"; gpct.textContent=pct+"%";
+    gp.appendChild(bar); gp.appendChild(gpct); head.appendChild(gp);
+
+    group.appendChild(head);
+
+    // rows
+    const rowsWrap=document.createElement("div"); rowsWrap.className="rows";
+    const table=document.createElement("table");
+
+    const ch=document.createElement("tr"); ch.className="colhead";
+    ch.innerHTML='<td class="t-name">タスク</td><td>状態</td>'
+      + (grouper!=="who"?'<td>担当</td>':'<td></td>')
+      + (grouper!=="epic"?'<td>エピック</td>':'<td></td>')
+      + '<td class="t-prog">進捗</td><td class="t-hours">工数</td>';
+    table.appendChild(ch);
+
+    items.forEach(t=>{
+      const tr=document.createElement("tr"); tr.className="trow"+(t.st==="done"?" done":"");
+      // name
+      const tdN=document.createElement("td"); tdN.className="t-name";
+      let metaTxt = t.sub || t.meta || "";
+      tdN.innerHTML='<div class="nm">'+t.name+'</div>'+(metaTxt?'<div class="meta">'+metaTxt+'</div>':'');
+      tr.appendChild(tdN);
+      // status
+      const tdS=document.createElement("td");
+      tdS.innerHTML='<span class="st '+ST_CLASS[t.st]+'">'+ST_LABEL[t.st]+'</span>';
+      tr.appendChild(tdS);
+      // who (hide column meaning when grouped by who)
+      const tdW=document.createElement("td");
+      if(grouper!=="who"){
+        const m=M[t.who];
+        tdW.innerHTML='<span class="who'+(m.un?" un":"")+'"><span class="av" style="background:'+(m.un?"#cbd2db":m.c)+'">'+m.n[0]+'</span>'+m.n+'</span>';
+      }
+      tr.appendChild(tdW);
+      // epic / pj cell
+      const tdE=document.createElement("td"); tdE.className="t-epic";
+      if(grouper!=="epic"){ tdE.textContent=EPIC[t.epic].n; }
+      tr.appendChild(tdE);
+      // progress
+      const tdP=document.createElement("td"); tdP.className="t-prog";
+      tdP.innerHTML='<div class="miniwrap"><div class="minibar"><i style="width:'+t.pct+'%;background:'+barColor(t.pct,t.st)+'"></i></div><span class="minipct">'+t.pct+'%</span></div>';
+      tr.appendChild(tdP);
+      // hours
+      const tdH=document.createElement("td"); tdH.className="t-hours"; tdH.textContent=t.h+"h";
+      tr.appendChild(tdH);
+
+      table.appendChild(tr);
+    });
+
+    rowsWrap.appendChild(table);
+    group.appendChild(rowsWrap);
+
+    head.addEventListener("click",()=>{
+      const h=rowsWrap.classList.toggle("hidden");
+      tw.classList.toggle("collapsed",h);
+      syncToggleLabel();
+    });
+
+    board.appendChild(group);
+  });
+}
+
+document.getElementById("seg").addEventListener("click",e=>{
+  const b=e.target.closest("button"); if(!b)return;
+  current=b.dataset.k;
+  document.querySelectorAll("#seg button").forEach(x=>x.classList.toggle("active",x===b));
+  render(current);
+  syncToggleLabel();
+});
+
+const toggleBtn=document.getElementById("toggleAll");
+toggleBtn.addEventListener("click",()=>{
+  const anyOpen=[...document.querySelectorAll(".rows")].some(r=>!r.classList.contains("hidden"));
+  document.querySelectorAll(".rows").forEach(r=>r.classList.toggle("hidden",anyOpen));
+  document.querySelectorAll(".gtw").forEach(t=>t.classList.toggle("collapsed",anyOpen));
+  syncToggleLabel();
+});
+function syncToggleLabel(){
+  const anyOpen=[...document.querySelectorAll(".rows")].some(r=>!r.classList.contains("hidden"));
+  toggleBtn.textContent=anyOpen?"すべて折りたたむ":"すべて展開";
+}
+
+render(current);
+syncToggleLabel();
+</script>
+</body>
+</html>

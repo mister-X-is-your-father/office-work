@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>依存関係グラフ／クリティカルパス — 新ダッシュボード機能</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --done:#2fa66b; --doing:#3a86ff; --todo:#9aa3af; --blocked:#e5484d;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"tnum" 1; -webkit-font-smoothing:antialiased;
+  }
+  .tnum{font-variant-numeric:tabular-nums}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 22px 60px}
+  header.page{margin-bottom:18px}
+  .crumb{font-size:12px;color:var(--muted);margin-bottom:6px}
+  h1{font-size:21px;margin:0 0 4px;font-weight:700;letter-spacing:.01em}
+  .sub{font-size:13px;color:var(--muted)}
+  .note{
+    margin-top:12px;font-size:12px;color:var(--muted);
+    background:#fff;border:1px solid var(--line);border-left:3px solid var(--doing);
+    padding:8px 12px;border-radius:8px;display:inline-block;
+  }
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:14px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04),0 4px 14px rgba(20,30,50,.03);
+  }
+  .alert{
+    margin:18px 0 16px;padding:12px 14px;border-radius:12px;
+    background:#fdeceb;border:1px solid #f6c9c6;color:#8d2420;
+    display:flex;gap:11px;align-items:flex-start;font-size:13px;line-height:1.5;
+  }
+  .alert .ic{
+    flex:none;width:22px;height:22px;border-radius:50%;background:var(--blocked);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;margin-top:1px;
+  }
+  .alert b{color:var(--blocked)}
+  .legend{display:flex;flex-wrap:wrap;gap:16px;align-items:center;padding:13px 18px;margin-bottom:14px;font-size:12px;color:var(--muted)}
+  .legend .grp{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+  .legend .sep{width:1px;height:16px;background:var(--line)}
+  .lg{display:inline-flex;gap:6px;align-items:center}
+  .dot{width:11px;height:11px;border-radius:3px;display:inline-block}
+  .dot.r{border-radius:50%}
+  .cp-line{display:inline-block;width:22px;height:0;border-top:3px solid var(--blocked)}
+  .dep-line{display:inline-block;width:22px;height:0;border-top:2px solid #c2c9d4}
+
+  .graphcard{padding:8px}
+  .graphscroll{overflow-x:auto}
+  svg.graph{display:block;min-width:1080px;width:100%;height:auto}
+
+  /* node label helper rendered via foreignObject */
+  .node{cursor:default}
+  .nbody{
+    width:100%;height:100%;border-radius:12px;background:#fff;
+    border:1.5px solid var(--line);padding:9px 11px;overflow:hidden;
+    display:flex;flex-direction:column;gap:5px;position:relative;
+    box-shadow:0 1px 2px rgba(20,30,50,.05);
+  }
+  .nbody.cp{border-color:#f1b4b0;box-shadow:0 0 0 2px rgba(229,72,77,.10),0 1px 2px rgba(20,30,50,.05)}
+  .nbody.blocked{border-color:var(--blocked);box-shadow:0 0 0 3px rgba(229,72,77,.16)}
+  .ntop{display:flex;align-items:center;gap:7px;justify-content:space-between}
+  .ntitle{font-size:13px;font-weight:700;line-height:1.25;color:var(--ink)}
+  .nstate{
+    font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:20px;color:#fff;white-space:nowrap;flex:none;
+  }
+  .s-done{background:var(--done)} .s-doing{background:var(--doing)}
+  .s-todo{background:var(--todo)} .s-blocked{background:var(--blocked)}
+  .nmeta{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--muted)}
+  .owner{display:inline-flex;align-items:center;gap:5px;font-size:11px}
+  .ava{width:16px;height:16px;border-radius:50%;color:#fff;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;flex:none}
+  .prog{height:5px;border-radius:4px;background:var(--track);overflow:hidden;margin-top:1px}
+  .prog>i{display:block;height:100%;border-radius:4px}
+  .cpbadge{
+    position:absolute;top:-9px;left:10px;font-size:9.5px;font-weight:700;color:#fff;
+    background:var(--blocked);padding:1px 7px;border-radius:20px;letter-spacing:.03em;
+  }
+  .blk-badge{font-size:10px;color:var(--blocked);font-weight:700;display:flex;align-items:center;gap:4px}
+
+  .stagehdr{font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.04em}
+
+  .footrow{display:flex;gap:16px;margin-top:18px;flex-wrap:wrap}
+  .panel{flex:1;min-width:280px;padding:16px 18px}
+  .panel h3{margin:0 0 10px;font-size:13px;font-weight:700}
+  .cpwalk{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px}
+  .cpwalk .step{padding:3px 9px;border-radius:7px;background:#fdeceb;border:1px solid #f3c4c0;color:#8d2420;font-weight:600}
+  .cpwalk .step.done{background:#eaf7f0;border-color:#bfe6d1;color:#1f6b45}
+  .cpwalk .arr{color:var(--blocked);font-weight:700}
+  .risk{font-size:12px;color:var(--muted);line-height:1.6;margin:0;padding-left:18px}
+  .risk li{margin-bottom:5px}
+  .risk b{color:var(--ink)}
+  .ddl{color:var(--blocked);font-weight:700}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="page">
+    <div class="crumb">プロジェクト / 新ダッシュボード機能 / ビュー</div>
+    <h1>依存関係グラフ ／ クリティカルパス</h1>
+    <div class="sub">今日 6/4(木)　・　タスク間の依存と「詰まり」を可視化　・　左 → 右が作業の流れ</div>
+    <div class="note">※ モック（サンプルデータ）。本番は Vikunja API（依存・状態）から自動算出。</div>
+  </header>
+
+  <div class="alert">
+    <div class="ic">!</div>
+    <div>
+      <b>クリティカルパスが停滞中。</b>　ブロック中の <b>「認証フロー実装」</b>（外部API待ち）がクリティカルパス上にあり、ここが解消されない限り
+      <b>結合テスト → リリース準備（締切 6/13）</b> が直撃で遅延します。最優先で外部API待ちを解消する必要があります。
+    </div>
+  </div>
+
+  <div class="card legend">
+    <div class="grp">
+      <span class="lg"><span class="dot r" style="background:var(--done)"></span>完了</span>
+      <span class="lg"><span class="dot r" style="background:var(--doing)"></span>進行中</span>
+      <span class="lg"><span class="dot r" style="background:var(--todo)"></span>未着手</span>
+      <span class="lg"><span class="dot r" style="background:var(--blocked)"></span>ブロック</span>
+    </div>
+    <div class="sep"></div>
+    <div class="grp">
+      <span class="lg"><span class="cp-line"></span>クリティカルパス</span>
+      <span class="lg"><span class="dep-line"></span>依存</span>
+    </div>
+    <div class="sep"></div>
+    <div class="grp">
+      <span class="lg"><span class="ava" style="background:var(--m-morita)">森</span>森田</span>
+      <span class="lg"><span class="ava" style="background:var(--m-tanaka)">田</span>田中</span>
+      <span class="lg"><span class="ava" style="background:var(--m-sato)">佐</span>佐藤</span>
+      <span class="lg"><span class="ava" style="background:var(--m-suzuki)">鈴</span>鈴木</span>
+    </div>
+  </div>
+
+  <div class="card graphcard">
+    <div class="graphscroll">
+      <svg class="graph" viewBox="0 0 1080 540" role="img" aria-label="依存関係グラフ">
+        <defs>
+          <marker id="arrCP" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto" markerUnits="userSpaceOnUse">
+            <path d="M0,0 L8,4 L0,8 z" fill="#e5484d"></path>
+          </marker>
+          <marker id="arrDep" markerWidth="8" markerHeight="8" refX="7" refY="3.5" orient="auto" markerUnits="userSpaceOnUse">
+            <path d="M0,0 L7,3.5 L0,7 z" fill="#9aa3af"></path>
+          </marker>
+        </defs>
+
+        <!-- stage headers -->
+        <text x="120" y="24" text-anchor="middle" class="stagehdr" fill="#6b7480">設計</text>
+        <text x="320" y="24" text-anchor="middle" class="stagehdr" fill="#6b7480">基盤・実装</text>
+        <text x="540" y="24" text-anchor="middle" class="stagehdr" fill="#6b7480">機能実装</text>
+        <text x="760" y="24" text-anchor="middle" class="stagehdr" fill="#6b7480">検証</text>
+        <text x="980" y="24" text-anchor="middle" class="stagehdr" fill="#6b7480">リリース</text>
+
+        <!-- ===== EDGES (drawn first, under nodes) ===== -->
+        <!-- Critical path edges (red, thick) -->
+        <!-- API設計(220,110)->DBマイグレ(420,110) -->
+        <path d="M222,118 C262,118 282,118 318,118" fill="none" stroke="#e5484d" stroke-width="3" marker-end="url(#arrCP)"/>
+        <!-- DBマイグレ(420,110)->認証(640,150) -->
+        <path d="M522,124 C560,132 580,148 638,156" fill="none" stroke="#e5484d" stroke-width="3" marker-end="url(#arrCP)"/>
+        <!-- 認証(640,150)->結合テスト(860,200) -->
+        <path d="M742,180 C778,188 800,200 838,206" fill="none" stroke="#e5484d" stroke-width="3" marker-end="url(#arrCP)"/>
+        <!-- 結合テスト(860,200)->リリース準備(960... actually node5 x~ -->
+        <path d="M962,206 C1000,206 1015,206 1050,206" fill="none" stroke="#e5484d" stroke-width="3" marker-end="url(#arrCP)" transform="translate(-90,0)"/>
+
+        <!-- dependency edges (gray) -->
+        <!-- ダッシュ画面実装(640,300)->結合テスト(860,200) -->
+        <path d="M742,308 C790,300 810,250 838,228" fill="none" stroke="#c2c9d4" stroke-width="2" marker-end="url(#arrDep)"/>
+
+        <!-- ===== NODES ===== -->
+        <!-- API設計 (done) x:20..222 -> place 20 -->
+        <foreignObject x="20" y="78" width="202" height="82" class="node">
+          <div xmlns="http://www.w3.org/1999/xhtml" class="nbody cp">
+            <div class="cpbadge">クリティカルパス</div>
+            <div class="ntop"><span class="ntitle">API設計</span><span class="nstate s-done">完了</span></div>
+            <div class="nmeta"><span class="owner"><span class="ava" style="background:#9aa3af">—</span>設計</span><span>・基盤確定</span></div>
+            <div class="prog"><i style="width:100%;background:var(--done)"></i></div>
+          </div>
+        </foreignObject>
+
+        <!-- DBマイグレ (doing 80) x:318..520 -->
+        <foreignObject x="318" y="78" width="202" height="86" class="node">
+          <div xmlns="http://www.w3.org/1999/xhtml" class="nbody cp">
+            <div class="cpbadge">クリティカルパス</div>
+            <div class="ntop"><span class="ntitle">DBマイグレーション</span><span class="nstate s-doing">進行中</span></div>
+            <div class="nmeta"><span class="owner"><span class="ava" style="background:var(--m-suzuki)">鈴</span>鈴木</span><span class="tnum">・80%</span></div>
+            <div class="prog"><i style="width:80%;background:var(--doing)"></i></div>
+          </div>
+        </foreignObject>
+
+        <!-- 認証フロー実装 (blocked) x:638..742 width202 -> 540 center; place 540 -->
+        <foreignObject x="540" y="116" width="202" height="92" class="node">
+          <div xmlns="http://www.w3.org/1999/xhtml" class="nbody cp blocked">
+            <div class="cpbadge">クリティカルパス</div>
+            <div class="ntop"><span class="ntitle">認証フロー実装</span><span class="nstate s-blocked">ブロック</span></div>
+            <div class="blk-badge">⚠ 外部API待ちで停滞</div>
+            <div class="nmeta"><span class="owner"><span class="ava" style="background:var(--m-sato)">佐</span>佐藤</span></div>
+            <div class="prog"><i style="width:15%;background:var(--blocked)"></i></div>
+          </div>
+        </foreignObject>
+
+        <!-- ダッシュ画面実装 (doing 60) branch row2 x:540 y:268 -->
+        <foreignObject x="540" y="268" width="202" height="86" class="node">
+          <div xmlns="http://www.w3.org/1999/xhtml" class="nbody">
+            <div class="ntop"><span class="ntitle">ダッシュ画面実装</span><span class="nstate s-doing">進行中</span></div>
+            <div class="nmeta"><span class="owner"><span class="ava" style="background:var(--m-tanaka)">田</span>田中</span><span class="tnum">・60%</span></div>
+            <div class="prog"><i style="width:60%;background:var(--doing)"></i></div>
+          </div>
+        </foreignObject>
+
+        <!-- 結合テスト (todo) x:760 center -> place 760-101=659? use x 758..960 width202 place 758 -->
+        <foreignObject x="758" y="164" width="202" height="82" class="node">
+          <div xmlns="http://www.w3.org/1999/xhtml" class="nbody cp">
+            <div class="cpbadge">クリティカルパス</div>
+            <div class="ntop"><span class="ntitle">結合テスト</span><span class="nstate s-todo">未着手</span></div>
+            <div class="nmeta"><span class="owner"><span class="ava" style="background:#9aa3af">—</span>未割当</span></div>
+            <div class="prog"><i style="width:0%;background:var(--todo)"></i></div>
+          </div>
+        </foreignObject>
+
+        <!-- リリース準備 (todo, 締切6/13) x:980 center place 878.. but width202 -> x 858? shift, place at right -->
+        <foreignObject x="868" y="164" width="202" height="82" class="node" transform="translate(8,0)">
+          <div xmlns="http://www.w3.org/1999/xhtml" class="nbody cp">
+            <div class="cpbadge">クリティカルパス</div>
+            <div class="ntop"><span class="ntitle">リリース準備</span><span class="nstate s-todo">未着手</span></div>
+            <div class="nmeta"><span class="owner"><span class="ava" style="background:#9aa3af">—</span>未割当</span><span class="tnum" style="color:#e5484d;font-weight:700">・締切 6/13</span></div>
+            <div class="prog"><i style="width:0%;background:var(--todo)"></i></div>
+          </div>
+        </foreignObject>
+
+        <!-- independent nodes (bottom band) -->
+        <!-- LP制作 (田中, todo) -->
+        <foreignObject x="20" y="410" width="202" height="80" class="node">
+          <div xmlns="http://www.w3.org/1999/xhtml" class="nbody">
+            <div class="ntop"><span class="ntitle">LP制作</span><span class="nstate s-todo">未着手</span></div>
+            <div class="nmeta"><span class="owner"><span class="ava" style="background:var(--m-tanaka)">田</span>田中</span><span>・独立（依存なし）</span></div>
+            <div class="prog"><i style="width:0%;background:var(--todo)"></i></div>
+          </div>
+        </foreignObject>
+
+        <!-- 設計ドキュメント (done, independent) -->
+        <foreignObject x="318" y="410" width="202" height="80" class="node">
+          <div xmlns="http://www.w3.org/1999/xhtml" class="nbody">
+            <div class="ntop"><span class="ntitle">設計ドキュメント</span><span class="nstate s-done">完了</span></div>
+            <div class="nmeta"><span class="owner"><span class="ava" style="background:#9aa3af">—</span>独立（依存なし）</span></div>
+            <div class="prog"><i style="width:100%;background:var(--done)"></i></div>
+          </div>
+        </foreignObject>
+
+        <text x="270" y="392" class="stagehdr" fill="#9aa3af">独立タスク（クリティカルパス外）</text>
+      </svg>
+    </div>
+  </div>
+
+  <div class="footrow">
+    <div class="card panel">
+      <h3>クリティカルパス（最長経路）</h3>
+      <div class="cpwalk">
+        <span class="step done">API設計</span><span class="arr">→</span>
+        <span class="step">DBマイグレ</span><span class="arr">→</span>
+        <span class="step" style="background:#fbdad7;border-color:#e5484d;color:#8d2420">認証フロー実装 ⚠</span><span class="arr">→</span>
+        <span class="step">結合テスト</span><span class="arr">→</span>
+        <span class="step">リリース準備</span>
+      </div>
+    </div>
+    <div class="card panel">
+      <h3>遅延リスク（どこが詰まるとリリースが遅れるか）</h3>
+      <ul class="risk">
+        <li><b>認証フロー実装が最大ボトルネック</b>：ブロック中（外部API待ち）。ここの停滞が結合テスト〜リリースを直撃。</li>
+        <li>結合テストは <b>認証フロー実装</b> と <b>ダッシュ画面実装(60%)</b> の両方が前提。</li>
+        <li>リリース準備の<span class="ddl">締切 6/13</span> に対し、現状クリティカルパスは認証で停止中。</li>
+      </ul>
+    </div>
+  </div>
+</div>
+</body>
+</html>

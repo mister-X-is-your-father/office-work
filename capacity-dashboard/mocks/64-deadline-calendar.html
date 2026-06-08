@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>期限カレンダー — 新ダッシュボード機能</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --done:#2fa66b; --doing:#3a86ff; --todo:#9aa3af; --blocked:#e5484d;
+    --sig-g:#2fa66b; --sig-y:#f5a623; --sig-r:#e5484d;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"palt"; font-variant-numeric:tabular-nums;
+    line-height:1.5; padding:28px 20px 60px;
+  }
+  .wrap{max-width:1000px;margin:0 auto}
+  header.page{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;flex-wrap:wrap}
+  .eyebrow{font-size:12px;color:var(--muted);letter-spacing:.04em;font-weight:600}
+  h1{font-size:22px;font-weight:700;margin:2px 0 0;letter-spacing:.01em}
+  .monthnav{display:flex;align-items:center;gap:6px}
+  .monthnav .arr{width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--muted);
+    display:flex;align-items:center;justify-content:center;font-size:14px}
+  .monthnav .mlabel{font-size:15px;font-weight:700;padding:0 6px;min-width:96px;text-align:center}
+  .note{
+    font-size:12px;color:var(--muted);background:#fff;border:1px solid var(--line);
+    border-radius:10px;padding:8px 12px;display:inline-flex;align-items:center;gap:6px;margin-top:12px;
+  }
+  .note .dot{width:6px;height:6px;border-radius:50%;background:var(--sig-y);flex:none}
+
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin:16px 0 14px;font-size:11.5px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:6px;font-weight:600}
+  .lg{width:11px;height:11px;border-radius:3px;display:inline-block}
+  .lg.today{background:var(--doing)} .lg.over{background:var(--sig-r)}
+  .lg.ms{background:#fff;border:2px solid var(--m-morita)} .lg.norm{background:var(--track)}
+
+  .layout{display:grid;grid-template-columns:1fr 270px;gap:16px;align-items:start}
+  @media(max-width:860px){.layout{grid-template-columns:1fr}}
+
+  .cal{background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px;box-shadow:0 1px 3px rgba(20,30,50,.05)}
+  .dow{display:grid;grid-template-columns:repeat(7,1fr);margin-bottom:6px}
+  .dow div{text-align:center;font-size:11.5px;font-weight:700;color:var(--muted);padding:4px 0}
+  .dow div.sun{color:var(--sig-r)} .dow div.sat{color:var(--doing)}
+  .grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+  .cell{
+    min-height:92px;border:1px solid var(--line);border-radius:10px;padding:6px 6px 7px;background:#fff;
+    display:flex;flex-direction:column;gap:3px;position:relative;
+  }
+  .cell.out{background:#fbfcfd;border-color:#f0f2f5}
+  .cell.out .dn{color:#c3c9d2}
+  .dn{font-size:12px;font-weight:700;color:var(--ink);width:22px;height:22px;display:flex;align-items:center;justify-content:center}
+  .cell.sun .dn{color:var(--sig-r)} .cell.sat .dn{color:var(--doing)}
+  .cell.today{border-color:var(--doing);box-shadow:0 0 0 2px rgba(58,134,255,.18)}
+  .cell.today .dn{background:var(--doing);color:#fff;border-radius:6px}
+  .cell.today.sun .dn,.cell.today.sat .dn{color:#fff}
+  .cell.today::after{content:"今日";position:absolute;top:8px;right:7px;font-size:10px;font-weight:700;color:var(--doing)}
+  .cell.ms{background:linear-gradient(180deg,#fff7f1,#fff);border-color:#f4cca8}
+
+  .chip{
+    font-size:10.5px;font-weight:600;padding:2px 6px 2px 16px;border-radius:6px;background:var(--track);color:var(--ink);
+    position:relative;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.55;
+  }
+  .chip::before{content:"";position:absolute;left:5px;top:50%;transform:translateY(-50%);width:7px;height:7px;border-radius:50%}
+  .chip.morita::before{background:var(--m-morita)} .chip.tanaka::before{background:var(--m-tanaka)}
+  .chip.sato::before{background:var(--m-sato)} .chip.suzuki::before{background:var(--m-suzuki)}
+  .chip.over{background:rgba(229,72,77,.12);color:var(--blocked)}
+  .chip.over::before{background:var(--sig-r)}
+  .chip.msx{background:rgba(229,119,45,.14);color:var(--m-morita);font-weight:700;padding-left:17px}
+  .chip.msx::before{content:"◆";background:none;width:auto;height:auto;left:5px;font-size:9px;color:var(--m-morita);transform:translateY(-50%)}
+
+  .side{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:0 1px 3px rgba(20,30,50,.05);position:sticky;top:20px}
+  .side .sh{display:flex;align-items:center;gap:8px;margin-bottom:3px}
+  .side .sh .b{width:24px;height:24px;border-radius:7px;background:var(--doing);color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  .side .sh .t{font-size:14px;font-weight:700}
+  .side .ssub{font-size:11.5px;color:var(--muted);margin-bottom:13px}
+  .ditem{border:1px solid var(--line);border-radius:10px;padding:9px 11px;margin-bottom:8px;position:relative;overflow:hidden}
+  .ditem::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px}
+  .ditem.morita::before{background:var(--m-morita)}
+  .ditem .dt{font-size:13px;font-weight:700}
+  .ditem .dm{font-size:11px;color:var(--muted);margin-top:4px;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .tg{font-size:10.5px;background:var(--track);color:var(--muted);padding:1px 7px;border-radius:5px;font-weight:600}
+  .tg.r{background:rgba(229,72,77,.1);color:var(--blocked)}
+  .owner{font-size:10.5px;font-weight:700;color:#fff;padding:1px 7px;border-radius:5px}
+  .o-morita{background:var(--m-morita)}
+  .upnext{margin-top:14px;border-top:1px dashed var(--line);padding-top:12px}
+  .upnext .ut{font-size:11.5px;font-weight:700;color:var(--muted);margin-bottom:8px}
+  .urow{display:flex;align-items:center;gap:8px;font-size:11.5px;padding:4px 0}
+  .urow .ud{font-weight:700;color:var(--ink);width:34px}
+  .urow .un{flex:1;color:var(--ink)}
+  .urow .um{width:8px;height:8px;border-radius:50%}
+  .um.morita{background:var(--m-morita)} .um.tanaka{background:var(--m-tanaka)} .um.sato{background:var(--m-sato)}
+  .urow.ms .un{color:var(--m-morita);font-weight:700}
+  .hint{margin-top:12px;font-size:11px;color:var(--muted);border-top:1px dashed var(--line);padding-top:10px}
+
+  footer{margin-top:24px;font-size:11.5px;color:var(--muted);text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="page">
+    <div>
+      <div class="eyebrow">プロジェクト · 新ダッシュボード機能</div>
+      <h1>期限カレンダー</h1>
+    </div>
+    <div class="monthnav">
+      <span class="arr">‹</span>
+      <span class="mlabel">2026年 6月</span>
+      <span class="arr">›</span>
+    </div>
+  </header>
+  <div class="note"><span class="dot"></span>※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</div>
+
+  <div class="legend">
+    <span><i class="lg today"></i>今日 6/4</span>
+    <span><i class="lg over"></i>当日 / 超過</span>
+    <span><i class="lg ms"></i>マイルストーン</span>
+    <span><i class="lg norm"></i>締切タスク</span>
+  </div>
+
+  <div class="layout">
+    <div class="cal">
+      <div class="dow"><div class="sun">日</div><div>月</div><div>火</div><div>水</div><div>木</div><div>金</div><div class="sat">土</div></div>
+      <div class="grid">
+        <!-- 6月1日(月)始まり。前後はグレーアウト。 -->
+        <div class="cell out sun"><span class="dn">31</span></div>
+        <div class="cell"><span class="dn">1</span></div>
+        <div class="cell"><span class="dn">2</span></div>
+        <div class="cell"><span class="dn">3</span></div>
+        <div class="cell today"><span class="dn">4</span>
+          <div class="chip over morita">ログイン障害対応</div>
+        </div>
+        <div class="cell"><span class="dn">5</span>
+          <div class="chip morita">DBマイグレ</div>
+        </div>
+        <div class="cell sat ms"><span class="dn">6</span>
+          <div class="chip msx">M2 認証</div>
+          <div class="chip sato">認証フロー実装</div>
+        </div>
+
+        <div class="cell sun"><span class="dn">7</span></div>
+        <div class="cell"><span class="dn">8</span></div>
+        <div class="cell"><span class="dn">9</span>
+          <div class="chip tanaka">ダッシュ画面実装</div>
+        </div>
+        <div class="cell"><span class="dn">10</span></div>
+        <div class="cell"><span class="dn">11</span>
+          <div class="chip sato">結合テスト</div>
+        </div>
+        <div class="cell"><span class="dn">12</span>
+          <div class="chip tanaka">LP制作</div>
+        </div>
+        <div class="cell sat ms"><span class="dn">13</span>
+          <div class="chip msx">M3 リリース</div>
+          <div class="chip morita">リリース準備</div>
+        </div>
+
+        <div class="cell sun"><span class="dn">14</span></div>
+        <div class="cell"><span class="dn">15</span></div>
+        <div class="cell"><span class="dn">16</span></div>
+        <div class="cell"><span class="dn">17</span></div>
+        <div class="cell"><span class="dn">18</span></div>
+        <div class="cell"><span class="dn">19</span></div>
+        <div class="cell sat"><span class="dn">20</span></div>
+
+        <div class="cell sun"><span class="dn">21</span></div>
+        <div class="cell"><span class="dn">22</span></div>
+        <div class="cell"><span class="dn">23</span></div>
+        <div class="cell"><span class="dn">24</span></div>
+        <div class="cell"><span class="dn">25</span></div>
+        <div class="cell"><span class="dn">26</span></div>
+        <div class="cell sat"><span class="dn">27</span></div>
+
+        <div class="cell sun"><span class="dn">28</span></div>
+        <div class="cell"><span class="dn">29</span></div>
+        <div class="cell"><span class="dn">30</span></div>
+        <div class="cell out"><span class="dn">1</span></div>
+        <div class="cell out"><span class="dn">2</span></div>
+        <div class="cell out"><span class="dn">3</span></div>
+        <div class="cell out sat"><span class="dn">4</span></div>
+      </div>
+    </div>
+
+    <aside class="side">
+      <div class="sh"><span class="b">4</span><span class="t">6/4（木）の締切</span></div>
+      <div class="ssub">今日 — 1件 / 進行中</div>
+
+      <div class="ditem morita">
+        <div class="dt">ログイン障害対応</div>
+        <div class="dm"><span class="owner o-morita">森田</span><span class="tg">Backend</span><span class="tg r">最優先</span><span class="tg r">本日締切</span></div>
+      </div>
+
+      <div class="upnext">
+        <div class="ut">今後の締切</div>
+        <div class="urow"><span class="ud">6/5</span><span class="um morita"></span><span class="un">DBマイグレ</span></div>
+        <div class="urow ms"><span class="ud">6/6</span><span class="um sato"></span><span class="un">認証（M2）</span></div>
+        <div class="urow"><span class="ud">6/9</span><span class="um tanaka"></span><span class="un">ダッシュ画面実装</span></div>
+        <div class="urow"><span class="ud">6/11</span><span class="um sato"></span><span class="un">結合テスト</span></div>
+        <div class="urow"><span class="ud">6/12</span><span class="um tanaka"></span><span class="un">LP制作</span></div>
+        <div class="urow ms"><span class="ud">6/13</span><span class="um morita"></span><span class="un">リリース（M3）</span></div>
+      </div>
+
+      <div class="hint">日付をクリックすると、その日が締切のタスク一覧を表示します。</div>
+    </aside>
+  </div>
+
+  <footer>表示 · 2026年6月 — 締切タスク 7件 / マイルストーン 2件（M2 6/6・M3 6/13）</footer>
+</div>
+</body>
+</html>

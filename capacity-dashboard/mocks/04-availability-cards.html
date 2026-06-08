@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>残容量カード — キャパダッシュボード</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0; --cap:#9aa3af;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased; line-height:1.5;
+  }
+  .tnum{font-variant-numeric:tabular-nums;}
+  .wrap{max-width:880px;margin:0 auto;padding:28px 20px 64px;}
+
+  .head{margin-bottom:22px;}
+  .head h1{font-size:20px;font-weight:700;margin:0 0 12px;}
+  .daynav{
+    display:inline-flex;align-items:center;gap:14px;background:var(--card);
+    border:1px solid var(--line);border-radius:12px;padding:7px 10px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04);
+  }
+  .daynav button{border:none;background:transparent;color:var(--muted);font-size:17px;cursor:pointer;
+    width:30px;height:30px;border-radius:8px;line-height:1;}
+  .daynav button:hover{background:var(--track);color:var(--ink);}
+  .daynav .today{font-weight:700;font-size:15px;}
+  .daynav .badge{font-size:11px;color:#fff;background:var(--fill);border-radius:999px;padding:2px 8px;font-weight:700;}
+  .note{font-size:12px;color:var(--muted);margin-top:10px;}
+
+  /* team stat strip */
+  .teamstrip{display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap;}
+  .stat{flex:1;min-width:120px;background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:12px 14px;box-shadow:0 1px 2px rgba(20,30,50,.04);}
+  .stat .k{font-size:11px;color:var(--muted);font-weight:600;margin-bottom:4px;}
+  .stat .v{font-size:22px;font-weight:800;line-height:1;}
+  .stat .v small{font-size:13px;font-weight:700;color:var(--muted);}
+  .stat.accent .v{color:var(--free);}
+
+  /* grid */
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
+  @media(max-width:600px){.grid{grid-template-columns:1fr;}}
+
+  .pcard{
+    background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04);position:relative;overflow:hidden;
+    transition:transform .08s ease,box-shadow .08s ease;
+  }
+  .pcard:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(20,30,50,.09);}
+  .pcard .topbar{position:absolute;top:0;left:0;right:0;height:4px;}
+
+  .pchead{display:flex;align-items:center;gap:11px;margin-bottom:14px;}
+  .ava{width:40px;height:40px;border-radius:50%;color:#fff;font-size:15px;font-weight:700;
+    display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+  .pchead .name{font-size:16px;font-weight:700;}
+  .pchead .tag{font-size:11px;color:var(--muted);}
+
+  /* big remaining number */
+  .remain{display:flex;align-items:baseline;gap:8px;margin-bottom:4px;}
+  .remain .big{font-size:42px;font-weight:800;line-height:1;color:var(--free);font-variant-numeric:tabular-nums;}
+  .remain .unit{font-size:18px;font-weight:700;color:var(--free);}
+  .remain .word{font-size:13px;color:var(--muted);font-weight:600;margin-left:2px;}
+  .pcard.zero .remain .big,.pcard.zero .remain .unit{color:var(--full);}
+  .pcard.over .remain .big,.pcard.over .remain .unit{color:var(--over);}
+
+  .usedline{font-size:12px;color:var(--muted);margin-bottom:12px;}
+
+  /* mini bar */
+  .mbar{height:10px;border-radius:5px;background:var(--track);overflow:hidden;display:flex;position:relative;}
+  .mbar .seg{height:100%;}
+  .mbar .capmark{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--cap);}
+
+  /* task list */
+  .tasks{margin-top:14px;border-top:1px dashed var(--line);padding-top:11px;display:flex;flex-direction:column;gap:7px;}
+  .task{display:flex;align-items:center;gap:8px;font-size:12.5px;}
+  .task .pdot{width:9px;height:9px;border-radius:3px;flex-shrink:0;}
+  .task .tname{flex:1;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .task .th{color:var(--muted);font-weight:600;font-variant-numeric:tabular-nums;}
+
+  /* over card */
+  .pcard.over{border:2px solid var(--over);background:#fef5f5;}
+  .warnpill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:#fff;
+    background:var(--over);border-radius:999px;padding:3px 10px;position:absolute;top:14px;right:14px;}
+
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:22px;font-size:11.5px;color:var(--muted);}
+  .legend span{display:inline-flex;align-items:center;gap:5px;}
+  .legend i{width:11px;height:11px;border-radius:3px;display:inline-block;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <h1>残容量カード</h1>
+    <div class="daynav">
+      <button aria-label="前の日">‹</button>
+      <span class="today tnum">6/4(木)</span>
+      <span class="badge">今日</span>
+      <button aria-label="次の日">›</button>
+    </div>
+    <p class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</p>
+  </header>
+
+  <div class="teamstrip">
+    <div class="stat"><div class="k">チーム稼働</div><div class="v tnum">24<small>/32h</small></div></div>
+    <div class="stat"><div class="k">稼働率</div><div class="v tnum">75<small>%</small></div></div>
+    <div class="stat accent"><div class="k">振れる空き</div><div class="v tnum">8<small>h</small></div></div>
+    <div class="stat"><div class="k">超過メンバー</div><div class="v tnum" style="color:var(--over);">1<small>名</small></div></div>
+  </div>
+
+  <div class="grid">
+
+    <!-- 鈴木 +6h -->
+    <div class="pcard">
+      <div class="topbar" style="background:#b657d6;"></div>
+      <div class="pchead">
+        <div class="ava" style="background:#b657d6;">鈴</div>
+        <div><div class="name">鈴木</div><div class="tag">タスク 1件</div></div>
+      </div>
+      <div class="remain"><span class="big tnum">+6</span><span class="unit">h</span><span class="word">振れる</span></div>
+      <div class="usedline tnum">割当 2h / 容量 8h</div>
+      <div class="mbar">
+        <div class="seg" style="width:25%;background:#8a93a0;"></div>
+        <div class="capmark" style="left:100%;"></div>
+      </div>
+      <div class="tasks">
+        <div class="task"><span class="pdot" style="background:#8a93a0;"></span><span class="tname">設計ドキュメント</span><span class="th tnum">2h</span></div>
+      </div>
+    </div>
+
+    <!-- 田中 +4h -->
+    <div class="pcard">
+      <div class="topbar" style="background:#3a86ff;"></div>
+      <div class="pchead">
+        <div class="ava" style="background:#3a86ff;">田</div>
+        <div><div class="name">田中</div><div class="tag">タスク 1件</div></div>
+      </div>
+      <div class="remain"><span class="big tnum">+4</span><span class="unit">h</span><span class="word">振れる</span></div>
+      <div class="usedline tnum">割当 4h / 容量 8h</div>
+      <div class="mbar">
+        <div class="seg" style="width:50%;background:#2fa66b;"></div>
+        <div class="capmark" style="left:100%;"></div>
+      </div>
+      <div class="tasks">
+        <div class="task"><span class="pdot" style="background:#2fa66b;"></span><span class="tname">ダッシュ画面実装</span><span class="th tnum">4h</span></div>
+      </div>
+    </div>
+
+    <!-- 佐藤 ±0 -->
+    <div class="pcard zero">
+      <div class="topbar" style="background:#2fa66b;"></div>
+      <div class="pchead">
+        <div class="ava" style="background:#2fa66b;">佐</div>
+        <div><div class="name">佐藤</div><div class="tag">タスク 2件</div></div>
+      </div>
+      <div class="remain"><span class="big tnum">±0</span><span class="unit">h</span><span class="word">ちょうど</span></div>
+      <div class="usedline tnum">割当 8h / 容量 8h</div>
+      <div class="mbar">
+        <div class="seg" style="width:62.5%;background:#3a86ff;"></div>
+        <div class="seg" style="width:37.5%;background:#b657d6;"></div>
+        <div class="capmark" style="left:100%;"></div>
+      </div>
+      <div class="tasks">
+        <div class="task"><span class="pdot" style="background:#3a86ff;"></span><span class="tname">認証フロー実装</span><span class="th tnum">5h</span></div>
+        <div class="task"><span class="pdot" style="background:#b657d6;"></span><span class="tname">結合テスト</span><span class="th tnum">3h</span></div>
+      </div>
+    </div>
+
+    <!-- 森田 超過 -->
+    <div class="pcard over">
+      <div class="topbar" style="background:#e5772d;"></div>
+      <span class="warnpill">⚠ 超過 −2h</span>
+      <div class="pchead">
+        <div class="ava" style="background:#e5772d;">森</div>
+        <div><div class="name">森田</div><div class="tag">タスク 3件</div></div>
+      </div>
+      <div class="remain"><span class="big tnum">−2</span><span class="unit">h</span><span class="word">オーバー</span></div>
+      <div class="usedline tnum">割当 10h / 容量 8h</div>
+      <div class="mbar">
+        <div class="seg" style="width:40%;background:#3a86ff;"></div>
+        <div class="seg" style="width:30%;background:#3a86ff;opacity:.78;"></div>
+        <div class="seg" style="width:30%;background:#e5484d;"></div>
+        <div class="capmark" style="left:80%;"></div>
+      </div>
+      <div class="tasks">
+        <div class="task"><span class="pdot" style="background:#3a86ff;"></span><span class="tname">API設計</span><span class="th tnum">4h</span></div>
+        <div class="task"><span class="pdot" style="background:#3a86ff;"></span><span class="tname">DBマイグレ</span><span class="th tnum">3h</span></div>
+        <div class="task"><span class="pdot" style="background:#8a93a0;"></span><span class="tname">PRレビュー</span><span class="th tnum">3h</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="legend">
+    <span><i style="background:#3a86ff;"></i>Backend</span>
+    <span><i style="background:#2fa66b;"></i>Frontend</span>
+    <span><i style="background:#b657d6;"></i>QA</span>
+    <span><i style="background:#8a93a0;"></i>共通</span>
+    <span><i style="background:#e5484d;"></i>超過分</span>
+    <span><i style="background:#9aa3af;width:2px;border-radius:0;"></i>容量ライン 8h</span>
+  </div>
+</div>
+</body>
+</html>

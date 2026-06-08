@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>週プランニング — 週カレンダー型</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee;
+    --track:#eef1f5; --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0;
+    --caprule:#9aa3af; --amber:#f5a623;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+    --p-backend:#3a86ff; --p-frontend:#2fa66b; --p-qa:#b657d6; --p-common:#8a93a0;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"palt"; -webkit-font-smoothing:antialiased;
+    font-variant-numeric:tabular-nums; padding:22px 26px 60px;
+  }
+  .wrap{max-width:1180px;margin:0 auto;}
+  header.top{display:flex;align-items:flex-end;gap:18px;flex-wrap:wrap;margin-bottom:6px;}
+  header.top h1{font-size:19px;margin:0;font-weight:700;letter-spacing:.02em;}
+  .phase{font-size:12px;color:var(--muted);font-weight:600;}
+  .weeknav{display:flex;align-items:center;gap:10px;margin-left:auto;
+    background:var(--card);border:1px solid var(--line);border-radius:10px;padding:6px 12px;}
+  .weeknav button{border:none;background:transparent;color:var(--muted);font-size:15px;cursor:pointer;
+    padding:2px 6px;border-radius:6px;line-height:1;}
+  .weeknav button:hover{background:var(--track);color:var(--ink);}
+  .weeknav .lbl{font-size:13px;font-weight:600;}
+  .note{font-size:11.5px;color:var(--muted);margin:6px 0 18px;}
+
+  .toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;}
+  .toolbar .tlabel{font-size:12px;color:var(--muted);font-weight:600;margin-right:2px;}
+  .mtoggle{display:inline-flex;align-items:center;gap:7px;cursor:pointer;user-select:none;
+    background:var(--card);border:1.5px solid var(--line);border-radius:20px;padding:5px 12px 5px 9px;
+    font-size:12.5px;font-weight:600;transition:.12s;}
+  .mtoggle .dot{width:11px;height:11px;border-radius:50%;flex:none;}
+  .mtoggle.off{opacity:.4;background:var(--track);}
+  .mtoggle:hover{border-color:var(--caprule);}
+  .legend{margin-left:auto;display:flex;gap:14px;align-items:center;font-size:11.5px;color:var(--muted);}
+  .legend .lg{display:inline-flex;align-items:center;gap:5px;}
+  .legend .sw{width:13px;height:13px;border-radius:3px;}
+
+  .calcard{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    box-shadow:0 1px 3px rgba(20,30,50,.04);overflow:hidden;}
+  .calgrid{display:grid;grid-template-columns:54px repeat(5,1fr);}
+  .colhead{padding:11px 6px 9px;text-align:center;border-bottom:1px solid var(--line);
+    border-left:1px solid var(--line);background:#fafbfc;}
+  .colhead.tcorner{border-left:none;}
+  .colhead .dow{font-size:13px;font-weight:700;}
+  .colhead .dnum{font-size:11px;color:var(--muted);margin-top:1px;}
+  .colhead .dsum{font-size:10.5px;margin-top:4px;font-weight:600;color:var(--muted);}
+  .colhead.today .dow{color:var(--fill);}
+  .colhead.today{background:#f0f6ff;}
+
+  .timecol{position:relative;border-right:1px solid var(--line);}
+  .tslot{height:46px;border-bottom:1px dashed var(--track);position:relative;}
+  .timecol .tslot{display:flex;justify-content:flex-end;align-items:flex-start;}
+  .timecol .tlab{font-size:10.5px;color:var(--muted);transform:translateY(-7px);padding-right:7px;font-weight:600;}
+
+  .daycol{position:relative;border-left:1px solid var(--line);}
+  .daycol .tslot{}
+  .daycol.today{background:linear-gradient(180deg,#f6faff 0%,#fbfdff 100%);}
+  .ev{position:absolute;left:4px;right:4px;border-radius:7px;padding:5px 7px;overflow:hidden;
+    color:#fff;box-shadow:0 1px 2px rgba(0,0,0,.12);cursor:default;border-left:3px solid rgba(255,255,255,.55);}
+  .ev .et{font-size:11px;font-weight:700;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .ev .em{font-size:10px;opacity:.92;margin-top:1px;}
+  .ev .eh{position:absolute;top:4px;right:6px;font-size:9.5px;opacity:.85;font-weight:700;}
+  .ev.morita{background:var(--m-morita);} .ev.tanaka{background:var(--m-tanaka);}
+  .ev.sato{background:var(--m-sato);} .ev.suzuki{background:var(--m-suzuki);}
+  .ev.hidden{display:none;}
+  .ev.over{outline:2px solid var(--over);outline-offset:-2px;}
+  .ev.over::after{content:"超過";position:absolute;bottom:3px;right:5px;font-size:9px;
+    background:var(--over);color:#fff;padding:0 4px;border-radius:4px;font-weight:700;}
+
+  .footer{display:flex;gap:20px;flex-wrap:wrap;margin-top:16px;padding:14px 16px;
+    background:var(--card);border:1px solid var(--line);border-radius:12px;font-size:12px;}
+  .footer .stat b{font-size:17px;font-weight:700;} .footer .stat{color:var(--muted);}
+  .footer .stat b.ok{color:var(--free);} .footer .stat b.amb{color:var(--amber);}
+  .hint{font-size:11px;color:var(--muted);margin-top:10px;}
+  .freeband{position:absolute;left:0;right:0;border-top:1px dashed transparent;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <div class="phase">② 計画 ／ 週プランニング</div>
+      <h1>週カレンダー — いつ・誰が空いているか</h1>
+    </div>
+    <div class="weeknav">
+      <button title="前の週">‹</button>
+      <span class="lbl">6/1〜6/5（今週）</span>
+      <button title="次の週">›</button>
+    </div>
+  </header>
+  <p class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</p>
+
+  <div class="toolbar">
+    <span class="tlabel">メンバー絞り込み:</span>
+    <span class="mtoggle" data-m="morita"><span class="dot" style="background:var(--m-morita)"></span>森田</span>
+    <span class="mtoggle" data-m="tanaka"><span class="dot" style="background:var(--m-tanaka)"></span>田中</span>
+    <span class="mtoggle" data-m="sato"><span class="dot" style="background:var(--m-sato)"></span>佐藤</span>
+    <span class="mtoggle" data-m="suzuki"><span class="dot" style="background:var(--m-suzuki)"></span>鈴木</span>
+    <div class="legend">
+      <span class="lg"><span class="sw" style="background:#fff;border:1px solid var(--line)"></span>白=空き時間</span>
+      <span class="lg"><span class="sw" style="background:var(--over)"></span>超過</span>
+    </div>
+  </div>
+
+  <div class="calcard">
+    <div class="calgrid">
+      <div class="colhead tcorner"></div>
+      <div class="colhead today"><div class="dow">月</div><div class="dnum">6/1</div><div class="dsum">22h アサイン</div></div>
+      <div class="colhead"><div class="dow">火</div><div class="dnum">6/2</div><div class="dsum">23h アサイン</div></div>
+      <div class="colhead"><div class="dow">水</div><div class="dnum">6/3</div><div class="dsum">20h アサイン</div></div>
+      <div class="colhead"><div class="dow">木</div><div class="dnum">6/4</div><div class="dsum">24h アサイン</div></div>
+      <div class="colhead"><div class="dow">金</div><div class="dnum">6/5</div><div class="dsum">12h アサイン</div></div>
+    </div>
+    <div class="calgrid">
+      <!-- time column -->
+      <div class="timecol">
+        <div class="tslot"><span class="tlab">9:00</span></div>
+        <div class="tslot"><span class="tlab">10:00</span></div>
+        <div class="tslot"><span class="tlab">11:00</span></div>
+        <div class="tslot"><span class="tlab">12:00</span></div>
+        <div class="tslot"><span class="tlab">13:00</span></div>
+        <div class="tslot"><span class="tlab">14:00</span></div>
+        <div class="tslot"><span class="tlab">15:00</span></div>
+        <div class="tslot"><span class="tlab">16:00</span></div>
+        <div class="tslot"><span class="tlab">17:00</span></div>
+        <div class="tslot" style="height:0;border:none"></div>
+      </div>
+
+      <!-- 月 6/1 : 森田8 田中4 佐藤8 鈴木2 (22) -->
+      <div class="daycol today" data-day="mon">
+        <div class="tslot"></div><div class="tslot"></div><div class="tslot"></div>
+        <div class="tslot"></div><div class="tslot"></div><div class="tslot"></div>
+        <div class="tslot"></div><div class="tslot"></div><div class="tslot"></div>
+      </div>
+      <!-- 火 6/2 : 森田6 田中6 佐藤8 鈴木3 (23) -->
+      <div class="daycol" data-day="tue">
+        <div class="tslot"></div><div class="tslot"></div><div class="tslot"></div>
+        <div class="tslot"></div><div class="tslot"></div><div class="tslot"></div>
+        <div class="tslot"></div><div class="tslot"></div><div class="tslot"></div>
+      </div>
+      <!-- 水 6/3 : 森田8 田中2 佐藤8 鈴木2 (20) -->
+      <div class="daycol" data-day="wed">
+        <div class="tslot"></div><div class="tslot"></div><div class="tslot"></div>
+        <div class="tslot"></div><div class="tslot"></div><div class="tslot"></div>
+        <div class="tslot"></div><div class="tslot"></div><div class="tslot"></div>
+      </div>
+      <!-- 木 6/4 : 森田10(超過) 田中4 佐藤8 鈴木2 (24) -->
+      <div class="daycol" data-day="thu">
+        <div class="tslot"></div><div class="tslot"></div><div class="tslot"></div>
+        <div class="tslot"></div><div class="tslot"></div><div class="tslot"></div>
+        <div class="tslot"></div><div class="tslot"></div><div class="tslot"></div>
+      </div>
+      <!-- 金 6/5 : 森田4 田中0 佐藤8 鈴木0 (12) -->
+      <div class="daycol" data-day="fri">
+        <div class="tslot"></div><div class="tslot"></div><div class="tslot"></div>
+        <div class="tslot"></div><div class="tslot"></div><div class="tslot"></div>
+        <div class="tslot"></div><div class="tslot"></div><div class="tslot"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="stat">チーム週容量 <b>160h</b></div>
+    <div class="stat">アサイン <b class="amb">101h</b>（63%）</div>
+    <div class="stat">空き <b class="ok">59h</b></div>
+    <div class="stat">超過者 <b style="color:var(--over)">森田（木 +2h）</b></div>
+  </div>
+  <p class="hint">タイムブロックの間の白い帯がそのメンバーの空き時間。金曜は田中・鈴木が終日空き、午後を中心に余裕がある。</p>
+</div>
+
+<script>
+  // 1スロット=46px=1h, 起点9:00。 top = (start-9)*46 + 1, height = dur*46 - 4
+  const SLOT=46, BASE=9;
+  function pos(start,dur){return {top:(start-BASE)*SLOT+1, h:dur*SLOT-3};}
+
+  // 各日のイベント割り当て（日別合計が指定値に一致）
+  const data = {
+    mon:[ // 森田8 田中4 佐藤8 鈴木2
+      {m:'morita',t:'API設計',s:9,d:4},{m:'morita',t:'認証実装',s:13,d:4},
+      {m:'tanaka',t:'PRレビュー',s:9,d:2},{m:'tanaka',t:'調査',s:14,d:2},
+      {m:'sato',t:'ダッシュ画面実装',s:9,d:5},{m:'sato',t:'結合テスト',s:14,d:3},
+      {m:'suzuki',t:'MTG',s:9,d:2},
+    ],
+    tue:[ // 森田6 田中6 佐藤8 鈴木3
+      {m:'morita',t:'DBマイグレ',s:9,d:3},{m:'morita',t:'認証実装',s:13,d:3},
+      {m:'tanaka',t:'設計ドキュメント',s:9,d:3},{m:'tanaka',t:'PRレビュー',s:13,d:3},
+      {m:'sato',t:'ダッシュ画面実装',s:9,d:5},{m:'sato',t:'結合テスト',s:14,d:3},
+      {m:'suzuki',t:'調査',s:9,d:3},
+    ],
+    wed:[ // 森田8 田中2 佐藤8 鈴木2
+      {m:'morita',t:'認証実装',s:9,d:4},{m:'morita',t:'API設計',s:13,d:4},
+      {m:'tanaka',t:'MTG',s:13,d:2},
+      {m:'sato',t:'ダッシュ画面実装',s:9,d:5},{m:'sato',t:'PRレビュー',s:14,d:3},
+      {m:'suzuki',t:'調査',s:10,d:2},
+    ],
+    thu:[ // 森田10(超過) 田中4 佐藤8 鈴木2
+      {m:'morita',t:'障害対応',s:9,d:5},{m:'morita',t:'認証実装',s:14,d:5,over:true},
+      {m:'tanaka',t:'結合テスト',s:9,d:2},{m:'tanaka',t:'設計ドキュメント',s:13,d:2},
+      {m:'sato',t:'ダッシュ画面実装',s:9,d:4},{m:'sato',t:'結合テスト',s:13,d:4},
+      {m:'suzuki',t:'MTG',s:14,d:2},
+    ],
+    fri:[ // 森田4 田中0 佐藤8 鈴木0
+      {m:'morita',t:'リリース準備',s:9,d:4},
+      {m:'sato',t:'結合テスト',s:9,d:4},{m:'sato',t:'リリース準備',s:13,d:4},
+    ],
+  };
+  const pname={morita:'森田',tanaka:'田中',sato:'佐藤',suzuki:'鈴木'};
+
+  Object.keys(data).forEach(day=>{
+    const col=document.querySelector(`.daycol[data-day="${day}"]`);
+    data[day].forEach(ev=>{
+      const p=pos(ev.s,ev.d);
+      const el=document.createElement('div');
+      el.className='ev '+ev.m+(ev.over?' over':'');
+      el.dataset.m=ev.m;
+      el.style.top=p.top+'px'; el.style.height=p.h+'px';
+      el.innerHTML=`<div class="eh">${ev.d}h</div><div class="et">${ev.t}</div><div class="em">${pname[ev.m]}</div>`;
+      col.appendChild(el);
+    });
+  });
+
+  // フィルタトグル: 全員ONが初期。クリックで該当メンバーをトグル。
+  const active=new Set(['morita','tanaka','sato','suzuki']);
+  document.querySelectorAll('.mtoggle').forEach(tg=>{
+    tg.addEventListener('click',()=>{
+      const m=tg.dataset.m;
+      if(active.has(m)){active.delete(m);tg.classList.add('off');}
+      else{active.add(m);tg.classList.remove('off');}
+      document.querySelectorAll('.ev').forEach(e=>{
+        e.classList.toggle('hidden',!active.has(e.dataset.m));
+      });
+    });
+  });
+</script>
+</body>
+</html>

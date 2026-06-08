@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>週プランニング盤 ｜ キャパダッシュボード</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee;
+    --track:#eef1f5; --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0;
+    --caline:#9aa3af; --amber:#f5a623;
+    --c-backend:#3a86ff; --c-frontend:#2fa66b; --c-qa:#b657d6; --c-common:#8a93a0;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"palt"; -webkit-font-smoothing:antialiased;
+    font-variant-numeric:tabular-nums; line-height:1.45;
+  }
+  .nums{font-variant-numeric:tabular-nums;}
+  .wrap{max-width:1240px; margin:0 auto; padding:22px 22px 60px;}
+
+  /* ---- header ---- */
+  header.top{display:flex; align-items:flex-end; justify-content:space-between; gap:18px; flex-wrap:wrap; margin-bottom:18px;}
+  .title-block h1{font-size:20px; font-weight:700; margin:0 0 4px; letter-spacing:.01em;}
+  .title-block .sub{font-size:12.5px; color:var(--muted);}
+  .weeknav{display:flex; align-items:center; gap:4px; background:var(--card); border:1px solid var(--line);
+    border-radius:11px; padding:5px 6px; box-shadow:0 1px 2px rgba(20,30,50,.04);}
+  .weeknav button{border:0; background:transparent; color:var(--muted); font-size:15px; cursor:pointer;
+    width:30px; height:30px; border-radius:8px; line-height:1;}
+  .weeknav button:hover{background:var(--track); color:var(--ink);}
+  .weeknav .label{font-size:13.5px; font-weight:600; padding:0 8px; white-space:nowrap;}
+  .weeknav .now{display:inline-block; font-size:10.5px; color:var(--fill); font-weight:700; margin-left:5px;}
+
+  /* ---- team summary bar ---- */
+  .teambar{display:flex; align-items:center; gap:18px; flex-wrap:wrap; background:var(--card);
+    border:1px solid var(--line); border-radius:14px; padding:13px 18px; margin-bottom:16px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04);}
+  .teambar .kpi{display:flex; flex-direction:column; gap:1px;}
+  .teambar .kpi .n{font-size:18px; font-weight:700;}
+  .teambar .kpi .k{font-size:11px; color:var(--muted);}
+  .teambar .kpi .n.free{color:var(--free);}
+  .teambar .meter{flex:1; min-width:200px;}
+  .teambar .meter .track{height:11px; background:var(--track); border-radius:6px; overflow:hidden; display:flex;}
+  .teambar .meter .seg-fill{background:var(--fill); height:100%;}
+  .teambar .meter .lbls{display:flex; justify-content:space-between; font-size:11px; color:var(--muted); margin-top:5px;}
+
+  /* ---- board layout ---- */
+  .board-grid{display:grid; grid-template-columns: 1fr 270px; gap:16px; align-items:start;}
+  @media(max-width:980px){ .board-grid{grid-template-columns:1fr;} }
+
+  .board{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:4px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04); overflow:hidden;}
+  table.plan{border-collapse:separate; border-spacing:0; width:100%;}
+  table.plan th, table.plan td{padding:0;}
+  /* header row */
+  thead th{position:sticky; top:0; background:var(--card); z-index:2;}
+  .colhead{padding:11px 6px 9px; text-align:center; border-bottom:1px solid var(--line);}
+  .colhead .d{font-size:13px; font-weight:700;}
+  .colhead .wd{font-size:10.5px; color:var(--muted);}
+  .colhead.today .d{color:var(--fill);}
+  .colhead.today{box-shadow:inset 0 -2px 0 var(--fill);}
+  .corner{width:138px; border-bottom:1px solid var(--line); padding:11px 12px 9px; text-align:left;}
+  .corner .lab{font-size:11px; color:var(--muted); font-weight:600;}
+
+  /* member row head */
+  .mhead{width:138px; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:middle;}
+  tbody tr:last-child .mhead, tbody tr:last-child .cell{border-bottom:0;}
+  .mhead .name{display:flex; align-items:center; gap:7px; font-size:13.5px; font-weight:600;}
+  .dot{width:9px; height:9px; border-radius:50%; flex:none;}
+  .mhead .wk{font-size:11px; color:var(--muted); margin-top:4px; margin-left:16px;}
+  .mhead .wk b{font-weight:700; color:var(--ink);}
+  .mhead .wk .badge{display:inline-block; font-size:10px; font-weight:700; padding:1px 5px; border-radius:5px; margin-left:4px; vertical-align:1px;}
+  .badge.over{background:#fdecec; color:var(--over);}
+  .badge.free{background:#e9f6ef; color:var(--free);}
+  .badge.full{background:#eef0f2; color:var(--full);}
+
+  /* day cell */
+  .cell{border-bottom:1px solid var(--line); border-left:1px solid var(--line); padding:8px 8px 9px; vertical-align:top; min-width:120px;
+    transition:background .12s;}
+  .cell.today{background:#f4f8ff;}
+  .cell:hover{background:#fafbfc;}
+  .cell.today:hover{background:#eef4ff;}
+  .cell.over{background:#fdf3f3;}
+  .cell.over.today{background:#fdf0f0;}
+  .cell.empty-low{background:repeating-linear-gradient(135deg,#fbfcfd,#fbfcfd 6px,#f4f6f8 6px,#f4f6f8 12px);}
+
+  .cell .hrs{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:6px;}
+  .cell .hrs .v{font-size:13px; font-weight:700;}
+  .cell .hrs .v small{font-size:10px; font-weight:600; color:var(--muted);}
+  .cell.over .hrs .v{color:var(--over);}
+  .cell .hrs .tag{font-size:10px; font-weight:700; padding:0 4px; border-radius:4px;}
+  .tag.o{background:#fdecec; color:var(--over);}
+  .tag.fr{background:#e9f6ef; color:var(--free);}
+
+  .minibar{height:7px; background:var(--track); border-radius:4px; overflow:hidden; position:relative; margin-bottom:7px;}
+  .minibar .f{height:100%; background:var(--fill); border-radius:4px;}
+  .minibar .f.over{background:var(--over); border-radius:4px 0 0 4px;}
+  .minibar .caline{position:absolute; top:-2px; bottom:-2px; width:2px; background:var(--caline); border-radius:1px;}
+
+  /* task chips inside cell */
+  .chips{display:flex; flex-direction:column; gap:4px;}
+  .chip{display:flex; align-items:center; gap:5px; font-size:11px; background:var(--bg); border:1px solid var(--line);
+    border-radius:7px; padding:3px 6px; cursor:grab;}
+  .chip .bar{width:3px; align-self:stretch; border-radius:2px; flex:none;}
+  .chip .t{flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .chip .h{color:var(--muted); font-weight:600; font-size:10.5px;}
+  .chip.backend .bar{background:var(--c-backend);}
+  .chip.frontend .bar{background:var(--c-frontend);}
+  .chip.qa .bar{background:var(--c-qa);}
+  .chip.common .bar{background:var(--c-common);}
+
+  .dropzone{margin-top:5px; border:1.5px dashed #d6dbe2; border-radius:8px; padding:7px 6px; text-align:center;
+    font-size:10.5px; color:#a6adb8; background:rgba(255,255,255,.4);}
+  .cell.over .dropzone{border-color:#f1bcbc; color:#d98a8a;}
+
+  /* ---- unassigned tray ---- */
+  aside.tray{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:15px 15px 17px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04); position:sticky; top:14px;}
+  aside.tray h2{font-size:13.5px; font-weight:700; margin:0 0 3px;}
+  aside.tray .note{font-size:11px; color:var(--muted); margin:0 0 12px;}
+  .traytask{display:flex; align-items:center; gap:9px; background:var(--bg); border:1px solid var(--line);
+    border-radius:10px; padding:9px 11px; margin-bottom:9px; cursor:grab; box-shadow:0 1px 1px rgba(20,30,50,.03);}
+  .traytask:active{cursor:grabbing;}
+  .traytask .grip{color:#c4cad3; font-size:13px; line-height:1; letter-spacing:-1px;}
+  .traytask .bar{width:4px; height:30px; border-radius:3px; flex:none;}
+  .traytask .body{flex:1; min-width:0;}
+  .traytask .nm{font-size:12.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .traytask .meta{font-size:10.5px; color:var(--muted); margin-top:2px;}
+  .traytask .hh{font-size:12px; font-weight:700; color:var(--ink); white-space:nowrap;}
+  .traytask.backend .bar{background:var(--c-backend);}
+  .traytask.frontend .bar{background:var(--c-frontend);}
+  .traytask.qa .bar{background:var(--c-qa);}
+  .traytask.common .bar{background:var(--c-common);}
+  .tray-tot{display:flex; justify-content:space-between; align-items:center; font-size:11.5px; color:var(--muted);
+    border-top:1px solid var(--line); margin-top:6px; padding-top:11px;}
+  .tray-tot b{font-size:14px; color:var(--ink); font-weight:700;}
+  .tray-hint{margin-top:12px; font-size:11px; color:#9aa3af; display:flex; align-items:flex-start; gap:6px; line-height:1.5;}
+  .tray-hint .ar{color:var(--fill); font-weight:700;}
+
+  /* legend */
+  .legend{display:flex; flex-wrap:wrap; gap:13px; margin-top:14px; font-size:11px; color:var(--muted); padding:0 4px;}
+  .legend .it{display:flex; align-items:center; gap:5px;}
+  .legend .sw{width:13px; height:9px; border-radius:3px; display:inline-block;}
+  .legend .ca{width:2px; height:13px; background:var(--caline); display:inline-block;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="title-block">
+      <h1>② 計画 ｜ 週プランニング盤</h1>
+      <div class="sub">メンバー × 曜日でアサインを置き、負荷を“ならす”作業盤。</div>
+    </div>
+    <nav class="weeknav" aria-label="週ナビゲーション">
+      <button title="前の週">‹</button>
+      <span class="label">6/1〜6/5<span class="now">今週</span></span>
+      <button title="次の週">›</button>
+    </nav>
+  </header>
+
+  <!-- team summary -->
+  <div class="teambar">
+    <div class="kpi"><span class="n nums">160h</span><span class="k">週の容量</span></div>
+    <div class="kpi"><span class="n nums">101h</span><span class="k">アサイン済（63%）</span></div>
+    <div class="kpi"><span class="n free nums">59h</span><span class="k">空き</span></div>
+    <div class="meter">
+      <div class="track"><div class="seg-fill" style="width:63%"></div></div>
+      <div class="lbls"><span>チーム週稼働 63%</span><span class="nums">101 / 160h</span></div>
+    </div>
+  </div>
+
+  <div class="board-grid">
+    <!-- ===== board ===== -->
+    <div class="board">
+      <table class="plan">
+        <thead>
+          <tr>
+            <th class="corner"><span class="lab">メンバー ＼ 曜日</span></th>
+            <th><div class="colhead"><div class="d">月</div><div class="wd nums">6/1</div></div></th>
+            <th><div class="colhead"><div class="d">火</div><div class="wd nums">6/2</div></div></th>
+            <th><div class="colhead today"><div class="d">水</div><div class="wd nums">6/3</div></div></th>
+            <th><div class="colhead"><div class="d">木</div><div class="wd nums">6/4</div></div></th>
+            <th><div class="colhead"><div class="d">金</div><div class="wd nums">6/5</div></div></th>
+          </tr>
+        </thead>
+        <tbody id="tbody"><!-- rows injected --></tbody>
+      </table>
+    </div>
+
+    <!-- ===== unassigned tray ===== -->
+    <aside class="tray">
+      <h2>未アサインの仕事</h2>
+      <p class="note">今週中に置きたいタスク。空きのあるセルへドラッグで配置。</p>
+
+      <div class="traytask backend" draggable="true">
+        <span class="grip">⠿</span><span class="bar"></span>
+        <div class="body"><div class="nm">ログインバグ修正</div><div class="meta">Backend</div></div>
+        <span class="hh nums">3h</span>
+      </div>
+      <div class="traytask frontend" draggable="true">
+        <span class="grip">⠿</span><span class="bar"></span>
+        <div class="body"><div class="nm">LP文言</div><div class="meta">Frontend</div></div>
+        <span class="hh nums">2h</span>
+      </div>
+      <div class="traytask common" draggable="true">
+        <span class="grip">⠿</span><span class="bar"></span>
+        <div class="body"><div class="nm">リリースノート</div><div class="meta">共通</div></div>
+        <span class="hh nums">1h</span>
+      </div>
+      <div class="traytask qa" draggable="true">
+        <span class="grip">⠿</span><span class="bar"></span>
+        <div class="body"><div class="nm">E2E整備</div><div class="meta">QA</div></div>
+        <span class="hh nums">6h</span>
+      </div>
+
+      <div class="tray-tot"><span>未アサイン計</span><b class="nums">12h</b></div>
+      <div class="tray-hint"><span class="ar">↳</span><span>鈴木（空き31h）と金曜が空き多め。E2E整備は鈴木の木曜あたりに置けます。</span></div>
+    </aside>
+  </div>
+
+  <div class="legend">
+    <span class="it"><span class="sw" style="background:var(--fill)"></span>容量内</span>
+    <span class="it"><span class="sw" style="background:var(--over)"></span>超過</span>
+    <span class="it"><span class="sw" style="background:var(--track)"></span>空き</span>
+    <span class="it"><span class="ca"></span>容量線（8h/日）</span>
+    <span class="it" style="margin-left:auto">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</span>
+  </div>
+
+</div>
+
+<script>
+  const CAP = 8;
+  const members = [
+    {name:'森田', color:'var(--m-morita)', total:36, badge:{cls:'over', t:'木 +2h 超過'},
+      days:[
+        {h:8, chips:[{t:'API設計', h:5, c:'backend'},{t:'PRレビュー', h:3, c:'backend'}]},
+        {h:6, chips:[{t:'認証実装', h:6, c:'backend'}]},
+        {h:8, chips:[{t:'認証実装', h:8, c:'backend'}]},
+        {h:10, chips:[{t:'決済連携', h:6, c:'backend'},{t:'障害対応', h:4, c:'backend'}]},
+        {h:4, chips:[{t:'デプロイ準備', h:4, c:'backend'}]},
+      ]},
+    {name:'田中', color:'var(--m-tanaka)', total:16, badge:{cls:'free', t:'空き24h'},
+      days:[
+        {h:4, chips:[{t:'画面実装', h:4, c:'frontend'}]},
+        {h:6, chips:[{t:'画面実装', h:6, c:'frontend'}]},
+        {h:2, chips:[{t:'CSS調整', h:2, c:'frontend'}]},
+        {h:4, chips:[{t:'結合確認', h:4, c:'frontend'}]},
+        {h:0, chips:[]},
+      ]},
+    {name:'佐藤', color:'var(--m-sato)', total:40, badge:{cls:'full', t:'満稼働'},
+      days:[
+        {h:8, chips:[{t:'コンポ実装', h:8, c:'frontend'}]},
+        {h:8, chips:[{t:'コンポ実装', h:8, c:'frontend'}]},
+        {h:8, chips:[{t:'状態管理', h:8, c:'frontend'}]},
+        {h:8, chips:[{t:'状態管理', h:8, c:'frontend'}]},
+        {h:8, chips:[{t:'仕上げ', h:8, c:'frontend'}]},
+      ]},
+    {name:'鈴木', color:'var(--m-suzuki)', total:9, badge:{cls:'free', t:'空き31h'},
+      days:[
+        {h:2, chips:[{t:'テスト計画', h:2, c:'qa'}]},
+        {h:3, chips:[{t:'回帰テスト', h:3, c:'qa'}]},
+        {h:2, chips:[{t:'回帰テスト', h:2, c:'qa'}]},
+        {h:2, chips:[{t:'バグ起票', h:2, c:'qa'}]},
+        {h:0, chips:[]},
+      ]},
+  ];
+  const todayIdx = 2; // 水曜
+
+  const tbody = document.getElementById('tbody');
+  members.forEach(m=>{
+    const tr = document.createElement('tr');
+    // member head
+    const badgeHtml = m.badge ? `<span class="badge ${m.badge.cls}">${m.badge.t}</span>` : '';
+    const th = document.createElement('td');
+    th.className = 'mhead';
+    th.innerHTML = `<div class="name"><span class="dot" style="background:${m.color}"></span>${m.name}</div>
+      <div class="wk">週 <b class="nums">${m.total}</b>/40h ${badgeHtml}</div>`;
+    tr.appendChild(th);
+
+    m.days.forEach((d,i)=>{
+      const td = document.createElement('td');
+      const over = d.h > CAP;
+      const free = d.h === 0;
+      const low = d.h>0 && d.h <= 3;
+      let cls = 'cell';
+      if(i===todayIdx) cls += ' today';
+      if(over) cls += ' over';
+      if(free) cls += ' empty-low';
+      else if(low) cls += ' empty-low';
+      td.className = cls;
+
+      // header line
+      let tag = '';
+      if(over) tag = `<span class="tag o">+${d.h-CAP}h</span>`;
+      else if(free) tag = `<span class="tag fr">空き</span>`;
+
+      // minibar
+      const filledPct = Math.min(d.h, CAP)/CAP*100;
+      const overPct = over ? (d.h-CAP)/CAP*100 : 0;
+      let barInner = `<div class="f${over?' over':''}" style="width:${over?100:filledPct}%"></div>`;
+      // capacity line at 8h position relative to a max of max(8, d.h)
+      const maxScale = Math.max(CAP, d.h);
+      const calinePos = CAP / maxScale * 100;
+      // re-render minibar against maxScale so overflow visible
+      const fillPos = Math.min(d.h,CAP)/maxScale*100;
+      barInner = `<div class="f" style="width:${fillPos}%"></div>`;
+      if(over){ barInner += `<div class="f over" style="position:absolute;left:${fillPos}%;width:${(d.h-CAP)/maxScale*100}%;top:0;"></div>`; }
+      const calineHtml = `<div class="caline" style="left:${calinePos}%"></div>`;
+
+      // chips
+      let chipsHtml = '';
+      if(d.chips.length){
+        chipsHtml = '<div class="chips">' + d.chips.map(c=>
+          `<div class="chip ${c.c}" draggable="true"><span class="bar"></span><span class="t">${c.t}</span><span class="h nums">${c.h}h</span></div>`
+        ).join('') + '</div>';
+      }
+      // dropzone for free / low cells
+      let dz = '';
+      if(free) dz = `<div class="dropzone">＋ ここにドラッグ</div>`;
+      else if(d.h <= 5 && !over) dz = `<div class="dropzone">＋ あと${CAP-d.h}h置ける</div>`;
+
+      td.innerHTML = `
+        <div class="hrs"><span class="v nums">${d.h}<small>/${CAP}h</small></span>${tag}</div>
+        <div class="minibar" style="position:relative">${barInner}${calineHtml}</div>
+        ${chipsHtml}${dz}`;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+</script>
+</body>
+</html>

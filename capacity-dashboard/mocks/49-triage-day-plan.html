@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>今日の段取りタイムライン — 6/4(木)</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --must:#e5484d; --should:#f5a623; --shift:#2fa66b; --block:#9aa3af;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+    --pj-be:#3a86ff; --pj-fe:#2fa66b; --pj-qa:#b657d6; --pj-common:#8a93a0;
+    --today:#e5484d;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--bg);color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"tnum" 1;}
+  body{padding:24px 28px 60px;max-width:1180px;margin:0 auto;}
+  .num{font-variant-numeric:tabular-nums;}
+
+  /* ---- header ---- */
+  header{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;flex-wrap:wrap;margin-bottom:6px;}
+  .h-title{font-size:21px;font-weight:700;letter-spacing:.02em;}
+  .h-sub{font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.5;}
+  .daynav{display:flex;align-items:center;gap:2px;background:var(--card);border:1px solid var(--line);
+    border-radius:11px;padding:5px 6px;box-shadow:0 1px 2px rgba(20,30,50,.04);}
+  .daynav button{border:none;background:transparent;color:var(--muted);font-size:16px;
+    width:30px;height:30px;border-radius:8px;cursor:pointer;line-height:1;}
+  .daynav button:hover{background:var(--track);color:var(--ink);}
+  .daynav .cur{font-size:14px;font-weight:700;padding:0 12px;color:var(--ink);}
+  .daynav .cur .tag{display:inline-block;margin-left:7px;font-size:10.5px;font-weight:700;color:#fff;
+    background:var(--today);border-radius:5px;padding:2px 6px;vertical-align:1px;letter-spacing:.04em;}
+  .note{margin:14px 0 22px;font-size:11.5px;color:var(--muted);background:#fff;border:1px dashed var(--line);
+    border-radius:8px;padding:8px 12px;display:inline-block;}
+
+  /* ---- legend ---- */
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);margin-bottom:18px;}
+  .legend .it{display:flex;align-items:center;gap:6px;}
+  .dot{width:10px;height:10px;border-radius:3px;display:inline-block;}
+
+  /* ---- layout: timeline + sidebar ---- */
+  .grid{display:grid;grid-template-columns:1fr 320px;gap:22px;align-items:start;}
+  @media(max-width:980px){.grid{grid-template-columns:1fr;}}
+
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    box-shadow:0 1px 3px rgba(20,30,50,.05);overflow:hidden;}
+  .panel-h{padding:14px 18px 12px;border-bottom:1px solid var(--line);display:flex;
+    align-items:baseline;justify-content:space-between;gap:10px;}
+  .panel-h .t{font-size:14px;font-weight:700;}
+  .panel-h .s{font-size:11px;color:var(--muted);}
+
+  /* ---- timeline ---- */
+  .tl{position:relative;padding:8px 18px 20px 70px;}
+  .hourrow{position:relative;height:64px;border-top:1px solid var(--line);}
+  .hourrow:first-child{border-top:none;}
+  .hourrow .hl{position:absolute;left:-58px;top:-8px;font-size:11px;color:var(--muted);width:48px;text-align:right;}
+  .nowline{position:absolute;left:-62px;right:18px;height:0;border-top:2px solid var(--today);z-index:5;}
+  .nowline .lbl{position:absolute;left:-2px;top:-9px;background:var(--today);color:#fff;font-size:10px;
+    font-weight:700;border-radius:5px;padding:2px 6px;white-space:nowrap;}
+  .nowline .lbl::after{content:"";position:absolute;right:-5px;top:50%;transform:translateY(-50%);
+    border-left:5px solid var(--today);border-top:4px solid transparent;border-bottom:4px solid transparent;}
+
+  /* blocks positioned absolutely over hour grid */
+  .blocks{position:absolute;left:70px;right:18px;top:8px;bottom:20px;}
+  .blk{position:absolute;left:0;right:0;border-radius:10px;padding:9px 12px;overflow:hidden;
+    border:1px solid var(--line);background:var(--card);box-shadow:0 1px 2px rgba(20,30,50,.06);
+    display:flex;flex-direction:column;gap:3px;}
+  .blk .bar{position:absolute;left:0;top:0;bottom:0;width:5px;border-radius:10px 0 0 10px;}
+  .blk .row1{display:flex;align-items:center;gap:8px;}
+  .blk .pri{font-size:10px;font-weight:700;border-radius:5px;padding:2px 6px;color:#fff;white-space:nowrap;}
+  .blk .name{font-size:13px;font-weight:700;letter-spacing:.01em;}
+  .blk .meta{font-size:10.5px;color:var(--muted);display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:1px;}
+  .blk .who{display:inline-flex;align-items:center;gap:5px;}
+  .blk .who .av{width:16px;height:16px;border-radius:50%;color:#fff;font-size:9px;font-weight:700;
+    display:flex;align-items:center;justify-content:center;}
+  .blk .pjchip{font-size:9.5px;color:#fff;border-radius:4px;padding:1px 5px;font-weight:600;}
+  .blk .dur{margin-left:auto;font-size:10.5px;color:var(--muted);font-weight:600;}
+  .blk.must{background:#fff5f5;border-color:#f4c7c8;}
+  .blk.should{background:#fff9ef;border-color:#f3ddb4;}
+
+  .gap{position:absolute;left:0;right:0;border:1px dashed var(--line);border-radius:8px;
+    display:flex;align-items:center;justify-content:center;font-size:10.5px;color:var(--muted);background:repeating-linear-gradient(45deg,transparent,transparent 7px,#f0f2f5 7px,#f0f2f5 8px);}
+
+  /* ---- sidebar columns ---- */
+  .side{display:flex;flex-direction:column;gap:18px;}
+  .waitcard .panel-h{background:#fbfbfc;}
+  .litem{padding:11px 16px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:5px;}
+  .litem:last-child{border-bottom:none;}
+  .litem .l1{display:flex;align-items:center;gap:8px;}
+  .litem .ln{font-size:12.5px;font-weight:700;}
+  .litem .lm{font-size:10.5px;color:var(--muted);display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  .av{width:16px;height:16px;border-radius:50%;color:#fff;font-size:9px;font-weight:700;
+    display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;}
+  .pjchip{font-size:9.5px;color:#fff;border-radius:4px;padding:1px 5px;font-weight:600;}
+  .pill{font-size:9.5px;font-weight:700;border-radius:5px;padding:2px 6px;color:#fff;}
+  .reason{font-size:10.5px;color:var(--muted);background:var(--track);border-radius:6px;padding:5px 8px;line-height:1.45;}
+  .reason b{color:var(--ink);font-weight:700;}
+
+  /* ---- capacity bar for 森田 ---- */
+  .capbox{margin:0 0 18px;background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:14px 18px;box-shadow:0 1px 3px rgba(20,30,50,.05);}
+  .capbox .ch{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+  .capbox .ch .av{width:22px;height:22px;font-size:11px;}
+  .capbox .ch .nm{font-size:13.5px;font-weight:700;}
+  .capbox .ch .st{margin-left:auto;font-size:11.5px;font-weight:700;color:var(--must);}
+  .captrack{height:22px;background:var(--track);border-radius:7px;overflow:hidden;display:flex;position:relative;}
+  .captrack .seg{height:100%;display:flex;align-items:center;justify-content:center;font-size:10px;
+    font-weight:700;color:#fff;white-space:nowrap;}
+  .capcap{position:absolute;top:-3px;bottom:-3px;border-left:2px dashed var(--ink);}
+  .capcap .cl{position:absolute;top:-16px;left:-14px;font-size:9.5px;color:var(--muted);white-space:nowrap;}
+  .capover{font-size:11px;color:var(--muted);margin-top:8px;display:flex;align-items:center;gap:6px;}
+  .capover .badge{background:#fff9ef;border:1px solid #f3ddb4;color:#b87908;border-radius:6px;
+    padding:2px 7px;font-weight:700;font-size:10px;}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="h-title">今日の段取りタイムライン</div>
+    <div class="h-sub">やる順に時間帯へ並べた今日の段取り。上から手をつける。</div>
+  </div>
+  <div class="daynav">
+    <button title="前日">‹</button>
+    <span class="cur">6/4(木)<span class="tag">今日</span></span>
+    <button title="翌日">›</button>
+  </div>
+</header>
+
+<div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</div>
+
+<div class="legend">
+  <span class="it"><span class="dot" style="background:var(--must)"></span>🔴 今日必須</span>
+  <span class="it"><span class="dot" style="background:var(--should)"></span>🟠 今日やるべき</span>
+  <span class="it"><span class="dot" style="background:var(--shift)"></span>🟢 ずらせる</span>
+  <span class="it"><span class="dot" style="background:var(--block)"></span>⛔ ブロック中</span>
+</div>
+
+<!-- 森田 capacity summary -->
+<div class="capbox">
+  <div class="ch">
+    <span class="av" style="background:var(--m-morita)">森</span>
+    <span class="nm">森田 の今日</span>
+    <span class="st">▲ 1h あふれ（明日送り）</span>
+  </div>
+  <div class="captrack">
+    <div class="seg" style="width:25%;background:var(--must)">障害 2h</div>
+    <div class="seg" style="width:37.5%;background:var(--should)">DBマイグレ 3h</div>
+    <div class="seg" style="width:12.5%;background:var(--shift);opacity:.55">レビュー 1h</div>
+    <div class="seg" style="width:25%;background:transparent;color:var(--muted)">空き</div>
+    <div class="capcap" style="left:75%"><span class="cl">稼働上限 6h</span></div>
+  </div>
+  <div class="capover">
+    必須 2h + やるべき 3h = <b style="color:var(--ink)">5h で稼働の大半が埋まる</b>。
+    <span class="badge">API設計レビュー 1h は上限を超えるため明日へ</span>
+  </div>
+</div>
+
+<div class="grid">
+
+  <!-- ===== timeline ===== -->
+  <div class="panel">
+    <div class="panel-h">
+      <span class="t">タイムライン 9:00 – 18:00</span>
+      <span class="s">いま 10:00 / 残り稼働で 5h 分を処理</span>
+    </div>
+    <div class="tl">
+      <!-- hour grid -->
+      <div class="hourrow"><span class="hl">9:00</span></div>
+      <div class="hourrow"><span class="hl">10:00</span></div>
+      <div class="hourrow"><span class="hl">11:00</span></div>
+      <div class="hourrow"><span class="hl">12:00</span></div>
+      <div class="hourrow"><span class="hl">13:00</span></div>
+      <div class="hourrow"><span class="hl">14:00</span></div>
+      <div class="hourrow"><span class="hl">15:00</span></div>
+      <div class="hourrow"><span class="hl">16:00</span></div>
+      <div class="hourrow"><span class="hl">17:00</span></div>
+
+      <!-- now line at 10:00 (=2nd row) -->
+      <div class="nowline" style="top:72px"><span class="lbl">いま 10:00</span></div>
+
+      <!-- blocks: container height = 9 rows * 64 = 576. 1h = 64px -->
+      <div class="blocks">
+        <!-- 9:00-11:00 障害対応 2h -->
+        <div class="blk must" style="top:0;height:120px">
+          <span class="bar" style="background:var(--must)"></span>
+          <div class="row1">
+            <span class="pri" style="background:var(--must)">🔴 今日必須</span>
+            <span class="name">ログイン障害対応</span>
+            <span class="dur">2h</span>
+          </div>
+          <div class="meta">
+            <span class="who"><span class="av" style="background:var(--m-morita)">森</span>森田</span>
+            <span class="pjchip" style="background:var(--pj-be)">Backend</span>
+            <span>本番障害・動かせない（slack=0）</span>
+          </div>
+          <div class="meta" style="color:var(--must);font-weight:600;">9:00 – 11:00　最優先・着手済み</div>
+        </div>
+
+        <!-- 11:00-14:00 DBマイグレ 3h (含む昼休憩を圧縮表示) -->
+        <div class="blk should" style="top:128px;height:184px">
+          <span class="bar" style="background:var(--should)"></span>
+          <div class="row1">
+            <span class="pri" style="background:var(--should)">🟠 今日やるべき</span>
+            <span class="name">DBマイグレーション</span>
+            <span class="dur">3h</span>
+          </div>
+          <div class="meta">
+            <span class="who"><span class="av" style="background:var(--m-morita)">森</span>森田</span>
+            <span class="pjchip" style="background:var(--pj-be)">Backend</span>
+            <span>締切 6/5・slack=1日</span>
+          </div>
+          <div class="meta" style="color:#b87908;font-weight:600;">11:00 – 15:00（昼休憩含む）　障害対応の次に</div>
+        </div>
+
+        <!-- API設計レビュー が溢れて明日へ → 半透明で 15:00台に置くが斜線 -->
+        <div class="blk" style="top:320px;height:56px;opacity:.6;border-style:dashed;">
+          <span class="bar" style="background:var(--shift)"></span>
+          <div class="row1">
+            <span class="pri" style="background:var(--shift)">🟢 ずらせる</span>
+            <span class="name" style="text-decoration:line-through;text-decoration-color:#bbb;">API設計レビュー</span>
+            <span class="dur">1h</span>
+          </div>
+          <div class="meta">
+            <span class="who"><span class="av" style="background:var(--m-morita)">森</span>森田</span>
+            <span class="pjchip" style="background:var(--pj-common)">共通</span>
+            <span style="color:var(--shift);font-weight:700;">→ 明日へ送る（上限超過）</span>
+          </div>
+        </div>
+
+        <!-- 残り空き -->
+        <div class="gap" style="top:384px;height:184px">15:00 以降は空き — 余力ができたら逃がした作業を戻せる</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== sidebar ===== -->
+  <div class="side">
+
+    <!-- 待ち（ブロック中） -->
+    <div class="panel waitcard">
+      <div class="panel-h">
+        <span class="t">⛔ 待ち（今日は動かせない）</span>
+        <span class="s">外部要因</span>
+      </div>
+      <div class="litem">
+        <div class="l1">
+          <span class="pill" style="background:var(--block)">⛔ ブロック中</span>
+          <span class="ln">認証フロー実装</span>
+        </div>
+        <div class="lm">
+          <span class="av" style="background:var(--m-sato)">佐</span>佐藤
+          <span class="pjchip" style="background:var(--pj-be)">Backend</span>
+          <span>5h・締切 6/6</span>
+        </div>
+        <div class="reason">外部API待ちのため着手不可。<b>API復旧後に再着手</b>。締切まで余裕あり。</div>
+      </div>
+    </div>
+
+    <!-- 今日やらなくてよい -->
+    <div class="panel">
+      <div class="panel-h">
+        <span class="t">🟢 今日やらなくてよい</span>
+        <span class="s">ずらせる・余裕あり</span>
+      </div>
+
+      <div class="litem">
+        <div class="l1">
+          <span class="pill" style="background:var(--shift)">明日へ</span>
+          <span class="ln">API設計レビュー</span>
+        </div>
+        <div class="lm">
+          <span class="av" style="background:var(--m-morita)">森</span>森田
+          <span class="pjchip" style="background:var(--pj-common)">共通</span>
+          <span>1h・締切なし</span>
+        </div>
+        <div class="reason">森田の今日は <b>障害+マイグレで上限</b>。slack 大なので明日に回す。</div>
+      </div>
+
+      <div class="litem">
+        <div class="l1">
+          <span class="pill" style="background:var(--shift)">ずらせる</span>
+          <span class="ln">ダッシュ画面実装</span>
+        </div>
+        <div class="lm">
+          <span class="av" style="background:var(--m-tanaka)">田</span>田中
+          <span class="pjchip" style="background:var(--pj-fe)">Frontend</span>
+          <span>4h・締切 6/9・slack=5日</span>
+        </div>
+        <div class="reason">締切まで 5 日。田中は手が空いていれば前倒し可、急ぎではない。</div>
+      </div>
+
+      <div class="litem">
+        <div class="l1">
+          <span class="pill" style="background:var(--shift)">ずらせる</span>
+          <span class="ln">設計ドキュメント整備</span>
+        </div>
+        <div class="lm">
+          <span class="av" style="background:var(--m-suzuki)">鈴</span>鈴木
+          <span class="pjchip" style="background:var(--pj-common)">共通</span>
+          <span>2h・締切なし</span>
+        </div>
+        <div class="reason">優先度 低・締切なし。空いた時間の埋め草。</div>
+      </div>
+
+      <div class="litem">
+        <div class="l1">
+          <span class="pill" style="background:var(--shift)">ずらせる</span>
+          <span class="ln">リリースノート作成</span>
+        </div>
+        <div class="lm">
+          <span class="av" style="background:var(--pj-common)">未</span>未アサイン
+          <span class="pjchip" style="background:var(--pj-common)">共通</span>
+          <span>1h・締切 6/13・slack=9日</span>
+        </div>
+        <div class="reason">slack=9日と最も余裕。<b>担当決めは後でよい</b>。</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>今日の空き容量さがし — リーダーボード</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee;
+    --track:#eef1f5; --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0;
+    --caplinecol:#9aa3af;
+    --p-backend:#3a86ff; --p-frontend:#2fa66b; --p-qa:#b657d6; --p-common:#8a93a0;
+    --font:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink); font-family:var(--font);
+    font-feature-settings:"tnum" 1; -webkit-font-smoothing:antialiased;
+    line-height:1.5; padding:28px 22px 64px;
+  }
+  .tnum{font-variant-numeric:tabular-nums;}
+  .wrap{max-width:980px; margin:0 auto;}
+
+  /* header */
+  header.top{display:flex; flex-wrap:wrap; align-items:flex-end; gap:18px 26px; margin-bottom:6px;}
+  .title h1{font-size:21px; margin:0; font-weight:700; letter-spacing:.01em;}
+  .title p.sub{margin:4px 0 0; color:var(--muted); font-size:12.5px;}
+  .daynav{display:flex; align-items:center; gap:4px; margin-left:auto;
+    background:var(--card); border:1px solid var(--line); border-radius:12px;
+    padding:5px 6px; box-shadow:0 1px 2px rgba(20,30,50,.04);}
+  .daynav button{border:none; background:transparent; color:var(--muted); cursor:pointer;
+    font-size:17px; line-height:1; width:30px; height:30px; border-radius:8px;}
+  .daynav button:hover{background:var(--track); color:var(--ink);}
+  .daynav .cur{font-size:14px; font-weight:600; padding:0 8px; min-width:118px; text-align:center;}
+  .daynav .today-pill{font-size:11px; color:var(--free); background:#eaf7ef; border-radius:999px; padding:2px 8px; margin-left:2px;}
+
+  .note{font-size:11.5px; color:var(--muted); margin:10px 0 18px;
+    background:#fbfcfd; border:1px dashed var(--line); border-radius:9px; padding:7px 11px; display:inline-block;}
+
+  /* "now assignable" summary banner */
+  .assign{display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+    background:linear-gradient(0deg,#fff,#fbfdfb); border:1px solid #d4ecdd; border-left:4px solid var(--free);
+    border-radius:12px; padding:12px 16px; margin-bottom:18px; box-shadow:0 1px 2px rgba(20,30,50,.04);}
+  .assign .ttl{font-size:13px; font-weight:700; color:var(--free); white-space:nowrap;}
+  .assign .chip{display:inline-flex; align-items:center; gap:7px; background:#fff; border:1px solid var(--line);
+    border-radius:999px; padding:5px 12px 5px 6px; font-size:13px; font-weight:600;}
+  .assign .chip .av{width:22px; height:22px; border-radius:50%; display:grid; place-items:center; color:#fff; font-size:11px; font-weight:700;}
+  .assign .chip b{color:var(--free); font-variant-numeric:tabular-nums;}
+  .assign .total{margin-left:auto; font-size:12px; color:var(--muted); white-space:nowrap;}
+  .assign .total b{color:var(--free); font-size:15px; font-variant-numeric:tabular-nums;}
+
+  /* toolbar / sort */
+  .toolbar{display:flex; align-items:center; gap:10px; margin-bottom:8px; padding:0 4px;}
+  .toolbar .sortlbl{font-size:12px; color:var(--muted);}
+  .seg{display:inline-flex; background:var(--track); border-radius:9px; padding:3px;}
+  .seg button{border:none; background:transparent; color:var(--muted); font-family:inherit;
+    font-size:12px; font-weight:600; padding:5px 12px; border-radius:7px; cursor:pointer;}
+  .seg button.on{background:#fff; color:var(--ink); box-shadow:0 1px 2px rgba(20,30,50,.08);}
+  .toolbar .count{margin-left:auto; font-size:12px; color:var(--muted);}
+
+  /* list */
+  .board{background:var(--card); border:1px solid var(--line); border-radius:14px; overflow:hidden;
+    box-shadow:0 1px 3px rgba(20,30,50,.05);}
+  .colhdr,.row{display:grid; grid-template-columns:26px 150px 1fr 84px 70px 96px; align-items:center; gap:14px;}
+  .colhdr{padding:9px 18px; font-size:10.5px; letter-spacing:.04em; color:var(--muted);
+    text-transform:uppercase; border-bottom:1px solid var(--line); background:#fbfcfd;}
+  .colhdr .r{text-align:right;}
+  .row{padding:11px 18px; border-bottom:1px solid var(--line); position:relative;}
+  .row:last-child{border-bottom:none;}
+  .row:hover{background:#fafbfc;}
+  .row.over{background:#fef7f7;}
+  .row.over:hover{background:#fdf1f1;}
+
+  .rank{font-size:13px; font-weight:700; color:var(--muted); text-align:center; font-variant-numeric:tabular-nums;}
+  .rank.top{color:var(--free);}
+
+  .person{display:flex; align-items:center; gap:10px; min-width:0;}
+  .av{width:28px; height:28px; border-radius:50%; flex:none; display:grid; place-items:center; color:#fff; font-size:12px; font-weight:700;}
+  .person .nm{font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+
+  /* inline mini stacked bar */
+  .barcell{position:relative;}
+  .bar{height:16px; border-radius:5px; background:var(--track); display:flex; overflow:hidden; position:relative;}
+  .bar .seg-task{height:100%; position:relative;}
+  .bar .seg-free{height:100%; background:repeating-linear-gradient(45deg,#e9f5ee,#e9f5ee 4px,#f1faf4 4px,#f1faf4 8px);}
+  .bar .seg-over{height:100%; background:var(--over);}
+  /* capacity line marker overlay */
+  .capmark{position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--caplinecol); border-radius:2px;}
+  .capmark::after{content:'8h'; position:absolute; top:-13px; left:50%; transform:translateX(-50%);
+    font-size:8.5px; color:var(--caplinecol); font-variant-numeric:tabular-nums;}
+  .barmeta{display:flex; gap:8px; margin-top:4px; font-size:10.5px; color:var(--muted); align-items:center;}
+  .barmeta .seglbl{display:inline-flex; align-items:center; gap:4px;}
+  .barmeta .sw{width:8px; height:8px; border-radius:2px;}
+
+  .used{font-size:13.5px; font-weight:600; text-align:right; font-variant-numeric:tabular-nums;}
+  .used small{color:var(--muted); font-weight:400; font-size:11.5px;}
+  .freecell{font-size:14px; font-weight:700; text-align:right; font-variant-numeric:tabular-nums;}
+  .freecell.pos{color:var(--free);}
+  .freecell.neg{color:var(--over);}
+  .freecell.zero{color:var(--full);}
+
+  .statecell{text-align:right;}
+  .pill{font-size:11px; font-weight:600; border-radius:999px; padding:3px 10px; display:inline-block;}
+  .pill.free{color:var(--free); background:#eaf7ef;}
+  .pill.over{color:var(--over); background:#fdecec;}
+  .pill.just{color:var(--full); background:#f0f1f4;}
+
+  /* footer total row */
+  .totalrow{display:grid; grid-template-columns:26px 150px 1fr 84px 70px 96px; align-items:center; gap:14px;
+    padding:12px 18px; background:#fbfcfd; font-size:12.5px;}
+  .totalrow .person .nm{color:var(--muted); font-weight:700;}
+  .totalrow .tbar{height:8px; border-radius:5px; background:var(--track); overflow:hidden; display:flex;}
+  .totalrow .used{font-weight:700;}
+
+  .plegend{display:flex; flex-wrap:wrap; gap:16px; margin-top:22px; font-size:12px; color:var(--muted); padding:0 4px;}
+  .plegend span{display:inline-flex; align-items:center; gap:6px;}
+  .plegend .sw{width:11px; height:11px; border-radius:3px;}
+  .plegend .sw.free{background:repeating-linear-gradient(45deg,#cfe6d8,#cfe6d8 3px,#eaf7ef 3px,#eaf7ef 6px);}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="title">
+      <h1>今日の空き容量さがし</h1>
+      <p class="sub">リーダーボード — 高密度1行ビュー（多人数向け）</p>
+    </div>
+    <div class="daynav" role="group" aria-label="日送り">
+      <button title="前日">‹</button>
+      <span class="cur tnum">6/4(木)</span>
+      <span class="today-pill">今日</span>
+      <button title="翌日">›</button>
+    </div>
+  </header>
+
+  <div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。容量は一律 8h/日。</div>
+
+  <!-- assignable summary -->
+  <div class="assign">
+    <span class="ttl">今すぐ振れる</span>
+    <span class="chip"><span class="av" style="background:#b657d6">鈴</span>鈴木 <b>+6h</b></span>
+    <span class="chip"><span class="av" style="background:#3a86ff">田</span>田中 <b>+4h</b></span>
+    <span class="total">空き合計 <b>8h</b> ／ 超過 1名（森田 +2h）</span>
+  </div>
+
+  <!-- toolbar -->
+  <div class="toolbar">
+    <span class="sortlbl">並べ替え</span>
+    <span class="seg">
+      <button class="on">空き多い順</button>
+      <button>稼働率順</button>
+      <button>名前順</button>
+    </span>
+    <span class="count" id="count"></span>
+  </div>
+
+  <!-- board -->
+  <div class="board">
+    <div class="colhdr">
+      <span>#</span><span>メンバー</span><span>稼働の内訳（タスク色＝プロジェクト）</span>
+      <span class="r">使用/容量</span><span class="r">空き</span><span class="r">状態</span>
+    </div>
+    <div id="rows"></div>
+    <!-- team total -->
+    <div class="totalrow">
+      <span></span>
+      <span class="person"><span class="nm">チーム計</span></span>
+      <span>
+        <div class="tbar">
+          <i style="width:75%;background:var(--fill);display:block;height:100%"></i>
+          <i style="width:25%;background:var(--free);opacity:.4;display:block;height:100%"></i>
+        </div>
+      </span>
+      <span class="used tnum">24<small> / 32h</small></span>
+      <span class="freecell pos tnum">+8h</span>
+      <span class="statecell"><span class="pill just tnum">75%</span></span>
+    </div>
+  </div>
+
+  <div class="plegend">
+    <span><i class="sw" style="background:var(--p-backend)"></i>Backend</span>
+    <span><i class="sw" style="background:var(--p-frontend)"></i>Frontend</span>
+    <span><i class="sw" style="background:var(--p-qa)"></i>QA</span>
+    <span><i class="sw" style="background:var(--p-common)"></i>共通</span>
+    <span><i class="sw free"></i>空き容量</span>
+    <span><i class="sw" style="background:var(--over)"></i>超過</span>
+    <span style="margin-left:auto"><i class="sw" style="background:var(--caplinecol)"></i>容量線 8h</span>
+  </div>
+
+</div>
+
+<script>
+const CAP = 8;
+const PCOL = {Backend:'#3a86ff', Frontend:'#2fa66b', QA:'#b657d6', '共通':'#8a93a0'};
+const members = [
+  { name:'森田', color:'#e5772d', tasks:[
+    {t:'API設計', h:4, p:'Backend'},
+    {t:'DBマイグレ', h:3, p:'Backend'},
+    {t:'PRレビュー', h:3, p:'共通'},
+  ]},
+  { name:'田中', color:'#3a86ff', tasks:[
+    {t:'ダッシュ画面実装', h:4, p:'Frontend'},
+  ]},
+  { name:'佐藤', color:'#2fa66b', tasks:[
+    {t:'認証フロー実装', h:5, p:'Backend'},
+    {t:'結合テスト', h:3, p:'QA'},
+  ]},
+  { name:'鈴木', color:'#b657d6', tasks:[
+    {t:'設計ドキュメント', h:2, p:'共通'},
+  ]},
+];
+members.forEach(m=>{
+  m.used = m.tasks.reduce((s,t)=>s+t.h,0);
+  m.free = Math.max(0, CAP - m.used);
+  m.over = Math.max(0, m.used - CAP);
+});
+members.sort((a,b)=> (b.free - a.free) || (a.over - b.over));
+
+document.getElementById('count').textContent = `${members.length}名`;
+
+/* bar scale: longest of (used, CAP) across team => full width reference.
+   We scale so CAP maps to a fixed fraction, leaving room for overflow. */
+const maxUsed = Math.max(CAP, ...members.map(m=>m.used)); // 10
+// capacity occupies CAP/maxUsed of the bar; remainder shows overflow zone
+function bar(m){
+  const totalUnits = maxUsed; // hours that fill 100%
+  let segs='';
+  let acc=0;
+  m.tasks.forEach(t=>{
+    const within = Math.min(t.h, Math.max(0, CAP-acc));
+    const wpct = (within/totalUnits)*100;
+    if(within>0){
+      segs+=`<i class="seg-task" style="width:${wpct}%;background:${PCOL[t.p]}" title="${t.t} ${t.h}h"></i>`;
+    }
+    // overflow portion of this task
+    const overPart = t.h - within;
+    if(overPart>0){
+      segs+=`<i class="seg-over" style="width:${(overPart/totalUnits)*100}%" title="${t.t} 超過 ${overPart}h"></i>`;
+    }
+    acc+=t.h;
+  });
+  if(m.free>0){
+    segs+=`<i class="seg-free" style="width:${(m.free/totalUnits)*100}%" title="空き ${m.free}h"></i>`;
+  }
+  const capLeft = (CAP/totalUnits)*100;
+  return `<div class="barcell">
+      <div class="bar">${segs}<span class="capmark" style="left:${capLeft}%"></span></div>
+    </div>`;
+}
+
+function row(m, i){
+  const cls = m.over>0?'over':'';
+  const fc = m.over>0?'neg':(m.free>0?'pos':'zero');
+  const fv = m.over>0?`-${m.over}h`:(m.free>0?`+${m.free}h`:'0h');
+  const pc = m.over>0?'over':(m.free>0?'free':'just');
+  const pt = m.over>0?`超過 +${m.over}h`:(m.free>0?'空きあり':'ちょうど');
+  return `<div class="row ${cls}">
+    <span class="rank ${i===0?'top':''} tnum">${i+1}</span>
+    <span class="person"><span class="av" style="background:${m.color}">${m.name[0]}</span><span class="nm">${m.name}</span></span>
+    ${bar(m)}
+    <span class="used tnum">${m.used}<small> / ${CAP}h</small></span>
+    <span class="freecell ${fc} tnum">${fv}</span>
+    <span class="statecell"><span class="pill ${pc}">${pt}</span></span>
+  </div>`;
+}
+
+document.getElementById('rows').innerHTML = members.map(row).join('');
+</script>
+</body>
+</html>

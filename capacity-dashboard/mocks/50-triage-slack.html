@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>動かせる/動かせない slackビュー — 6/4(木)</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --must:#e5484d; --should:#f5a623; --shift:#2fa66b; --block:#9aa3af;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+    --pj-be:#3a86ff; --pj-fe:#2fa66b; --pj-qa:#b657d6; --pj-common:#8a93a0;
+    --today:#e5484d;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--bg);color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"tnum" 1;}
+  body{padding:24px 28px 60px;max-width:1240px;margin:0 auto;}
+
+  header{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;flex-wrap:wrap;margin-bottom:6px;}
+  .h-title{font-size:21px;font-weight:700;letter-spacing:.02em;}
+  .h-sub{font-size:12.5px;color:var(--muted);margin-top:4px;line-height:1.5;}
+  .daynav{display:flex;align-items:center;gap:2px;background:var(--card);border:1px solid var(--line);
+    border-radius:11px;padding:5px 6px;box-shadow:0 1px 2px rgba(20,30,50,.04);}
+  .daynav button{border:none;background:transparent;color:var(--muted);font-size:16px;
+    width:30px;height:30px;border-radius:8px;cursor:pointer;line-height:1;}
+  .daynav button:hover{background:var(--track);color:var(--ink);}
+  .daynav .cur{font-size:14px;font-weight:700;padding:0 12px;color:var(--ink);}
+  .daynav .cur .tag{display:inline-block;margin-left:7px;font-size:10.5px;font-weight:700;color:#fff;
+    background:var(--today);border-radius:5px;padding:2px 6px;vertical-align:1px;letter-spacing:.04em;}
+  .note{margin:14px 0 20px;font-size:11.5px;color:var(--muted);background:#fff;border:1px dashed var(--line);
+    border-radius:8px;padding:8px 12px;display:inline-block;}
+
+  /* two zones header */
+  .zones{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;}
+  @media(max-width:820px){.zones{grid-template-columns:1fr;}}
+  .zone{border-radius:12px;padding:12px 16px;display:flex;align-items:center;gap:12px;}
+  .zone.fix{background:#fff5f5;border:1px solid #f4c7c8;}
+  .zone.move{background:#f1faf4;border:1px solid #c4e6d2;}
+  .zone .ic{font-size:20px;}
+  .zone .zt{font-size:13.5px;font-weight:700;}
+  .zone .zs{font-size:11px;color:var(--muted);margin-top:2px;line-height:1.4;}
+  .zone .cnt{margin-left:auto;font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;}
+  .zone.fix .cnt{color:var(--must);}
+  .zone.move .cnt{color:var(--shift);}
+
+  /* main table-ish */
+  .board{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    box-shadow:0 1px 3px rgba(20,30,50,.05);overflow:hidden;}
+  .colhead{display:grid;grid-template-columns:248px 1fr 150px;gap:0;padding:10px 18px;
+    border-bottom:1px solid var(--line);font-size:11px;color:var(--muted);font-weight:600;background:#fbfbfc;}
+  .colhead .axis{position:relative;}
+  .axis .ticks{position:absolute;left:0;right:0;top:0;display:flex;justify-content:space-between;}
+  .axis .ticks span{font-variant-numeric:tabular-nums;}
+
+  .grouplbl{padding:9px 18px;font-size:11px;font-weight:700;letter-spacing:.04em;display:flex;align-items:center;gap:8px;
+    background:#fafbfc;border-bottom:1px solid var(--line);}
+  .grouplbl .gd{width:9px;height:9px;border-radius:3px;}
+  .grouplbl .gn{color:var(--muted);}
+
+  .row{display:grid;grid-template-columns:248px 1fr 150px;gap:0;align-items:center;
+    padding:13px 18px;border-bottom:1px solid var(--line);}
+  .row:last-child{border-bottom:none;}
+  .row:hover{background:#fcfcfd;}
+
+  /* task cell */
+  .task .tn{font-size:13.5px;font-weight:700;display:flex;align-items:center;gap:7px;}
+  .task .tn .pri{font-size:9.5px;font-weight:700;border-radius:5px;padding:2px 6px;color:#fff;white-space:nowrap;}
+  .task .tm{font-size:10.5px;color:var(--muted);display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:5px;}
+  .av{width:16px;height:16px;border-radius:50%;color:#fff;font-size:9px;font-weight:700;
+    display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;}
+  .pjchip{font-size:9.5px;color:#fff;border-radius:4px;padding:1px 5px;font-weight:600;}
+
+  /* slack bar cell */
+  .slackcell{position:relative;padding:0 16px;}
+  .stk{position:relative;height:30px;background:var(--track);border-radius:8px;overflow:hidden;}
+  /* vertical gridlines for days */
+  .stk .gl{position:absolute;top:0;bottom:0;width:1px;background:#e1e5ea;}
+  /* today line at left edge */
+  .todayline{position:absolute;left:0;top:-7px;bottom:-7px;width:2px;background:var(--today);z-index:4;border-radius:2px;}
+  .todayline .tlb{position:absolute;top:-15px;left:-13px;font-size:9px;font-weight:700;color:var(--today);white-space:nowrap;}
+  .fill{position:absolute;top:0;bottom:0;left:0;border-radius:8px;display:flex;align-items:center;
+    padding-left:9px;font-size:10.5px;font-weight:700;color:#fff;white-space:nowrap;}
+  /* pin for slack=0 */
+  .pin{position:absolute;left:0;top:50%;transform:translate(-50%,-50%);width:22px;height:22px;border-radius:50%;
+    background:var(--must);color:#fff;font-size:11px;display:flex;align-items:center;justify-content:center;
+    z-index:5;box-shadow:0 1px 4px rgba(229,72,77,.5);border:2px solid #fff;}
+  .deadlineflag{position:absolute;top:50%;transform:translateY(-50%);font-size:9px;color:var(--muted);
+    background:#fff;border:1px solid var(--line);border-radius:4px;padding:1px 5px;white-space:nowrap;}
+
+  /* verdict cell */
+  .verdict{text-align:right;}
+  .verdict .vbadge{display:inline-block;font-size:11px;font-weight:700;border-radius:7px;padding:4px 9px;}
+  .v-fix{background:#fdecec;color:var(--must);}
+  .v-soon{background:#fdf3e3;color:#b87908;}
+  .v-move{background:#e8f6ee;color:#1f8a52;}
+  .v-block{background:#f0f1f3;color:#6b7480;}
+  .verdict .vsub{font-size:10px;color:var(--muted);margin-top:4px;}
+
+  /* dependency notes footer */
+  .deps{margin-top:18px;background:var(--card);border:1px solid var(--line);border-radius:14px;
+    box-shadow:0 1px 3px rgba(20,30,50,.05);padding:14px 18px;}
+  .deps h3{font-size:13px;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:7px;}
+  .deps .dlist{display:grid;grid-template-columns:1fr 1fr;gap:9px 22px;}
+  @media(max-width:820px){.deps .dlist{grid-template-columns:1fr;}}
+  .deps .di{font-size:11.5px;color:var(--muted);line-height:1.5;display:flex;gap:8px;}
+  .deps .di .k{color:var(--ink);font-weight:700;white-space:nowrap;}
+  .deps .di .arrow{color:#bbb;}
+
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin:16px 2px 0;}
+  .legend .it{display:flex;align-items:center;gap:6px;}
+  .legend .dot{width:10px;height:10px;border-radius:3px;}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="h-title">動かせる / 動かせない — slackビュー</div>
+    <div class="h-sub">締切までの余裕（slack）でタスクを並べる。余裕ゼロは固定、余裕が大きいほど逃がせる。</div>
+  </div>
+  <div class="daynav">
+    <button title="前日">‹</button>
+    <span class="cur">6/4(木)<span class="tag">今日</span></span>
+    <button title="翌日">›</button>
+  </div>
+</header>
+
+<div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</div>
+
+<!-- two zone summary -->
+<div class="zones">
+  <div class="zone fix">
+    <span class="ic">📌</span>
+    <div>
+      <div class="zt">今日に固定すべき</div>
+      <div class="zs">slack=0／本番障害。動かすと即・影響が出る。</div>
+    </div>
+    <span class="cnt">1</span>
+  </div>
+  <div class="zone move">
+    <span class="ic">🪁</span>
+    <div>
+      <div class="zt">他の日に逃がせる</div>
+      <div class="zs">締切まで余裕あり。今日やらなくても遅れない。</div>
+    </div>
+    <span class="cnt">4</span>
+  </div>
+</div>
+
+<div class="board">
+  <!-- column headers -->
+  <div class="colhead">
+    <div>タスク / 担当</div>
+    <div class="axis">締切までの余裕（slack）→
+      <div class="ticks">
+        <span>今日</span><span>+1日</span><span>+3日</span><span>+5日</span><span>+7日</span><span>+9日↑</span>
+      </div>
+    </div>
+    <div style="text-align:right">判定</div>
+  </div>
+
+  <!-- ===== GROUP: 固定 ===== -->
+  <div class="grouplbl"><span class="gd" style="background:var(--must)"></span><span class="gn">余裕ゼロ — 今日固定</span></div>
+
+  <!-- 1. ログイン障害 slack=0 -->
+  <div class="row">
+    <div class="task">
+      <div class="tn"><span class="pri" style="background:var(--must)">🔴 今日必須</span>ログイン障害対応</div>
+      <div class="tm"><span class="av" style="background:var(--m-morita)">森</span>森田
+        <span class="pjchip" style="background:var(--pj-be)">Backend</span>2h・本番障害</div>
+    </div>
+    <div class="slackcell">
+      <div class="stk">
+        <div class="gl" style="left:16.6%"></div><div class="gl" style="left:33.3%"></div>
+        <div class="gl" style="left:50%"></div><div class="gl" style="left:66.6%"></div><div class="gl" style="left:83.3%"></div>
+        <div class="todayline"><span class="tlb">今日</span></div>
+        <div class="fill" style="width:2px;background:var(--must)"></div>
+        <div class="pin">📌</div>
+        <span class="deadlineflag" style="left:30px;color:var(--must);border-color:#f4c7c8;">slack 0 — 即対応</span>
+      </div>
+    </div>
+    <div class="verdict">
+      <span class="vbadge v-fix">動かせない</span>
+      <div class="vsub">遅らせる＝障害継続</div>
+    </div>
+  </div>
+
+  <!-- ===== GROUP: ほぼ固定 ===== -->
+  <div class="grouplbl"><span class="gd" style="background:var(--should)"></span><span class="gn">余裕わずか — 今日やるべき</span></div>
+
+  <!-- 2. DBマイグレ slack=1日 -->
+  <div class="row">
+    <div class="task">
+      <div class="tn"><span class="pri" style="background:var(--should)">🟠 今日やるべき</span>DBマイグレーション</div>
+      <div class="tm"><span class="av" style="background:var(--m-morita)">森</span>森田
+        <span class="pjchip" style="background:var(--pj-be)">Backend</span>3h・締切 6/5</div>
+    </div>
+    <div class="slackcell">
+      <div class="stk">
+        <div class="gl" style="left:16.6%"></div><div class="gl" style="left:33.3%"></div>
+        <div class="gl" style="left:50%"></div><div class="gl" style="left:66.6%"></div><div class="gl" style="left:83.3%"></div>
+        <div class="todayline"><span class="tlb">今日</span></div>
+        <div class="fill" style="width:16.6%;background:var(--should)">slack 1日</div>
+        <span class="deadlineflag" style="left:16.6%;margin-left:8px;">締切 6/5</span>
+      </div>
+    </div>
+    <div class="verdict">
+      <span class="vbadge v-soon">明日まで</span>
+      <div class="vsub">逃がす余地は1日だけ</div>
+    </div>
+  </div>
+
+  <!-- ===== GROUP: ブロック ===== -->
+  <div class="grouplbl"><span class="gd" style="background:var(--block)"></span><span class="gn">外部待ち — 着手不可</span></div>
+
+  <!-- 3. 認証フロー ブロック中 -->
+  <div class="row">
+    <div class="task">
+      <div class="tn"><span class="pri" style="background:var(--block)">⛔ ブロック中</span>認証フロー実装</div>
+      <div class="tm"><span class="av" style="background:var(--m-sato)">佐</span>佐藤
+        <span class="pjchip" style="background:var(--pj-be)">Backend</span>5h・締切 6/6</div>
+    </div>
+    <div class="slackcell">
+      <div class="stk" style="background:repeating-linear-gradient(45deg,#eef1f5,#eef1f5 6px,#e6e9ee 6px,#e6e9ee 7px)">
+        <div class="todayline"><span class="tlb">今日</span></div>
+        <div class="fill" style="width:33.3%;background:var(--block);opacity:.55">外部API待ち</div>
+        <span class="deadlineflag" style="left:33.3%;margin-left:8px;">締切 6/6</span>
+      </div>
+    </div>
+    <div class="verdict">
+      <span class="vbadge v-block">待ち</span>
+      <div class="vsub">API復旧まで動かせない</div>
+    </div>
+  </div>
+
+  <!-- ===== GROUP: 逃がせる ===== -->
+  <div class="grouplbl"><span class="gd" style="background:var(--shift)"></span><span class="gn">余裕大 — 他の日へ逃がせる</span></div>
+
+  <!-- 4. API設計レビュー slack大 -->
+  <div class="row">
+    <div class="task">
+      <div class="tn"><span class="pri" style="background:var(--shift)">🟢 ずらせる</span>API設計レビュー</div>
+      <div class="tm"><span class="av" style="background:var(--m-morita)">森</span>森田
+        <span class="pjchip" style="background:var(--pj-common)">共通</span>1h・締切なし</div>
+    </div>
+    <div class="slackcell">
+      <div class="stk">
+        <div class="gl" style="left:16.6%"></div><div class="gl" style="left:33.3%"></div>
+        <div class="gl" style="left:50%"></div><div class="gl" style="left:66.6%"></div><div class="gl" style="left:83.3%"></div>
+        <div class="todayline"><span class="tlb">今日</span></div>
+        <div class="fill" style="width:100%;background:linear-gradient(90deg,#2fa66b,#7fcda3)">slack 大（締切なし）</div>
+      </div>
+    </div>
+    <div class="verdict">
+      <span class="vbadge v-move">逃がせる</span>
+      <div class="vsub">森田が満杯→明日へ</div>
+    </div>
+  </div>
+
+  <!-- 5. ダッシュ画面 slack=5日 -->
+  <div class="row">
+    <div class="task">
+      <div class="tn"><span class="pri" style="background:var(--shift)">🟢 ずらせる</span>ダッシュ画面実装</div>
+      <div class="tm"><span class="av" style="background:var(--m-tanaka)">田</span>田中
+        <span class="pjchip" style="background:var(--pj-fe)">Frontend</span>4h・締切 6/9</div>
+    </div>
+    <div class="slackcell">
+      <div class="stk">
+        <div class="gl" style="left:16.6%"></div><div class="gl" style="left:33.3%"></div>
+        <div class="gl" style="left:50%"></div><div class="gl" style="left:66.6%"></div><div class="gl" style="left:83.3%"></div>
+        <div class="todayline"><span class="tlb">今日</span></div>
+        <div class="fill" style="width:83.3%;background:linear-gradient(90deg,#2fa66b,#6cc695)">slack 5日</div>
+        <span class="deadlineflag" style="left:83.3%;margin-left:8px;">締切 6/9</span>
+      </div>
+    </div>
+    <div class="verdict">
+      <span class="vbadge v-move">逃がせる</span>
+      <div class="vsub">余裕5日</div>
+    </div>
+  </div>
+
+  <!-- 6. 設計ドキュメント slack大（締切なし・低） -->
+  <div class="row">
+    <div class="task">
+      <div class="tn"><span class="pri" style="background:var(--shift)">🟢 ずらせる</span>設計ドキュメント整備</div>
+      <div class="tm"><span class="av" style="background:var(--m-suzuki)">鈴</span>鈴木
+        <span class="pjchip" style="background:var(--pj-common)">共通</span>2h・締切なし</div>
+    </div>
+    <div class="slackcell">
+      <div class="stk">
+        <div class="gl" style="left:16.6%"></div><div class="gl" style="left:33.3%"></div>
+        <div class="gl" style="left:50%"></div><div class="gl" style="left:66.6%"></div><div class="gl" style="left:83.3%"></div>
+        <div class="todayline"><span class="tlb">今日</span></div>
+        <div class="fill" style="width:100%;background:linear-gradient(90deg,#2fa66b,#8fd4ad)">slack 大（優先度 低）</div>
+      </div>
+    </div>
+    <div class="verdict">
+      <span class="vbadge v-move">逃がせる</span>
+      <div class="vsub">埋め草でよい</div>
+    </div>
+  </div>
+
+  <!-- 7. リリースノート slack=9日 -->
+  <div class="row">
+    <div class="task">
+      <div class="tn"><span class="pri" style="background:var(--shift)">🟢 ずらせる</span>リリースノート作成</div>
+      <div class="tm"><span class="av" style="background:var(--pj-common)">未</span>未アサイン
+        <span class="pjchip" style="background:var(--pj-common)">共通</span>1h・締切 6/13</div>
+    </div>
+    <div class="slackcell">
+      <div class="stk">
+        <div class="gl" style="left:16.6%"></div><div class="gl" style="left:33.3%"></div>
+        <div class="gl" style="left:50%"></div><div class="gl" style="left:66.6%"></div><div class="gl" style="left:83.3%"></div>
+        <div class="todayline"><span class="tlb">今日</span></div>
+        <div class="fill" style="width:100%;background:linear-gradient(90deg,#2fa66b,#9bd9b6)">slack 9日（最も余裕）</div>
+        <span class="deadlineflag" style="right:6px;">締切 6/13</span>
+      </div>
+    </div>
+    <div class="verdict">
+      <span class="vbadge v-move">逃がせる</span>
+      <div class="vsub">担当決めも後で</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- dependency notes -->
+<div class="deps">
+  <h3>🔗 ずらすと何が遅れるか（依存）</h3>
+  <div class="dlist">
+    <div class="di"><span class="k">ログイン障害</span><span class="arrow">→</span><span>逃がせない。放置＝本番ユーザーがログイン不可のまま。依存なしだが影響が最大。</span></div>
+    <div class="di"><span class="k">DBマイグレ</span><span class="arrow">→</span><span>遅らせると <b style="color:var(--ink)">認証フロー実装</b>の前提が揃わない。明日が限界。</span></div>
+    <div class="di"><span class="k">認証フロー</span><span class="arrow">→</span><span>外部API＋DBマイグレ完了が前提。今日は待ち。両方揃えば着手。</span></div>
+    <div class="di"><span class="k">API設計レビュー</span><span class="arrow">→</span><span>後続なし。森田が満杯のため明日へ。遅れても他に波及しない。</span></div>
+    <div class="di"><span class="k">ダッシュ画面</span><span class="arrow">→</span><span>独立タスク。6/9 までに着手すれば間に合う。</span></div>
+    <div class="di"><span class="k">設計Doc / リリースノート</span><span class="arrow">→</span><span>誰の前提にもなっていない。最後でよい。</span></div>
+  </div>
+</div>
+
+<div class="legend">
+  <span class="it"><span class="dot" style="background:var(--must)"></span>📌 slack=0 固定ピン</span>
+  <span class="it"><span class="dot" style="background:var(--should)"></span>余裕わずか</span>
+  <span class="it"><span class="dot" style="background:var(--shift)"></span>余裕大・逃がせる</span>
+  <span class="it"><span class="dot" style="background:var(--block)"></span>外部待ち</span>
+  <span class="it"><span class="dot" style="background:var(--today)"></span>今日ライン</span>
+</div>
+
+</body>
+</html>

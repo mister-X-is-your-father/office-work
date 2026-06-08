@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>着地見込み一覧 — キャパダッシュボード</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee;
+    --track:#eef1f5; --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0; --amber:#f5a623;
+    --backend:#3a86ff; --frontend:#2fa66b; --qa:#b657d6; --common:#8a93a0;
+    --morita:#e5772d; --tanaka:#3a86ff; --sato:#2fa66b; --suzuki:#b657d6;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    background:var(--bg); color:var(--ink); line-height:1.5; padding:24px;
+    font-variant-numeric:tabular-nums; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px;margin:0 auto}
+  header.page{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:6px;flex-wrap:wrap}
+  h1{font-size:20px;font-weight:700;letter-spacing:.01em}
+  .sub{font-size:13px;color:var(--muted);margin-top:2px}
+  .nav{display:flex;align-items:center;gap:6px}
+  .nav button{
+    border:1px solid var(--line);background:var(--card);color:var(--ink);
+    border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer;
+    font-family:inherit;
+  }
+  .nav button:hover{background:var(--track)}
+  .nav .period{font-size:13px;font-weight:600;padding:0 6px;min-width:130px;text-align:center}
+  .note{font-size:12px;color:var(--muted);margin:10px 0 18px;padding:8px 12px;background:#fff;border:1px dashed var(--line);border-radius:8px}
+
+  .summary{display:flex;gap:12px;margin-bottom:18px;flex-wrap:wrap}
+  .stat{
+    background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:14px 16px;flex:1;min-width:150px;box-shadow:0 1px 2px rgba(29,36,48,.04);
+  }
+  .stat .num{font-size:24px;font-weight:700;display:flex;align-items:baseline;gap:6px}
+  .stat .num small{font-size:13px;font-weight:600;color:var(--muted)}
+  .stat .lbl{font-size:12px;color:var(--muted);margin-top:2px}
+  .stat.danger .num{color:var(--over)}
+  .stat.amber .num{color:var(--amber)}
+  .stat.ok .num{color:var(--free)}
+
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:12px;
+    box-shadow:0 1px 2px rgba(29,36,48,.04);overflow:hidden;
+  }
+  .card h2{font-size:14px;font-weight:700;padding:14px 16px;border-bottom:1px solid var(--line)}
+  table{width:100%;border-collapse:collapse}
+  thead th{
+    font-size:11px;color:var(--muted);font-weight:600;text-align:left;
+    padding:10px 16px;border-bottom:1px solid var(--line);text-transform:uppercase;letter-spacing:.03em;
+    white-space:nowrap;
+  }
+  thead th.r{text-align:right}
+  tbody td{padding:14px 16px;border-bottom:1px solid var(--line);font-size:14px;vertical-align:middle}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr.danger{background:linear-gradient(90deg,rgba(229,72,77,.055),transparent 60%)}
+  tbody tr.amber{background:linear-gradient(90deg,rgba(245,166,35,.05),transparent 60%)}
+  tbody tr:hover{background:rgba(58,134,255,.035)}
+  tbody tr.danger:hover{background:rgba(229,72,77,.08)}
+
+  .task{font-weight:600;display:flex;align-items:center;gap:8px}
+  .pj-dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .pj-tag{font-size:11px;color:var(--muted);font-weight:500;margin-left:2px}
+
+  .owner{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+  .ava{width:22px;height:22px;border-radius:50%;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex:none}
+  .owner small{display:block;font-size:11px;color:var(--muted);font-weight:500;line-height:1.2}
+
+  td.r{text-align:right}
+  .hrs{font-weight:600}
+  .hrs small{color:var(--muted);font-weight:400;font-size:12px}
+
+  .date{font-variant-numeric:tabular-nums;white-space:nowrap}
+  .date .dow{color:var(--muted);font-size:12px;margin-left:2px}
+
+  .badge{
+    display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;
+    padding:5px 10px;border-radius:999px;white-space:nowrap;
+  }
+  .badge .ico{width:8px;height:8px;border-radius:50%}
+  .b-late{background:rgba(229,72,77,.12);color:var(--over)}
+  .b-late .ico{background:var(--over)}
+  .b-tight{background:rgba(245,166,35,.14);color:#b9791a}
+  .b-tight .ico{background:var(--amber)}
+  .b-ok{background:rgba(47,166,107,.13);color:var(--free)}
+  .b-ok .ico{background:var(--free)}
+  .b-edge{background:rgba(47,166,107,.1);color:#5a7d57}
+  .b-edge .ico{background:linear-gradient(90deg,var(--free) 50%,var(--amber) 50%)}
+
+  .delta{font-size:12px;color:var(--muted);margin-top:3px}
+  .bar-mini{margin-top:6px;height:5px;border-radius:3px;background:var(--track);overflow:hidden;width:120px}
+  .bar-mini i{display:block;height:100%;border-radius:3px}
+  .legend{display:flex;gap:16px;font-size:12px;color:var(--muted);padding:12px 16px;flex-wrap:wrap;align-items:center}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .legend .ico{width:9px;height:9px;border-radius:50%}
+  footer{font-size:11px;color:var(--muted);margin-top:16px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="page">
+    <div>
+      <h1>② 計画：着地見込み一覧</h1>
+      <div class="sub">残作業と稼働から予測した着地日を、締切と突き合わせて表示</div>
+    </div>
+    <div class="nav">
+      <button title="前の週">‹</button>
+      <span class="period">今日 6/4(木) 基準</span>
+      <button title="次の週">›</button>
+      <button style="margin-left:6px">今週</button>
+    </div>
+  </header>
+
+  <div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</div>
+
+  <div class="summary">
+    <div class="stat danger">
+      <div class="num">1 <small>件</small></div>
+      <div class="lbl">締切に間に合わない（遅延）</div>
+    </div>
+    <div class="stat amber">
+      <div class="num">1 <small>件</small></div>
+      <div class="lbl">ギリギリ・要注意</div>
+    </div>
+    <div class="stat ok">
+      <div class="num">2 <small>件</small></div>
+      <div class="lbl">余裕あり・着地見込み内</div>
+    </div>
+    <div class="stat">
+      <div class="num">-3 <small>日</small></div>
+      <div class="lbl">最大の遅延（ログイン機能）</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>タスク別 着地見込み（締切に間に合わない順）</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>タスク / PJ</th>
+          <th>担当</th>
+          <th class="r">残作業</th>
+          <th>締切</th>
+          <th>予測着地</th>
+          <th>状況</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- ログイン機能: 遅延 -3日 -->
+        <tr class="danger">
+          <td>
+            <div class="task"><span class="pj-dot" style="background:var(--backend)"></span>ログイン機能<span class="pj-tag">Backend</span></div>
+          </td>
+          <td>
+            <span class="owner"><span class="ava" style="background:var(--morita)">森</span><span>森田<small>ほぼ埋まり</small></span></span>
+          </td>
+          <td class="r"><span class="hrs">12<small>h</small></span></td>
+          <td><span class="date">6/6<span class="dow">(土)</span></span></td>
+          <td><span class="date" style="color:var(--over);font-weight:600">6/9<span class="dow" style="color:rgba(229,72,77,.7)">(火)</span></span></td>
+          <td>
+            <span class="badge b-late"><span class="ico"></span>遅延 −3日</span>
+            <div class="bar-mini"><i style="width:100%;background:var(--over)"></i></div>
+          </td>
+        </tr>
+
+        <!-- 認証フロー: ギリ遅れ -1日 -->
+        <tr class="amber">
+          <td>
+            <div class="task"><span class="pj-dot" style="background:var(--backend)"></span>認証フロー<span class="pj-tag">Backend</span></div>
+          </td>
+          <td>
+            <span class="owner"><span class="ava" style="background:var(--sato)">佐</span><span>佐藤<small>満稼働</small></span></span>
+          </td>
+          <td class="r"><span class="hrs">4<small>h</small></span></td>
+          <td><span class="date">6/5<span class="dow">(金)</span></span></td>
+          <td><span class="date" style="color:#b9791a;font-weight:600">6/6<span class="dow" style="color:rgba(185,121,26,.8)">(土)</span></span></td>
+          <td>
+            <span class="badge b-tight"><span class="ico"></span>ギリ遅れ −1日</span>
+            <div class="bar-mini"><i style="width:78%;background:var(--amber)"></i></div>
+          </td>
+        </tr>
+
+        <!-- 結合テスト: ちょうど -->
+        <tr>
+          <td>
+            <div class="task"><span class="pj-dot" style="background:var(--qa)"></span>結合テスト<span class="pj-tag">QA</span></div>
+          </td>
+          <td>
+            <span class="owner"><span class="ava" style="background:var(--sato)">佐</span><span>佐藤<small>後半に着手</small></span></span>
+          </td>
+          <td class="r"><span class="hrs">6<small>h</small></span></td>
+          <td><span class="date">6/9<span class="dow">(火)</span></span></td>
+          <td><span class="date" style="font-weight:600">6/9<span class="dow">(火)</span></span></td>
+          <td>
+            <span class="badge b-edge"><span class="ico"></span>ちょうど ±0日</span>
+            <div class="bar-mini"><i style="width:50%;background:linear-gradient(90deg,var(--free),var(--amber))"></i></div>
+          </td>
+        </tr>
+
+        <!-- LP制作: 余裕 +2日 -->
+        <tr>
+          <td>
+            <div class="task"><span class="pj-dot" style="background:var(--frontend)"></span>LP制作<span class="pj-tag">Frontend</span></div>
+          </td>
+          <td>
+            <span class="owner"><span class="ava" style="background:var(--tanaka)">田</span><span>田中<small>空きあり</small></span></span>
+          </td>
+          <td class="r"><span class="hrs">8<small>h</small></span></td>
+          <td><span class="date">6/10<span class="dow">(水)</span></span></td>
+          <td><span class="date" style="color:var(--free);font-weight:600">6/8<span class="dow" style="color:rgba(47,166,107,.7)">(日)</span></span></td>
+          <td>
+            <span class="badge b-ok"><span class="ico"></span>余裕 +2日</span>
+            <div class="bar-mini"><i style="width:30%;background:var(--free)"></i></div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="legend">
+      <span><span class="ico" style="background:var(--over)"></span>遅延（締切超過）</span>
+      <span><span class="ico" style="background:var(--amber)"></span>ギリギリ／要注意</span>
+      <span><span class="ico" style="background:var(--free)"></span>余裕あり</span>
+      <span style="margin-left:auto">予測着地 = 残作業 ÷ 担当の日次空き枠から算出（1日8h・既存稼働差引）</span>
+    </div>
+  </div>
+
+  <footer>キャパダッシュボード（Vikunja API）／ ② 計画：着地見込み＆What-if ・ mock 20</footer>
+</div>
+</body>
+</html>

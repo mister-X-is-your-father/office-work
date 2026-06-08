@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>今日の空き容量さがし ｜ 横積みタスク</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee;
+    --track:#eef1f5; --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0;
+    --caprule:#9aa3af;
+    --p-backend:#3a86ff; --p-frontend:#2fa66b; --p-qa:#b657d6; --p-common:#8a93a0;
+    --font:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink); font-family:var(--font);
+    font-feature-settings:"palt"; -webkit-font-smoothing:antialiased;
+    font-variant-numeric:tabular-nums; padding:28px 20px 60px;
+  }
+  .wrap{max-width:1000px;margin:0 auto;}
+  header{margin-bottom:22px;}
+  .titlerow{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;}
+  h1{font-size:22px;font-weight:700;margin:0;letter-spacing:.01em;}
+  .subtitle{font-size:13px;color:var(--muted);}
+  .nav{display:flex;align-items:center;gap:0;margin-top:14px;background:var(--card);
+    border:1px solid var(--line);border-radius:11px;padding:4px;width:max-content;
+    box-shadow:0 1px 2px rgba(20,30,50,.04);}
+  .nav button{border:0;background:transparent;color:var(--muted);font-size:15px;
+    cursor:pointer;padding:6px 11px;border-radius:8px;line-height:1;}
+  .nav button:hover{background:var(--track);color:var(--ink);}
+  .nav .cur{color:var(--ink);font-weight:600;font-size:15px;padding:6px 14px;}
+  .nav .today{font-size:11px;color:var(--free);font-weight:700;margin-left:2px;}
+  .note{font-size:11.5px;color:var(--muted);margin-top:11px;line-height:1.5;}
+  .summary{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0 14px;}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:13px 16px;box-shadow:0 1px 2px rgba(20,30,50,.04);min-width:120px;}
+  .kpi .lbl{font-size:11px;color:var(--muted);margin-bottom:5px;letter-spacing:.02em;}
+  .kpi .val{font-size:21px;font-weight:700;line-height:1;}
+  .kpi .val small{font-size:13px;font-weight:600;color:var(--muted);margin-left:2px;}
+  .kpi.free .val{color:var(--free);}
+  .kpi.over .val{color:var(--over);}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin:2px 0 4px;font-size:11.5px;color:var(--muted);}
+  .legend .item{display:flex;align-items:center;gap:6px;}
+  .swatch{width:11px;height:11px;border-radius:3px;display:inline-block;}
+  .legend .rule{width:0;height:16px;border-left:2px dashed var(--caprule);}
+
+  .chartcard{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:22px 24px 18px;margin-top:8px;box-shadow:0 2px 10px rgba(20,30,50,.05);}
+  /* scale ruler on top */
+  .ruler{position:relative;height:22px;margin-left:var(--labelw);margin-right:var(--rgut);}
+  .ruler .tk{position:absolute;top:0;transform:translateX(-50%);font-size:10.5px;color:var(--muted);}
+  .ruler .tkline{position:absolute;top:16px;bottom:-6px;width:1px;background:var(--track);transform:translateX(-50%);}
+  :root{--labelw:96px; --rgut:118px;} /* rgut: reserved zone right of cap for overflow */
+
+  .rows{position:relative;}
+  /* the plotting field, used to place cap line full-height */
+  .field{position:relative;}
+  .capmark{position:absolute;top:0;bottom:30px;width:2px;
+    background:repeating-linear-gradient(var(--caprule),var(--caprule) 4px,transparent 4px,transparent 8px);
+    z-index:5;}
+  .capmark .tag{position:absolute;top:-20px;left:50%;transform:translateX(-50%);
+    font-size:10.5px;color:#7c838f;font-weight:600;white-space:nowrap;}
+
+  .row{display:flex;align-items:center;height:48px;}
+  .row .name{width:var(--labelw);flex:none;font-size:14px;font-weight:700;padding-right:10px;text-align:right;
+    display:flex;align-items:center;justify-content:flex-end;gap:6px;}
+  .row .name .dot{width:8px;height:8px;border-radius:50%;flex:none;}
+  .barwrap{position:relative;flex:1;height:30px;}
+  /* track = the capacity zone (0..8h), the over zone extends into right gutter */
+  .track{position:absolute;left:0;top:0;bottom:0;background:var(--track);border-radius:7px;}
+  .bar{position:absolute;left:0;top:0;bottom:0;display:flex;border-radius:7px;overflow:hidden;
+    box-shadow:0 1px 2px rgba(20,30,50,.12);}
+  .seg{position:relative;display:flex;align-items:center;padding:0 8px;color:#fff;
+    min-width:0;border-right:1.5px solid rgba(255,255,255,.55);overflow:hidden;}
+  .bar .seg:last-child{border-right:0;}
+  .seg .lab{font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .seg.overpart{background:repeating-linear-gradient(135deg,#e5484d,#e5484d 7px,#d83a3f 7px,#d83a3f 14px)!important;
+    color:#fff;}
+  /* status chip on the right */
+  .chip{margin-left:12px;flex:none;font-size:12px;font-weight:700;white-space:nowrap;width:78px;text-align:left;}
+  .chip.free{color:var(--free);}
+  .chip.over{color:var(--over);}
+  .chip.full{color:var(--full);}
+  .chip small{display:block;font-size:10px;font-weight:600;color:var(--muted);margin-top:1px;}
+  .rowdiv{border-top:1px solid var(--line);}
+  /* tooltip */
+  .seg[data-tip]:hover::after{content:attr(data-tip);position:absolute;left:50%;bottom:calc(100% + 7px);
+    transform:translateX(-50%);background:#1d2430;color:#fff;font-size:11px;font-weight:500;
+    padding:5px 9px;border-radius:7px;white-space:nowrap;z-index:30;box-shadow:0 4px 12px rgba(0,0,0,.2);}
+  .seg[data-tip]:hover::before{content:"";position:absolute;left:50%;bottom:calc(100% + 2px);
+    transform:translateX(-50%);border:5px solid transparent;border-top-color:#1d2430;z-index:30;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="titlerow">
+      <h1>今日の空き容量さがし</h1>
+      <span class="subtitle">横積み・タスクセグメント（空き順）</span>
+    </div>
+    <div class="nav">
+      <button aria-label="前の日">‹</button>
+      <span class="cur">6/4(木)</span>
+      <span class="today">今日</span>
+      <button aria-label="次の日">›</button>
+    </div>
+    <div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。容量は一律 8h/人。</div>
+  </header>
+
+  <div class="summary">
+    <div class="kpi"><div class="lbl">チーム稼働</div><div class="val">24<small>/32h</small></div></div>
+    <div class="kpi"><div class="lbl">稼働率</div><div class="val">75<small>%</small></div></div>
+    <div class="kpi free"><div class="lbl">振れる空き</div><div class="val">8<small>h</small></div></div>
+    <div class="kpi over"><div class="lbl">超過</div><div class="val">+2<small>h</small></div></div>
+  </div>
+
+  <div class="legend">
+    <span class="item"><span class="swatch" style="background:var(--p-backend)"></span>Backend</span>
+    <span class="item"><span class="swatch" style="background:var(--p-frontend)"></span>Frontend</span>
+    <span class="item"><span class="swatch" style="background:var(--p-qa)"></span>QA</span>
+    <span class="item"><span class="swatch" style="background:var(--p-common)"></span>共通</span>
+    <span class="item"><span class="rule"></span>容量 8h</span>
+    <span class="item"><span class="swatch" style="background:repeating-linear-gradient(135deg,#e5484d,#e5484d 4px,#d83a3f 4px,#d83a3f 8px)"></span>超過（右にはみ出し）</span>
+  </div>
+
+  <div class="chartcard">
+    <div class="ruler" id="ruler"></div>
+    <div class="rows field" id="rows"></div>
+  </div>
+</div>
+
+<script>
+const CAP = 8;
+const PCOL = {Backend:"#3a86ff", Frontend:"#2fa66b", QA:"#b657d6", 共通:"#8a93a0"};
+let members = [
+  { name:"森田", dot:"#e5772d", tasks:[
+      {n:"API設計", h:4, p:"Backend"},
+      {n:"DBマイグレ", h:3, p:"Backend"},
+      {n:"PRレビュー", h:3, p:"共通"},
+  ]},
+  { name:"田中", dot:"#3a86ff", tasks:[ {n:"ダッシュ画面実装", h:4, p:"Frontend"} ]},
+  { name:"佐藤", dot:"#2fa66b", tasks:[ {n:"認証フロー実装", h:5, p:"Backend"},{n:"結合テスト", h:3, p:"QA"} ]},
+  { name:"鈴木", dot:"#b657d6", tasks:[ {n:"設計ドキュメント", h:2, p:"共通"} ]},
+];
+members.forEach(m=> m.total = m.tasks.reduce((s,t)=>s+t.h,0));
+// sort by free space desc (most free first)
+members.sort((a,b)=> (CAP-b.total) - (CAP-a.total)); // 空き多い順
+
+// scale: cap (8h) occupies the "track" portion. Full scale to MAX_H.
+const MAX_H = 11; // 0..11h across (cap zone 0..8, over zone 8..11)
+// cap zone takes the left part of barwrap; we map h->percent of barwrap width
+const pct = h => (h / MAX_H) * 100;
+
+// ruler ticks
+const ruler = document.getElementById("ruler");
+for(let h=0; h<=10; h+=2){
+  const t = document.createElement("div");
+  t.className="tk"; t.style.left = pct(h)+"%"; t.textContent = h+"h";
+  ruler.appendChild(t);
+  const l = document.createElement("div");
+  l.className="tkline"; l.style.left = pct(h)+"%";
+  ruler.appendChild(l);
+}
+
+const rows = document.getElementById("rows");
+// cap line across all rows
+const capmark = document.createElement("div");
+capmark.className="capmark";
+capmark.style.left = `calc(var(--labelw) + (100% - var(--labelw) - var(--rgut) - 90px) * 0)`;
+rows.appendChild(capmark);
+
+members.forEach((m,i)=>{
+  const row = document.createElement("div");
+  row.className="row"+(i>0?" rowdiv":"");
+  const total = m.total;
+  const over = total - CAP;
+
+  let segHTML = "";
+  let cum = 0;
+  m.tasks.forEach(t=>{
+    const start = cum, end = cum+t.h; cum = end;
+    if(end > CAP && start < CAP){
+      const underH = CAP-start, overH = end-CAP;
+      segHTML += seg(t, underH, PCOL[t.p], false);
+      segHTML += seg(t, overH, PCOL[t.p], true);
+    } else if(start >= CAP){
+      segHTML += seg(t, t.h, PCOL[t.p], true);
+    } else {
+      segHTML += seg(t, t.h, PCOL[t.p], false);
+    }
+  });
+
+  let chipCls = over>0?"over":(over===0?"full":"free");
+  let chipMain = over>0?("+"+over+"h"):(over===0?"満":("空 "+(CAP-total)+"h"));
+  let chipSub = over>0?"超過":(over===0?"ちょうど":"振れる");
+
+  row.innerHTML =
+    `<div class="name"><span class="dot" style="background:${m.dot}"></span>${m.name}</div>`+
+    `<div class="barwrap">`+
+      `<div class="track" style="width:${pct(CAP)}%"></div>`+
+      `<div class="bar" style="width:${pct(total)}%">${segHTML}</div>`+
+    `</div>`+
+    `<div class="chip ${chipCls}">${chipMain}<small>${chipSub}・${total}h</small></div>`;
+  rows.appendChild(row);
+});
+
+// position cap line: at pct(CAP) of the barwrap. barwrap starts after name (labelw)
+// and ends before chip (90px). We compute via wrapper measurement after layout.
+function placeCap(){
+  const bw = document.querySelector(".barwrap");
+  if(!bw) return;
+  const r = bw.getBoundingClientRect();
+  const host = rows.getBoundingClientRect();
+  const xLeft = r.left - host.left;
+  const capX = xLeft + r.width * (CAP/MAX_H);
+  capmark.style.left = capX+"px";
+  capmark.style.removeProperty("width");
+  capmark.style.width = "2px";
+  capmark.innerHTML = `<div class="tag">容量 8h</div>`;
+}
+window.addEventListener("load", placeCap);
+window.addEventListener("resize", placeCap);
+placeCap();
+
+function seg(t, hours, color, isOver){
+  const w = pct(hours);
+  const showLab = hours >= 1.4; // hide label on very thin segments
+  const lab = showLab ? `<span class="lab">${t.n} ${t.h}h</span>` : "";
+  const cls = "seg"+(isOver?" overpart":"");
+  const bg = isOver ? "" : `background:${color};`;
+  return `<div class="${cls}" style="width:${w}%;${bg}" data-tip="${t.n}・${t.h}h（${t.p}）">${lab}</div>`;
+}
+</script>
+</body>
+</html>

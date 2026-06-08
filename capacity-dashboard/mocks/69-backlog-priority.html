@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>優先度バックログ — 新ダッシュボード機能</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --done:#2fa66b; --doing:#3a86ff; --todo:#9aa3af; --blocked:#e5484d;
+    --must:#e5484d; --should:#f5a623; --could:#3a86ff; --wont:#9aa3af;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"tnum"; font-variant-numeric:tabular-nums;
+    line-height:1.5; padding:28px 20px;
+  }
+  .wrap{max-width:880px;margin:0 auto}
+  header h1{font-size:20px;font-weight:700;letter-spacing:.01em}
+  header .proj{font-size:13px;color:var(--muted);margin-top:3px}
+  .note{
+    font-size:12px;color:var(--muted);background:#fff;border:1px solid var(--line);
+    border-radius:10px;padding:9px 12px;margin:14px 0 18px;
+  }
+  .toolbar{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+  .toolbar .spacer{flex:1}
+  .btn{
+    font:inherit;font-size:12.5px;color:var(--ink);background:var(--card);
+    border:1px solid var(--line);border-radius:8px;padding:7px 12px;cursor:pointer;
+    transition:border-color .12s,background .12s;
+  }
+  .btn:hover{border-color:#cdd3db}
+  .btn.active{border-color:#cdd3db;background:#f0f3f7;font-weight:600}
+  .summary{font-size:12.5px;color:var(--muted)}
+  .summary b{color:var(--ink)}
+
+  .sprint-band{
+    display:flex;align-items:center;gap:10px;margin:6px 2px 8px;
+  }
+  .sprint-band .lbl{font-size:11.5px;font-weight:700;letter-spacing:.04em;white-space:nowrap}
+  .sprint-band.now .lbl{color:#2563c9}
+  .sprint-band.later .lbl{color:var(--muted)}
+  .sprint-band .rule{flex:1;height:0;border-top:1.5px dashed #c5cdd8}
+  .sprint-band .cap{font-size:11.5px;color:var(--muted)}
+
+  ul.list{list-style:none;display:flex;flex-direction:column;gap:8px}
+  li.row{
+    display:grid;grid-template-columns:22px 30px 1fr auto;align-items:center;gap:12px;
+    background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:12px 14px;box-shadow:0 1px 2px rgba(20,30,50,.04);
+    cursor:grab;transition:box-shadow .12s,transform .08s,border-color .12s;
+  }
+  li.row:hover{box-shadow:0 3px 10px rgba(20,30,50,.08);border-color:#dce1e8}
+  li.row.dragging{opacity:.5;box-shadow:0 8px 20px rgba(20,30,50,.16)}
+  li.row.over{border-color:#3a86ff;box-shadow:0 0 0 2px rgba(58,134,255,.18)}
+  .handle{
+    color:#c2c8d0;font-size:16px;line-height:1;cursor:grab;user-select:none;
+    text-align:center;letter-spacing:1px;
+  }
+  .handle:active{cursor:grabbing}
+  .rank{
+    font-size:14px;font-weight:700;color:var(--muted);text-align:center;
+  }
+  li.row:first-child .rank,li.row:nth-child(2) .rank{color:var(--ink)}
+  .main{min-width:0}
+  .title-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .tname{font-size:14.5px;font-weight:600}
+  .meta{display:flex;align-items:center;gap:14px;margin-top:5px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+  .meta .who{display:inline-flex;align-items:center;gap:5px}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+  .tag{
+    font-size:10.5px;font-weight:700;letter-spacing:.03em;padding:2px 7px;border-radius:5px;
+    color:#fff;white-space:nowrap;
+  }
+  .badge-urgent{
+    font-size:10px;font-weight:700;color:#e5484d;border:1px solid #f4b9bb;
+    background:#fdeaea;border-radius:5px;padding:2px 6px;
+  }
+  .badge-skip{
+    font-size:10px;font-weight:700;color:#6b7480;border:1px solid var(--line);
+    background:#f3f5f8;border-radius:5px;padding:2px 6px;
+  }
+  .right{display:flex;align-items:center;gap:14px;justify-content:flex-end}
+  .est{font-size:12.5px;color:var(--muted);white-space:nowrap}
+  .est b{color:var(--ink);font-weight:600}
+  .status{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;white-space:nowrap}
+  .area{font-size:11px;color:var(--muted)}
+  .wont-row{opacity:.62}
+  footer{margin-top:22px;font-size:11.5px;color:var(--muted);text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>優先度バックログ</h1>
+    <div class="proj">プロジェクト「新ダッシュボード機能」 ・ 2026/06/04（木）時点</div>
+  </header>
+  <div class="note">※ モック（サンプルデータ）。本番は Vikunja API（優先度ラベル等）から自動算出。</div>
+
+  <div class="toolbar">
+    <button class="btn active" data-sort="manual" id="b-manual">手動順</button>
+    <button class="btn" data-sort="moscow" id="b-moscow">MoSCoW順</button>
+    <button class="btn" data-sort="effort" id="b-effort">見積順</button>
+    <div class="spacer"></div>
+    <div class="summary" id="summary"></div>
+  </div>
+
+  <ul class="list" id="list"></ul>
+
+  <footer>ハンドル <span style="color:#c2c8d0">⋮⋮</span> をドラッグして並べ替え。上位 <b>今スプリント</b> に入った順に着手します。</footer>
+</div>
+
+<script>
+const MOSCOW = {
+  Must:{c:'var(--must)',rank:0}, Should:{c:'var(--should)',rank:1},
+  Could:{c:'var(--could)',rank:2}, "Won't":{c:'var(--wont)',rank:3}
+};
+const MEMBER = {
+  森田:'var(--m-morita)', 田中:'var(--m-tanaka)', 佐藤:'var(--m-sato)', 鈴木:'var(--m-suzuki)', 共通:'#9aa3af'
+};
+const STATUS = {
+  Done:{c:'var(--done)',l:'Done'}, Doing:{c:'var(--doing)',l:'Doing'},
+  Todo:{c:'var(--todo)',l:'Todo'}, Blocked:{c:'var(--blocked)',l:'Blocked'}
+};
+
+// 優先順（上ほど高優先）。サンプルデータ準拠。
+let tasks = [
+  {name:'ログイン障害対応', area:'Backend', who:'森田', est:2, moscow:'Must', status:'Doing', flag:'urgent'},
+  {name:'認証フロー実装',   area:'Backend', who:'佐藤', est:5, moscow:'Must', status:'Blocked'},
+  {name:'ダッシュ画面実装', area:'Frontend',who:'田中', est:4, moscow:'Must', status:'Todo'},
+  {name:'結合テスト',       area:'QA',      who:'佐藤', est:6, moscow:'Must', status:'Todo'},
+  {name:'DBマイグレーション',area:'Backend',who:'森田', est:3, moscow:'Must', status:'Todo'},
+  {name:'LP制作',           area:'Frontend',who:'田中', est:8, moscow:'Should',status:'Todo'},
+  {name:'リリースノート作成',area:'共通',    who:'共通', est:1, moscow:'Could', status:'Todo'},
+  {name:'ダークモード対応', area:'Frontend',who:'田中', est:3, moscow:'Could', status:'Todo', flag:'skip'},
+  {name:'通知機能',         area:'Backend', who:'森田', est:13,moscow:"Won't", status:'Todo'},
+];
+
+const SPRINT_CAP = 20; // 今スプリントの容量(h)。上から積んでこの線で区切る。
+let sortMode = 'manual';
+const listEl = document.getElementById('list');
+
+function ordered(){
+  let arr = tasks.slice();
+  if(sortMode==='moscow') arr.sort((a,b)=>MOSCOW[a.moscow].rank-MOSCOW[b.moscow].rank);
+  else if(sortMode==='effort') arr.sort((a,b)=>a.est-b.est);
+  return arr; // manual = tasks の現在順
+}
+
+function render(){
+  const arr = ordered();
+  listEl.innerHTML = '';
+  let cum = 0, bandDrawn = false;
+
+  // 今スプリント band（先頭）
+  listEl.appendChild(band('now','今スプリント', `容量 ${SPRINT_CAP}h`));
+
+  arr.forEach((t,i)=>{
+    const prevCum = cum;
+    cum += t.est;
+    // Won't は常にバックログ側へ落とす
+    const overflow = (prevCum >= SPRINT_CAP) || t.moscow==="Won't";
+    if(overflow && !bandDrawn){
+      listEl.appendChild(band('later','バックログ（次スプリント以降）', '優先度低 / 今回見送り'));
+      bandDrawn = true;
+    }
+    listEl.appendChild(rowEl(t,i,arr));
+  });
+  updateSummary(arr);
+}
+
+function band(kind,label,cap){
+  const d = document.createElement('div');
+  d.className = 'sprint-band '+kind;
+  d.innerHTML = `<span class="lbl">${kind==='now'?'▼ ':''}${label}</span><span class="rule"></span><span class="cap">${cap}</span>`;
+  return d;
+}
+
+function rowEl(t,i,arr){
+  const li = document.createElement('li');
+  li.className='row'+(t.moscow==="Won't"?' wont-row':'');
+  li.draggable = (sortMode==='manual');
+  li.dataset.name = t.name;
+  const st = STATUS[t.status];
+  const flag = t.flag==='urgent'
+      ? '<span class="badge-urgent">緊急・本番障害</span>'
+      : t.flag==='skip' ? '<span class="badge-skip">今回見送り検討</span>' : '';
+  li.innerHTML = `
+    <span class="handle" title="ドラッグで並べ替え">⋮⋮</span>
+    <span class="rank">${i+1}</span>
+    <div class="main">
+      <div class="title-line">
+        <span class="tname">${t.name}</span>
+        <span class="tag" style="background:${MOSCOW[t.moscow].c}">${t.moscow}</span>
+        ${flag}
+      </div>
+      <div class="meta">
+        <span class="area">${t.area}</span>
+        <span class="who"><span class="dot" style="background:${MEMBER[t.who]}"></span>${t.who}</span>
+      </div>
+    </div>
+    <div class="right">
+      <span class="est">見積 <b>${t.est}h</b></span>
+      <span class="status"><span class="dot" style="background:${st.c}"></span>${st.l}</span>
+    </div>`;
+  if(sortMode==='manual') attachDrag(li);
+  return li;
+}
+
+function updateSummary(arr){
+  const total = arr.reduce((s,t)=>s+t.est,0);
+  let cum=0, inSprint=0;
+  for(const t of arr){ if(t.moscow!=="Won't" && cum<SPRINT_CAP){inSprint+=t.est;} cum+=t.est; }
+  const must = arr.filter(t=>t.moscow==='Must').length;
+  document.getElementById('summary').innerHTML =
+    `全 <b>${arr.length}</b> 件 ・ Must <b>${must}</b> ・ 今スプリント計 <b>${inSprint}h</b> / 全 <b>${total}h</b>`;
+}
+
+/* ---- drag & drop（手動順のときのみ） ---- */
+let dragName = null;
+function attachDrag(li){
+  li.addEventListener('dragstart',e=>{
+    dragName = li.dataset.name; li.classList.add('dragging');
+    e.dataTransfer.effectAllowed='move';
+  });
+  li.addEventListener('dragend',()=>{ li.classList.remove('dragging'); cleanOver(); });
+  li.addEventListener('dragover',e=>{
+    e.preventDefault(); cleanOver(); li.classList.add('over');
+  });
+  li.addEventListener('drop',e=>{
+    e.preventDefault(); cleanOver();
+    const from = tasks.findIndex(t=>t.name===dragName);
+    const to   = tasks.findIndex(t=>t.name===li.dataset.name);
+    if(from<0||to<0||from===to) return;
+    const [moved] = tasks.splice(from,1);
+    tasks.splice(to,0,moved);
+    render();
+  });
+}
+function cleanOver(){ document.querySelectorAll('li.row.over').forEach(e=>e.classList.remove('over')); }
+
+/* ---- sort buttons ---- */
+document.querySelectorAll('.toolbar .btn').forEach(b=>{
+  b.addEventListener('click',()=>{
+    document.querySelectorAll('.toolbar .btn').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    sortMode = b.dataset.sort;
+    render();
+  });
+});
+
+render();
+</script>
+</body>
+</html>

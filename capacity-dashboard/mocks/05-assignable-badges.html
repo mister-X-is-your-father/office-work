@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>振れる枠バッジ — キャパダッシュボード</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0; --cap:#9aa3af;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased; line-height:1.5;
+  }
+  .tnum{font-variant-numeric:tabular-nums;}
+  .wrap{max-width:760px;margin:0 auto;padding:28px 20px 64px;}
+
+  .head{margin-bottom:22px;}
+  .head h1{font-size:20px;font-weight:700;margin:0 0 12px;}
+  .daynav{
+    display:inline-flex;align-items:center;gap:14px;background:var(--card);
+    border:1px solid var(--line);border-radius:12px;padding:7px 10px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04);
+  }
+  .daynav button{border:none;background:transparent;color:var(--muted);font-size:17px;cursor:pointer;
+    width:30px;height:30px;border-radius:8px;line-height:1;}
+  .daynav button:hover{background:var(--track);color:var(--ink);}
+  .daynav .today{font-weight:700;font-size:15px;}
+  .daynav .badge{font-size:11px;color:#fff;background:var(--fill);border-radius:999px;padding:2px 8px;font-weight:700;}
+  .note{font-size:12px;color:var(--muted);margin-top:10px;}
+
+  .lede{font-size:13.5px;color:var(--muted);margin:0 2px 8px;}
+  .lede b{color:var(--free);font-weight:800;font-variant-numeric:tabular-nums;}
+
+  /* big assignable pills */
+  .pills{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:8px;}
+  .pill{
+    border:none;cursor:pointer;text-align:left;font-family:inherit;
+    background:var(--card);border:1.5px solid #cdeedb;border-radius:16px;
+    padding:14px 18px;display:flex;align-items:center;gap:13px;
+    box-shadow:0 1px 3px rgba(20,30,50,.05);transition:transform .08s ease,box-shadow .08s ease;
+    flex:1 1 200px;
+  }
+  .pill:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(20,30,50,.1);}
+  .pill .ava{width:42px;height:42px;border-radius:50%;color:#fff;font-size:16px;font-weight:700;
+    display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+  .pill .info{display:flex;flex-direction:column;}
+  .pill .pname{font-size:15px;font-weight:700;}
+  .pill .pfree{font-size:11px;color:var(--muted);font-weight:600;}
+  .pill .amt{margin-left:auto;font-size:28px;font-weight:800;color:var(--free);
+    font-variant-numeric:tabular-nums;line-height:1;}
+  .pill .amt small{font-size:15px;}
+  .pill .chev{margin-left:6px;color:var(--muted);font-size:14px;transition:transform .15s ease;}
+  .pill[aria-expanded="true"] .chev{transform:rotate(90deg);}
+
+  /* full / exact pill */
+  .pill.exact{border-color:var(--line);flex:1 1 200px;}
+  .pill.exact .amt{color:var(--full);}
+
+  /* detail panel */
+  .detail{
+    overflow:hidden;max-height:0;opacity:0;transition:max-height .25s ease,opacity .2s ease,margin .25s ease;
+    background:var(--card);border:1px solid var(--line);border-radius:14px;margin:0;
+  }
+  .detail.open{max-height:340px;opacity:1;margin:0 0 18px;padding:0;}
+  .detail .inner{padding:16px 18px;}
+  .detail .dtitle{font-size:13px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px;}
+  .detail .dtitle .mini{width:22px;height:22px;border-radius:50%;color:#fff;font-size:11px;font-weight:700;
+    display:flex;align-items:center;justify-content:center;}
+  .detail .dtitle .right{margin-left:auto;font-size:12px;color:var(--muted);font-weight:600;}
+  .dbar{height:12px;border-radius:6px;background:var(--track);overflow:hidden;display:flex;position:relative;margin-bottom:4px;}
+  .dbar .seg{height:100%;}
+  .dbar .freezone{flex:1;background:repeating-linear-gradient(45deg,#e9f6ef,#e9f6ef 5px,#f2faf5 5px,#f2faf5 10px);}
+  .dbar .capmark{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--cap);}
+  .dscale{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:12px;}
+  .drow{display:flex;align-items:center;gap:9px;font-size:13px;padding:5px 0;border-top:1px dashed var(--line);}
+  .drow:first-of-type{border-top:none;}
+  .drow .pdot{width:10px;height:10px;border-radius:3px;flex-shrink:0;}
+  .drow .tn{flex:1;}
+  .drow .pj{font-size:11px;color:var(--muted);}
+  .drow .th{font-weight:700;font-variant-numeric:tabular-nums;}
+  .drow.freerow{color:var(--free);font-weight:700;border-top:1px solid #cdeedb;margin-top:4px;}
+  .drow.freerow .pdot{background:var(--free);}
+
+  /* warning section */
+  .warnsec{margin-top:26px;}
+  .warnsec h2{font-size:12px;font-weight:700;color:var(--over);letter-spacing:.04em;margin:0 0 10px;
+    display:flex;align-items:center;gap:8px;}
+  .warnsec h2::after{content:"";flex:1;height:1px;background:#f6c9cb;}
+  .warntag{
+    width:100%;text-align:left;font-family:inherit;cursor:pointer;
+    background:#fef4f4;border:1.5px solid #f3b6b9;border-radius:14px;padding:13px 16px;
+    display:flex;align-items:center;gap:13px;transition:transform .08s ease,box-shadow .08s ease;
+  }
+  .warntag:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(229,72,77,.14);}
+  .warntag .ava{width:40px;height:40px;border-radius:50%;color:#fff;font-size:15px;font-weight:700;
+    display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+  .warntag .wname{font-size:15px;font-weight:700;}
+  .warntag .wmeta{font-size:11px;color:var(--muted);}
+  .warntag .wamt{margin-left:auto;display:flex;align-items:center;gap:8px;}
+  .warntag .over-pill{font-size:11px;font-weight:700;color:#fff;background:var(--over);border-radius:999px;padding:3px 10px;}
+  .warntag .wnum{font-size:24px;font-weight:800;color:var(--over);font-variant-numeric:tabular-nums;}
+  .warntag .chev{color:var(--over);font-size:14px;transition:transform .15s ease;}
+  .warntag[aria-expanded="true"] .chev{transform:rotate(90deg);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="head">
+    <h1>振れる枠</h1>
+    <div class="daynav">
+      <button aria-label="前の日">‹</button>
+      <span class="today tnum">6/4(木)</span>
+      <span class="badge">今日</span>
+      <button aria-label="次の日">›</button>
+    </div>
+    <p class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</p>
+  </header>
+
+  <p class="lede">今日 新しい仕事を振れる枠は 合計 <b>+10h</b>（2名）。バッジをタップすると内訳が開きます。</p>
+
+  <!-- assignable pills -->
+  <div class="pills">
+    <button class="pill" aria-expanded="false" data-target="d-suzuki">
+      <span class="ava" style="background:#b657d6;">鈴</span>
+      <span class="info"><span class="pname">鈴木</span><span class="pfree tnum">割当 2h / 8h</span></span>
+      <span class="amt tnum">+6<small>h</small></span>
+      <span class="chev">›</span>
+    </button>
+
+    <button class="pill" aria-expanded="false" data-target="d-tanaka">
+      <span class="ava" style="background:#3a86ff;">田</span>
+      <span class="info"><span class="pname">田中</span><span class="pfree tnum">割当 4h / 8h</span></span>
+      <span class="amt tnum">+4<small>h</small></span>
+      <span class="chev">›</span>
+    </button>
+  </div>
+
+  <!-- detail panels (each placed after pills row so it spans full width) -->
+  <div class="detail" id="d-suzuki">
+    <div class="inner">
+      <div class="dtitle"><span class="mini" style="background:#b657d6;">鈴</span>鈴木 の今日<span class="right tnum">2h 使用 / 6h 空き</span></div>
+      <div class="dbar">
+        <div class="seg" style="width:25%;background:#8a93a0;"></div>
+        <div class="freezone"></div>
+        <div class="capmark" style="left:100%;"></div>
+      </div>
+      <div class="dscale tnum"><span>0h</span><span>4h</span><span>容量 8h</span></div>
+      <div class="drow"><span class="pdot" style="background:#8a93a0;"></span><span class="tn">設計ドキュメント <span class="pj">共通</span></span><span class="th tnum">2h</span></div>
+      <div class="drow freerow"><span class="pdot"></span><span class="tn">振れる空き</span><span class="th tnum">+6h</span></div>
+    </div>
+  </div>
+
+  <div class="detail" id="d-tanaka">
+    <div class="inner">
+      <div class="dtitle"><span class="mini" style="background:#3a86ff;">田</span>田中 の今日<span class="right tnum">4h 使用 / 4h 空き</span></div>
+      <div class="dbar">
+        <div class="seg" style="width:50%;background:#2fa66b;"></div>
+        <div class="freezone"></div>
+        <div class="capmark" style="left:100%;"></div>
+      </div>
+      <div class="dscale tnum"><span>0h</span><span>4h</span><span>容量 8h</span></div>
+      <div class="drow"><span class="pdot" style="background:#2fa66b;"></span><span class="tn">ダッシュ画面実装 <span class="pj">Frontend</span></span><span class="th tnum">4h</span></div>
+      <div class="drow freerow"><span class="pdot"></span><span class="tn">振れる空き</span><span class="th tnum">+4h</span></div>
+    </div>
+  </div>
+
+  <!-- exact (no free) -->
+  <div class="pills">
+    <button class="pill exact" aria-expanded="false" data-target="d-sato">
+      <span class="ava" style="background:#2fa66b;">佐</span>
+      <span class="info"><span class="pname">佐藤</span><span class="pfree tnum">割当 8h / 8h ・ちょうど</span></span>
+      <span class="amt tnum">±0<small>h</small></span>
+      <span class="chev">›</span>
+    </button>
+  </div>
+
+  <div class="detail" id="d-sato">
+    <div class="inner">
+      <div class="dtitle"><span class="mini" style="background:#2fa66b;">佐</span>佐藤 の今日<span class="right tnum">8h 使用 / 0h 空き</span></div>
+      <div class="dbar">
+        <div class="seg" style="width:62.5%;background:#3a86ff;"></div>
+        <div class="seg" style="width:37.5%;background:#b657d6;"></div>
+        <div class="capmark" style="left:100%;"></div>
+      </div>
+      <div class="dscale tnum"><span>0h</span><span>4h</span><span>容量 8h</span></div>
+      <div class="drow"><span class="pdot" style="background:#3a86ff;"></span><span class="tn">認証フロー実装 <span class="pj">Backend</span></span><span class="th tnum">5h</span></div>
+      <div class="drow"><span class="pdot" style="background:#b657d6;"></span><span class="tn">結合テスト <span class="pj">QA</span></span><span class="th tnum">3h</span></div>
+    </div>
+  </div>
+
+  <!-- warning -->
+  <div class="warnsec">
+    <h2>⚠ 超過 — 振れない / 要調整</h2>
+    <button class="warntag" aria-expanded="false" data-target="d-morita">
+      <span class="ava" style="background:#e5772d;">森</span>
+      <span class="info"><span class="wname">森田</span><span class="wmeta tnum">割当 10h / 8h ・タスク3件</span></span>
+      <span class="wamt">
+        <span class="over-pill">超過</span>
+        <span class="wnum tnum">−2h</span>
+        <span class="chev">›</span>
+      </span>
+    </button>
+
+    <div class="detail" id="d-morita">
+      <div class="inner">
+        <div class="dtitle"><span class="mini" style="background:#e5772d;">森</span>森田 の今日<span class="right tnum" style="color:var(--over);">10h 使用 / 2h 超過</span></div>
+        <div class="dbar">
+          <div class="seg" style="width:40%;background:#3a86ff;"></div>
+          <div class="seg" style="width:30%;background:#3a86ff;opacity:.78;"></div>
+          <div class="seg" style="width:30%;background:#e5484d;"></div>
+          <div class="capmark" style="left:80%;"></div>
+        </div>
+        <div class="dscale tnum"><span>0h</span><span>容量 8h ↑</span><span>10h</span></div>
+        <div class="drow"><span class="pdot" style="background:#3a86ff;"></span><span class="tn">API設計 <span class="pj">Backend</span></span><span class="th tnum">4h</span></div>
+        <div class="drow"><span class="pdot" style="background:#3a86ff;"></span><span class="tn">DBマイグレ <span class="pj">Backend</span></span><span class="th tnum">3h</span></div>
+        <div class="drow"><span class="pdot" style="background:#8a93a0;"></span><span class="tn">PRレビュー <span class="pj">共通</span></span><span class="th tnum">3h</span></div>
+        <div class="drow" style="color:var(--over);font-weight:700;border-top:1px solid #f3b6b9;margin-top:4px;">
+          <span class="pdot" style="background:var(--over);"></span><span class="tn">容量オーバー</span><span class="th tnum">−2h</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  document.querySelectorAll('[data-target]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var id = btn.getAttribute('data-target');
+      var panel = document.getElementById(id);
+      var open = panel.classList.contains('open');
+      // close all
+      document.querySelectorAll('.detail.open').forEach(function(p){ p.classList.remove('open'); });
+      document.querySelectorAll('[data-target][aria-expanded="true"]').forEach(function(b){ b.setAttribute('aria-expanded','false'); });
+      if(!open){
+        panel.classList.add('open');
+        btn.setAttribute('aria-expanded','true');
+      }
+    });
+  });
+</script>
+</body>
+</html>

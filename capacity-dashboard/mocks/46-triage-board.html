@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>今日のトリアージ — 三分類ボード</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --red:#e5484d; --amber:#f5a623; --green:#2fa66b; --block:#9aa3af;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+    --p-backend:#3a86ff; --p-frontend:#2fa66b; --p-qa:#b657d6; --p-common:#8a93a0;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    background:var(--bg); color:var(--ink); line-height:1.5;
+    font-feature-settings:"tnum"; -webkit-font-smoothing:antialiased;
+    padding:24px; max-width:1280px; margin:0 auto;
+  }
+  .tnum{font-variant-numeric:tabular-nums}
+  /* header */
+  header{margin-bottom:20px}
+  .titlerow{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+  h1{font-size:20px;font-weight:700;letter-spacing:.01em}
+  .daynav{display:inline-flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);
+    border-radius:10px;padding:5px 10px;font-size:13px;font-weight:600}
+  .daynav button{border:none;background:none;color:var(--muted);font-size:15px;cursor:pointer;padding:0 4px;line-height:1}
+  .daynav .today{color:var(--ink)}
+  .daynav .badge{background:var(--track);color:var(--muted);font-size:11px;padding:1px 7px;border-radius:20px;font-weight:600}
+  .note{font-size:11.5px;color:var(--muted);margin-top:2px}
+  /* summary strip */
+  .summary{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0 22px}
+  .sumcard{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:11px 15px;
+    display:flex;flex-direction:column;gap:2px;min-width:140px;position:relative;overflow:hidden}
+  .sumcard::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px}
+  .sumcard.red::before{background:var(--red)}
+  .sumcard.amber::before{background:var(--amber)}
+  .sumcard.block::before{background:var(--block)}
+  .sumcard.green::before{background:var(--green)}
+  .sumcard .lbl{font-size:11.5px;color:var(--muted);font-weight:600}
+  .sumcard .val{font-size:21px;font-weight:700}
+  .sumcard .sub{font-size:11px;color:var(--muted)}
+  /* hero callout */
+  .hero{background:linear-gradient(180deg,#fff 0%,#fff7f7 100%);border:1.5px solid #f3c4c5;
+    border-radius:14px;padding:16px 18px;display:flex;align-items:center;gap:16px;margin-bottom:22px;
+    box-shadow:0 1px 3px rgba(229,72,77,.08)}
+  .hero .flag{font-size:30px}
+  .hero .htxt{flex:1}
+  .hero .hkick{font-size:11.5px;font-weight:700;color:var(--red);letter-spacing:.06em;text-transform:uppercase}
+  .hero .htitle{font-size:18px;font-weight:700;margin:1px 0 2px}
+  .hero .hmeta{font-size:12.5px;color:var(--muted)}
+  .hero .hmeta b{color:var(--ink)}
+  /* board */
+  .board{display:grid;grid-template-columns:1.05fr 1fr 1.25fr;gap:16px}
+  .col{background:transparent;display:flex;flex-direction:column;gap:11px}
+  .colhead{display:flex;align-items:center;gap:8px;padding:2px 2px 0}
+  .colhead .dot{width:11px;height:11px;border-radius:3px}
+  .colhead .ttl{font-size:14px;font-weight:700}
+  .colhead .cnt{font-size:11.5px;color:var(--muted);font-weight:600;margin-left:auto}
+  .colhead .hrs{font-size:11px;color:var(--muted);font-weight:600;background:var(--track);padding:1px 8px;border-radius:20px}
+  .colhint{font-size:11px;color:var(--muted);padding:0 2px 4px;margin-top:-4px}
+  .col.red .dot{background:var(--red)} .col.amber .dot{background:var(--amber)}
+  .col.green .dot{background:var(--green)} .col.block .dot{background:var(--block)}
+  /* task card */
+  .task{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 13px;
+    box-shadow:0 1px 2px rgba(29,36,48,.04);position:relative}
+  .task.lead{border-color:#f3c4c5;box-shadow:0 2px 10px rgba(229,72,77,.12);border-width:1.5px}
+  .task .topbar{position:absolute;left:0;top:0;bottom:0;width:4px;border-radius:12px 0 0 12px}
+  .col.red .task .topbar{background:var(--red)} .col.amber .task .topbar{background:var(--amber)}
+  .col.green .task .topbar{background:var(--green)} .col.block .task .topbar{background:var(--block)}
+  .task.blocked{background:repeating-linear-gradient(45deg,#fafbfc,#fafbfc 9px,#f1f3f6 9px,#f1f3f6 18px);
+    border-style:dashed;opacity:.92}
+  .trow1{display:flex;align-items:flex-start;gap:8px;margin-bottom:7px;padding-left:6px}
+  .tname{font-size:14px;font-weight:700;flex:1;line-height:1.35}
+  .col.block .tname{color:#5d646e}
+  .prio{font-size:10px;font-weight:700;padding:2px 7px;border-radius:6px;white-space:nowrap;align-self:flex-start;letter-spacing:.02em}
+  .prio.p-max{background:#fdeaea;color:#c0353a} .prio.p-high{background:#fdf2e0;color:#b87410}
+  .prio.p-mid{background:#eef1f5;color:#6b7480} .prio.p-low{background:#f1f3f6;color:#8a93a0}
+  .tmeta{display:flex;flex-wrap:wrap;gap:6px;padding-left:6px;margin-bottom:8px}
+  .chip{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--muted);
+    background:var(--track);border-radius:7px;padding:2px 8px;font-weight:500}
+  .chip .who{width:7px;height:7px;border-radius:50%}
+  .chip.proj{background:#fff;border:1px solid var(--line)}
+  .chip.proj .pb{width:7px;height:7px;border-radius:2px}
+  .chip.hrs{font-weight:600}
+  .deadline{padding-left:6px;font-size:11.5px;display:flex;align-items:center;gap:6px;margin-bottom:7px}
+  .deadline .dl{font-weight:600}
+  .deadline.urgent .dl{color:var(--red)}
+  .deadline.soon .dl{color:#b87410}
+  .deadline.calm .dl{color:var(--green)}
+  .reason{padding-left:6px;font-size:11.5px;color:#525a66;background:#f9fafb;border-radius:8px;
+    padding:7px 9px 7px 15px;margin-top:2px;border-left:2px solid var(--line);line-height:1.5}
+  .col.red .reason{background:#fdf6f6;border-left-color:var(--red)}
+  .reason b{color:var(--ink);font-weight:600}
+  .slack{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;margin-left:auto}
+  .slack .bar{width:42px;height:5px;border-radius:3px;background:var(--track);overflow:hidden;display:inline-block}
+  .slack .bar i{display:block;height:100%;border-radius:3px}
+  @media(max-width:980px){.board{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <div class="titlerow">
+    <h1>今日のトリアージ — 三分類ボード</h1>
+    <div class="daynav">
+      <button aria-label="前日">‹</button>
+      <span class="today tnum">6/4(木)</span>
+      <span class="badge">今日</span>
+      <button aria-label="翌日">›</button>
+    </div>
+  </div>
+  <p class="note">※ モック（サンプルデータ）。本番は Vikunja API（優先度・期日・依存・ブロック）から自動算出。</p>
+</header>
+
+<!-- summary -->
+<section class="summary">
+  <div class="sumcard red"><span class="lbl">🔴 今日必須</span><span class="val tnum">1<span style="font-size:13px;font-weight:600;color:var(--muted)"> 件</span></span><span class="sub tnum">合計 2h・動かせない</span></div>
+  <div class="sumcard amber"><span class="lbl">🟠 今日やるべき</span><span class="val tnum">1<span style="font-size:13px;font-weight:600;color:var(--muted)"> 件</span></span><span class="sub tnum">合計 3h・明日もギリ可</span></div>
+  <div class="sumcard block"><span class="lbl">⛔ ブロック中</span><span class="val tnum">1<span style="font-size:13px;font-weight:600;color:var(--muted)"> 件</span></span><span class="sub">外部API待ち</span></div>
+  <div class="sumcard green"><span class="lbl">🟢 ずらせる</span><span class="val tnum">4<span style="font-size:13px;font-weight:600;color:var(--muted)"> 件</span></span><span class="sub tnum">合計 8h・余裕あり</span></div>
+</section>
+
+<!-- hero -->
+<div class="hero">
+  <span class="flag">🔥</span>
+  <div class="htxt">
+    <div class="hkick">今日絶対やるべきは これ</div>
+    <div class="htitle">ログイン障害対応</div>
+    <div class="hmeta">本番障害・<b>期限 今日中</b>・担当 <b>森田</b>・見積 <b>2h</b>・slack=0（1分も動かせない）</div>
+  </div>
+</div>
+
+<!-- board -->
+<section class="board">
+
+  <!-- 今日必須 -->
+  <div class="col red">
+    <div class="colhead"><span class="dot"></span><span class="ttl">🔴 今日必須</span><span class="cnt tnum">1件</span><span class="hrs tnum">2h</span></div>
+    <div class="colhint">動かせない。最優先で着手。</div>
+
+    <div class="task lead">
+      <span class="topbar"></span>
+      <div class="trow1">
+        <span class="tname">ログイン障害対応</span>
+        <span class="prio p-max">最高</span>
+      </div>
+      <div class="tmeta">
+        <span class="chip"><span class="who" style="background:var(--m-morita)"></span>森田</span>
+        <span class="chip proj"><span class="pb" style="background:var(--p-backend)"></span>Backend</span>
+        <span class="chip hrs">⏱ 2h</span>
+      </div>
+      <div class="deadline urgent">⏰ <span class="dl">期限 今日中</span>
+        <span class="slack">slack 0d<span class="bar"><i style="width:100%;background:var(--red)"></i></span></span>
+      </div>
+      <div class="reason"><b>本番障害</b>で多数ユーザがログイン不可。今着手しないと損失が拡大。今日のすべてに優先。</div>
+    </div>
+  </div>
+
+  <!-- 今日やるべき -->
+  <div class="col amber">
+    <div class="colhead"><span class="dot"></span><span class="ttl">🟠 今日やるべき</span><span class="cnt tnum">1件</span><span class="hrs tnum">3h</span></div>
+    <div class="colhint">明日もギリ可だが、今日進めると安全。</div>
+
+    <div class="task">
+      <span class="topbar"></span>
+      <div class="trow1">
+        <span class="tname">DBマイグレーション</span>
+        <span class="prio p-high">高</span>
+      </div>
+      <div class="tmeta">
+        <span class="chip"><span class="who" style="background:var(--m-morita)"></span>森田</span>
+        <span class="chip proj"><span class="pb" style="background:var(--p-backend)"></span>Backend</span>
+        <span class="chip hrs">⏱ 3h</span>
+      </div>
+      <div class="deadline soon">📅 <span class="dl tnum">締切 6/5</span>
+        <span class="slack" style="color:#b87410">slack 1d<span class="bar"><i style="width:28%;background:var(--amber)"></i></span></span>
+      </div>
+      <div class="reason">締切は<b>明日 6/5</b>。今日障害対応の後に着手できれば理想。最悪 明日午前でも間に合う。</div>
+    </div>
+  </div>
+
+  <!-- ずらせる + ブロック -->
+  <div class="col green">
+    <div class="colhead"><span class="dot"></span><span class="ttl">🟢 ずらせる</span><span class="cnt tnum">4件</span><span class="hrs tnum">8h</span></div>
+    <div class="colhint">余裕あり。手が空いたら / 後日でOK。</div>
+
+    <div class="task">
+      <span class="topbar"></span>
+      <div class="trow1"><span class="tname">API設計レビュー</span><span class="prio p-mid">中</span></div>
+      <div class="tmeta">
+        <span class="chip"><span class="who" style="background:var(--m-morita)"></span>森田</span>
+        <span class="chip proj"><span class="pb" style="background:var(--p-common)"></span>共通</span>
+        <span class="chip hrs">⏱ 1h</span>
+      </div>
+      <div class="deadline calm">🗓 <span class="dl">締切なし</span>
+        <span class="slack" style="color:var(--green)">slack 大<span class="bar"><i style="width:100%;background:var(--green)"></i></span></span>
+      </div>
+      <div class="reason">締切なし。隙間時間で。</div>
+    </div>
+
+    <div class="task">
+      <span class="topbar"></span>
+      <div class="trow1"><span class="tname">ダッシュ画面実装（続き）</span><span class="prio p-mid">中</span></div>
+      <div class="tmeta">
+        <span class="chip"><span class="who" style="background:var(--m-tanaka)"></span>田中</span>
+        <span class="chip proj"><span class="pb" style="background:var(--p-frontend)"></span>Frontend</span>
+        <span class="chip hrs">⏱ 4h</span>
+      </div>
+      <div class="deadline calm">📅 <span class="dl tnum">締切 6/9</span>
+        <span class="slack" style="color:var(--green)">slack 5d<span class="bar"><i style="width:90%;background:var(--green)"></i></span></span>
+      </div>
+      <div class="reason">締切 6/9 で余裕。今日詰める必要なし。</div>
+    </div>
+
+    <div class="task">
+      <span class="topbar"></span>
+      <div class="trow1"><span class="tname">設計ドキュメント整備</span><span class="prio p-low">低</span></div>
+      <div class="tmeta">
+        <span class="chip"><span class="who" style="background:var(--m-suzuki)"></span>鈴木</span>
+        <span class="chip proj"><span class="pb" style="background:var(--p-common)"></span>共通</span>
+        <span class="chip hrs">⏱ 2h</span>
+      </div>
+      <div class="deadline calm">🗓 <span class="dl">締切なし</span>
+        <span class="slack" style="color:var(--green)">slack 大<span class="bar"><i style="width:100%;background:var(--green)"></i></span></span>
+      </div>
+      <div class="reason">締切なし・優先度低。後日でOK。</div>
+    </div>
+
+    <div class="task">
+      <span class="topbar"></span>
+      <div class="trow1"><span class="tname">リリースノート作成</span><span class="prio p-low">低</span></div>
+      <div class="tmeta">
+        <span class="chip" style="font-style:italic;color:var(--muted)">未アサイン</span>
+        <span class="chip proj"><span class="pb" style="background:var(--p-common)"></span>共通</span>
+        <span class="chip hrs">⏱ 1h</span>
+      </div>
+      <div class="deadline calm">📅 <span class="dl tnum">締切 6/13</span>
+        <span class="slack" style="color:var(--green)">slack 9d<span class="bar"><i style="width:100%;background:var(--green)"></i></span></span>
+      </div>
+      <div class="reason">締切 6/13 と遠い。担当も未定。今は触らない。</div>
+    </div>
+
+    <!-- block sub-section -->
+    <div class="colhead" style="margin-top:8px"><span class="dot" style="background:var(--block)"></span><span class="ttl" style="font-size:13px">⛔ ブロック中</span><span class="cnt tnum">1件</span><span class="hrs">今日は不可</span></div>
+    <div class="colhint">依存解消まで進められない。待ち。</div>
+
+    <div class="task blocked">
+      <span class="topbar" style="background:var(--block)"></span>
+      <div class="trow1"><span class="tname">認証フロー実装</span><span class="prio p-high">高</span></div>
+      <div class="tmeta">
+        <span class="chip"><span class="who" style="background:var(--m-sato)"></span>佐藤</span>
+        <span class="chip proj"><span class="pb" style="background:var(--p-backend)"></span>Backend</span>
+        <span class="chip hrs">⏱ 5h</span>
+      </div>
+      <div class="deadline soon">📅 <span class="dl tnum">締切 6/6</span>
+        <span class="slack" style="color:var(--block)">外部API待ち</span>
+      </div>
+      <div class="reason">⛔ <b>外部API待ち</b>。今日は進められない。優先度は高なので、依存が解けたら即着手の構え。</div>
+    </div>
+  </div>
+
+</section>
+</body>
+</html>

@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>森田さんの今日 — キャパダッシュボード</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0; --cap:#9aa3af;
+    --p-backend:#3a86ff; --p-frontend:#2fa66b; --p-qa:#b657d6; --p-common:#8a93a0;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased; line-height:1.5;
+    font-variant-numeric:tabular-nums; font-feature-settings:"tnum";
+  }
+  .wrap{max-width:760px; margin:0 auto; padding:28px 20px 64px;}
+  .topbar{display:flex; align-items:center; gap:10px; margin-bottom:6px;}
+  .back{
+    display:inline-flex; align-items:center; gap:6px; text-decoration:none;
+    color:var(--muted); font-size:13px; padding:5px 10px; border-radius:8px;
+    border:1px solid var(--line); background:var(--card);
+  }
+  .back:hover{color:var(--ink);}
+  h1{font-size:20px; margin:10px 0 2px; letter-spacing:.01em;}
+  .sub{color:var(--muted); font-size:13px; margin:0 0 14px;}
+  .note{
+    color:var(--muted); font-size:12px; background:#fffaf2; border:1px solid #f1e4cf;
+    border-radius:10px; padding:8px 12px; margin:0 0 20px;
+  }
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    padding:18px 18px; box-shadow:0 1px 2px rgba(20,28,45,.04); margin-bottom:16px;
+  }
+  .hd{display:flex; align-items:center; gap:12px; margin-bottom:16px;}
+  .avatar{
+    width:44px; height:44px; border-radius:50%; flex:none;
+    display:flex; align-items:center; justify-content:center;
+    color:#fff; font-weight:700; font-size:17px;
+  }
+  .hd .name{font-size:17px; font-weight:700;}
+  .hd .role{font-size:12px; color:var(--muted);}
+  .statusbadge{
+    margin-left:auto; font-size:12px; font-weight:700; padding:4px 11px; border-radius:999px;
+    background:#fde9ea; color:var(--over); border:1px solid #f6c9cc;
+  }
+
+  /* 容量バー */
+  .barwrap{margin:4px 0 6px;}
+  .barlabels{display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:6px;}
+  .bartrack{
+    position:relative; height:30px; background:var(--track); border-radius:8px; overflow:hidden;
+    display:flex;
+  }
+  .seg{height:100%; display:flex; align-items:center; justify-content:center; font-size:11px; color:#fff; white-space:nowrap;}
+  .seg.over{background:repeating-linear-gradient(45deg,var(--over),var(--over) 6px,#d23a3f 6px,#d23a3f 12px);}
+  .capline{
+    position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--cap); z-index:3;
+  }
+  .capline::after{
+    content:"容量8h"; position:absolute; top:-17px; left:50%; transform:translateX(-50%);
+    font-size:10px; color:var(--cap); white-space:nowrap;
+  }
+  .sumline{display:flex; justify-content:space-between; align-items:baseline; margin-top:14px;}
+  .sumline .big{font-size:26px; font-weight:700;}
+  .sumline .big .u{font-size:14px; color:var(--muted); font-weight:500;}
+  .overtxt{color:var(--over); font-weight:700; font-size:14px;}
+
+  /* タスク内訳 */
+  .sectitle{font-size:13px; font-weight:700; color:var(--muted); margin:2px 0 12px; letter-spacing:.02em;}
+  .task{
+    display:flex; align-items:center; gap:12px; padding:11px 0; border-top:1px solid var(--line);
+  }
+  .task:first-of-type{border-top:none;}
+  .pdot{width:10px; height:10px; border-radius:3px; flex:none;}
+  .task .tname{font-size:14px; flex:1;}
+  .task .ptag{font-size:11px; color:var(--muted); background:var(--track); padding:2px 8px; border-radius:6px;}
+  .task .thrs{font-size:14px; font-weight:700; width:42px; text-align:right;}
+  .task.removable{position:relative;}
+  .rmflag{
+    font-size:10px; color:var(--over); border:1px solid #f6c9cc; background:#fde9ea;
+    padding:1px 6px; border-radius:5px;
+  }
+
+  /* 外せる候補 */
+  .candidate{
+    display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px dashed #f1c5c8;
+    border-radius:10px; margin-bottom:9px; background:#fffafa;
+  }
+  .candidate .ci{font-size:13px; flex:1;}
+  .candidate .ch{font-size:13px; font-weight:700; color:var(--over);}
+  .candidate .why{font-size:11px; color:var(--muted);}
+  .relief{font-size:12px; color:var(--muted); margin-top:6px;}
+  .relief b{color:var(--free);}
+
+  /* 今週ミニ */
+  .weekmini{display:flex; gap:7px; align-items:flex-end; height:96px; padding-top:8px;}
+  .daycol{flex:1; display:flex; flex-direction:column; align-items:center; gap:6px;}
+  .daybarwrap{width:100%; height:64px; display:flex; align-items:flex-end; position:relative;}
+  .daycaprule{position:absolute; left:0; right:0; border-top:1px dashed var(--cap); }
+  .daybar{width:100%; border-radius:5px 5px 0 0; background:var(--fill);}
+  .daybar.over{background:var(--over);}
+  .daybar.today{outline:2px solid var(--ink); outline-offset:1px;}
+  .dlabel{font-size:11px; color:var(--muted);}
+  .dlabel.today{color:var(--ink); font-weight:700;}
+  .dhrs{font-size:10px; color:var(--muted);}
+  .legend{display:flex; gap:14px; flex-wrap:wrap; font-size:11px; color:var(--muted); margin-top:10px;}
+  .legend span{display:inline-flex; align-items:center; gap:5px;}
+  .lg{width:9px; height:9px; border-radius:3px; display:inline-block;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <a class="back" href="#">‹ ダッシュボードへ戻る</a>
+    <a class="back" href="#" style="margin-left:auto;">‹ 前日</a>
+    <a class="back" href="#">翌日 ›</a>
+  </div>
+  <h1>森田さんの今日</h1>
+  <p class="sub">6/4(木) ・ 個人ドリルダウン ・ 容量モデル: 一律8h/日</p>
+  <div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</div>
+
+  <!-- サマリーカード -->
+  <div class="card">
+    <div class="hd">
+      <div class="avatar" style="background:#e5772d;">森</div>
+      <div>
+        <div class="name">森田</div>
+        <div class="role">Backend 中心</div>
+      </div>
+      <div class="statusbadge">超過 +2h</div>
+    </div>
+
+    <div class="barwrap">
+      <div class="barlabels"><span>0h</span><span>本日の割当（容量比 125%）</span><span>10h</span></div>
+      <div class="bartrack">
+        <!-- 8h分=80%, 超過2h=20% -->
+        <div class="seg" style="width:32%; background:var(--p-backend);">API設計 4h</div>
+        <div class="seg" style="width:24%; background:#5e9aff;">DBマイグレ 3h</div>
+        <div class="seg" style="width:8%; background:var(--p-common);">PR1h</div>
+        <div class="seg over" style="width:16%;">超過 2h</div>
+        <div class="capline" style="left:80%;"></div>
+      </div>
+    </div>
+
+    <div class="sumline">
+      <div>
+        <span class="big">10<span class="u">h</span></span>
+        <span class="u" style="font-size:14px; color:var(--muted); margin-left:8px;">／ 容量 8h</span>
+      </div>
+      <div class="overtxt">▲ 容量オーバー +2h</div>
+    </div>
+  </div>
+
+  <!-- タスク内訳 -->
+  <div class="card">
+    <div class="sectitle">本日のタスク内訳（3件・合計10h）</div>
+
+    <div class="task">
+      <span class="pdot" style="background:var(--p-backend);"></span>
+      <span class="tname">API設計</span>
+      <span class="ptag">Backend</span>
+      <span class="thrs">4h</span>
+    </div>
+    <div class="task">
+      <span class="pdot" style="background:var(--p-backend);"></span>
+      <span class="tname">DBマイグレーション</span>
+      <span class="ptag">Backend</span>
+      <span class="thrs">3h</span>
+    </div>
+    <div class="task removable">
+      <span class="pdot" style="background:var(--p-common);"></span>
+      <span class="tname">PRレビュー <span class="rmflag">外せる候補</span></span>
+      <span class="ptag">共通</span>
+      <span class="thrs">3h</span>
+    </div>
+
+    <div style="display:flex; justify-content:space-between; border-top:2px solid var(--line); margin-top:8px; padding-top:12px;">
+      <span style="font-size:13px; color:var(--muted);">合計</span>
+      <span style="font-weight:700;">10h</span>
+    </div>
+  </div>
+
+  <!-- 超過の内訳 -->
+  <div class="card">
+    <div class="sectitle">超過 +2h の内訳</div>
+    <div style="font-size:13px; color:var(--muted); line-height:1.7;">
+      容量 <b style="color:var(--ink);">8h</b> に対し、割当 <b style="color:var(--ink);">10h</b>。
+      最初の8hで <b style="color:var(--ink);">API設計(4h)＋DBマイグレ(3h)＋PRレビューの1h</b> を消化、
+      残り <b style="color:var(--over);">PRレビューの2h</b> が容量線を超えています。
+    </div>
+  </div>
+
+  <!-- 外せるタスク候補 -->
+  <div class="card">
+    <div class="sectitle">外せる / 移せるタスク候補</div>
+    <div class="candidate">
+      <span class="pdot" style="background:var(--p-common); width:10px; height:10px;"></span>
+      <span class="ci">PRレビュー <span class="why">（共通タスク・他メンバーに振替可）</span></span>
+      <span class="ch">-3h</span>
+    </div>
+    <div class="relief">
+      振替後の森田さんは <b>7h</b>（空き1h）。鈴木さん（空き6h）or 田中さん（空き4h）へ移すと
+      チーム全体の超過が解消します。
+    </div>
+  </div>
+
+  <!-- 今週ミニ文脈 -->
+  <div class="card">
+    <div class="sectitle">森田さんの今週負荷（7日）</div>
+    <div class="weekmini">
+      <div class="daycol">
+        <div class="daybarwrap"><div class="daycaprule" style="bottom:48px;"></div><div class="daybar" style="height:54px;"></div></div>
+        <div class="dhrs">9h</div><div class="dlabel">月</div>
+      </div>
+      <div class="daycol">
+        <div class="daybarwrap"><div class="daycaprule" style="bottom:48px;"></div><div class="daybar" style="height:36px;"></div></div>
+        <div class="dhrs">6h</div><div class="dlabel">火</div>
+      </div>
+      <div class="daycol">
+        <div class="daybarwrap"><div class="daycaprule" style="bottom:48px;"></div><div class="daybar" style="height:48px;"></div></div>
+        <div class="dhrs">8h</div><div class="dlabel">水</div>
+      </div>
+      <div class="daycol">
+        <div class="daybarwrap"><div class="daycaprule" style="bottom:48px;"></div><div class="daybar over today" style="height:60px;"></div></div>
+        <div class="dhrs" style="color:var(--over); font-weight:700;">10h</div><div class="dlabel today">木·今日</div>
+      </div>
+      <div class="daycol">
+        <div class="daybarwrap"><div class="daycaprule" style="bottom:48px;"></div><div class="daybar" style="height:42px;"></div></div>
+        <div class="dhrs">7h</div><div class="dlabel">金</div>
+      </div>
+      <div class="daycol">
+        <div class="daybarwrap"><div class="daycaprule" style="bottom:48px;"></div><div class="daybar" style="height:0;"></div></div>
+        <div class="dhrs">0h</div><div class="dlabel">土</div>
+      </div>
+      <div class="daycol">
+        <div class="daybarwrap"><div class="daycaprule" style="bottom:48px;"></div><div class="daybar" style="height:0;"></div></div>
+        <div class="dhrs">0h</div><div class="dlabel">日</div>
+      </div>
+    </div>
+    <div class="legend">
+      <span><i class="lg" style="background:var(--fill);"></i>容量内</span>
+      <span><i class="lg" style="background:var(--over);"></i>超過</span>
+      <span><i class="lg" style="border-top:1px dashed var(--cap); width:14px; height:0;"></i>容量8h</span>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

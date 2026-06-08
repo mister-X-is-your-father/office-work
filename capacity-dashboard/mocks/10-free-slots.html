@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>空きコマさがし — フリースロット</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0; --capline:#9aa3af;
+    --backend:#3a86ff; --frontend:#2fa66b; --qa:#b657d6; --common:#8a93a0;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .tnum{font-variant-numeric:tabular-nums;}
+
+  header.top{padding:18px 30px 14px;}
+  .top-row{display:flex; align-items:center; gap:18px; flex-wrap:wrap;}
+  .title{font-size:19px; font-weight:700;}
+  .title .accent{color:var(--free);}
+  .daynav{
+    display:inline-flex; align-items:center; gap:2px; background:var(--card);
+    border:1px solid var(--line); border-radius:10px; padding:3px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04);
+  }
+  .daynav button{border:none; background:transparent; color:var(--muted); font-size:15px; width:30px; height:30px; border-radius:7px; cursor:pointer;}
+  .daynav button:hover{background:var(--track); color:var(--ink);}
+  .daynav .today{font-size:13.5px; font-weight:700; padding:0 12px; height:30px; display:inline-flex; align-items:center; gap:7px;}
+  .daynav .today .pill{background:var(--free); color:#fff; font-size:10.5px; font-weight:700; padding:2px 7px; border-radius:20px;}
+  .note{font-size:11.5px; color:var(--muted); margin-top:6px;}
+  .head-spacer{flex:1;}
+  .freebanner{
+    display:flex; align-items:center; gap:12px; background:linear-gradient(135deg,#2fa66b,#27905c);
+    color:#fff; border-radius:12px; padding:10px 20px; box-shadow:0 3px 10px rgba(47,166,107,.28);
+  }
+  .freebanner .big{font-size:26px; font-weight:800; letter-spacing:-.02em;}
+  .freebanner .lbl{font-size:11.5px; opacity:.9; line-height:1.35;}
+
+  main{padding:18px 30px 60px;}
+
+  /* hour scale header */
+  .scalebar{
+    display:grid; grid-template-columns:188px repeat(8, 1fr) 132px; gap:0;
+    padding:0 0 8px; align-items:end;
+  }
+  .scalebar .sp{}
+  .scalebar .hr{
+    font-size:11px; color:var(--muted); text-align:center; font-weight:600;
+    border-left:1px solid var(--line); padding:2px 0;
+  }
+  .scalebar .hr.lunch{color:var(--full);}
+  .scalebar .hr:first-of-type{border-left:none;}
+  .scalebar .agg{font-size:11px; color:var(--muted); font-weight:600; text-align:center;}
+
+  .rows{display:flex; flex-direction:column; gap:12px;}
+  .prow{
+    display:grid; grid-template-columns:188px repeat(8, 1fr) 132px; gap:0;
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    box-shadow:0 2px 8px rgba(20,30,50,.05); overflow:hidden; align-items:stretch;
+    position:relative;
+  }
+  .prow.over{border-color:#f3c2c4; box-shadow:0 2px 10px rgba(229,72,77,.12);}
+
+  .person{
+    padding:14px 16px; display:flex; flex-direction:column; gap:5px; justify-content:center;
+    border-right:1px solid var(--line);
+  }
+  .person .nm{font-size:15.5px; font-weight:700; display:flex; align-items:center; gap:9px;}
+  .avatar{width:24px; height:24px; border-radius:50%; flex:none; box-shadow:inset 0 0 0 1px rgba(0,0,0,.06); color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;}
+  .person .role{font-size:11.5px; color:var(--muted);}
+
+  .cell{
+    border-left:1px solid var(--line); padding:8px 6px; min-height:78px;
+    display:flex; flex-direction:column; align-items:stretch; justify-content:center; position:relative;
+  }
+  .cell.lunch{background:rgba(138,147,160,.06);}
+  .cell.lunch::after{content:"昼"; position:absolute; top:5px; left:50%; transform:translateX(-50%); font-size:9px; color:var(--full); font-weight:700;}
+
+  /* filled task chip */
+  .task{
+    border-radius:8px; color:#fff; padding:7px 8px; height:100%;
+    display:flex; flex-direction:column; justify-content:center; gap:3px;
+    box-shadow:0 1px 3px rgba(20,30,50,.18); font-size:11px; line-height:1.25;
+  }
+  .task .t{font-weight:700; font-size:11.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .task .h{font-size:9.5px; opacity:.85; font-weight:600;}
+  .task.cont{opacity:.92;}
+  .task.cont .t::before{content:"↳ "; opacity:.7;}
+  .task.backend{background:var(--backend);}
+  .task.frontend{background:var(--frontend);}
+  .task.qa{background:var(--qa);}
+  .task.common{background:var(--common);}
+
+  /* span across cells (use grid-column) */
+
+  /* empty / free slot */
+  .empty{
+    border:1.5px dashed #bfe6cf; border-radius:8px; height:100%; min-height:60px;
+    background:repeating-linear-gradient(135deg,rgba(47,166,107,.04),rgba(47,166,107,.04) 6px,rgba(47,166,107,.09) 6px,rgba(47,166,107,.09) 12px);
+    display:flex; align-items:center; justify-content:center; flex-direction:column; gap:2px;
+    color:var(--free); cursor:pointer; transition:all .12s;
+  }
+  .empty:hover{background:rgba(47,166,107,.16); border-color:var(--free);}
+  .empty .plus{font-size:18px; font-weight:300; line-height:1;}
+  .empty .lbl{font-size:9px; font-weight:700; opacity:.85;}
+
+  /* overflow slot */
+  .overcell{
+    border-radius:8px; height:100%; min-height:60px;
+    border:1.5px solid var(--over); color:var(--over);
+    background:repeating-linear-gradient(45deg,rgba(229,72,77,.1),rgba(229,72,77,.1) 6px,rgba(229,72,77,.2) 6px,rgba(229,72,77,.2) 12px);
+    display:flex; align-items:center; justify-content:center; flex-direction:column; gap:2px; font-size:10.5px; font-weight:700;
+  }
+
+  /* per-person free aggregate (right col) */
+  .pagg{
+    padding:12px 14px; display:flex; flex-direction:column; gap:6px; justify-content:center; align-items:center;
+    border-left:1px solid var(--line); background:#fbfdfc; text-align:center;
+  }
+  .pagg.zero{background:#fbfcfd;}
+  .pagg.overbg{background:#fef6f6;}
+  .pagg .num{font-size:24px; font-weight:800; line-height:1; color:var(--free);}
+  .pagg .num.zero{color:var(--full);}
+  .pagg .num.over{color:var(--over); font-size:20px;}
+  .pagg .unit{font-size:11px; color:var(--muted); font-weight:600;}
+  .pagg .dots{display:flex; gap:3px; margin-top:2px;}
+  .pagg .dot{width:7px; height:7px; border-radius:2px; background:var(--track);}
+  .pagg .dot.f{background:var(--free);}
+
+  .rank{
+    position:absolute; left:-1px; top:-1px; background:var(--free); color:#fff;
+    font-size:10px; font-weight:800; padding:3px 9px; border-radius:14px 0 12px 0;
+    letter-spacing:.03em; z-index:2;
+  }
+  .rank.r1{background:var(--free);}
+  .rank.r2{background:#5cbd85;}
+  .rank.none{background:var(--full);}
+  .rank.overr{background:var(--over);}
+
+  .legend{display:flex; gap:18px; flex-wrap:wrap; margin-top:18px; align-items:center; font-size:11.5px; color:var(--muted);}
+  .legend .item{display:flex; align-items:center; gap:6px;}
+  .legend .sw{width:14px; height:14px; border-radius:4px;}
+  .legend .sw.empt{border:1.5px dashed #bfe6cf; background:repeating-linear-gradient(135deg,rgba(47,166,107,.06),rgba(47,166,107,.06) 4px,rgba(47,166,107,.12) 4px,rgba(47,166,107,.12) 8px);}
+  .legend .sw.ov{border:1.5px solid var(--over); background:repeating-linear-gradient(45deg,rgba(229,72,77,.1),rgba(229,72,77,.1) 4px,rgba(229,72,77,.22) 4px,rgba(229,72,77,.22) 8px);}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-row">
+    <div class="title">空きコマさがし <span class="accent">フリースロット盤</span></div>
+    <div class="daynav">
+      <button title="前日">‹</button>
+      <span class="today">6/4(木) <span class="pill">今日</span></span>
+      <button title="翌日">›</button>
+    </div>
+    <div class="head-spacer"></div>
+    <div class="freebanner">
+      <div class="big tnum">8</div>
+      <div class="lbl">空きコマ合計<br>(=8h 振れる)</div>
+    </div>
+  </div>
+  <div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。 — 1日 8コマ(=1h)・空き多い順に並べ替え済み</div>
+</header>
+
+<main>
+  <!-- hour scale -->
+  <div class="scalebar">
+    <div class="sp"></div>
+    <div class="hr">9</div>
+    <div class="hr">10</div>
+    <div class="hr">11</div>
+    <div class="hr lunch">12</div>
+    <div class="hr">13</div>
+    <div class="hr">14</div>
+    <div class="hr">15</div>
+    <div class="hr">16</div>
+    <div class="agg">空き</div>
+  </div>
+
+  <div class="rows">
+
+    <!-- 鈴木 — 空き6コマ (1位) -->
+    <div class="prow">
+      <span class="rank r1">空き最多 ◎</span>
+      <div class="person">
+        <div class="nm"><span class="avatar" style="background:#b657d6;">鈴</span>鈴木</div>
+        <div class="role">共通</div>
+      </div>
+      <!-- 9,10 設計ドキュメント2h / 11..16 空き6 (※昼コマは枠扱いだが空きにカウントしない想定→6コマ空き) -->
+      <div class="cell"><div class="task common"><span class="t">設計ドキュメント</span><span class="h">2h</span></div></div>
+      <div class="cell"><div class="task common cont"><span class="t">設計ドキュメント</span><span class="h">続き</span></div></div>
+      <div class="cell"><div class="empty"><span class="plus">＋</span><span class="lbl">空き</span></div></div>
+      <div class="cell lunch"></div>
+      <div class="cell"><div class="empty"><span class="plus">＋</span><span class="lbl">空き</span></div></div>
+      <div class="cell"><div class="empty"><span class="plus">＋</span><span class="lbl">空き</span></div></div>
+      <div class="cell"><div class="empty"><span class="plus">＋</span><span class="lbl">空き</span></div></div>
+      <div class="cell"><div class="empty"><span class="plus">＋</span><span class="lbl">空き</span></div></div>
+      <div class="pagg">
+        <div class="num tnum">6</div>
+        <div class="unit">空きコマ</div>
+        <div class="dots"><span class="dot f"></span><span class="dot f"></span><span class="dot f"></span><span class="dot f"></span><span class="dot f"></span><span class="dot f"></span><span class="dot"></span><span class="dot"></span></div>
+      </div>
+    </div>
+
+    <!-- 田中 — 空き4コマ (2位) -->
+    <div class="prow">
+      <span class="rank r2">空き多め ○</span>
+      <div class="person">
+        <div class="nm"><span class="avatar" style="background:#3a86ff;">田</span>田中</div>
+        <div class="role">Frontend</div>
+      </div>
+      <!-- 9-12 ダッシュ画面4h(3コマ+α), 午後空き4 -->
+      <div class="cell"><div class="task frontend"><span class="t">ダッシュ画面実装</span><span class="h">4h</span></div></div>
+      <div class="cell"><div class="task frontend cont"><span class="t">ダッシュ画面</span></div></div>
+      <div class="cell"><div class="task frontend cont"><span class="t">ダッシュ画面</span></div></div>
+      <div class="cell lunch"></div>
+      <div class="cell"><div class="empty"><span class="plus">＋</span><span class="lbl">空き</span></div></div>
+      <div class="cell"><div class="empty"><span class="plus">＋</span><span class="lbl">空き</span></div></div>
+      <div class="cell"><div class="empty"><span class="plus">＋</span><span class="lbl">空き</span></div></div>
+      <div class="cell"><div class="empty"><span class="plus">＋</span><span class="lbl">空き</span></div></div>
+      <div class="pagg">
+        <div class="num tnum">4</div>
+        <div class="unit">空きコマ</div>
+        <div class="dots"><span class="dot f"></span><span class="dot f"></span><span class="dot f"></span><span class="dot f"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+      </div>
+    </div>
+
+    <!-- 佐藤 — 空き0 ちょうど満 -->
+    <div class="prow">
+      <span class="rank none">満稼働 —</span>
+      <div class="person">
+        <div class="nm"><span class="avatar" style="background:#2fa66b;">佐</span>佐藤</div>
+        <div class="role">Backend / QA</div>
+      </div>
+      <!-- 認証5h(9-11+13), 結合テスト3h(14-16) -->
+      <div class="cell"><div class="task backend"><span class="t">認証フロー実装</span><span class="h">5h</span></div></div>
+      <div class="cell"><div class="task backend cont"><span class="t">認証フロー</span></div></div>
+      <div class="cell"><div class="task backend cont"><span class="t">認証フロー</span></div></div>
+      <div class="cell lunch"></div>
+      <div class="cell"><div class="task backend cont"><span class="t">認証フロー</span></div></div>
+      <div class="cell"><div class="task qa"><span class="t">結合テスト</span><span class="h">3h</span></div></div>
+      <div class="cell"><div class="task qa cont"><span class="t">結合テスト</span></div></div>
+      <div class="cell"><div class="task qa cont"><span class="t">結合テスト</span></div></div>
+      <div class="pagg zero">
+        <div class="num zero tnum">0</div>
+        <div class="unit">空きコマ</div>
+        <div class="dots"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
+      </div>
+    </div>
+
+    <!-- 森田 — 超過 -->
+    <div class="prow over">
+      <span class="rank overr">超過 +2h ⚠</span>
+      <div class="person">
+        <div class="nm"><span class="avatar" style="background:#e5772d;">森</span>森田</div>
+        <div class="role">Backend</div>
+      </div>
+      <!-- API設計4h(9-12), DB移行3h(13-15), レビュー3h(15-17)→8コマ全埋+overcell -->
+      <div class="cell"><div class="task backend"><span class="t">API設計</span><span class="h">4h</span></div></div>
+      <div class="cell"><div class="task backend cont"><span class="t">API設計</span></div></div>
+      <div class="cell"><div class="task backend cont"><span class="t">API設計</span></div></div>
+      <div class="cell lunch"></div>
+      <div class="cell"><div class="task backend"><span class="t">DBマイグレ</span><span class="h">3h</span></div></div>
+      <div class="cell"><div class="task backend cont"><span class="t">DBマイグレ</span></div></div>
+      <div class="cell"><div class="task common"><span class="t">PRレビュー</span><span class="h">3h</span></div></div>
+      <div class="cell"><div class="overcell">⚠ +2h<br>あふれ</div></div>
+      <div class="pagg overbg">
+        <div class="num over tnum">−2</div>
+        <div class="unit">超過 (10/8h)</div>
+        <div class="dots"><span class="dot" style="background:var(--over);"></span><span class="dot" style="background:var(--over);"></span><span class="dot" style="background:var(--over);"></span><span class="dot" style="background:var(--over);"></span><span class="dot" style="background:var(--over);"></span><span class="dot" style="background:var(--over);"></span><span class="dot" style="background:var(--over);"></span><span class="dot" style="background:var(--over);"></span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="legend">
+    <div class="item"><span class="sw" style="background:var(--backend);"></span>Backend</div>
+    <div class="item"><span class="sw" style="background:var(--frontend);"></span>Frontend</div>
+    <div class="item"><span class="sw" style="background:var(--qa);"></span>QA</div>
+    <div class="item"><span class="sw" style="background:var(--common);"></span>共通</div>
+    <div class="item"><span class="sw empt"></span>空きコマ（クリックで割り当て）</div>
+    <div class="item"><span class="sw ov"></span>容量あふれ</div>
+  </div>
+</main>
+</body>
+</html>

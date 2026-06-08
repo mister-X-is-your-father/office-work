@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工数バジェット — 新ダッシュボード機能 (Release v1.2)</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee;
+    --track:#eef1f5; --fill:#3a86ff; --over:#e5484d; --rest:#dde2e9;
+    --green:#2fa66b; --yellow:#f5a623; --red:#e5484d;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{font-size:15px}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    line-height:1.55; padding:28px 20px 64px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px;margin:0 auto}
+  .tnum{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+
+  /* header */
+  header{margin-bottom:22px}
+  .title-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  h1{font-size:1.42rem;font-weight:700;letter-spacing:.01em}
+  .proj-pick{
+    display:inline-flex;align-items:center;gap:7px;
+    background:var(--card);border:1px solid var(--line);border-radius:9px;
+    padding:6px 12px;font-size:.86rem;color:var(--ink);font-weight:600;
+    box-shadow:0 1px 2px rgba(20,30,50,.04);cursor:pointer;
+  }
+  .proj-pick .caret{color:var(--muted);font-size:.8rem}
+  .note{margin-top:8px;font-size:.78rem;color:var(--muted)}
+
+  /* layout */
+  .grid{display:grid;grid-template-columns:1fr;gap:16px}
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:14px;
+    box-shadow:0 1px 3px rgba(20,30,50,.05);padding:20px 22px;
+  }
+  .card h2{font-size:.97rem;font-weight:700;margin-bottom:3px}
+  .card .sub{font-size:.76rem;color:var(--muted);margin-bottom:16px}
+
+  /* KPI strip */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .kpi{
+    background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:14px 16px;box-shadow:0 1px 3px rgba(20,30,50,.05);
+  }
+  .kpi .lab{font-size:.74rem;color:var(--muted);font-weight:600;letter-spacing:.02em}
+  .kpi .val{font-size:1.5rem;font-weight:700;margin-top:4px}
+  .kpi .val small{font-size:.82rem;color:var(--muted);font-weight:600}
+  .kpi.danger .val{color:var(--over)}
+  .kpi .delta{font-size:.76rem;font-weight:700;margin-top:2px}
+  .kpi .delta.up{color:var(--over)}
+  .kpi .delta.ok{color:var(--green)}
+
+  /* budget bar */
+  .budget-headline{
+    display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:14px;
+  }
+  .budget-headline .big{font-size:1.05rem;font-weight:700}
+  .pill{
+    display:inline-flex;align-items:center;gap:6px;font-size:.76rem;font-weight:700;
+    padding:3px 10px;border-radius:999px;
+  }
+  .pill.red{background:rgba(229,72,77,.12);color:var(--over)}
+  .pill.dot::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;display:inline-block}
+
+  .bar-zone{position:relative;margin:30px 0 8px}
+  .scale{position:relative;height:18px;margin-bottom:6px}
+  .scale .tick{position:absolute;top:0;transform:translateX(-50%);font-size:.7rem;color:var(--muted)}
+  .scale .tick::after{content:"";position:absolute;left:50%;top:14px;width:1px;height:6px;background:var(--line)}
+
+  .track{
+    position:relative;height:40px;background:var(--track);border-radius:9px;overflow:visible;
+  }
+  .seg{position:absolute;top:0;height:40px;display:flex;align-items:center;justify-content:center;
+    font-size:.78rem;font-weight:700;color:#fff;white-space:nowrap}
+  .seg.done{left:0;background:var(--fill);border-radius:9px 0 0 9px}
+  .seg.rest{background:var(--rest);color:var(--muted)}
+  .seg.over{background:repeating-linear-gradient(45deg,var(--over),var(--over) 6px,#d23b40 6px,#d23b40 12px);
+    border-radius:0 9px 9px 0;color:#fff}
+  /* budget cap line at 120h */
+  .caplabel{position:absolute;top:-26px;transform:translateX(-50%);font-size:.72rem;font-weight:700;color:var(--ink)}
+  .capline{position:absolute;top:-8px;bottom:-8px;width:2px;background:var(--ink);z-index:5}
+  .capline::after{content:"";position:absolute;top:-4px;left:-3px;width:8px;height:8px;border-radius:50%;background:var(--ink)}
+
+  /* forecast line at 132h */
+  .fclabel{position:absolute;top:-26px;transform:translateX(-50%);font-size:.72rem;font-weight:700;color:var(--over)}
+  .fcline{position:absolute;top:-8px;bottom:-8px;width:0;border-left:2px dashed var(--over);z-index:6}
+  .fcline::after{content:"▼";position:absolute;top:-15px;left:-6px;font-size:.7rem;color:var(--over)}
+
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin-top:24px;font-size:.78rem;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:7px}
+  .sw{width:13px;height:13px;border-radius:3px;display:inline-block}
+  .sw.done{background:var(--fill)} .sw.rest{background:var(--rest)}
+  .sw.over{background:repeating-linear-gradient(45deg,var(--over),var(--over) 4px,#d23b40 4px,#d23b40 8px)}
+  .sw.cap{width:2px;height:14px;background:var(--ink);border-radius:0}
+  .sw.fc{width:0;border-left:2px dashed var(--over);height:14px}
+
+  .callout{
+    margin-top:18px;background:rgba(229,72,77,.07);border:1px solid rgba(229,72,77,.25);
+    border-radius:10px;padding:12px 14px;font-size:.82rem;color:#8f2a2e;display:flex;gap:10px;align-items:flex-start;
+  }
+  .callout .ic{font-size:1rem;line-height:1.3}
+  .callout b{color:var(--over)}
+
+  /* two-col breakdowns */
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:760px){.two{grid-template-columns:1fr}.kpis{grid-template-columns:repeat(2,1fr)}}
+
+  /* member rows */
+  .row{display:grid;grid-template-columns:84px 1fr 96px;align-items:center;gap:12px;padding:9px 0;border-top:1px solid var(--line)}
+  .row:first-of-type{border-top:none}
+  .who{display:flex;align-items:center;gap:8px;font-size:.86rem;font-weight:600}
+  .avatar{width:9px;height:9px;border-radius:50%;flex:none}
+  .minibar{position:relative;height:14px;background:var(--track);border-radius:7px;overflow:hidden}
+  .minibar .mdone{position:absolute;left:0;top:0;height:14px;border-radius:7px}
+  .minibar .mrest{position:absolute;top:0;height:14px;background:var(--rest)}
+  .nums{font-size:.78rem;color:var(--muted);text-align:right}
+  .nums b{color:var(--ink)}
+  .blocked{display:inline-flex;align-items:center;gap:4px;font-size:.68rem;font-weight:700;color:var(--red);
+    background:rgba(229,72,77,.12);padding:1px 6px;border-radius:5px;margin-left:4px}
+
+  /* domain bars */
+  .dom{display:grid;grid-template-columns:90px 1fr 52px;align-items:center;gap:12px;padding:9px 0;border-top:1px solid var(--line);font-size:.84rem}
+  .dom:first-of-type{border-top:none}
+  .dom .dname{font-weight:600}
+  .dom .dbar{height:14px;background:var(--track);border-radius:7px;overflow:hidden}
+  .dom .dbar i{display:block;height:14px;background:var(--fill);border-radius:7px}
+  .dom .dval{text-align:right;color:var(--muted);font-weight:600}
+  .dom .dval b{color:var(--ink)}
+
+  .foot{margin-top:8px;font-size:.72rem;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="title-row">
+      <h1>工数バジェット</h1>
+      <span class="proj-pick">プロジェクト: 新ダッシュボード機能 <span class="caret">▾</span></span>
+    </div>
+    <div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</div>
+  </header>
+
+  <div class="grid">
+
+    <!-- KPI strip -->
+    <div class="kpis">
+      <div class="kpi">
+        <div class="lab">見積り総工数</div>
+        <div class="val tnum">120<small> h</small></div>
+        <div class="delta ok">予算ベースライン</div>
+      </div>
+      <div class="kpi">
+        <div class="lab">消化済み</div>
+        <div class="val tnum">78<small> h</small></div>
+        <div class="delta ok">65% 消化</div>
+      </div>
+      <div class="kpi">
+        <div class="lab">残工数</div>
+        <div class="val tnum">42<small> h</small></div>
+        <div class="delta ok">35% 残</div>
+      </div>
+      <div class="kpi danger">
+        <div class="lab">最終見込み</div>
+        <div class="val tnum">132<small> h</small></div>
+        <div class="delta up">▲ +12h / +10% 超過</div>
+      </div>
+    </div>
+
+    <!-- main budget bar -->
+    <div class="card">
+      <div class="budget-headline">
+        <span class="big">予算消化バー</span>
+        <span class="pill red dot">予算を1割超過する見込み</span>
+      </div>
+      <div class="sub">期間 5/20〜6/13 ・ 今日 6/4(木) ・ 現ペース継続時の着地 6/16（3日遅延）</div>
+
+      <div class="bar-zone">
+        <!-- scale 0..140 -->
+        <div class="scale tnum">
+          <span class="tick" style="left:0%">0h</span>
+          <span class="tick" style="left:21.43%">30h</span>
+          <span class="tick" style="left:42.86%">60h</span>
+          <span class="tick" style="left:55.71%">78h</span>
+          <span class="tick" style="left:64.29%">90h</span>
+          <span class="tick" style="left:100%">140h</span>
+        </div>
+        <!-- 140h full scale -> 120/140=85.71%, 132/140=94.29%, 78/140=55.71% -->
+        <div class="track">
+          <!-- consumed 0..78 -->
+          <div class="seg done" style="width:55.71%">消化 78h</div>
+          <!-- remaining 78..120 (within budget) -->
+          <div class="seg rest" style="left:55.71%;width:30%">残 42h</div>
+          <!-- overrun 120..132 -->
+          <div class="seg over" style="left:85.71%;width:8.57%">+12h</div>
+
+          <!-- budget cap @120h -->
+          <div class="capline" style="left:85.71%"></div>
+          <div class="caplabel" style="left:85.71%">見積り上限 120h</div>
+
+          <!-- forecast @132h -->
+          <div class="fcline" style="left:94.29%"></div>
+          <div class="fclabel" style="left:94.29%">着地見込み 132h</div>
+        </div>
+      </div>
+
+      <div class="legend">
+        <span><i class="sw done"></i> 消化済み (78h)</span>
+        <span><i class="sw rest"></i> 残（見積り内）(42h)</span>
+        <span><i class="sw over"></i> 見積り超過分 (+12h)</span>
+        <span><i class="sw cap"></i> 見積り上限 120h</span>
+        <span><i class="sw fc"></i> 着地見込み 132h</span>
+      </div>
+
+      <div class="callout">
+        <span class="ic">⚠️</span>
+        <div>現ペースのまま進むと最終消化は <b>132h</b>（見積り120hに対し <b>+12h / +10%</b>）。
+        着地は <b>6/16</b> と締切 6/13 を <b>3日超過</b>。残42hの配分見直し、または認証フローのブロッカー解消によるペース回復が必要です。</div>
+      </div>
+    </div>
+
+    <!-- breakdowns -->
+    <div class="two">
+      <!-- member breakdown -->
+      <div class="card">
+        <h2>担当別 消化 / 残</h2>
+        <div class="sub">バーの長さ＝総工数。濃色＝消化、薄色＝残。</div>
+
+        <!-- max member total = 48 (森田) -> scale to 100% -->
+        <div class="row">
+          <div class="who"><span class="avatar" style="background:var(--m-morita)"></span>森田</div>
+          <div class="minibar">
+            <div class="mdone" style="width:83.3%;background:var(--m-morita)"></div>
+            <div class="mrest" style="left:83.3%;width:16.7%"></div>
+          </div>
+          <div class="nums tnum"><b>40h</b> / 残8h</div>
+        </div>
+
+        <div class="row">
+          <div class="who"><span class="avatar" style="background:var(--m-tanaka)"></span>田中</div>
+          <div class="minibar">
+            <div class="mdone" style="width:37.5%;background:var(--m-tanaka)"></div>
+            <div class="mrest" style="left:37.5%;width:29.2%"></div>
+          </div>
+          <div class="nums tnum"><b>18h</b> / 残14h</div>
+        </div>
+
+        <div class="row">
+          <div class="who"><span class="avatar" style="background:var(--m-sato)"></span>佐藤<span class="blocked">●ブロック中</span></div>
+          <div class="minibar">
+            <div class="mdone" style="width:25%;background:var(--m-sato)"></div>
+            <div class="mrest" style="left:25%;width:33.3%;background:repeating-linear-gradient(45deg,#dde2e9,#dde2e9 4px,#cfd5de 4px,#cfd5de 8px)"></div>
+          </div>
+          <div class="nums tnum"><b>12h</b> / 残16h</div>
+        </div>
+
+        <div class="row">
+          <div class="who"><span class="avatar" style="background:var(--m-suzuki)"></span>鈴木</div>
+          <div class="minibar">
+            <div class="mdone" style="width:16.7%;background:var(--m-suzuki)"></div>
+            <div class="mrest" style="left:16.7%;width:8.3%"></div>
+          </div>
+          <div class="nums tnum"><b>8h</b> / 残4h</div>
+        </div>
+
+        <div class="foot">合計 消化78h / 残42h。佐藤の残16hは認証フローのブロックで進捗停止中。</div>
+      </div>
+
+      <!-- domain breakdown -->
+      <div class="card">
+        <h2>領域別 消化工数</h2>
+        <div class="sub">このPJ内サブ領域別の消化済み工数（合計78h）。</div>
+
+        <!-- max=45 (Backend) -> 100% -->
+        <div class="dom">
+          <div class="dname">Backend</div>
+          <div class="dbar"><i style="width:100%"></i></div>
+          <div class="dval tnum"><b>45</b>h</div>
+        </div>
+        <div class="dom">
+          <div class="dname">Frontend</div>
+          <div class="dbar"><i style="width:44.4%"></i></div>
+          <div class="dval tnum"><b>20</b>h</div>
+        </div>
+        <div class="dom">
+          <div class="dname">共通</div>
+          <div class="dbar"><i style="width:17.8%"></i></div>
+          <div class="dval tnum"><b>8</b>h</div>
+        </div>
+        <div class="dom">
+          <div class="dname">QA</div>
+          <div class="dbar"><i style="width:11.1%"></i></div>
+          <div class="dval tnum"><b>5</b>h</div>
+        </div>
+
+        <div class="foot">Backend が消化の過半。QA は5hに留まり、結合テスト工程は認証フロー解消待ちで未本格化。</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

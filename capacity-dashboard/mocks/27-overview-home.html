@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>キャパダッシュボード — 総合ホーム</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee;
+    --track:#eef1f5; --fill:#3a86ff; --red:#e5484d; --green:#2fa66b; --full:#8a93a0; --amber:#f5a623;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+    --pj-be:#3a86ff; --pj-fe:#2fa66b; --pj-qa:#b657d6; --pj-common:#8a93a0;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased;
+    font-variant-numeric:tabular-nums; font-feature-settings:"tnum";
+  }
+  .wrap{max-width:1080px; margin:0 auto; padding:20px 22px 60px;}
+
+  /* header */
+  header.top{display:flex; align-items:flex-end; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:6px;}
+  header.top h1{font-size:20px; font-weight:700; margin:0; letter-spacing:.01em;}
+  header.top .sub{font-size:12px; color:var(--muted); margin-top:3px;}
+  .nav{display:flex; align-items:center; gap:6px;}
+  .nav button{
+    background:var(--card); border:1px solid var(--line); color:var(--ink);
+    border-radius:9px; height:32px; padding:0 10px; font-size:13px; cursor:pointer;
+    font-family:inherit; display:inline-flex; align-items:center; gap:5px;
+  }
+  .nav button:hover{background:#fafbfc;}
+  .nav .cur{font-weight:600; padding:0 12px; font-size:13px; color:var(--ink); white-space:nowrap;}
+  .nav .today{border-color:#cfd6df;}
+  .note{
+    font-size:11.5px; color:var(--muted); background:#fff7ec; border:1px solid #f3e2c4;
+    border-radius:8px; padding:6px 10px; margin:12px 0 18px; display:inline-block;
+  }
+
+  /* grid */
+  .grid{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    padding:16px 16px 14px; box-shadow:0 1px 2px rgba(20,30,50,.04);
+  }
+  .card.full{grid-column:1 / -1;}
+  .card h2{
+    font-size:13px; font-weight:700; margin:0 0 2px; display:flex; align-items:center; gap:8px;
+  }
+  .card .lead{font-size:11.5px; color:var(--muted); margin:0 0 12px;}
+  .card .hd{display:flex; align-items:flex-start; justify-content:space-between; gap:10px;}
+  .more{
+    font-size:11.5px; color:var(--fill); text-decoration:none; white-space:nowrap;
+    display:inline-flex; align-items:center; gap:3px; padding:2px 6px; border-radius:6px;
+  }
+  .more:hover{background:#eef4ff;}
+  .more .arr{font-size:13px;}
+
+  /* hero — today availability */
+  .hero h2{font-size:14px;}
+  .hero .summary{
+    display:flex; align-items:baseline; gap:14px; margin:6px 0 16px; flex-wrap:wrap;
+  }
+  .hero .big{font-size:34px; font-weight:800; letter-spacing:-.01em; line-height:1;}
+  .hero .big .unit{font-size:16px; font-weight:600; color:var(--muted); margin-left:2px;}
+  .hero .pct{
+    font-size:13px; font-weight:600; color:var(--fill);
+    background:#eef4ff; border-radius:20px; padding:3px 11px;
+  }
+  .hero .meta{font-size:12px; color:var(--muted);}
+
+  .ppl{display:grid; grid-template-columns:repeat(4,1fr); gap:10px;}
+  .person{
+    border:1px solid var(--line); border-radius:11px; padding:11px 12px 12px;
+    position:relative; overflow:hidden;
+  }
+  .person .pname{display:flex; align-items:center; gap:7px; font-weight:600; font-size:13px;}
+  .dot{width:9px; height:9px; border-radius:50%; flex:none;}
+  .person .stat{font-size:22px; font-weight:800; margin:8px 0 2px; line-height:1;}
+  .person .stat .u{font-size:12px; font-weight:600; color:var(--muted);}
+  .person .label{font-size:11px; font-weight:600;}
+  .person .barT{height:6px; background:var(--track); border-radius:4px; margin-top:10px; overflow:hidden; position:relative;}
+  .person .barF{height:100%; border-radius:4px;}
+  .person .barOver{position:absolute; top:0; right:0; height:100%; background:repeating-linear-gradient(45deg,var(--red),var(--red) 3px,#f06b6f 3px,#f06b6f 6px); border-radius:4px;}
+  .tag{font-size:10.5px; font-weight:600; padding:1px 7px; border-radius:20px; display:inline-block;}
+  .tag.over{background:#fdeaea; color:var(--red);}
+  .tag.free{background:#e9f6ef; color:var(--green);}
+  .tag.just{background:#eef1f5; color:var(--muted);}
+
+  /* week load rows */
+  .rows{display:flex; flex-direction:column; gap:11px; margin-top:2px;}
+  .row{display:grid; grid-template-columns:64px 1fr 88px; align-items:center; gap:10px;}
+  .row .who{display:flex; align-items:center; gap:6px; font-weight:600; font-size:12.5px;}
+  .row .track{height:14px; background:var(--track); border-radius:7px; overflow:hidden; position:relative;}
+  .row .bar{height:100%; border-radius:7px;}
+  .row .barfull{background:var(--full);}
+  .row .num{font-size:12px; color:var(--muted); text-align:right;}
+  .row .num b{color:var(--ink); font-weight:700; font-size:12.5px;}
+  .row .pctmini{display:inline-block; min-width:34px; text-align:right;}
+  .teamline{
+    display:flex; align-items:baseline; justify-content:space-between; margin-top:14px;
+    padding-top:12px; border-top:1px dashed var(--line);
+  }
+  .teamline .l{font-size:12px; color:var(--muted);}
+  .teamline .v{font-size:14px;} .teamline .v b{font-size:17px; font-weight:800;}
+
+  /* alerts */
+  .alerts{display:flex; flex-direction:column; gap:9px;}
+  .alert{
+    display:flex; gap:11px; align-items:flex-start; padding:11px 12px;
+    border:1px solid var(--line); border-radius:11px; background:#fcfcfd;
+  }
+  .alert .ic{
+    width:26px; height:26px; border-radius:8px; flex:none; display:flex; align-items:center;
+    justify-content:center; font-size:14px; font-weight:800; color:#fff;
+  }
+  .alert.crit .ic{background:var(--red);}
+  .alert.warn .ic{background:var(--amber);}
+  .alert .body{flex:1; min-width:0;}
+  .alert .at{font-size:12.5px; font-weight:700; margin:1px 0 2px;}
+  .alert .ad{font-size:11.5px; color:var(--muted); line-height:1.45;}
+  .alert .ad b{color:var(--red); font-weight:700;}
+  .alert .go{font-size:11px; color:var(--muted); margin-top:5px; display:inline-block;}
+
+  /* risk donut + legend */
+  .risk-wrap{display:flex; align-items:center; gap:18px;}
+  .donut{width:108px; height:108px; flex:none; position:relative;}
+  .donut .ctr{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;}
+  .donut .ctr .n{font-size:24px; font-weight:800; line-height:1;}
+  .donut .ctr .t{font-size:10px; color:var(--muted); margin-top:2px;}
+  .risk-legend{flex:1; display:flex; flex-direction:column; gap:8px;}
+  .leg{display:flex; align-items:center; gap:9px; font-size:12.5px;}
+  .leg .sw{width:11px; height:11px; border-radius:3px; flex:none;}
+  .leg .name{flex:1;}
+  .leg .cnt{font-weight:700;}
+  .leg .det{color:var(--muted); font-size:11px;}
+
+  /* unassigned */
+  .ua-top{display:flex; align-items:baseline; gap:10px; margin-bottom:10px;}
+  .ua-top .n{font-size:30px; font-weight:800; line-height:1;}
+  .ua-top .sub{font-size:12px; color:var(--muted);}
+  .ua-list{display:flex; flex-direction:column; gap:7px;}
+  .ua{display:flex; align-items:center; gap:9px; padding:8px 10px; border:1px solid var(--line); border-radius:9px;}
+  .ua .pj{width:8px; height:8px; border-radius:2px; flex:none;}
+  .ua .tt{flex:1; font-size:12.5px; font-weight:500; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .ua .hh{font-size:12px; color:var(--muted); font-weight:600;}
+  .ua .assign{font-size:10.5px; color:var(--fill); border:1px solid #cfe0ff; border-radius:6px; padding:2px 7px; cursor:pointer; background:#f3f8ff;}
+
+  .pjkey{display:flex; gap:14px; flex-wrap:wrap; margin-top:12px; padding-top:10px; border-top:1px dashed var(--line); font-size:11px; color:var(--muted);}
+  .pjkey span{display:inline-flex; align-items:center; gap:5px;}
+  .pjkey i{width:9px; height:9px; border-radius:2px; display:inline-block;}
+
+  @media(max-width:760px){ .grid{grid-template-columns:1fr;} .ppl{grid-template-columns:1fr 1fr;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div>
+      <h1>キャパダッシュボード · 総合ホーム</h1>
+      <div class="sub">チーム稼働の俯瞰 — 今振れる人 / 今アブない事を一望</div>
+    </div>
+    <div class="nav">
+      <button class="today">今日</button>
+      <button>‹</button>
+      <span class="cur">2026年 6月4日（木）· 第23週</span>
+      <button>›</button>
+    </div>
+  </header>
+
+  <div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</div>
+
+  <div class="grid">
+
+    <!-- HERO: 今日の空き -->
+    <div class="card full hero">
+      <div class="hd">
+        <div>
+          <h2>🟢 今日の空き <span style="font-weight:500;color:var(--muted);font-size:11.5px;">6/4(木)</span></h2>
+          <p class="lead">いま手が空いているメンバー＝すぐ振れる先。森田が超過、要再配分。</p>
+        </div>
+        <a class="more" href="#">日次キャパ詳細 <span class="arr">→</span></a>
+      </div>
+
+      <div class="summary">
+        <div class="big">8<span class="unit">h 空き</span></div>
+        <div class="pct">チーム 24 / 32h · 75%</div>
+        <div class="meta">稼働中 3名 / 空き 2名 / 超過 1名</div>
+      </div>
+
+      <div class="ppl">
+        <div class="person">
+          <div class="pname"><span class="dot" style="background:var(--m-morita)"></span>森田</div>
+          <div class="stat" style="color:var(--red)">+2<span class="u">h 超過</span></div>
+          <div><span class="tag over">超過 10/8h</span></div>
+          <div class="barT"><div class="barF" style="width:100%;background:var(--m-morita)"></div><div class="barOver" style="width:20%"></div></div>
+        </div>
+        <div class="person">
+          <div class="pname"><span class="dot" style="background:var(--m-tanaka)"></span>田中</div>
+          <div class="stat" style="color:var(--green)">4<span class="u">h 空き</span></div>
+          <div><span class="tag free">空き 4/8h</span></div>
+          <div class="barT"><div class="barF" style="width:50%;background:var(--m-tanaka)"></div></div>
+        </div>
+        <div class="person">
+          <div class="pname"><span class="dot" style="background:var(--m-sato)"></span>佐藤</div>
+          <div class="stat" style="color:var(--muted)">0<span class="u">h ちょうど</span></div>
+          <div><span class="tag just">ちょうど 8/8h</span></div>
+          <div class="barT"><div class="barF" style="width:100%;background:var(--m-sato)"></div></div>
+        </div>
+        <div class="person">
+          <div class="pname"><span class="dot" style="background:var(--m-suzuki)"></span>鈴木</div>
+          <div class="stat" style="color:var(--green)">6<span class="u">h 空き</span></div>
+          <div><span class="tag free">空き 6/8h</span></div>
+          <div class="barT"><div class="barF" style="width:25%;background:var(--m-suzuki)"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 今週の負荷 -->
+    <div class="card">
+      <div class="hd">
+        <div>
+          <h2>📊 今週の負荷</h2>
+          <p class="lead">6/1（月）〜6/5（金）· 各自 40h 上限</p>
+        </div>
+        <a class="more" href="#">週ヒートマップ <span class="arr">→</span></a>
+      </div>
+
+      <div class="rows">
+        <div class="row">
+          <div class="who"><span class="dot" style="background:var(--m-morita)"></span>森田</div>
+          <div class="track"><div class="bar" style="width:90%;background:var(--m-morita)"></div></div>
+          <div class="num"><b>36</b>/40h <span class="pctmini" style="color:var(--amber)">90%</span></div>
+        </div>
+        <div class="row">
+          <div class="who"><span class="dot" style="background:var(--m-tanaka)"></span>田中</div>
+          <div class="track"><div class="bar" style="width:40%;background:var(--m-tanaka)"></div></div>
+          <div class="num"><b>16</b>/40h <span class="pctmini" style="color:var(--green)">40%</span></div>
+        </div>
+        <div class="row">
+          <div class="who"><span class="dot" style="background:var(--m-sato)"></span>佐藤</div>
+          <div class="track"><div class="bar barfull" style="width:100%"></div></div>
+          <div class="num"><b>40</b>/40h <span class="pctmini" style="color:var(--full)">満</span></div>
+        </div>
+        <div class="row">
+          <div class="who"><span class="dot" style="background:var(--m-suzuki)"></span>鈴木</div>
+          <div class="track"><div class="bar" style="width:22.5%;background:var(--m-suzuki)"></div></div>
+          <div class="num"><b>9</b>/40h <span class="pctmini" style="color:var(--green)">23%</span></div>
+        </div>
+      </div>
+
+      <div class="teamline">
+        <div class="l">チーム週合計</div>
+        <div class="v"><b>101</b> / 160h · <span style="color:var(--fill);font-weight:700">63%</span> <span style="color:var(--muted);font-size:12px">（空き 59h）</span></div>
+      </div>
+    </div>
+
+    <!-- アラート -->
+    <div class="card">
+      <div class="hd">
+        <div>
+          <h2>⚠️ アラート <span style="font-weight:600;color:var(--red);font-size:11px;background:#fdeaea;padding:1px 7px;border-radius:20px;">3</span></h2>
+          <p class="lead">過負荷 / 着地リスク — 早めの手当てが必要</p>
+        </div>
+        <a class="more" href="#">全アラート <span class="arr">→</span></a>
+      </div>
+
+      <div class="alerts">
+        <div class="alert crit">
+          <div class="ic">!</div>
+          <div class="body">
+            <div class="at">締切遅延：ログイン機能</div>
+            <div class="ad">締切 6/6 に対し着地見込み 6/9 — <b>3日遅延</b>。要員追加か範囲調整を。</div>
+            <span class="go">→ タスク詳細・着地予測へ</span>
+          </div>
+        </div>
+        <div class="alert warn">
+          <div class="ic">🔥</div>
+          <div class="body">
+            <div class="at">高負荷継続：森田（燃え尽き注意）</div>
+            <div class="ad">今日 +2h 超過・週 90%。連日高稼働で疲弊リスク。再配分を検討。</div>
+            <span class="go">→ 森田の負荷推移へ</span>
+          </div>
+        </div>
+        <div class="alert warn">
+          <div class="ic">●</div>
+          <div class="body">
+            <div class="at">満稼働常態：佐藤</div>
+            <div class="ad">週 40/40h で連続満稼働。バッファ無く、突発対応の余地なし。</div>
+            <span class="go">→ 佐藤の負荷推移へ</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 着地リスク -->
+    <div class="card">
+      <div class="hd">
+        <div>
+          <h2>🎯 着地リスク</h2>
+          <p class="lead">主要タスクの締切到達見込み</p>
+        </div>
+        <a class="more" href="#">着地予測一覧 <span class="arr">→</span></a>
+      </div>
+
+      <div class="risk-wrap">
+        <div class="donut">
+          <svg viewBox="0 0 36 36" width="108" height="108">
+            <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--track)" stroke-width="4"></circle>
+            <!-- 4 segments: green2, amber1, red1 of total 4 -->
+            <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--green)" stroke-width="4"
+              stroke-dasharray="50 50" stroke-dashoffset="0" transform="rotate(-90 18 18)"></circle>
+            <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--amber)" stroke-width="4"
+              stroke-dasharray="25 75" stroke-dashoffset="-50" transform="rotate(-90 18 18)"></circle>
+            <circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--red)" stroke-width="4"
+              stroke-dasharray="25 75" stroke-dashoffset="-75" transform="rotate(-90 18 18)"></circle>
+          </svg>
+          <div class="ctr"><div class="n">4</div><div class="t">主要タスク</div></div>
+        </div>
+        <div class="risk-legend">
+          <div class="leg"><span class="sw" style="background:var(--red)"></span><span class="name">遅延（赤）</span><span class="cnt">1</span><span class="det">ログイン機能 +3日</span></div>
+          <div class="leg"><span class="sw" style="background:var(--amber)"></span><span class="name">注意（黄）</span><span class="cnt">1</span><span class="det">認証 ぎりぎり</span></div>
+          <div class="leg"><span class="sw" style="background:var(--green)"></span><span class="name">順調（緑）</span><span class="cnt">2</span><span class="det">余裕あり</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 未アサイン -->
+    <div class="card">
+      <div class="hd">
+        <div>
+          <h2>📥 未アサイン</h2>
+          <p class="lead">担当未設定 — 空きメンバーへ割当を</p>
+        </div>
+        <a class="more" href="#">バックログへ <span class="arr">→</span></a>
+      </div>
+
+      <div class="ua-top">
+        <div class="n">4<span style="font-size:14px;font-weight:600;color:var(--muted)">件</span></div>
+        <div class="sub">合計 <b style="color:var(--ink)">12h</b> · 空き 59h 内に収容可</div>
+      </div>
+
+      <div class="ua-list">
+        <div class="ua"><span class="pj" style="background:var(--pj-be)"></span><span class="tt">パスワードリセットAPI</span><span class="hh">4h</span><span class="assign">割当</span></div>
+        <div class="ua"><span class="pj" style="background:var(--pj-fe)"></span><span class="tt">設定画面のUI調整</span><span class="hh">3h</span><span class="assign">割当</span></div>
+        <div class="ua"><span class="pj" style="background:var(--pj-qa)"></span><span class="tt">回帰テストケース追加</span><span class="hh">3h</span><span class="assign">割当</span></div>
+        <div class="ua"><span class="pj" style="background:var(--pj-common)"></span><span class="tt">リリースノート下書き</span><span class="hh">2h</span><span class="assign">割当</span></div>
+      </div>
+
+      <div class="pjkey">
+        <span><i style="background:var(--pj-be)"></i>Backend</span>
+        <span><i style="background:var(--pj-fe)"></i>Frontend</span>
+        <span><i style="background:var(--pj-qa)"></i>QA</span>
+        <span><i style="background:var(--pj-common)"></i>共通</span>
+      </div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>

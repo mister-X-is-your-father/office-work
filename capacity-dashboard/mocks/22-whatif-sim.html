@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>What-if シミュレータ — キャパダッシュボード</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee;
+    --track:#eef1f5; --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0; --amber:#f5a623;
+    --backend:#3a86ff; --frontend:#2fa66b; --qa:#b657d6; --common:#8a93a0;
+    --morita:#e5772d; --tanaka:#3a86ff; --sato:#2fa66b; --suzuki:#b657d6;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    background:var(--bg); color:var(--ink); line-height:1.5; padding:24px;
+    font-variant-numeric:tabular-nums; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px;margin:0 auto}
+  header.page{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:6px;flex-wrap:wrap}
+  h1{font-size:20px;font-weight:700}
+  .sub{font-size:13px;color:var(--muted);margin-top:2px}
+  .nav{display:flex;align-items:center;gap:6px}
+  .nav button{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:6px 10px;font-size:13px;cursor:pointer;font-family:inherit}
+  .nav button:hover{background:var(--track)}
+  .nav .period{font-size:13px;font-weight:600;padding:0 6px;min-width:120px;text-align:center}
+  .note{font-size:12px;color:var(--muted);margin:10px 0 18px;padding:8px 12px;background:#fff;border:1px dashed var(--line);border-radius:8px}
+
+  .grid{display:grid;grid-template-columns:340px 1fr;gap:18px;align-items:start}
+  @media(max-width:820px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:0 1px 2px rgba(29,36,48,.04)}
+  .card h2{font-size:14px;font-weight:700;padding:14px 16px;border-bottom:1px solid var(--line)}
+  .pad{padding:16px}
+
+  /* form */
+  label.fld{display:block;font-size:12px;color:var(--muted);font-weight:600;margin:0 0 6px}
+  .fld-row{margin-bottom:16px}
+  input[type=text]{width:100%;border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-size:14px;font-family:inherit;color:var(--ink)}
+  input[type=text]:focus{outline:none;border-color:var(--fill);box-shadow:0 0 0 3px rgba(58,134,255,.12)}
+  .seg{display:flex;gap:6px;flex-wrap:wrap}
+  .seg button{
+    flex:1;min-width:62px;border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px 4px;
+    font-size:13px;font-family:inherit;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;font-weight:600;color:var(--ink);
+  }
+  .seg button .dot{width:9px;height:9px;border-radius:50%}
+  .seg button.on{border-color:var(--ink);box-shadow:0 0 0 2px rgba(29,36,48,.08) inset}
+  .seg button:hover{background:var(--track)}
+
+  .slider-wrap{display:flex;align-items:center;gap:12px}
+  input[type=range]{flex:1;accent-color:var(--fill);height:4px}
+  .hrs-val{font-size:20px;font-weight:700;min-width:54px;text-align:right}
+  .hrs-val small{font-size:12px;color:var(--muted);font-weight:600}
+
+  .apply{
+    width:100%;border:none;background:var(--fill);color:#fff;border-radius:8px;padding:11px;font-size:14px;font-weight:700;
+    cursor:pointer;font-family:inherit;margin-top:4px;
+  }
+  .apply:hover{filter:brightness(1.05)}
+  .reset{width:100%;border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:8px;padding:9px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;margin-top:8px}
+  .reset:hover{background:var(--track)}
+
+  .verdict{margin:14px 0 0;padding:12px 14px;border-radius:10px;font-size:13px;font-weight:600;display:flex;gap:8px;align-items:flex-start;line-height:1.45}
+  .verdict.ok{background:rgba(47,166,107,.1);color:#1f7a4d}
+  .verdict.warn{background:rgba(245,166,35,.13);color:#9c6713}
+  .verdict.bad{background:rgba(229,72,77,.11);color:#b3393d}
+  .verdict .ic{font-size:15px;line-height:1.2}
+
+  /* capacity panel */
+  .members{padding:6px 4px}
+  .mrow{padding:14px 16px;border-bottom:1px solid var(--line)}
+  .mrow:last-child{border-bottom:none}
+  .mhead{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+  .ava{width:26px;height:26px;border-radius:50%;color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;flex:none}
+  .mname{font-size:14px;font-weight:700}
+  .mnums{margin-left:auto;font-size:13px;font-weight:600;color:var(--muted)}
+  .mnums b{color:var(--ink)}
+  .mnums .added{color:var(--fill)}
+  .mnums .over{color:var(--over)}
+
+  .bar{position:relative;height:24px;border-radius:7px;background:var(--track);overflow:hidden;display:flex}
+  .bar .seg-base{height:100%;background:var(--full);transition:width .35s ease}
+  .bar .seg-add{height:100%;background:repeating-linear-gradient(45deg,var(--fill),var(--fill) 7px,#5b9bff 7px,#5b9bff 14px);transition:width .35s ease}
+  .bar .seg-over{height:100%;background:repeating-linear-gradient(45deg,var(--over),var(--over) 7px,#d83a3f 7px,#d83a3f 14px);transition:width .35s ease}
+  .bar.full{box-shadow:0 0 0 2px var(--over) inset}
+  .cap-line{position:absolute;top:-2px;bottom:-2px;width:0;border-left:2px solid var(--ink);opacity:.55;z-index:2}
+  .cap-line::after{content:'8h';position:absolute;top:-15px;right:-9px;font-size:9px;color:var(--muted);font-weight:700}
+  .bstatus{font-size:11px;font-weight:700;margin-top:5px;display:flex;align-items:center;gap:6px}
+  .bstatus.s-ok{color:var(--free)} .bstatus.s-near{color:#9c6713} .bstatus.s-full{color:var(--full)} .bstatus.s-over{color:var(--over)}
+  .pulse{animation:pulse .5s ease}
+  @keyframes pulse{0%{transform:scale(1)}40%{transform:scale(1.012)}100%{transform:scale(1)}}
+
+  .quick{display:flex;gap:8px;padding:0 16px 14px;flex-wrap:wrap}
+  .quick button{border:1px dashed var(--line);background:#fafbfc;border-radius:999px;padding:6px 12px;font-size:12px;cursor:pointer;font-family:inherit;color:var(--muted);font-weight:600}
+  .quick button:hover{border-color:var(--fill);color:var(--fill)}
+  footer{font-size:11px;color:var(--muted);margin-top:16px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="page">
+    <div>
+      <h1>② 計画：What-if シミュレータ</h1>
+      <div class="sub">新規タスクを仮置きすると、各人の容量バーがリアルタイムに変化。誰が溢れるかを試算</div>
+    </div>
+    <div class="nav">
+      <button title="前日">‹</button>
+      <span class="period">6/4(木)</span>
+      <button title="翌日">›</button>
+    </div>
+  </header>
+
+  <div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</div>
+
+  <div class="grid">
+    <!-- LEFT: form -->
+    <div class="card">
+      <h2>新規タスクを追加（仮置き）</h2>
+      <div class="pad">
+        <div class="fld-row">
+          <label class="fld">タスク名</label>
+          <input type="text" id="taskName" value="緊急バグ修正" />
+        </div>
+
+        <div class="fld-row">
+          <label class="fld">担当に割り当て</label>
+          <div class="seg" id="ownerSeg">
+            <button data-k="morita" class="on"><span class="dot" style="background:var(--morita)"></span>森田</button>
+            <button data-k="tanaka"><span class="dot" style="background:var(--tanaka)"></span>田中</button>
+            <button data-k="sato"><span class="dot" style="background:var(--sato)"></span>佐藤</button>
+            <button data-k="suzuki"><span class="dot" style="background:var(--suzuki)"></span>鈴木</button>
+          </div>
+        </div>
+
+        <div class="fld-row">
+          <label class="fld">追加する作業量（今日分）</label>
+          <div class="slider-wrap">
+            <input type="range" id="hrs" min="0" max="8" step="0.5" value="3" />
+            <div class="hrs-val"><span id="hrsNum">3</span><small>h</small></div>
+          </div>
+        </div>
+
+        <div class="fld-row">
+          <label class="fld">期日</label>
+          <input type="text" id="due" value="6/5(金)" />
+        </div>
+
+        <button class="apply" id="applyBtn">この内容で仮置きする</button>
+        <button class="reset" id="resetBtn">仮置きをクリア</button>
+
+        <div class="verdict ok" id="verdict">
+          <span class="ic">✓</span><span id="verdictTxt">担当を選んで作業量を動かすと、収まるか即超過かを判定します。</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: capacity bars -->
+    <div class="card">
+      <h2>各メンバーの今日の容量（1日 8h）</h2>
+      <div class="members" id="members"></div>
+      <div class="quick">
+        <span style="font-size:12px;color:var(--muted);font-weight:600;align-self:center;margin-right:2px">試算プリセット:</span>
+        <button data-owner="suzuki" data-hrs="6">鈴木に6h</button>
+        <button data-owner="sato" data-hrs="3">佐藤に3h</button>
+        <button data-owner="morita" data-hrs="2">森田に2h</button>
+        <button data-owner="tanaka" data-hrs="5">田中に5h</button>
+      </div>
+    </div>
+  </div>
+
+  <footer>キャパダッシュボード（Vikunja API）／ ② 計画：着地見込み＆What-if ・ mock 22</footer>
+</div>
+
+<script>
+  // 各人の既存稼働（今日／8h中）。空き = 8 - used
+  const MEMBERS = [
+    {k:'morita', name:'森田', color:'#e5772d', used:8},  // 空き0h・超過寸前
+    {k:'tanaka', name:'田中', color:'#3a86ff', used:4},  // 空き4h
+    {k:'sato',   name:'佐藤', color:'#2fa66b', used:8},  // 空き0h・満稼働
+    {k:'suzuki', name:'鈴木', color:'#b657d6', used:2},  // 空き6h
+  ];
+  const CAP = 8;
+  let assigned = {morita:0, tanaka:0, sato:0, suzuki:0};
+  let selOwner = 'morita';
+  let hrs = 3;
+
+  const membersEl = document.getElementById('members');
+
+  function render(pulseKey){
+    membersEl.innerHTML = MEMBERS.map(m=>{
+      const add = assigned[m.k] || 0;
+      const total = m.used + add;
+      const free = CAP - m.used;
+      const over = Math.max(0, total - CAP);
+      // widths as % of CAP, capped so over shows beyond
+      const denom = Math.max(CAP, total);
+      const baseW = (m.used/denom)*100;
+      const addInCap = Math.max(0, Math.min(add, CAP - m.used));
+      const addW = (addInCap/denom)*100;
+      const overW = (over/denom)*100;
+      const capLeft = (CAP/denom)*100;
+
+      let scls='s-ok', stxt='空き '+free+'h', barCls='';
+      if(over>0){ scls='s-over'; stxt='超過 +'+over+'h ・ 溢れています'; barCls='full'; }
+      else if(total>=CAP){ scls='s-full'; stxt='ちょうど満稼働（空き0h）'; }
+      else if(total>=CAP-1){ scls='s-near'; stxt='残り '+(CAP-total)+'h ・ ほぼ満杯'; }
+      else { scls='s-ok'; stxt='残り '+(CAP-total)+'h の余裕'; }
+
+      const addLabel = add>0 ? `<span class="${over>0?'over':'added'}">+${add}h</span>` : '';
+      const pulse = (pulseKey===m.k)?'pulse':'';
+
+      return `<div class="mrow">
+        <div class="mhead">
+          <span class="ava" style="background:${m.color}">${m.name[0]}</span>
+          <span class="mname">${m.name}</span>
+          <span class="mnums"><b>${total}</b>/${CAP}h ${addLabel}</span>
+        </div>
+        <div class="bar ${barCls} ${pulse}">
+          <span class="seg-base" style="width:${baseW}%"></span>
+          <span class="seg-add" style="width:${addW}%"></span>
+          <span class="seg-over" style="width:${overW}%"></span>
+          <span class="cap-line" style="left:${capLeft}%"></span>
+        </div>
+        <div class="bstatus ${scls}"><span class="dot">●</span>${stxt}</div>
+      </div>`;
+    }).join('');
+  }
+
+  function judge(){
+    const m = MEMBERS.find(x=>x.k===selOwner);
+    const add = assigned[selOwner]||0;
+    const total = m.used + add;
+    const free = CAP - m.used;
+    const v = document.getElementById('verdict');
+    const t = document.getElementById('verdictTxt');
+    const ic = v.querySelector('.ic');
+    if(add===0){
+      v.className='verdict ok'; ic.textContent='✓';
+      t.textContent='仮置きすると判定を表示します。担当と作業量を選んでください。';
+      return;
+    }
+    if(total>CAP){
+      v.className='verdict bad'; ic.textContent='⚠';
+      t.innerHTML=`<b>${m.name}</b> は即超過。空き ${free}h に対し +${add}h → <b>${total-CAP}h あふれる</b>。別の担当へ振るか期日調整が必要。`;
+    } else if(total===CAP){
+      v.className='verdict warn'; ic.textContent='!';
+      t.innerHTML=`<b>${m.name}</b> はギリギリ収まる（空き ${free}h ＝ +${add}h で満稼働）。これ以上は溢れます。`;
+    } else {
+      v.className='verdict ok'; ic.textContent='✓';
+      t.innerHTML=`<b>${m.name}</b> はまだ収まる。空き ${free}h のうち +${add}h 使用 → 残り <b>${free-add}h</b>。`;
+    }
+  }
+
+  function apply(pulseKey){
+    assigned = {morita:0, tanaka:0, sato:0, suzuki:0};
+    assigned[selOwner] = hrs;
+    render(pulseKey||selOwner);
+    judge();
+  }
+
+  // owner segmented control
+  document.getElementById('ownerSeg').addEventListener('click', e=>{
+    const b = e.target.closest('button'); if(!b) return;
+    selOwner = b.dataset.k;
+    [...e.currentTarget.children].forEach(x=>x.classList.toggle('on', x===b));
+    apply();
+  });
+  // slider live
+  const hrsInput = document.getElementById('hrs');
+  hrsInput.addEventListener('input', e=>{
+    hrs = parseFloat(e.target.value);
+    document.getElementById('hrsNum').textContent = hrs;
+    apply();
+  });
+  document.getElementById('applyBtn').addEventListener('click', ()=>apply());
+  document.getElementById('resetBtn').addEventListener('click', ()=>{
+    assigned = {morita:0, tanaka:0, sato:0, suzuki:0};
+    render();
+    const v=document.getElementById('verdict'); v.className='verdict ok';
+    v.querySelector('.ic').textContent='✓';
+    document.getElementById('verdictTxt').textContent='仮置きをクリアしました。';
+  });
+  // presets
+  document.querySelectorAll('.quick button').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      selOwner = b.dataset.owner;
+      hrs = parseFloat(b.dataset.hrs);
+      hrsInput.value = hrs;
+      document.getElementById('hrsNum').textContent = hrs;
+      [...document.getElementById('ownerSeg').children].forEach(x=>x.classList.toggle('on', x.dataset.k===selOwner));
+      apply();
+    });
+  });
+
+  // init
+  apply();
+</script>
+</body>
+</html>

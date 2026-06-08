@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>週ならしビュー（積み上げ）｜ キャパダッシュボード</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee;
+    --track:#eef1f5; --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0;
+    --caline:#9aa3af; --amber:#f5a623;
+    --c-backend:#3a86ff; --c-frontend:#2fa66b; --c-qa:#b657d6; --c-common:#8a93a0;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"palt"; -webkit-font-smoothing:antialiased;
+    font-variant-numeric:tabular-nums; line-height:1.45;
+  }
+  .nums{font-variant-numeric:tabular-nums;}
+  .wrap{max-width:1180px; margin:0 auto; padding:22px 22px 60px;}
+
+  /* header */
+  header.top{display:flex; align-items:flex-end; justify-content:space-between; gap:18px; flex-wrap:wrap; margin-bottom:18px;}
+  .title-block h1{font-size:20px; font-weight:700; margin:0 0 4px; letter-spacing:.01em;}
+  .title-block .sub{font-size:12.5px; color:var(--muted);}
+  .weeknav{display:flex; align-items:center; gap:4px; background:var(--card); border:1px solid var(--line);
+    border-radius:11px; padding:5px 6px; box-shadow:0 1px 2px rgba(20,30,50,.04);}
+  .weeknav button{border:0; background:transparent; color:var(--muted); font-size:15px; cursor:pointer;
+    width:30px; height:30px; border-radius:8px; line-height:1;}
+  .weeknav button:hover{background:var(--track); color:var(--ink);}
+  .weeknav .label{font-size:13.5px; font-weight:600; padding:0 8px; white-space:nowrap;}
+  .weeknav .now{display:inline-block; font-size:10.5px; color:var(--fill); font-weight:700; margin-left:5px;}
+
+  .panel{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px 20px 20px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04); margin-bottom:16px;}
+  .panel > .ph{display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin-bottom:16px; flex-wrap:wrap;}
+  .panel > .ph h2{font-size:14px; font-weight:700; margin:0;}
+  .panel > .ph .hint{font-size:11.5px; color:var(--muted);}
+
+  /* ====== VIEW A: per-day stacked columns ====== */
+  .daycols{display:grid; grid-template-columns:repeat(5,1fr); gap:14px; align-items:end;}
+  .daycol{display:flex; flex-direction:column; align-items:center;}
+  .daycol .col-title{font-size:12.5px; font-weight:700; margin-bottom:2px;}
+  .daycol .col-title .wd{font-weight:400; color:var(--muted); font-size:11px; margin-left:4px;}
+  .daycol.today .col-title{color:var(--fill);}
+  .daycol .col-sub{font-size:11px; color:var(--muted); margin-bottom:9px;}
+  .daycol .col-sub b{color:var(--ink); font-weight:700;}
+  .stackwrap{position:relative; width:100%; max-width:120px; height:260px; display:flex; flex-direction:column-reverse;
+    background:var(--track); border-radius:9px; overflow:visible; border:1px solid var(--line);}
+  .seg{width:100%; display:flex; align-items:center; justify-content:center; position:relative; min-height:2px;}
+  .seg span{font-size:10.5px; font-weight:700; color:#fff; text-shadow:0 1px 1px rgba(0,0,0,.18);}
+  .seg.m-morita{background:var(--m-morita);}
+  .seg.m-tanaka{background:var(--m-tanaka);}
+  .seg.m-sato{background:var(--m-sato);}
+  .seg.m-suzuki{background:var(--m-suzuki);}
+  .seg.gap{background:repeating-linear-gradient(135deg,#fbfcfd,#fbfcfd 5px,#eef1f5 5px,#eef1f5 10px); flex:1;}
+  .seg.gap span{color:#b3bac4; text-shadow:none; font-weight:600;}
+  .stackwrap .capline{position:absolute; left:-5px; right:-5px; height:0; border-top:2px dashed var(--caline); z-index:5;}
+  .stackwrap .capline .cl-tag{position:absolute; right:-2px; top:-15px; font-size:9.5px; color:var(--muted); font-weight:600; background:var(--card); padding:0 3px;}
+  .daycol .col-foot{font-size:11px; margin-top:9px; font-weight:600;}
+  .daycol .col-foot .free{color:var(--free);}
+  .daycol.lowfill .col-title::after{content:"空き多"; font-size:9.5px; font-weight:700; color:var(--free); background:#e9f6ef; padding:1px 5px; border-radius:5px; margin-left:6px; vertical-align:1px;}
+
+  /* ====== VIEW B: per-member horizontal week ====== */
+  .memrows{display:flex; flex-direction:column; gap:13px;}
+  .memrow{display:grid; grid-template-columns:128px 1fr 92px; align-items:center; gap:14px;}
+  .memrow .who{display:flex; align-items:center; gap:8px;}
+  .memrow .who .dot{width:10px; height:10px; border-radius:50%; flex:none;}
+  .memrow .who .nm{font-size:13.5px; font-weight:600;}
+  .memrow .who .rl{font-size:10.5px; color:var(--muted); display:block; margin-top:1px;}
+  .htrack{position:relative; height:30px; background:var(--track); border-radius:8px; display:flex; overflow:hidden; border:1px solid var(--line);}
+  .hseg{height:100%; display:flex; align-items:center; justify-content:center; position:relative;}
+  .hseg.day1{} /* per-day segments share member color w/ subtle dividers */
+  .hseg .dh{font-size:10px; font-weight:700; color:#fff; text-shadow:0 1px 1px rgba(0,0,0,.18);}
+  .hseg + .hseg{border-left:1.5px solid rgba(255,255,255,.55);}
+  .hseg.empty{background:repeating-linear-gradient(135deg,#fbfcfd,#fbfcfd 5px,#eef1f5 5px,#eef1f5 10px);}
+  .hseg.empty .dh{color:#b3bac4; text-shadow:none;}
+  .htrack .htot-line{position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--caline); z-index:4;}
+  .memrow .sumcell{text-align:right;}
+  .memrow .sumcell .big{font-size:14px; font-weight:700;}
+  .memrow .sumcell .big small{font-size:10.5px; color:var(--muted); font-weight:600;}
+  .memrow .sumcell .st{font-size:10px; font-weight:700; padding:1px 6px; border-radius:5px; display:inline-block; margin-top:3px;}
+  .st.over{background:#fdecec; color:var(--over);} .st.free{background:#e9f6ef; color:var(--free);} .st.full{background:#eef0f2; color:var(--full);}
+  .colaxis{display:grid; grid-template-columns:128px 1fr 92px; gap:14px; margin-bottom:8px;}
+  .colaxis .days{display:grid; grid-template-columns:repeat(5,1fr); font-size:10.5px; color:var(--muted); text-align:center;}
+  .colaxis .days span.today{color:var(--fill); font-weight:700;}
+
+  /* insight callout */
+  .insight{display:flex; align-items:center; gap:10px; background:#fffaf0; border:1px solid #f6e3bd; border-radius:12px;
+    padding:12px 16px; margin-bottom:16px; font-size:13px;}
+  .insight .ic{width:24px; height:24px; border-radius:7px; background:var(--amber); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:700; flex:none;}
+  .insight b{font-weight:700;}
+
+  /* legend */
+  .legend{display:flex; flex-wrap:wrap; gap:14px; margin-top:4px; font-size:11px; color:var(--muted);}
+  .legend .it{display:flex; align-items:center; gap:5px;}
+  .legend .sw{width:13px; height:11px; border-radius:3px; display:inline-block;}
+  .legend .gp{width:13px; height:11px; border-radius:3px; display:inline-block; background:repeating-linear-gradient(135deg,#fbfcfd,#fbfcfd 4px,#eef1f5 4px,#eef1f5 8px); border:1px solid var(--line);}
+  .legend .dash{width:16px; border-top:2px dashed var(--caline); display:inline-block;}
+  .footnote{font-size:11px; color:var(--muted); margin-top:18px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="title-block">
+      <h1>② 計画 ｜ 週ならしビュー</h1>
+      <div class="sub">週全体の埋まり具合・偏り・空きを俯瞰。どこをならすか一目で。</div>
+    </div>
+    <nav class="weeknav" aria-label="週ナビゲーション">
+      <button title="前の週">‹</button>
+      <span class="label">6/1〜6/5<span class="now">今週</span></span>
+      <button title="次の週">›</button>
+    </nav>
+  </header>
+
+  <div class="insight">
+    <span class="ic">!</span>
+    <span><b>金曜</b>と<b>鈴木</b>が大きく空いています（金曜 残容量18h／鈴木 空き31h）。佐藤は満稼働・森田は木曜が超過。未アサイン12hは空きへ寄せて“ならし”を。</span>
+  </div>
+
+  <!-- ===== VIEW A: per-day stacked ===== -->
+  <div class="panel">
+    <div class="ph">
+      <h2>曜日ごとの積み上げ（チーム容量 40h/日）</h2>
+      <span class="hint">各色＝メンバー／網掛け＝空き／破線＝容量40h</span>
+    </div>
+    <div class="daycols" id="daycols"></div>
+  </div>
+
+  <!-- ===== VIEW B: per-member horizontal ===== -->
+  <div class="panel">
+    <div class="ph">
+      <h2>メンバーごとの週（横スタック・容量40h/週）</h2>
+      <span class="hint">左から月→金。網掛け＝空き／縦線＝容量40h</span>
+    </div>
+    <div class="colaxis">
+      <div></div>
+      <div class="days"><span>月 6/1</span><span>火 6/2</span><span class="today">水 6/3</span><span>木 6/4</span><span>金 6/5</span></div>
+      <div></div>
+    </div>
+    <div class="memrows" id="memrows"></div>
+  </div>
+
+  <div class="legend">
+    <span class="it"><span class="sw" style="background:var(--m-morita)"></span>森田</span>
+    <span class="it"><span class="sw" style="background:var(--m-tanaka)"></span>田中</span>
+    <span class="it"><span class="sw" style="background:var(--m-sato)"></span>佐藤</span>
+    <span class="it"><span class="sw" style="background:var(--m-suzuki)"></span>鈴木</span>
+    <span class="it"><span class="gp"></span>空き</span>
+    <span class="it"><span class="dash"></span>容量線</span>
+    <span class="it"><span class="sw" style="background:var(--over)"></span>超過</span>
+  </div>
+
+  <p class="footnote">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</p>
+
+</div>
+
+<script>
+  const DAY_CAP = 40;   // team capacity per day
+  const WEEK_CAP = 40;  // per member per week
+  const MEMBER_DAY_CAP = 8;
+  const todayIdx = 2;   // 水曜
+
+  // member-day assigned hours
+  const members = [
+    {key:'morita', name:'森田', role:'Backend', color:'var(--m-morita)', days:[8,6,8,10,4]},
+    {key:'tanaka', name:'田中', role:'Frontend', color:'var(--m-tanaka)', days:[4,6,2,4,0]},
+    {key:'sato',   name:'佐藤', role:'Frontend', color:'var(--m-sato)',   days:[8,8,8,8,8]},
+    {key:'suzuki', name:'鈴木', role:'QA',       color:'var(--m-suzuki)', days:[2,3,2,2,0]},
+  ];
+  const dayLabels = [
+    {d:'月', wd:'6/1'},{d:'火', wd:'6/2'},{d:'水', wd:'6/3'},{d:'木', wd:'6/4'},{d:'金', wd:'6/5'}
+  ];
+  const PXH = 260/ (DAY_CAP * (260/ (DAY_CAP))); // placeholder; we'll scale by px
+
+  // ---- VIEW A: per-day stacked columns ----
+  const STACK_H = 260; // px = 40h scale top (cap line). over goes above visually capped here since max day total = 22 < 40
+  const SCALE = STACK_H / DAY_CAP; // px per hour
+  const dc = document.getElementById('daycols');
+  dayLabels.forEach((dl, di)=>{
+    const totals = members.map(m=>m.days[di]);
+    const dayTotal = totals.reduce((a,b)=>a+b,0);
+    const free = DAY_CAP - dayTotal;
+    const lowfill = dayTotal <= 20;
+
+    const col = document.createElement('div');
+    col.className = 'daycol' + (di===todayIdx?' today':'') + (lowfill?' lowfill':'');
+
+    // build stacked segments (members bottom->up, then gap fills remainder via flex)
+    let segs = '';
+    members.forEach(m=>{
+      const h = m.days[di];
+      if(h<=0) return;
+      const px = h*SCALE;
+      segs += `<div class="seg m-${m.key}" style="height:${px}px" title="${m.name} ${h}h">
+        <span>${m.name.charAt(0)} ${h}</span></div>`;
+    });
+    // gap segment fills the rest up to cap (flex:1 inside fixed-height wrap)
+    const gapPx = free*SCALE;
+    const gapSeg = free>0 ? `<div class="seg gap" style="height:${gapPx}px"><span>空 ${free}</span></div>` : '';
+
+    col.innerHTML = `
+      <div class="col-title">${dl.d}<span class="wd">${dl.wd}</span></div>
+      <div class="col-sub"><b class="nums">${dayTotal}</b>/${DAY_CAP}h</div>
+      <div class="stackwrap" style="height:${STACK_H}px">
+        ${segs}${gapSeg}
+        <div class="capline" style="bottom:${DAY_CAP*SCALE}px"><span class="cl-tag">40h</span></div>
+      </div>
+      <div class="col-foot"><span class="free nums">空き ${free}h</span></div>`;
+    dc.appendChild(col);
+  });
+
+  // ---- VIEW B: per-member horizontal ----
+  const mr = document.getElementById('memrows');
+  members.forEach(m=>{
+    const total = m.days.reduce((a,b)=>a+b,0);
+    const free = WEEK_CAP - total;
+    const hasOver = m.days.some(h=>h>MEMBER_DAY_CAP);
+    let stat = {cls:'', t:''};
+    if(hasOver) stat = {cls:'over', t:'超過あり'};
+    else if(total>=40) stat = {cls:'full', t:'満稼働'};
+    else if(free>=20) stat = {cls:'free', t:`空き${free}h`};
+    else stat = {cls:'free', t:`空き${free}h`};
+
+    // segments scaled so that WEEK_CAP(40h) = 100% width; capacity line at total->no, line marks 40h = full width edge
+    // We scale by 40h = 100%. Each day's hours as % of 40.
+    const row = document.createElement('div');
+    row.className = 'memrow';
+
+    let segHtml = '';
+    m.days.forEach((h,i)=>{
+      if(h<=0) return;
+      const w = h/WEEK_CAP*100;
+      const over = h>MEMBER_DAY_CAP;
+      const bg = over ? 'var(--over)' : m.color;
+      segHtml += `<div class="hseg" style="width:${w}%; background:${bg}" title="${dayLabels[i].d} ${h}h">
+        <span class="dh">${h}</span></div>`;
+    });
+    // empty remainder of week
+    if(free>0){
+      const w = free/WEEK_CAP*100;
+      segHtml += `<div class="hseg empty" style="width:${w}%"><span class="dh">空き ${free}h</span></div>`;
+    }
+
+    row.innerHTML = `
+      <div class="who"><span class="dot" style="background:${m.color}"></span>
+        <span><span class="nm">${m.name}</span><span class="rl">${m.role}</span></span></div>
+      <div class="htrack">${segHtml}</div>
+      <div class="sumcell"><div class="big nums">${total}<small>/40h</small></div>
+        <span class="st ${stat.cls}">${stat.t}</span></div>`;
+    mr.appendChild(row);
+  });
+</script>
+</body>
+</html>

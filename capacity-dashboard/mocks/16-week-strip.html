@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>今週ストリップ — キャパダッシュボード</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0; --cap:#9aa3af;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased; line-height:1.5;
+    font-variant-numeric:tabular-nums; font-feature-settings:"tnum";
+  }
+  .wrap{max-width:760px; margin:0 auto; padding:28px 20px 64px;}
+  h1{font-size:20px; margin:0 0 2px; letter-spacing:.01em;}
+  .sub{color:var(--muted); font-size:13px; margin:0 0 14px;}
+  .note{
+    color:var(--muted); font-size:12px; background:#fffaf2; border:1px solid #f1e4cf;
+    border-radius:10px; padding:8px 12px; margin:0 0 20px;
+  }
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    padding:18px 18px; box-shadow:0 1px 2px rgba(20,28,45,.04); margin-bottom:16px;
+  }
+  .sectitle{font-size:13px; font-weight:700; color:var(--muted); margin:0 0 14px; letter-spacing:.02em;}
+
+  /* 週ストリップ */
+  .strip{display:flex; gap:8px;}
+  .day{
+    flex:1; border:1px solid var(--line); border-radius:11px; padding:10px 6px 9px;
+    text-align:center; cursor:pointer; background:var(--card); transition:.12s;
+    position:relative;
+  }
+  .day:hover{border-color:#c9d2de; box-shadow:0 2px 6px rgba(20,28,45,.07);}
+  .day.sel{border-color:var(--ink); box-shadow:0 0 0 1px var(--ink) inset;}
+  .day .dow{font-size:12px; color:var(--muted);}
+  .day.sel .dow{color:var(--ink); font-weight:700;}
+  .day .dnum{font-size:15px; font-weight:700; margin:1px 0 9px;}
+  .freebar-track{
+    height:50px; background:var(--track); border-radius:6px; display:flex; align-items:flex-end;
+    overflow:hidden; margin-bottom:8px;
+  }
+  .freebar{width:100%; border-radius:6px 6px 0 0; background:var(--free);}
+  .freebar.none{background:var(--over);}
+  .freebar.off{background:transparent;}
+  .day .freeval{font-size:12px; font-weight:700;}
+  .day .freelbl{font-size:10px; color:var(--muted);}
+  .day.weekend{background:#fafbfc;}
+  .day.weekend .dnum{color:var(--muted);}
+
+  .striplegend{display:flex; gap:16px; flex-wrap:wrap; font-size:11px; color:var(--muted); margin-top:12px;}
+  .striplegend span{display:inline-flex; align-items:center; gap:5px;}
+  .lg{width:9px; height:9px; border-radius:3px; display:inline-block;}
+
+  /* 選択日サマリ */
+  .selhd{display:flex; align-items:baseline; gap:10px; margin-bottom:4px;}
+  .selhd .d{font-size:17px; font-weight:700;}
+  .selhd .tag{font-size:11px; color:var(--free); background:#e7f6ee; border:1px solid #cdebda; padding:2px 9px; border-radius:999px; font-weight:700;}
+  .teamline{font-size:13px; color:var(--muted); margin-bottom:16px;}
+  .teamline b{color:var(--ink);}
+
+  /* メンバー別空き */
+  .mrow{display:flex; align-items:center; gap:12px; padding:10px 0; border-top:1px solid var(--line);}
+  .mrow:first-of-type{border-top:none;}
+  .mav{width:30px; height:30px; border-radius:50%; flex:none; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:13px;}
+  .mname{font-size:14px; width:64px; flex:none;}
+  .mbar-track{flex:1; height:18px; background:var(--track); border-radius:5px; position:relative; overflow:hidden;}
+  .mbar{height:100%; border-radius:5px;}
+  .mbar.fill{background:var(--fill);}
+  .mbar.over{background:repeating-linear-gradient(45deg,var(--over),var(--over) 5px,#d23a3f 5px,#d23a3f 10px);}
+  .mfree{font-size:13px; font-weight:700; width:78px; text-align:right;}
+  .mfree.free{color:var(--free);}
+  .mfree.full{color:var(--full);}
+  .mfree.over{color:var(--over);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>今週のキャパシティ</h1>
+  <p class="sub">2026年 6月第1週 ・ チーム4名 ・ 容量 8h/人/日</p>
+  <div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</div>
+
+  <!-- 週ストリップ -->
+  <div class="card">
+    <div class="sectitle">今週7日ストリップ — 各日のチーム空き合計（クリックでその日へ）</div>
+    <div class="strip">
+      <!-- 月 -->
+      <div class="day" title="6/1 月 空き12h">
+        <div class="dow">月</div><div class="dnum">1</div>
+        <div class="freebar-track"><div class="freebar" style="height:38%;"></div></div>
+        <div class="freeval" style="color:var(--free);">12h</div><div class="freelbl">空き</div>
+      </div>
+      <!-- 火 -->
+      <div class="day" title="6/2 火 空き5h">
+        <div class="dow">火</div><div class="dnum">2</div>
+        <div class="freebar-track"><div class="freebar" style="height:16%;"></div></div>
+        <div class="freeval" style="color:var(--free);">5h</div><div class="freelbl">空き</div>
+      </div>
+      <!-- 水 -->
+      <div class="day" title="6/3 水 空き0h（満杯）">
+        <div class="dow">水</div><div class="dnum">3</div>
+        <div class="freebar-track"><div class="freebar none" style="height:6%;"></div></div>
+        <div class="freeval" style="color:var(--over);">0h</div><div class="freelbl">満杯</div>
+      </div>
+      <!-- 木 today/selected -->
+      <div class="day sel" title="6/4 木 空き8h（選択中）">
+        <div class="dow">木</div><div class="dnum">4</div>
+        <div class="freebar-track"><div class="freebar" style="height:25%;"></div></div>
+        <div class="freeval" style="color:var(--free);">8h</div><div class="freelbl">今日</div>
+      </div>
+      <!-- 金 -->
+      <div class="day" title="6/5 金 空き16h">
+        <div class="dow">金</div><div class="dnum">5</div>
+        <div class="freebar-track"><div class="freebar" style="height:50%;"></div></div>
+        <div class="freeval" style="color:var(--free);">16h</div><div class="freelbl">空き</div>
+      </div>
+      <!-- 土 -->
+      <div class="day weekend" title="6/6 土 休">
+        <div class="dow">土</div><div class="dnum">6</div>
+        <div class="freebar-track"><div class="freebar off"></div></div>
+        <div class="freeval" style="color:var(--muted);">—</div><div class="freelbl">休</div>
+      </div>
+      <!-- 日 -->
+      <div class="day weekend" title="6/7 日 休">
+        <div class="dow">日</div><div class="dnum">7</div>
+        <div class="freebar-track"><div class="freebar off"></div></div>
+        <div class="freeval" style="color:var(--muted);">—</div><div class="freelbl">休</div>
+      </div>
+    </div>
+    <div class="striplegend">
+      <span><i class="lg" style="background:var(--free);"></i>空きあり</span>
+      <span><i class="lg" style="background:var(--over);"></i>満杯/超過</span>
+      <span>バーの高さ = チーム空き合計（最大32h）</span>
+    </div>
+  </div>
+
+  <!-- 選択日 = 今日(6/4 木) -->
+  <div class="card">
+    <div class="selhd">
+      <span class="d">6/4(木) の空き</span>
+      <span class="tag">選択中・今日</span>
+    </div>
+    <div class="teamline">チーム計 <b>24 / 32h</b>（稼働率 75%）・ 空き合計 <b style="color:var(--free);">8h</b></div>
+
+    <!-- 森田 超過 -->
+    <div class="mrow">
+      <span class="mav" style="background:#e5772d;">森</span>
+      <span class="mname">森田</span>
+      <span class="mbar-track"><span class="mbar over" style="width:100%;"></span></span>
+      <span class="mfree over">超過 +2h</span>
+    </div>
+    <!-- 田中 空き4h -->
+    <div class="mrow">
+      <span class="mav" style="background:#3a86ff;">田</span>
+      <span class="mname">田中</span>
+      <span class="mbar-track"><span class="mbar fill" style="width:50%;"></span></span>
+      <span class="mfree free">空き 4h</span>
+    </div>
+    <!-- 佐藤 ちょうど -->
+    <div class="mrow">
+      <span class="mav" style="background:#2fa66b;">佐</span>
+      <span class="mname">佐藤</span>
+      <span class="mbar-track"><span class="mbar fill" style="width:100%;"></span></span>
+      <span class="mfree full">満（0h）</span>
+    </div>
+    <!-- 鈴木 空き6h -->
+    <div class="mrow">
+      <span class="mav" style="background:#b657d6;">鈴</span>
+      <span class="mname">鈴木</span>
+      <span class="mbar-track"><span class="mbar fill" style="width:25%;"></span></span>
+      <span class="mfree free">空き 6h</span>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

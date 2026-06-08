@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>おすすめ担当ランキング｜キャパダッシュボード</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"palt"; -webkit-font-smoothing:antialiased;
+  }
+  .nums{font-variant-numeric:tabular-nums;}
+  header{
+    background:var(--card); border-bottom:1px solid var(--line);
+    padding:16px 24px; display:flex; align-items:center; gap:20px; flex-wrap:wrap;
+  }
+  header h1{font-size:17px; margin:0; font-weight:700; letter-spacing:.02em;}
+  .daynav{display:flex; align-items:center; gap:4px; margin-left:8px;
+    background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:4px;}
+  .daynav button{border:none; background:transparent; color:var(--muted); font-size:15px;
+    width:30px; height:30px; border-radius:8px; cursor:pointer;}
+  .daynav button:hover{background:var(--track); color:var(--ink);}
+  .daynav .today{font-size:14px; font-weight:600; padding:0 12px; display:flex; align-items:center; gap:7px;}
+  .daynav .badge-today{background:var(--fill); color:#fff; font-size:11px; font-weight:700; padding:1px 7px; border-radius:6px;}
+  .note{margin-left:auto; color:var(--muted); font-size:12px;}
+  main{padding:24px; max-width:860px; margin:0 auto;}
+  /* target task header */
+  .target{
+    background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px 20px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04); margin-bottom:18px;
+    display:flex; align-items:center; gap:16px;
+  }
+  .target .tbar{width:5px; align-self:stretch; min-height:48px; border-radius:3px;}
+  .target .tinfo{flex:1;}
+  .target .tlabel{font-size:11.5px; color:var(--muted); font-weight:700; letter-spacing:.05em; margin-bottom:4px;}
+  .target .tname{font-size:19px; font-weight:800;}
+  .target .tmeta{display:flex; align-items:center; gap:9px; margin-top:8px;}
+  .chip{font-size:11.5px; font-weight:700; padding:3px 10px; border-radius:7px; color:#fff;}
+  .hrs{font-size:13px; color:var(--muted); font-weight:700;}
+  .picker{display:flex; gap:7px;}
+  .picker button{
+    font-size:12px; border:1px solid var(--line); background:var(--card); color:var(--muted);
+    padding:6px 12px; border-radius:9px; cursor:pointer; font-weight:600;
+  }
+  .picker button.active{background:var(--ink); color:#fff; border-color:var(--ink);}
+  /* scoring legend */
+  .scorebar{
+    display:flex; gap:18px; padding:11px 18px; background:var(--card); border:1px solid var(--line);
+    border-radius:11px; font-size:11.5px; color:var(--muted); margin-bottom:16px; flex-wrap:wrap;
+  }
+  .scorebar b{color:var(--ink);}
+  .scorebar .dot{display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:5px; vertical-align:0;}
+  /* ranking */
+  .rank{display:flex; flex-direction:column; gap:12px;}
+  .rcard{
+    background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px 18px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04); display:flex; gap:16px; align-items:center; position:relative;
+    transition:.15s;
+  }
+  .rcard.best{border-color:var(--free); box-shadow:0 0 0 3px rgba(47,166,107,.13);}
+  .rcard.no{opacity:.66;}
+  .medal{
+    width:30px; text-align:center; font-size:20px; font-weight:800; color:var(--muted); flex-shrink:0;
+  }
+  .rcard.best .medal{color:var(--free);}
+  .avatar{width:42px; height:42px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:15px; flex-shrink:0;}
+  .rmain{flex:1; min-width:0;}
+  .rrow1{display:flex; align-items:center; gap:9px; margin-bottom:8px;}
+  .rname{font-size:15px; font-weight:800;}
+  .rrole{font-size:11px; color:var(--muted); border:1px solid var(--line); padding:1px 7px; border-radius:5px; font-weight:600;}
+  .best-tag{font-size:11px; font-weight:800; color:#fff; background:var(--free); padding:2px 9px; border-radius:6px;}
+  /* factor chips */
+  .factors{display:flex; gap:7px; flex-wrap:wrap; margin-bottom:9px;}
+  .fchip{font-size:11px; font-weight:600; padding:3px 9px; border-radius:7px; display:flex; align-items:center; gap:4px; border:1px solid var(--line);}
+  .fchip.good{background:#eafaf1; color:#1f8f5a; border-color:#cfe8d8;}
+  .fchip.bad{background:#fdecec; color:#c93b3b; border-color:#f5cccc;}
+  .fchip.mid{background:var(--bg); color:var(--muted);}
+  /* capacity mini bar */
+  .capbar{height:8px; background:var(--track); border-radius:5px; overflow:hidden; display:flex;}
+  .capbar .u{height:100%;}
+  .capbar .add{height:100%; background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.4) 0 4px,transparent 4px 8px);}
+  .capcap{font-size:11px; color:var(--muted); margin-top:5px;}
+  .capcap b{color:var(--ink);}
+  /* score gauge */
+  .score{flex-shrink:0; text-align:center; width:78px;}
+  .score .num{font-size:26px; font-weight:800; line-height:1;}
+  .score.good .num{color:var(--free);} .score.mid .num{color:var(--fill);} .score.bad .num{color:var(--full);}
+  .score .lbl{font-size:10px; color:var(--muted); font-weight:700; letter-spacing:.05em; margin-top:3px;}
+  .score .ring{
+    width:54px; height:54px; border-radius:50%; margin:0 auto 5px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .assign{
+    margin-left:14px; flex-shrink:0;
+  }
+  .assign button{
+    border:none; cursor:pointer; font-weight:700; font-size:12.5px; padding:9px 16px; border-radius:10px;
+    background:var(--fill); color:#fff;
+  }
+  .assign button:disabled{background:var(--track); color:var(--full); cursor:not-allowed;}
+  .toast{position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px);
+    background:var(--ink); color:#fff; padding:11px 20px; border-radius:10px; font-size:13px;
+    font-weight:600; opacity:0; transition:.25s; pointer-events:none; box-shadow:0 6px 20px rgba(0,0,0,.2);}
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+</style>
+</head>
+<body>
+<header>
+  <h1>🏆 おすすめ担当ランキング</h1>
+  <div class="daynav">
+    <button title="前日">‹</button>
+    <span class="today nums">6/4(木) <span class="badge-today">今日</span></span>
+    <button title="翌日">›</button>
+  </div>
+  <span class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</span>
+</header>
+
+<main>
+  <div class="target" id="target"></div>
+
+  <div class="scorebar">
+    <span>スコア算出:</span>
+    <span><span class="dot" style="background:var(--free)"></span><b>空き時間</b> 多いほど高</span>
+    <span><span class="dot" style="background:var(--fill)"></span><b>プロジェクト一致</b> +30</span>
+    <span><span class="dot" style="background:var(--over)"></span><b>超過する/満稼働</b> 大幅減点</span>
+  </div>
+
+  <div class="rank" id="rank"></div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const PROJ = {Backend:'#3a86ff', Frontend:'#2fa66b', QA:'#b657d6', 共通:'#8a93a0'};
+const CAP = 8;
+
+// selectable target tasks (default = ログインバグ修正)
+const targetTasks = [
+  {id:'t1', name:'ログインバグ修正', hours:3, proj:'Backend'},
+  {id:'t2', name:'LP文言修正', hours:2, proj:'Frontend'},
+  {id:'t3', name:'リリースノート作成', hours:1, proj:'共通'},
+];
+let current = targetTasks[0];
+
+const members = [
+  {id:'suzuki', name:'鈴木', color:'#b657d6', role:'共通', used:2, projs:['共通']},
+  {id:'tanaka', name:'田中', color:'#3a86ff', role:'Frontend', used:4, projs:['Frontend']},
+  {id:'sato',   name:'佐藤', color:'#2fa66b', role:'Backend/QA', used:8, projs:['Backend','QA']},
+  {id:'morita', name:'森田', color:'#e5772d', role:'Backend', used:10, projs:['Backend']},
+];
+
+function scoreOf(m, task){
+  const free = Math.max(0, CAP - m.used);
+  const fits = m.used <= CAP && free >= task.hours;
+  const match = m.projs.includes(task.proj);
+  let s = 0;
+  const breakdown = [];
+  // free capacity: up to 50
+  const freeScore = Math.round((free/CAP)*50);
+  s += freeScore;
+  breakdown.push({type:free>0?'good':'mid', label:`空き ${free}h`, pts:freeScore});
+  // fits (no overflow)
+  if(m.used > CAP){
+    s -= 60; breakdown.push({type:'bad', label:`超過中 +${m.used-CAP}h`, pts:-60});
+  }else if(!fits){
+    s -= 40; breakdown.push({type:'bad', label:`容量不足(${task.hours}h入らず)`, pts:-40});
+  }else{
+    s += 20; breakdown.push({type:'good', label:`超過しない`, pts:20});
+  }
+  // project match
+  if(match){ s += 30; breakdown.push({type:'good', label:`${task.proj}一致`, pts:30}); }
+  else { breakdown.push({type:'mid', label:`${task.proj}専任でない`, pts:0}); }
+  s = Math.max(0, Math.min(100, s));
+  return {free, fits, match, score:s, breakdown};
+}
+
+function render(){
+  // target header
+  const c = PROJ[current.proj];
+  document.getElementById('target').innerHTML=`
+    <div class="tbar" style="background:${c}"></div>
+    <div class="tinfo">
+      <div class="tlabel">この仕事を誰に振る？</div>
+      <div class="tname">${current.name}</div>
+      <div class="tmeta">
+        <span class="chip" style="background:${c}">${current.proj}</span>
+        <span class="hrs nums">所要 ${current.hours}h</span>
+        <span class="hrs">／ 今日 cap 8h/人</span>
+      </div>
+    </div>
+    <div class="picker" id="picker"></div>`;
+  const pk=document.getElementById('picker');
+  targetTasks.forEach(t=>{
+    const b=document.createElement('button');
+    b.textContent=t.name; b.className=t.id===current.id?'active':'';
+    b.onclick=()=>{current=t; render();};
+    pk.appendChild(b);
+  });
+
+  // ranking
+  const ranked = members.map(m=>({m, ...scoreOf(m,current)}))
+    .sort((a,b)=>b.score-a.score);
+  const wrap=document.getElementById('rank');
+  wrap.innerHTML='';
+  ranked.forEach((r,i)=>{
+    const m=r.m;
+    const best = i===0 && r.fits;
+    const usedPct=Math.min(100,(m.used/CAP)*100);
+    const addPct = r.fits ? (current.hours/CAP)*100 : 0;
+    const overBar = m.used>CAP;
+    const scoreCls = r.score>=70?'good':(r.score>=40?'mid':'bad');
+    const medals=['①','②','③','④'];
+    let barInner;
+    if(overBar){ barInner=`<div class="u" style="width:100%;background:var(--over)"></div>`; }
+    else{
+      barInner=`<div class="u" style="width:${usedPct}%;background:var(--fill)"></div>`+
+               (r.fits?`<div class="add" style="width:${addPct}%;background:${c}"></div>`:'');
+    }
+    const factorsHtml = r.breakdown.map(f=>
+      `<span class="fchip ${f.type}">${f.type==='good'?'✓':(f.type==='bad'?'✕':'•')} ${f.label}${f.pts!==0?` <b style="font-variant-numeric:tabular-nums">${f.pts>0?'+':''}${f.pts}</b>`:''}</span>`
+    ).join('');
+    const ring = `conic-gradient(${r.score>=70?'var(--free)':(r.score>=40?'var(--fill)':'var(--full)')} ${r.score*3.6}deg, var(--track) 0)`;
+    const el=document.createElement('div');
+    el.className='rcard'+(best?' best':'')+(r.fits?'':' no');
+    el.innerHTML=`
+      <div class="medal">${medals[i]}</div>
+      <div class="avatar" style="background:${m.color}">${m.name.charAt(0)}</div>
+      <div class="rmain">
+        <div class="rrow1">
+          <span class="rname">${m.name}</span>
+          <span class="rrole">${m.role}</span>
+          ${best?'<span class="best-tag">おすすめ</span>':''}
+        </div>
+        <div class="factors">${factorsHtml}</div>
+        <div class="capbar">${barInner}</div>
+        <div class="capcap nums"><b>${m.used}/${CAP}h</b> 使用 ${overBar?`<span style="color:var(--over)">(+${m.used-CAP}h超過)</span>`:(r.fits?`→ 振ると <b>${m.used+current.hours}/${CAP}h</b>`:`· 残り${r.free}h`)}</div>
+      </div>
+      <div class="score ${scoreCls}">
+        <div class="ring" style="background:${ring}">
+          <div style="width:42px;height:42px;border-radius:50%;background:var(--card);display:flex;align-items:center;justify-content:center;">
+            <span class="num nums">${r.score}</span>
+          </div>
+        </div>
+        <div class="lbl">SCORE</div>
+      </div>
+      <div class="assign">
+        <button ${r.fits?'':'disabled'} onclick="doAssign('${m.name}',${r.fits})">${r.fits?'振る':'不可'}</button>
+      </div>`;
+    wrap.appendChild(el);
+  });
+}
+
+let toastT;
+function doAssign(who, fits){
+  if(!fits) return;
+  const t=document.getElementById('toast');
+  t.textContent=`✓ 「${current.name}」を ${who} さんにアサインしました（モック）`;
+  t.classList.add('show');
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2600);
+}
+
+render();
+</script>
+</body>
+</html>

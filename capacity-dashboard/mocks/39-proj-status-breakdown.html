@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ステータス別タスク内訳 — 新ダッシュボード機能</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --done:#2fa66b; --doing:#3a86ff; --todo:#9aa3af; --blocked:#e5484d;
+    --sig-green:#2fa66b; --sig-yellow:#f5a623; --sig-red:#e5484d;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"tnum" 1; -webkit-font-smoothing:antialiased;
+    line-height:1.5; padding:28px 20px 60px;
+  }
+  .wrap{max-width:980px;margin:0 auto;}
+  .tnum{font-variant-numeric:tabular-nums;}
+
+  /* header */
+  header.top{margin-bottom:22px;}
+  .titlerow{display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+  h1{font-size:20px;font-weight:700;margin:0;letter-spacing:.01em;}
+  .projpick{
+    display:inline-flex;align-items:center;gap:6px;
+    background:var(--card);border:1px solid var(--line);border-radius:9px;
+    padding:6px 12px;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer;
+    box-shadow:0 1px 2px rgba(20,30,50,.04);
+  }
+  .projpick .caret{color:var(--muted);font-size:11px;}
+  .note{font-size:12px;color:var(--muted);margin-top:8px;}
+
+  /* cards */
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:14px;
+    box-shadow:0 1px 3px rgba(20,30,50,.05);padding:20px 22px;margin-bottom:18px;
+  }
+  .card h2{font-size:14px;font-weight:700;margin:0 0 16px;display:flex;align-items:center;gap:8px;}
+  .card h2 .sub{font-size:12px;font-weight:500;color:var(--muted);}
+
+  /* top summary grid */
+  .summary{display:grid;grid-template-columns:1.15fr 1fr;gap:18px;}
+  @media(max-width:760px){.summary{grid-template-columns:1fr;}}
+
+  /* donut */
+  .donutbox{display:flex;align-items:center;gap:22px;}
+  .donut{position:relative;width:168px;height:168px;flex:0 0 auto;}
+  .donut svg{transform:rotate(-90deg);}
+  .donut .center{
+    position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
+  }
+  .donut .pct{font-size:30px;font-weight:700;letter-spacing:-.01em;}
+  .donut .pctlbl{font-size:11px;color:var(--muted);margin-top:2px;}
+  .donut .cnt{font-size:11px;color:var(--muted);margin-top:3px;}
+
+  .legend{display:flex;flex-direction:column;gap:11px;flex:1;min-width:0;}
+  .legrow{display:flex;align-items:center;gap:10px;font-size:13px;}
+  .legrow .dot{width:11px;height:11px;border-radius:3px;flex:0 0 auto;}
+  .legrow .nm{font-weight:600;flex:0 0 86px;}
+  .legrow .nums{margin-left:auto;color:var(--muted);font-size:12.5px;}
+  .legrow .nums b{color:var(--ink);font-weight:700;font-size:13px;}
+
+  /* stacked bar */
+  .stackwrap{display:flex;flex-direction:column;justify-content:center;}
+  .stackbar{display:flex;height:30px;border-radius:8px;overflow:hidden;border:1px solid var(--line);}
+  .stackbar .seg{height:100%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:700;min-width:0;}
+  .stacklbls{display:flex;flex-wrap:wrap;gap:14px 20px;margin-top:16px;}
+  .stacklbls .item{display:flex;align-items:center;gap:8px;font-size:12.5px;}
+  .stacklbls .item .dot{width:10px;height:10px;border-radius:3px;}
+  .stacklbls .item .pc{color:var(--muted);}
+  .miniprog{margin-top:18px;padding-top:16px;border-top:1px dashed var(--line);}
+  .miniprog .lbl{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:7px;}
+  .miniprog .lbl b{color:var(--ink);font-weight:700;}
+  .track{height:9px;background:var(--track);border-radius:6px;overflow:hidden;}
+  .track .fill{height:100%;background:var(--done);border-radius:6px;}
+
+  /* status sections */
+  .stcols{display:grid;grid-template-columns:1fr 1fr;gap:18px;}
+  @media(max-width:760px){.stcols{grid-template-columns:1fr;}}
+
+  .stcard h3{
+    font-size:13px;font-weight:700;margin:0 0 13px;display:flex;align-items:center;gap:9px;
+  }
+  .stcard h3 .chip{
+    display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;
+    font-size:12px;font-weight:700;color:#fff;
+  }
+  .stcard h3 .ct{margin-left:auto;font-size:12px;color:var(--muted);font-weight:600;}
+  .tasklist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:0;}
+  .tasklist li{
+    display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px;
+  }
+  .tasklist li:last-child{border-bottom:none;}
+  .tasklist .marker{width:7px;height:7px;border-radius:50%;flex:0 0 auto;}
+  .tasklist .tname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .tasklist .owner{
+    font-size:11px;font-weight:700;color:#fff;border-radius:5px;padding:2px 7px;flex:0 0 auto;
+  }
+  /* doing progress inline */
+  .pgwrap{display:flex;align-items:center;gap:8px;flex:0 0 110px;}
+  .pgwrap .pgtrack{flex:1;height:6px;background:var(--track);border-radius:5px;overflow:hidden;}
+  .pgwrap .pgfill{height:100%;background:var(--doing);border-radius:5px;}
+  .pgwrap .pgnum{font-size:11.5px;font-weight:700;color:var(--doing);width:34px;text-align:right;}
+  .blockreason{
+    display:flex;align-items:center;gap:8px;flex:0 0 auto;
+    font-size:11.5px;color:var(--blocked);font-weight:600;
+    background:rgba(229,72,77,.08);border-radius:6px;padding:3px 9px;
+  }
+  .donesmall .tname{color:var(--muted);}
+  .donesmall .check{color:var(--done);font-size:13px;flex:0 0 auto;}
+  .more{font-size:11.5px;color:var(--muted);padding-top:9px;}
+  footer{font-size:11px;color:var(--muted);text-align:center;margin-top:26px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="titlerow">
+      <h1>ステータス別タスク内訳</h1>
+      <span class="projpick">プロジェクト: 新ダッシュボード機能 <span class="caret">▾</span></span>
+    </div>
+    <div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。 ｜ Release v1.2 ・ 期間 5/20〜6/13 ・ 本日 6/4(木)</div>
+  </header>
+
+  <!-- summary card -->
+  <div class="card">
+    <h2>スコープ全体の分布 <span class="sub">全 24 タスク</span></h2>
+    <div class="summary">
+      <!-- donut -->
+      <div class="donutbox">
+        <div class="donut">
+          <!-- circumference for r=72 = 452.39 ; segments: done14, doing5, todo4, blocked1 of 24 -->
+          <svg width="168" height="168" viewBox="0 0 168 168" aria-hidden="true">
+            <circle cx="84" cy="84" r="72" fill="none" stroke="#eef1f5" stroke-width="22"/>
+            <!-- done 14/24=58.33% -> dash 263.89 -->
+            <circle cx="84" cy="84" r="72" fill="none" stroke="#2fa66b" stroke-width="22"
+              stroke-dasharray="263.89 452.39" stroke-dashoffset="0"/>
+            <!-- doing 5/24=20.83% -> dash 94.25 ; offset -263.89 -->
+            <circle cx="84" cy="84" r="72" fill="none" stroke="#3a86ff" stroke-width="22"
+              stroke-dasharray="94.25 452.39" stroke-dashoffset="-263.89"/>
+            <!-- todo 4/24=16.67% -> dash 75.40 ; offset -(263.89+94.25)=-358.14 -->
+            <circle cx="84" cy="84" r="72" fill="none" stroke="#9aa3af" stroke-width="22"
+              stroke-dasharray="75.40 452.39" stroke-dashoffset="-358.14"/>
+            <!-- blocked 1/24=4.17% -> dash 18.85 ; offset -(358.14+75.40)=-433.54 -->
+            <circle cx="84" cy="84" r="72" fill="none" stroke="#e5484d" stroke-width="22"
+              stroke-dasharray="18.85 452.39" stroke-dashoffset="-433.54"/>
+          </svg>
+          <div class="center">
+            <div class="pct tnum">58<span style="font-size:16px;">%</span></div>
+            <div class="pctlbl">進捗率</div>
+            <div class="cnt tnum">完了 14 / 24</div>
+          </div>
+        </div>
+        <div class="legend">
+          <div class="legrow">
+            <span class="dot" style="background:var(--done)"></span>
+            <span class="nm">完了</span>
+            <span class="nums tnum"><b>14</b> 件 ・ 58%</span>
+          </div>
+          <div class="legrow">
+            <span class="dot" style="background:var(--doing)"></span>
+            <span class="nm">進行中</span>
+            <span class="nums tnum"><b>5</b> 件 ・ 21%</span>
+          </div>
+          <div class="legrow">
+            <span class="dot" style="background:var(--todo)"></span>
+            <span class="nm">未着手</span>
+            <span class="nums tnum"><b>4</b> 件 ・ 17%</span>
+          </div>
+          <div class="legrow">
+            <span class="dot" style="background:var(--blocked)"></span>
+            <span class="nm">ブロック</span>
+            <span class="nums tnum"><b>1</b> 件 ・ 4%</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- stacked bar -->
+      <div class="stackwrap">
+        <div class="stackbar">
+          <div class="seg" style="background:var(--done);width:58.33%">14</div>
+          <div class="seg" style="background:var(--doing);width:20.83%">5</div>
+          <div class="seg" style="background:var(--todo);width:16.67%">4</div>
+          <div class="seg" style="background:var(--blocked);width:4.17%">1</div>
+        </div>
+        <div class="stacklbls">
+          <div class="item"><span class="dot" style="background:var(--done)"></span>完了 <span class="pc tnum">58%</span></div>
+          <div class="item"><span class="dot" style="background:var(--doing)"></span>進行中 <span class="pc tnum">21%</span></div>
+          <div class="item"><span class="dot" style="background:var(--todo)"></span>未着手 <span class="pc tnum">17%</span></div>
+          <div class="item"><span class="dot" style="background:var(--blocked)"></span>ブロック <span class="pc tnum">4%</span></div>
+        </div>
+        <div class="miniprog">
+          <div class="lbl"><span>全体進捗</span><span><b class="tnum">58%</b> 完了</span></div>
+          <div class="track"><div class="fill" style="width:58%"></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- status detail sections -->
+  <div class="stcols">
+    <!-- Doing (priority top-left) -->
+    <div class="card stcard">
+      <h3>
+        <span class="chip" style="background:var(--doing)">進行中</span>
+        <span class="ct tnum">5 件</span>
+      </h3>
+      <ul class="tasklist">
+        <li>
+          <span class="marker" style="background:var(--doing)"></span>
+          <span class="tname">ダッシュ画面実装</span>
+          <span class="owner" style="background:#e5772d">森田</span>
+          <span class="pgwrap"><span class="pgtrack"><span class="pgfill" style="width:60%"></span></span><span class="pgnum tnum">60%</span></span>
+        </li>
+        <li>
+          <span class="marker" style="background:var(--doing)"></span>
+          <span class="tname">認証フロー実装</span>
+          <span class="owner" style="background:#3a86ff">田中</span>
+          <span class="pgwrap"><span class="pgtrack"><span class="pgfill" style="width:40%"></span></span><span class="pgnum tnum">40%</span></span>
+        </li>
+        <li>
+          <span class="marker" style="background:var(--doing)"></span>
+          <span class="tname">グラフ描画コンポーネント</span>
+          <span class="owner" style="background:#b657d6">鈴木</span>
+          <span class="pgwrap"><span class="pgtrack"><span class="pgfill" style="width:75%"></span></span><span class="pgnum tnum">75%</span></span>
+        </li>
+        <li>
+          <span class="marker" style="background:var(--doing)"></span>
+          <span class="tname">通知センター実装</span>
+          <span class="owner" style="background:#2fa66b">佐藤</span>
+          <span class="pgwrap"><span class="pgtrack"><span class="pgfill" style="width:30%"></span></span><span class="pgnum tnum">30%</span></span>
+        </li>
+        <li>
+          <span class="marker" style="background:var(--doing)"></span>
+          <span class="tname">権限管理API実装</span>
+          <span class="owner" style="background:#3a86ff">田中</span>
+          <span class="pgwrap"><span class="pgtrack"><span class="pgfill" style="width:50%"></span></span><span class="pgnum tnum">50%</span></span>
+        </li>
+      </ul>
+    </div>
+
+    <!-- Blocked (priority top-right) -->
+    <div class="card stcard">
+      <h3>
+        <span class="chip" style="background:var(--blocked)">ブロック</span>
+        <span class="ct tnum">1 件</span>
+      </h3>
+      <ul class="tasklist">
+        <li>
+          <span class="marker" style="background:var(--blocked)"></span>
+          <span class="tname">認証フロー実装（SSO連携）</span>
+          <span class="owner" style="background:#3a86ff">田中</span>
+          <span class="blockreason">⚠ 外部API待ちで停滞</span>
+        </li>
+      </ul>
+      <div class="more">外部認証プロバイダのレート上限緩和を申請中。承認待ち（6/2〜）。M2 実装完了の遅延リスク要因。</div>
+    </div>
+
+    <!-- Todo -->
+    <div class="card stcard">
+      <h3>
+        <span class="chip" style="background:var(--todo)">未着手</span>
+        <span class="ct tnum">4 件</span>
+      </h3>
+      <ul class="tasklist">
+        <li>
+          <span class="marker" style="background:var(--todo)"></span>
+          <span class="tname">結合テスト</span>
+          <span class="owner" style="background:#2fa66b">佐藤</span>
+        </li>
+        <li>
+          <span class="marker" style="background:var(--todo)"></span>
+          <span class="tname">LP制作</span>
+          <span class="owner" style="background:#e5772d">森田</span>
+        </li>
+        <li>
+          <span class="marker" style="background:var(--todo)"></span>
+          <span class="tname">リリースノート作成</span>
+          <span class="owner" style="background:#b657d6">鈴木</span>
+        </li>
+        <li>
+          <span class="marker" style="background:var(--todo)"></span>
+          <span class="tname">本番デプロイ手順整備</span>
+          <span class="owner" style="background:#3a86ff">田中</span>
+        </li>
+      </ul>
+    </div>
+
+    <!-- Done -->
+    <div class="card stcard">
+      <h3>
+        <span class="chip" style="background:var(--done)">完了</span>
+        <span class="ct tnum">14 件</span>
+      </h3>
+      <ul class="tasklist">
+        <li class="donesmall"><span class="check">✓</span><span class="tname">API設計</span><span class="owner" style="background:#3a86ff">田中</span></li>
+        <li class="donesmall"><span class="check">✓</span><span class="tname">設計ドキュメント</span><span class="owner" style="background:#e5772d">森田</span></li>
+        <li class="donesmall"><span class="check">✓</span><span class="tname">DBマイグレーション</span><span class="owner" style="background:#2fa66b">佐藤</span></li>
+        <li class="donesmall"><span class="check">✓</span><span class="tname">画面ワイヤーフレーム</span><span class="owner" style="background:#e5772d">森田</span></li>
+        <li class="donesmall"><span class="check">✓</span><span class="tname">技術選定 / ADR</span><span class="owner" style="background:#3a86ff">田中</span></li>
+        <li class="donesmall"><span class="check">✓</span><span class="tname">CI/CDパイプライン構築</span><span class="owner" style="background:#b657d6">鈴木</span></li>
+      </ul>
+      <div class="more">ほか 8 件完了（環境構築・コンポーネント設計・データモデル定義 ほか）</div>
+    </div>
+  </div>
+
+  <footer>新ダッシュボード機能 (Release v1.2) ・ ステータス別内訳 ・ 集計時刻 6/4 09:00（モック）</footer>
+</div>
+</body>
+</html>

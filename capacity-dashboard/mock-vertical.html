@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>今日のキャパ（縦バー版）— Capacity Board</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480;
+    --line:#e6e9ee; --track:#eef1f5;
+    --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0;
+    --cap-line:#9aa3af;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;line-height:1.5}
+  .wrap{max-width:760px;margin:0 auto;padding:28px 20px 60px}
+  header.top{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:6px}
+  .title{font-size:20px;font-weight:700;letter-spacing:.02em}
+  .title small{font-weight:500;color:var(--muted);font-size:13px;margin-left:8px}
+  .datenav{display:flex;align-items:center;gap:6px;font-size:14px}
+  .datenav button{border:1px solid var(--line);background:var(--card);width:30px;height:30px;
+    border-radius:8px;cursor:pointer;font-size:15px;color:var(--ink)}
+  .datenav button:hover{background:#f0f3f7}
+  .datenav .d{min-width:120px;text-align:center;font-weight:600}
+  .mocknote{font-size:12px;color:var(--muted);margin:0 0 18px}
+  .switch{font-size:12px;margin:0 0 16px}
+  .switch a{color:var(--fill);text-decoration:none} .switch a:hover{text-decoration:underline}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04),0 8px 24px rgba(20,30,50,.04);padding:8px 20px 18px}
+
+  /* chart */
+  .chart{display:flex;gap:10px;padding:26px 0 0 38px;position:relative}
+  .yaxis{position:absolute;left:0;top:26px;bottom:64px;width:34px}
+  .ytick{position:absolute;right:6px;transform:translateY(50%);font-size:10px;
+    color:var(--muted);font-variant-numeric:tabular-nums}
+  .grid{position:absolute;left:38px;right:0;border-top:1px dashed var(--line)}
+  .capline{position:absolute;left:38px;right:0;border-top:2px dashed var(--cap-line)}
+  .capline span{position:absolute;right:0;top:-16px;font-size:10px;color:var(--muted);background:var(--card);padding:0 4px}
+
+  .col{flex:1;display:flex;flex-direction:column;align-items:center;cursor:pointer;
+    min-width:0;background:none;border:0;font:inherit;color:inherit}
+  .colplot{position:relative;width:100%;display:flex;justify-content:center}
+  .bartrack{position:relative;width:46px;border-radius:8px 8px 0 0;background:var(--track)}
+  .bar{position:absolute;left:0;right:0;bottom:0;border-radius:8px 8px 0 0;overflow:hidden;
+    display:flex;flex-direction:column-reverse}
+  .seg-in{background:var(--fill)}
+  .seg-over{background:var(--over)}
+  .htag{position:absolute;left:50%;transform:translateX(-50%);top:-19px;font-size:12px;
+    font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .col.over .htag{color:var(--over)}
+  .label{margin-top:10px;display:flex;flex-direction:column;align-items:center;gap:3px}
+  .ava{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;
+    font-size:13px;font-weight:700;color:#fff}
+  .nm{font-weight:600;font-size:13px}
+  .st{font-size:10px;font-weight:600}
+  .s-over{color:var(--over)} .s-free{color:var(--free)} .s-full{color:var(--full)}
+  .col.sel .bartrack{outline:2px solid var(--fill);outline-offset:2px}
+
+  footer.sum{display:flex;align-items:center;justify-content:space-between;
+    margin-top:16px;padding:12px 4px 0;border-top:1px solid var(--line)}
+  .sum .big{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums}
+  .sum .muted{color:var(--muted);font-size:13px}
+
+  .detail{margin-top:14px;border:1px solid var(--line);border-radius:10px;padding:12px 14px;
+    background:#fbfcfe;font-size:13px;display:none}
+  .detail.show{display:block}
+  .detail h4{margin:0 0 8px;font-size:13px}
+  .task{display:flex;align-items:center;gap:10px;padding:4px 0}
+  .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .task .tname{flex:1}.task .th{color:var(--muted);font-variant-numeric:tabular-nums}
+  .proj{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:1px 8px}
+  .legend{display:flex;gap:16px;margin-top:14px;font-size:11px;color:var(--muted);flex-wrap:wrap}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .chip{width:10px;height:10px;border-radius:3px;display:inline-block}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="title">今日のキャパ <small>縦バー版</small></div>
+    <div class="datenav"><button>‹</button><div class="d">6/4 (木) 今日</div><button>›</button></div>
+  </header>
+  <p class="switch">表示: <b>縦バー</b> ｜ <a href="mock.html">横バー版へ →</a></p>
+  <p class="mocknote">※ モック（サンプルデータ）。本番は Vikunja API から 担当者・期日・見積り時間 を自動算出。バーをクリックで内訳。</p>
+
+  <div class="card">
+    <div class="chart" id="chart"></div>
+    <footer class="sum" id="sum"></footer>
+    <div class="detail" id="detail"></div>
+    <div class="legend">
+      <span><i class="chip" style="background:var(--fill)"></i>アサイン済み</span>
+      <span><i class="chip" style="background:var(--over)"></i>容量超過</span>
+      <span><i class="chip" style="background:var(--track)"></i>空き</span>
+      <span>┄ 横の点線 = 1日の容量(8h)</span>
+    </div>
+  </div>
+</div>
+
+<script>
+const SCALE_MAX = 12;             // Y軸上限(h)
+const PLOT_H = 250;               // チャート高(px) = SCALE_MAX
+const members = [
+  { name:"森田", color:"#e5772d", cap:8, tasks:[
+      {t:"API 設計",4:0,h:4,proj:"Backend",c:"#3a86ff"},
+      {t:"DB マイグレ",h:3,proj:"Backend",c:"#3a86ff"},
+      {t:"PR レビュー",h:3,proj:"共通",c:"#8a93a0"} ]},
+  { name:"田中", color:"#3a86ff", cap:8, tasks:[
+      {t:"ダッシュ画面実装",h:4,proj:"Frontend",c:"#2fa66b"} ]},
+  { name:"佐藤", color:"#2fa66b", cap:8, tasks:[
+      {t:"認証フロー実装",h:5,proj:"Backend",c:"#3a86ff"},
+      {t:"結合テスト",h:3,proj:"QA",c:"#b657d6"} ]},
+  { name:"鈴木", color:"#b657d6", cap:8, tasks:[
+      {t:"設計ドキュメント",h:2,proj:"共通",c:"#8a93a0"} ]},
+];
+
+const chart = document.getElementById("chart");
+const detail = document.getElementById("detail");
+const h2px = h => h / SCALE_MAX * PLOT_H;
+
+// y-axis + gridlines + capacity line (cap is uniform 8h here)
+const yax = document.createElement("div"); yax.className="yaxis"; yax.style.height=PLOT_H+"px";
+[0,4,8,12].forEach(v=>{
+  const t=document.createElement("div"); t.className="ytick"; t.textContent=v+"h";
+  t.style.bottom=h2px(v)+"px"; yax.appendChild(t);
+  if(v>0&&v<12){ const g=document.createElement("div"); g.className="grid";
+    g.style.bottom=h2px(v)+"px"; chart.appendChild(g);}
+});
+chart.appendChild(yax);
+const cap=document.createElement("div"); cap.className="capline";
+cap.style.bottom=h2px(8)+"px"; cap.innerHTML='<span>容量 8h</span>'; chart.appendChild(cap);
+
+let totA=0,totC=0;
+members.forEach((m,i)=>{
+  const used=m.tasks.reduce((s,t)=>s+t.h,0); totA+=used; totC+=m.cap;
+  const over=Math.max(0,used-m.cap), inCap=Math.min(used,m.cap);
+  let st,scls;
+  if(over>0){st="⚠ +"+over+"h";scls="s-over";}
+  else if(used===m.cap){st="◎ 満稼働";scls="s-full";}
+  else{st="空き "+(m.cap-used)+"h";scls="s-free";}
+
+  const col=document.createElement("button"); col.type="button";
+  col.className="col"+(over>0?" over":"");
+  col.innerHTML=`
+    <div class="colplot" style="height:${PLOT_H}px;align-items:flex-end">
+      <div class="bartrack" style="height:${h2px(m.cap)}px">
+        <div class="bar" style="height:${h2px(used)}px">
+          <div class="seg-in" style="height:${h2px(inCap)}px"></div>
+          ${over>0?`<div class="seg-over" style="height:${h2px(over)}px"></div>`:``}
+        </div>
+        <div class="htag">${used}h</div>
+      </div>
+    </div>
+    <div class="label">
+      <div class="ava" style="background:${m.color}">${m.name[0]}</div>
+      <div class="nm">${m.name}</div>
+      <div class="st ${scls}">${st}</div>
+    </div>`;
+  col.addEventListener("click",()=>{
+    const wasSel=col.classList.contains("sel");
+    document.querySelectorAll(".col").forEach(c=>c.classList.remove("sel"));
+    if(wasSel){ detail.classList.remove("show"); return; }
+    col.classList.add("sel");
+    detail.innerHTML=`<h4>${m.name} の今日のタスク（計 ${used}h / 容量 ${m.cap}h）</h4>`+
+      m.tasks.map(t=>`<div class="task"><span class="dot" style="background:${t.c}"></span>
+        <span class="tname">${t.t}</span><span class="proj">${t.proj}</span>
+        <span class="th">${t.h}h</span></div>`).join("");
+    detail.classList.add("show");
+  });
+  chart.appendChild(col);
+});
+
+const rate=Math.round(totA/totC*100);
+document.getElementById("sum").innerHTML=
+  `<div class="muted">チーム計</div><div><span class="big">${totA} / ${totC}h</span>
+   <span class="muted">（${rate}%）　空き ${Math.max(0,totC-totA)}h</span></div>`;
+</script>
+</body>
+</html>

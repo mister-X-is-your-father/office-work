@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>キャパダッシュボード — ヒートマップ</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0; --cap:#9aa3af;
+    --font:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{background:var(--bg); color:var(--ink); font-family:var(--font); -webkit-font-smoothing:antialiased; padding:0 16px 64px;}
+  .tnum{font-variant-numeric:tabular-nums;}
+  header.app{max-width:860px; margin:0 auto; padding:26px 4px 14px;}
+  header.app h1{font-size:20px; font-weight:700; margin:0 0 4px; letter-spacing:.02em;}
+  .daynav{display:flex; align-items:center; gap:10px; margin:14px 0 6px;}
+  .daynav button{border:1px solid var(--line); background:var(--card); color:var(--ink); width:34px; height:34px; border-radius:9px; font-size:16px; cursor:pointer; line-height:1;}
+  .daynav button:hover{background:#f0f2f6;}
+  .daynav .today{font-size:16px; font-weight:700; padding:0 6px;}
+  .daynav .today small{font-weight:600; color:var(--free); margin-left:8px; font-size:12px; background:#eaf7f0; padding:3px 8px; border-radius:20px;}
+  .note{font-size:11.5px; color:var(--muted); margin:8px 0 0;}
+
+  .panel{max-width:860px; margin:18px auto 0; background:var(--card); border:1px solid var(--line); border-radius:14px; box-shadow:0 1px 2px rgba(20,30,50,.04); padding:18px 18px 16px;}
+  table.hm{border-collapse:separate; border-spacing:6px; width:100%;}
+  table.hm th{font-size:11.5px; font-weight:700; color:var(--muted); padding:0 4px 6px; text-align:center; white-space:nowrap;}
+  table.hm th.proj .swatch{display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:4px; vertical-align:middle;}
+  table.hm th.corner{text-align:left;}
+  table.hm td.who{font-size:14px; font-weight:700; white-space:nowrap; padding-right:6px;}
+  table.hm td.who .swatch{display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:7px; vertical-align:middle;}
+
+  .cell{height:46px; border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center; font-size:13px; font-weight:700; min-width:64px;}
+  .cell.empty{background:#fafbfc; border:1px dashed #e1e5ea; color:#c4cad2; font-weight:600; font-size:11px;}
+  .cell .h{line-height:1.1;}
+
+  /* total + free end columns */
+  td.total .box{height:46px; border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center; min-width:74px; background:var(--track);}
+  td.total .box .v{font-size:14px; font-weight:800;}
+  td.total .box .l{font-size:9.5px; color:var(--muted); margin-top:1px;}
+  td.free .box{height:46px; border-radius:8px; display:flex; flex-direction:column; align-items:center; justify-content:center; min-width:80px;}
+  td.free .box .v{font-size:15px; font-weight:800;}
+  td.free .box .l{font-size:9.5px; margin-top:1px;}
+  .free-yes{background:#eaf7f0;} .free-yes .v{color:var(--free);} .free-yes .l{color:var(--free);}
+  .free-full{background:#eef0f3;} .free-full .v{color:var(--full);} .free-full .l{color:var(--full);}
+  .free-over{background:#fdeaea;} .free-over .v{color:var(--over);} .free-over .l{color:var(--over);}
+
+  tr.teamrow td{padding-top:10px;}
+  tr.teamrow .who{color:var(--muted); font-weight:700; font-size:12px;}
+  tr.teamrow .cell{background:#f2f4f7; color:var(--muted); height:34px; font-size:12px;}
+  tr.teamrow td.total .box, tr.teamrow td.free .box{height:34px;}
+
+  .scaleleg{display:flex; align-items:center; gap:10px; margin:16px 2px 0; font-size:11px; color:var(--muted);}
+  .scaleleg .bar{display:flex; height:12px; border-radius:3px; overflow:hidden; width:170px;}
+  .scaleleg .bar span{flex:1;}
+  .legend{max-width:860px; margin:14px auto 0; display:flex; gap:16px; flex-wrap:wrap; font-size:11.5px; color:var(--muted); align-items:center;}
+  .legend .li{display:flex; align-items:center; gap:6px;}
+  .legend .sw{width:11px; height:11px; border-radius:3px;}
+  .legend .swempty{width:14px; height:11px; border-radius:3px; border:1px dashed #c4cad2; background:#fafbfc;}
+</style>
+</head>
+<body>
+  <header class="app">
+    <h1>キャパダッシュボード — 今日の空き容量</h1>
+    <div class="daynav">
+      <button aria-label="前日">‹</button>
+      <span class="today tnum">6/4(木) <small>今日</small></span>
+      <button aria-label="翌日">›</button>
+    </div>
+    <p class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。 ／ 容量 8h/人・日。色が濃いほど高負荷、空白セルは余白＝振れる余地。</p>
+  </header>
+
+  <section class="panel">
+    <table class="hm" id="hm"></table>
+    <div class="scaleleg">
+      <span>負荷</span>
+      <span>軽</span>
+      <div class="bar"><span style="background:#dfe9fb"></span><span style="background:#bcd2f7"></span><span style="background:#7aa8f0"></span><span style="background:#3a86ff"></span></div>
+      <span>重</span>
+      <span style="margin-left:8px;color:var(--over);font-weight:700;">■ 超過は赤</span>
+    </div>
+  </section>
+
+  <div class="legend">
+    <span class="li"><span class="swempty"></span>空きセル（振れる余地）</span>
+    <span class="li"><span class="sw" style="background:#eaf7f0;border:1px solid #cfead9"></span>空きあり</span>
+    <span class="li"><span class="sw" style="background:#fdeaea;border:1px solid #f4caca"></span>超過</span>
+    <span class="li" style="margin-left:auto;">行＝メンバー ／ 列＝プロジェクト</span>
+  </div>
+
+<script>
+const CAP=8;
+const PROJ_ORDER=['Backend','Frontend','QA','共通'];
+const PROJ_COLOR={Backend:'#3a86ff', Frontend:'#2fa66b', QA:'#b657d6', '共通':'#8a93a0'};
+const people=[
+  {name:'森田', color:'#e5772d', tasks:{Backend:7, '共通':3}},          // API設計4+DBマイグレ3=7, PRレビュー3
+  {name:'田中', color:'#3a86ff', tasks:{Frontend:4}},
+  {name:'佐藤', color:'#2fa66b', tasks:{Backend:5, QA:3}},
+  {name:'鈴木', color:'#b657d6', tasks:{'共通':2}},
+];
+people.forEach(p=>{ p.total=Object.values(p.tasks).reduce((s,h)=>s+h,0); p.free=CAP-p.total; });
+// sort by free desc — idle members on top
+people.sort((a,b)=> b.free-a.free);
+
+// heat color by hours per cell (0..max). Use blend toward project color but unified blue heat for "load濃淡".
+function heat(h){
+  if(h<=0) return null;
+  // intensity 1..8h -> light..dark blue
+  const t=Math.min(h,8)/8;
+  // interpolate #dfe9fb -> #3a86ff
+  const a=[223,233,251], b=[58,134,255];
+  const c=a.map((v,i)=>Math.round(v+(b[i]-v)*t));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+}
+function textOn(h){ return h>=5 ? '#fff' : '#1d2430'; }
+
+const tbl=document.getElementById('hm');
+// header
+let thead='<tr><th class="corner">メンバー</th>';
+PROJ_ORDER.forEach(p=> thead+=`<th class="proj"><span class="swatch" style="background:${PROJ_COLOR[p]}"></span>${p}</th>`);
+thead+='<th>合計</th><th>空き</th></tr>';
+tbl.innerHTML=thead;
+
+people.forEach(p=>{
+  let row=`<tr><td class="who"><span class="swatch" style="background:${p.color}"></span>${p.name}</td>`;
+  PROJ_ORDER.forEach(pr=>{
+    const h=p.tasks[pr]||0;
+    if(h>0){
+      const bg=heat(h);
+      row+=`<td><div class="cell" style="background:${bg};color:${textOn(h)}"><span class="h tnum">${h}h</span></div></td>`;
+    } else {
+      row+=`<td><div class="cell empty">—</div></td>`;
+    }
+  });
+  // total
+  const over=p.total>CAP, full=p.total===CAP;
+  row+=`<td class="total"><div class="box"><span class="v tnum">${p.total}h</span><span class="l">/ ${CAP}h</span></div></td>`;
+  // free
+  let fc, fv, fl;
+  if(over){ fc='free-over'; fv='+'+(p.total-CAP)+'h'; fl='超過'; }
+  else if(full){ fc='free-full'; fv='0h'; fl='ちょうど'; }
+  else { fc='free-yes'; fv=p.free+'h'; fl='振れる'; }
+  row+=`<td class="free"><div class="box ${fc}"><span class="v tnum">${fv}</span><span class="l">${fl}</span></div></td>`;
+  row+='</tr>';
+  tbl.innerHTML+=row;
+});
+
+// team total row
+let colTot={}; PROJ_ORDER.forEach(pr=> colTot[pr]=people.reduce((s,p)=>s+(p.tasks[pr]||0),0));
+const teamTotal=people.reduce((s,p)=>s+p.total,0);
+const teamFree=people.reduce((s,p)=>s+Math.max(p.free,0),0);
+let trow='<tr class="teamrow"><td class="who">チーム計</td>';
+PROJ_ORDER.forEach(pr=> trow+=`<td><div class="cell tnum">${colTot[pr]}h</div></td>`);
+trow+=`<td class="total"><div class="box"><span class="v tnum">${teamTotal}h</span><span class="l">/ 32h</span></div></td>`;
+trow+=`<td class="free"><div class="box free-yes"><span class="v tnum">${teamFree}h</span><span class="l">空き</span></div></td>`;
+trow+='</tr>';
+tbl.innerHTML+=trow;
+</script>
+</body>
+</html>

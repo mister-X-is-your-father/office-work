@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>キャパダッシュボード — 円形ゲージ</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0; --cap:#9aa3af;
+    --font:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink); font-family:var(--font);
+    -webkit-font-smoothing:antialiased; padding:0 16px 64px;
+  }
+  .tnum{font-variant-numeric:tabular-nums;}
+  /* ---- header ---- */
+  header.app{
+    max-width:900px; margin:0 auto; padding:26px 4px 14px;
+  }
+  header.app h1{
+    font-size:20px; font-weight:700; margin:0 0 4px; letter-spacing:.02em;
+  }
+  .daynav{
+    display:flex; align-items:center; gap:10px; margin:14px 0 6px;
+  }
+  .daynav button{
+    border:1px solid var(--line); background:var(--card); color:var(--ink);
+    width:34px; height:34px; border-radius:9px; font-size:16px; cursor:pointer; line-height:1;
+  }
+  .daynav button:hover{background:#f0f2f6;}
+  .daynav .today{
+    font-size:16px; font-weight:700; padding:0 6px;
+  }
+  .daynav .today small{font-weight:600; color:var(--free); margin-left:8px; font-size:12px;
+    background:#eaf7f0; padding:3px 8px; border-radius:20px;}
+  .note{font-size:11.5px; color:var(--muted); margin:8px 0 0;}
+  /* ---- team summary ---- */
+  .team{
+    max-width:900px; margin:18px auto 8px; background:var(--card); border:1px solid var(--line);
+    border-radius:14px; padding:16px 18px; box-shadow:0 1px 2px rgba(20,30,50,.04);
+    display:flex; align-items:center; gap:22px; flex-wrap:wrap;
+  }
+  .team .big{font-size:26px; font-weight:800;}
+  .team .lbl{font-size:12px; color:var(--muted); margin-bottom:2px;}
+  .team .divider{width:1px; align-self:stretch; background:var(--line);}
+  .team .freebig{color:var(--free);}
+  .teambar{flex:1; min-width:160px;}
+  .teambar .track{height:10px; border-radius:6px; background:var(--track); overflow:hidden; display:flex;}
+  .teambar .seg{height:100%;}
+  /* ---- grid ---- */
+  .grid{
+    max-width:900px; margin:18px auto 0; display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(200px,1fr)); gap:16px;
+  }
+  .gcard{
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    padding:18px 16px 16px; box-shadow:0 1px 2px rgba(20,30,50,.04);
+    display:flex; flex-direction:column; align-items:center; position:relative;
+  }
+  .gcard .rank{
+    position:absolute; top:12px; left:13px; font-size:11px; color:var(--muted); font-weight:700;
+  }
+  .gcard .status-pill{
+    position:absolute; top:11px; right:12px; font-size:10.5px; font-weight:700;
+    padding:3px 8px; border-radius:20px;
+  }
+  .pill-free{background:#eaf7f0; color:var(--free);}
+  .pill-over{background:#fdeaea; color:var(--over);}
+  .pill-full{background:#eef0f3; color:var(--full);}
+  .donut{position:relative; width:140px; height:140px; margin:6px 0 2px;}
+  .donut svg{transform:rotate(-90deg); display:block;}
+  .donut .center{
+    position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  }
+  .donut .center .num{font-size:30px; font-weight:800; line-height:1;}
+  .donut .center .unit{font-size:13px; font-weight:700; margin-left:1px;}
+  .donut .center .sub{font-size:10.5px; color:var(--muted); margin-top:3px; letter-spacing:.02em;}
+  .center .num.over{color:var(--over);}
+  .center .num.free{color:var(--free);}
+  .center .num.full{color:var(--full);}
+  .gcard .name{font-size:15px; font-weight:700; margin:10px 0 2px;}
+  .gcard .load{font-size:12px; color:var(--muted);}
+  .gcard .load b{color:var(--ink); font-weight:700;}
+  .tasks{
+    width:100%; margin-top:12px; border-top:1px solid var(--line); padding-top:10px;
+    display:flex; flex-direction:column; gap:6px;
+  }
+  .task{display:flex; align-items:center; gap:8px; font-size:11.5px;}
+  .task .dot{width:9px; height:9px; border-radius:3px; flex:none;}
+  .task .tn{flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#3b424d;}
+  .task .th{color:var(--muted); font-weight:700;}
+  .legend{
+    max-width:900px; margin:22px auto 0; display:flex; gap:16px; flex-wrap:wrap;
+    font-size:11.5px; color:var(--muted); align-items:center;
+  }
+  .legend .li{display:flex; align-items:center; gap:6px;}
+  .legend .sw{width:11px; height:11px; border-radius:3px;}
+</style>
+</head>
+<body>
+  <header class="app">
+    <h1>キャパダッシュボード — 今日の空き容量</h1>
+    <div class="daynav">
+      <button aria-label="前日">‹</button>
+      <span class="today tnum">6/4(木) <small>今日</small></span>
+      <button aria-label="翌日">›</button>
+    </div>
+    <p class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。 ／ 容量 8h/人・日。空き多い順に表示。</p>
+  </header>
+
+  <section class="team">
+    <div>
+      <div class="lbl">チーム稼働</div>
+      <div class="big tnum">24<span style="font-size:16px;color:var(--muted);">/32h</span> <span style="font-size:14px;color:var(--muted);">(75%)</span></div>
+    </div>
+    <div class="divider"></div>
+    <div>
+      <div class="lbl">空き合計</div>
+      <div class="big freebig tnum">8h</div>
+    </div>
+    <div class="teambar">
+      <div class="lbl">充填バランス</div>
+      <div class="track">
+        <div class="seg" style="width:75%;background:var(--fill);"></div>
+        <div class="seg" style="width:25%;background:var(--free);"></div>
+      </div>
+    </div>
+  </section>
+
+  <main class="grid" id="grid"></main>
+
+  <div class="legend">
+    <span class="li"><span class="sw" style="background:var(--fill);"></span>容量内</span>
+    <span class="li"><span class="sw" style="background:var(--over);"></span>超過</span>
+    <span class="li"><span class="sw" style="background:var(--free);"></span>空き</span>
+    <span class="li"><span class="sw" style="background:var(--full);"></span>満</span>
+    <span style="margin-left:auto;">プロジェクト：</span>
+    <span class="li"><span class="sw" style="background:#3a86ff;"></span>Backend</span>
+    <span class="li"><span class="sw" style="background:#2fa66b;"></span>Frontend</span>
+    <span class="li"><span class="sw" style="background:#b657d6;"></span>QA</span>
+    <span class="li"><span class="sw" style="background:#8a93a0;"></span>共通</span>
+  </div>
+
+<script>
+const CAP = 8;
+const PROJ = {Backend:'#3a86ff', Frontend:'#2fa66b', QA:'#b657d6', '共通':'#8a93a0'};
+const people = [
+  {name:'鈴木', color:'#b657d6', tasks:[{n:'設計ドキュメント',h:2,p:'共通'}]},
+  {name:'田中', color:'#3a86ff', tasks:[{n:'ダッシュ画面実装',h:4,p:'Frontend'}]},
+  {name:'佐藤', color:'#2fa66b', tasks:[{n:'認証フロー実装',h:5,p:'Backend'},{n:'結合テスト',h:3,p:'QA'}]},
+  {name:'森田', color:'#e5772d', tasks:[{n:'API設計',h:4,p:'Backend'},{n:'DBマイグレ',h:3,p:'Backend'},{n:'PRレビュー',h:3,p:'共通'}]},
+];
+// compute & sort by free desc (most idle first)
+people.forEach(p=>{ p.total = p.tasks.reduce((s,t)=>s+t.h,0); p.free = CAP - p.total; });
+people.sort((a,b)=> b.free - a.free);
+
+const R = 56, STROKE = 13, C = 2*Math.PI*R, CX=70, CY=70;
+const grid = document.getElementById('grid');
+
+people.forEach((p,i)=>{
+  const over = p.total > CAP;
+  const full = p.total === CAP;
+  const ratio = Math.min(p.total, CAP) / CAP;          // filled portion within cap
+  const overRatio = over ? (p.total - CAP)/CAP : 0;     // overflow portion
+
+  let statusClass, statusText, centerClass, centerNum, centerSub;
+  if(over){ statusClass='pill-over'; statusText='超過 +'+(p.total-CAP)+'h'; centerClass='over'; centerNum='+'+(p.total-CAP); centerSub='超過'; }
+  else if(full){ statusClass='pill-full'; statusText='ちょうど'; centerClass='full'; centerNum='0'; centerSub='空きなし'; }
+  else { statusClass='pill-free'; statusText='空き '+p.free+'h'; centerClass='free'; centerNum=p.free; centerSub='空き'; }
+
+  // build donut arcs
+  let arcs='';
+  if(over){
+    // full ring filled, then overflow segment in red on a slightly inner accent — show cap ring red over fill
+    arcs = `<circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="${PROJ['共通'] /* placeholder */}" stroke-width="0"/>`;
+    // base filled (cap) in fill color
+    arcs += `<circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="var(--fill)" stroke-width="${STROKE}" stroke-dasharray="${C} ${C}" stroke-dashoffset="0"/>`;
+    // overflow arc in red, starting at top, length = overRatio
+    const ovLen = Math.min(overRatio,1)*C;
+    arcs += `<circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="var(--over)" stroke-width="${STROKE}" stroke-linecap="round" stroke-dasharray="${ovLen} ${C}" stroke-dashoffset="0"/>`;
+  } else {
+    const fillLen = ratio*C;
+    // free track (light green) full ring as backdrop
+    arcs += `<circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="#dff0e6" stroke-width="${STROKE}"/>`;
+    // filled portion
+    arcs += `<circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="${full?'var(--full)':'var(--fill)'}" stroke-width="${STROKE}" stroke-linecap="round" stroke-dasharray="${fillLen} ${C}" stroke-dashoffset="0"/>`;
+  }
+
+  const tasksHtml = p.tasks.map(t=>`
+    <div class="task">
+      <span class="dot" style="background:${PROJ[t.p]}"></span>
+      <span class="tn">${t.n}</span>
+      <span class="th tnum">${t.h}h</span>
+    </div>`).join('');
+
+  const card = document.createElement('div');
+  card.className='gcard';
+  card.innerHTML = `
+    <span class="rank">#${i+1}</span>
+    <span class="status-pill ${statusClass}">${statusText}</span>
+    <div class="donut">
+      <svg width="140" height="140" viewBox="0 0 140 140">${arcs}</svg>
+      <div class="center">
+        <div><span class="num ${centerClass} tnum">${centerNum}</span><span class="unit ${centerClass==='over'?'':''}">h</span></div>
+        <div class="sub">${centerSub}</div>
+      </div>
+    </div>
+    <div class="name" style="color:${p.color}">${p.name}</div>
+    <div class="load tnum"><b>${p.total}</b> / ${CAP}h 稼働</div>
+    <div class="tasks">${tasksHtml}</div>
+  `;
+  grid.appendChild(card);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>アウトライン階層リスト — 新ダッシュボード機能</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --done:#2fa66b; --doing:#3a86ff; --todo:#9aa3af; --blocked:#e5484d;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+    --pj-be:#3a86ff; --pj-fe:#2fa66b; --pj-qa:#b657d6; --pj-common:#8a93a0;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-size:14px; line-height:1.55; -webkit-font-smoothing:antialiased;
+    font-variant-numeric:tabular-nums; font-feature-settings:"tnum";
+  }
+  .wrap{max-width:880px; margin:0 auto; padding:24px 20px 80px}
+  header.page{margin-bottom:14px}
+  .crumb{font-size:12px; color:var(--muted); margin-bottom:4px}
+  h1{font-size:20px; margin:0 0 4px}
+  .sub{font-size:12.5px; color:var(--muted)}
+  .note{
+    margin:10px 0 16px; padding:8px 12px; font-size:12px; color:var(--muted);
+    background:#fbfcfd; border:1px solid var(--line); border-radius:8px;
+  }
+  .toolbar{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:8px}
+  .btn{
+    font:inherit; font-size:12.5px; color:var(--ink); background:var(--card);
+    border:1px solid var(--line); border-radius:8px; padding:6px 12px; cursor:pointer;
+  }
+  .btn:hover{background:#f1f3f6}
+  .spacer{flex:1}
+  .meta{font-size:12px; color:var(--muted)}
+
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04), 0 6px 18px rgba(20,30,50,.03);
+    padding:6px 0; margin-top:12px;
+  }
+
+  .outline{list-style:none; margin:0; padding:0}
+  .outline ul{list-style:none; margin:0; padding:0}
+
+  .li{position:relative}
+  .line{
+    display:flex; align-items:center; gap:9px; padding:5px 16px 5px 0;
+    border-radius:8px; cursor:default;
+  }
+  .line:hover{background:#f8f9fb}
+
+  /* indent */
+  .epic > .line{padding-left:14px}
+  .task > .line{padding-left:40px}
+  .sub  > .line{padding-left:78px}
+
+  /* vertical guide */
+  .task::before, .sub::before{
+    content:""; position:absolute; top:0; bottom:0; border-left:1px solid var(--line);
+  }
+  .task::before{left:24px}
+  .sub::before{left:50px}
+
+  .tw{
+    width:18px; height:18px; flex:none; border:none; background:none; cursor:pointer; color:var(--muted);
+    display:inline-flex; align-items:center; justify-content:center; transition:transform .15s;
+  }
+  .tw svg{width:9px; height:9px}
+  .tw.collapsed{transform:rotate(-90deg)}
+  .tw.leaf{visibility:hidden; cursor:default}
+
+  /* checkbox */
+  .cb{
+    width:16px; height:16px; flex:none; border:1.5px solid #c3cad4; border-radius:5px;
+    display:inline-flex; align-items:center; justify-content:center; cursor:pointer; background:#fff;
+    transition:all .12s;
+  }
+  .cb svg{width:10px; height:10px; opacity:0; transform:scale(.6); transition:all .12s}
+  .cb.checked{background:var(--done); border-color:var(--done)}
+  .cb.checked svg{opacity:1; transform:scale(1)}
+  .cb.partial{background:#fff; border-color:var(--doing)}
+  .cb.partial::after{content:""; width:8px; height:2px; background:var(--doing); border-radius:2px; position:absolute}
+  .cb.blocked{border-color:var(--blocked)}
+
+  .bullet{
+    width:7px; height:7px; border-radius:50%; background:#cbd2db; flex:none; margin:0 4px;
+  }
+
+  .title{flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .epic > .line .title{font-weight:700; font-size:15px}
+  .task > .line .title{font-weight:500}
+  .sub  > .line .title{font-size:13.5px; color:#3a4453}
+  .done .title{color:var(--muted); text-decoration:line-through; text-decoration-color:#c7cdd6}
+
+  .subcount{
+    font-size:11px; color:var(--muted); background:var(--track); border-radius:999px;
+    padding:1px 8px; flex:none; font-variant-numeric:tabular-nums;
+  }
+  .subcount.full{color:#fff; background:var(--done)}
+
+  .pjtag{font-size:10px; padding:1px 6px; border-radius:5px; flex:none; border:1px solid currentColor; font-weight:600}
+
+  .right{display:flex; align-items:center; gap:12px; flex:none}
+  .who{display:flex; align-items:center; gap:5px; font-size:12px; color:#404a58; width:64px}
+  .av{
+    width:18px; height:18px; border-radius:50%; color:#fff; flex:none;
+    display:inline-flex; align-items:center; justify-content:center; font-size:9.5px; font-weight:700;
+  }
+  .who.un{color:var(--muted)}
+  .who.un .av{background:#cbd2db}
+  .due{font-size:11.5px; color:var(--muted); width:54px; text-align:right; font-variant-numeric:tabular-nums}
+  .due.warn{color:var(--blocked); font-weight:600}
+  .st{
+    font-size:10px; padding:1px 7px; border-radius:999px; color:#fff; font-weight:600; width:58px; text-align:center;
+  }
+  .st-done{background:var(--done)} .st-doing{background:var(--doing)}
+  .st-todo{background:var(--todo)} .st-blocked{background:var(--blocked)}
+
+  .children.hidden{display:none}
+
+  @media(max-width:680px){
+    .due,.st{display:none}
+    .sub > .line{padding-left:62px}
+    .sub::before{left:40px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="page">
+    <div class="crumb">プロジェクト / 新ダッシュボード機能</div>
+    <h1>アウトライン階層リスト</h1>
+    <div class="sub">親タスク配下にサブを箇条書きで分解。三角で開閉、チェックで完了　<span style="color:#404a58">今日 6/4 (木)</span></div>
+  </header>
+
+  <div class="note">※ モック（サンプルデータ）。本番は Vikunja API（親子・サブタスク）から自動算出。</div>
+
+  <div class="toolbar">
+    <button class="btn" id="expandAll">すべて展開</button>
+    <button class="btn" id="collapseAll">すべて畳む</button>
+    <div class="spacer"></div>
+    <div class="meta" id="counter">—</div>
+  </div>
+
+  <div class="card">
+    <ul class="outline" id="outline"></ul>
+  </div>
+</div>
+
+<script>
+const M = {
+  morita:{n:"森田",c:"#e5772d"}, tanaka:{n:"田中",c:"#3a86ff"},
+  sato:{n:"佐藤",c:"#2fa66b"}, suzuki:{n:"鈴木",c:"#b657d6"}, none:{n:"未",un:true}
+};
+const PJ = { be:{n:"Backend",c:"#3a86ff"}, fe:{n:"Frontend",c:"#2fa66b"}, qa:{n:"QA",c:"#b657d6"}, common:{n:"共通",c:"#8a93a0"} };
+
+const DATA = [
+  {name:"認証", kind:"epic", pj:"be", children:[
+    {name:"DBマイグレーション", kind:"task", st:"done", who:"morita", due:"6/3"},
+    {name:"認証フロー実装", kind:"task", st:"blocked", who:"sato", due:"6/6", children:[
+      {name:"トークン発行", kind:"sub", st:"done", who:"sato"},
+      {name:"セッション管理", kind:"sub", st:"doing", who:"sato", due:"6/6"},
+      {name:"外部API連携（待ち）", kind:"sub", st:"blocked", who:"sato"},
+    ]},
+    {name:"PRレビュー #142（佐藤→森田）", kind:"task", st:"doing", who:"sato", due:"6/4"},
+  ]},
+  {name:"ダッシュボード画面", kind:"epic", pj:"fe", children:[
+    {name:"ダッシュ画面実装", kind:"task", st:"doing", who:"tanaka", due:"6/7", children:[
+      {name:"レイアウト", kind:"sub", st:"done", who:"tanaka"},
+      {name:"グラフ描画", kind:"sub", st:"doing", who:"tanaka", due:"6/7"},
+      {name:"データ接続", kind:"sub", st:"todo", who:"tanaka"},
+    ]},
+    {name:"LP制作", kind:"task", st:"todo", who:"tanaka", due:"6/10"},
+  ]},
+  {name:"品質", kind:"epic", pj:"qa", children:[
+    {name:"結合テスト", kind:"task", st:"todo", who:"sato", due:"6/12"},
+  ]},
+  {name:"リリース", kind:"epic", pj:"common", children:[
+    {name:"リリースノート", kind:"task", st:"todo", who:"none", due:"6/13"},
+    {name:"リリース準備", kind:"task", st:"todo", who:"morita", due:"6/13"},
+  ]},
+];
+
+const ST_CLASS={done:"st-done",doing:"st-doing",todo:"st-todo",blocked:"st-blocked"};
+const ST_LABEL={done:"Done",doing:"Doing",todo:"Todo",blocked:"Blocked"};
+const CHECK='<svg viewBox="0 0 12 12"><path d="M2.5 6.5 L5 9 L9.5 3.5" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const TRI='<svg viewBox="0 0 10 10"><path d="M2 1 L8 5 L2 9 Z" fill="currentColor"/></svg>';
+
+const today = "6/4";
+function dueWarn(due, st){
+  if(!due || st==="done") return false;
+  // simple: 6/3 or 6/4 = warn (today or past)
+  return ["5/","6/1","6/2","6/3","6/4"].some(p=>due.startsWith(p)) || due===today;
+}
+
+function subStats(d){
+  if(!d.children) return null;
+  const subs = d.children.filter(c=>c.kind==="sub");
+  if(!subs.length) return null;
+  const done = subs.filter(s=>s.st==="done").length;
+  return {done, total:subs.length};
+}
+
+function makeNode(d){
+  const li=document.createElement("li");
+  li.className="li "+d.kind+(d.st==="done"?" done":"");
+  const hasKids = d.children && d.children.length;
+
+  const line=document.createElement("div"); line.className="line";
+
+  // triangle
+  const tw=document.createElement("button");
+  tw.className="tw"+(hasKids?"":" leaf"); tw.innerHTML=TRI;
+  line.appendChild(tw);
+
+  // checkbox (task & sub) or bullet (epic)
+  if(d.kind==="epic"){
+    const b=document.createElement("span"); b.className="bullet"; line.appendChild(b);
+  } else {
+    const cb=document.createElement("span");
+    let cls="cb";
+    if(d.st==="done") cls+=" checked";
+    else if(d.st==="doing") cls+=" partial";
+    else if(d.st==="blocked") cls+=" blocked";
+    cb.className=cls; cb.innerHTML=CHECK;
+    cb.addEventListener("click",()=>{
+      const on=cb.classList.toggle("checked");
+      cb.classList.remove("partial");
+      li.classList.toggle("done", on);
+      updateCounter();
+    });
+    line.appendChild(cb);
+  }
+
+  const title=document.createElement("span"); title.className="title"; title.textContent=d.name;
+  line.appendChild(title);
+
+  if(d.kind==="epic" && d.pj){
+    const t=document.createElement("span"); t.className="pjtag"; t.style.color=PJ[d.pj].c; t.textContent=PJ[d.pj].n;
+    line.appendChild(t);
+  }
+
+  const ss=subStats(d);
+  if(ss){
+    const c=document.createElement("span");
+    c.className="subcount"+(ss.done===ss.total?" full":"");
+    c.textContent=ss.done+"/"+ss.total;
+    c.title="サブタスク完了 "+ss.done+" / "+ss.total;
+    line.appendChild(c);
+  }
+
+  // right block (task & sub only)
+  if(d.kind!=="epic"){
+    const right=document.createElement("div"); right.className="right";
+    const m=M[d.who||"none"];
+    const who=document.createElement("span"); who.className="who"+(m.un?" un":"");
+    const av=document.createElement("span"); av.className="av"; av.style.background=m.c||"#cbd2db"; av.textContent=m.n[0];
+    who.appendChild(av);
+    const wn=document.createElement("span"); wn.textContent=m.n; who.appendChild(wn);
+    right.appendChild(who);
+
+    const due=document.createElement("span");
+    due.className="due"+(dueWarn(d.due,d.st)?" warn":"");
+    due.textContent=d.due||"";
+    right.appendChild(due);
+
+    const st=document.createElement("span"); st.className="st "+ST_CLASS[d.st]; st.textContent=ST_LABEL[d.st];
+    right.appendChild(st);
+    line.appendChild(right);
+  }
+
+  li.appendChild(line);
+
+  if(hasKids){
+    const ul=document.createElement("ul"); ul.className="children";
+    d.children.forEach(c=>ul.appendChild(makeNode(c)));
+    li.appendChild(ul);
+    tw.addEventListener("click",()=>{
+      const h=ul.classList.toggle("hidden");
+      tw.classList.toggle("collapsed",h);
+    });
+  }
+  return li;
+}
+
+const root=document.getElementById("outline");
+DATA.forEach(d=>root.appendChild(makeNode(d)));
+
+function updateCounter(){
+  const cbs=document.querySelectorAll(".cb");
+  const done=document.querySelectorAll(".cb.checked").length;
+  document.getElementById("counter").textContent="完了 "+done+" / 全 "+cbs.length+" 項目";
+}
+updateCounter();
+
+document.getElementById("expandAll").addEventListener("click",()=>{
+  document.querySelectorAll(".children").forEach(u=>u.classList.remove("hidden"));
+  document.querySelectorAll(".tw").forEach(t=>t.classList.remove("collapsed"));
+});
+document.getElementById("collapseAll").addEventListener("click",()=>{
+  document.querySelectorAll(".task > .children").forEach(u=>u.classList.add("hidden"));
+  document.querySelectorAll(".task > .line .tw:not(.leaf)").forEach(t=>t.classList.add("collapsed"));
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>マッチング盤｜キャパダッシュボード</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0;
+    --backend:#3a86ff; --frontend:#2fa66b; --qa:#b657d6; --common:#8a93a0;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"palt"; -webkit-font-smoothing:antialiased;
+  }
+  .nums{font-variant-numeric:tabular-nums;}
+  header{
+    background:var(--card); border-bottom:1px solid var(--line);
+    padding:16px 24px; display:flex; align-items:center; gap:20px; flex-wrap:wrap;
+  }
+  header h1{font-size:17px; margin:0; font-weight:700; letter-spacing:.02em;}
+  .daynav{
+    display:flex; align-items:center; gap:4px; margin-left:8px;
+    background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:4px;
+  }
+  .daynav button{border:none; background:transparent; color:var(--muted); font-size:15px;
+    width:30px; height:30px; border-radius:8px; cursor:pointer;}
+  .daynav button:hover{background:var(--track); color:var(--ink);}
+  .daynav .today{font-size:14px; font-weight:600; padding:0 12px; display:flex; align-items:center; gap:7px;}
+  .daynav .badge-today{background:var(--fill); color:#fff; font-size:11px; font-weight:700; padding:1px 7px; border-radius:6px;}
+  .note{margin-left:auto; color:var(--muted); font-size:12px;}
+  main{padding:24px; max-width:1240px; margin:0 auto;}
+  .hint{
+    background:#eef4ff; border:1px solid #d4e2ff; color:#2a5cbf; border-radius:10px;
+    padding:10px 16px; font-size:12.5px; margin-bottom:18px; display:flex; align-items:center; gap:8px;
+  }
+  .board{display:grid; grid-template-columns:340px 1fr; gap:20px; align-items:start;}
+  .col-head{font-size:13px; font-weight:700; margin:0 0 12px 4px; display:flex; align-items:center; gap:8px;}
+  .col-head .count{font-size:11.5px; color:var(--muted); background:var(--card); border:1px solid var(--line); border-radius:20px; padding:2px 9px; font-weight:600;}
+  /* unassigned task cards */
+  .pool{display:flex; flex-direction:column; gap:10px;}
+  .tcard{
+    background:var(--card); border:1px solid var(--line); border-radius:12px; padding:13px 14px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04); cursor:grab; position:relative;
+    border-left:4px solid var(--full); transition:.12s;
+  }
+  .tcard:hover{box-shadow:0 4px 12px rgba(20,30,50,.1); transform:translateY(-1px);}
+  .tcard.dragging{opacity:.4;}
+  .tcard.placed{opacity:.45; cursor:default; border-style:dashed;}
+  .tcard .tn{font-size:13.5px; font-weight:700; margin-bottom:7px;}
+  .tcard .tm{display:flex; align-items:center; gap:8px;}
+  .chip{font-size:11px; font-weight:700; padding:2px 8px; border-radius:6px; color:#fff;}
+  .hrs{font-size:12px; color:var(--muted); font-weight:600;}
+  .grip{position:absolute; right:12px; top:13px; color:var(--line); font-size:14px; letter-spacing:-2px;}
+  .placed-tag{font-size:11px; color:var(--free); font-weight:700; margin-top:6px;}
+  /* member capacity rows */
+  .members{display:flex; flex-direction:column; gap:12px;}
+  .mcard{
+    background:var(--card); border:1px solid var(--line); border-radius:13px; padding:14px 16px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04); transition:.12s;
+  }
+  .mcard.droptarget{border-color:var(--free); background:#f3fbf6; box-shadow:0 0 0 3px rgba(47,166,107,.12);}
+  .mcard.over{background:#fdf3f3;}
+  .mtop{display:flex; align-items:center; gap:12px; margin-bottom:11px;}
+  .avatar{width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:13px; flex-shrink:0;}
+  .mname{font-size:14px; font-weight:700;}
+  .mrole{font-size:11px; color:var(--muted); margin-left:2px;}
+  .mstat{margin-left:auto; font-size:12.5px; font-weight:700;}
+  .mstat.free{color:var(--free);} .mstat.full{color:var(--full);} .mstat.over{color:var(--over);}
+  .capbar{height:22px; background:var(--track); border-radius:7px; overflow:hidden; display:flex; position:relative;}
+  .seg{height:100%; display:flex; align-items:center; justify-content:center; font-size:10px; color:#fff; font-weight:700; overflow:hidden; white-space:nowrap;}
+  .freezone{
+    flex:1; display:flex; align-items:center; justify-content:center; gap:6px;
+    border:1.5px dashed transparent; color:var(--free); font-size:11px; font-weight:700;
+  }
+  .mcard.droptarget .freezone{border-color:var(--free); background:rgba(47,166,107,.08); border-radius:6px;}
+  .capnums{display:flex; justify-content:space-between; margin-top:6px; font-size:11.5px; color:var(--muted);}
+  .capnums b{color:var(--ink);}
+  .nofit{color:var(--full); font-size:11px; margin-top:6px; font-weight:600;}
+  .toast{position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px);
+    background:var(--ink); color:#fff; padding:11px 20px; border-radius:10px; font-size:13px;
+    font-weight:600; opacity:0; transition:.25s; pointer-events:none; box-shadow:0 6px 20px rgba(0,0,0,.2);}
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+  .alldone{padding:30px; text-align:center; color:var(--muted); font-size:13px;}
+</style>
+</head>
+<body>
+<header>
+  <h1>🧩 マッチング盤</h1>
+  <div class="daynav">
+    <button title="前日">‹</button>
+    <span class="today nums">6/4(木) <span class="badge-today">今日</span></span>
+    <button title="翌日">›</button>
+  </div>
+  <span class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</span>
+</header>
+
+<main>
+  <div class="hint">💡 左の未アサインカードを、右の人の<b style="margin:0 2px">空き枠（点線）</b>へドラッグして割り当てます。空きが足りない人にはドロップできません。</div>
+  <div class="board">
+    <div>
+      <h3 class="col-head">未アサイン <span class="count nums" id="poolCount">3件 · 計6h</span></h3>
+      <div class="pool" id="pool"></div>
+    </div>
+    <div>
+      <h3 class="col-head">メンバーの空き容量 <span class="count">cap 8h/人</span></h3>
+      <div class="members" id="members"></div>
+    </div>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const PROJ = {Backend:'#3a86ff', Frontend:'#2fa66b', QA:'#b657d6', 共通:'#8a93a0'};
+const CAP = 8;
+
+let tasks = [
+  {id:'t1', name:'ログインバグ修正', hours:3, proj:'Backend', placed:null},
+  {id:'t2', name:'LP文言修正', hours:2, proj:'Frontend', placed:null},
+  {id:'t3', name:'リリースノート作成', hours:1, proj:'共通', placed:null},
+];
+
+// each member: existing task segments
+let members = [
+  {id:'morita', name:'森田', color:'#e5772d', role:'Backend', segs:[
+    {label:'API設計', h:4, proj:'Backend'},{label:'DBマイグレ', h:3, proj:'Backend'},{label:'PRレビュー', h:3, proj:'Backend'}]},
+  {id:'tanaka', name:'田中', color:'#3a86ff', role:'Frontend', segs:[
+    {label:'ダッシュ画面実装', h:4, proj:'Frontend'}]},
+  {id:'sato', name:'佐藤', color:'#2fa66b', role:'Backend/QA', segs:[
+    {label:'認証実装', h:5, proj:'Backend'},{label:'結合テスト', h:3, proj:'QA'}]},
+  {id:'suzuki', name:'鈴木', color:'#b657d6', role:'共通', segs:[
+    {label:'設計ドキュメント', h:2, proj:'共通'}]},
+];
+
+let dragTask = null;
+
+function used(m){return m.segs.reduce((s,x)=>s+x.h,0);}
+
+function renderPool(){
+  const pool = document.getElementById('pool');
+  pool.innerHTML='';
+  const remaining = tasks.filter(t=>!t.placed);
+  document.getElementById('poolCount').textContent =
+    `${remaining.length}件 · 計${remaining.reduce((s,t)=>s+t.hours,0)}h`;
+  if(remaining.length===0){
+    pool.innerHTML='<div class="alldone">🎉 すべて割り当て済み！</div>';
+  }
+  tasks.forEach(t=>{
+    const c = PROJ[t.proj];
+    const el=document.createElement('div');
+    el.className='tcard'+(t.placed?' placed':'');
+    el.draggable = !t.placed;
+    el.dataset.id=t.id;
+    el.innerHTML=`
+      ${t.placed?'':'<div class="grip">⋮⋮</div>'}
+      <div class="tn">${t.name}</div>
+      <div class="tm"><span class="chip" style="background:${c}">${t.proj}</span><span class="hrs nums">${t.hours}h</span></div>
+      ${t.placed?`<div class="placed-tag">✓ ${t.placed} に割当済</div>`:''}`;
+    if(!t.placed){
+      el.addEventListener('dragstart', e=>{dragTask=t; el.classList.add('dragging'); refreshTargets();});
+      el.addEventListener('dragend', e=>{el.classList.remove('dragging'); dragTask=null; clearTargets();});
+    }
+    pool.appendChild(el);
+  });
+}
+
+function renderMembers(){
+  const wrap=document.getElementById('members');
+  wrap.innerHTML='';
+  members.forEach(m=>{
+    const u=used(m); const free=Math.max(0,CAP-u); const over=u>CAP;
+    const el=document.createElement('div');
+    el.className='mcard'+(over?' over':'');
+    el.dataset.id=m.id;
+    let segHtml='';
+    let acc=0;
+    m.segs.forEach(s=>{
+      const w=(s.h/CAP)*100;
+      const isOver = acc>=CAP;
+      acc+=s.h;
+      segHtml+=`<div class="seg" style="width:${w}%;background:${isOver?'var(--over)':PROJ[s.proj]}" title="${s.label} ${s.h}h">${s.h>=2?s.label:''}</div>`;
+    });
+    let freeHtml='';
+    if(over){
+      // overflow shown by red beyond — keep bar at 100 visually with red tail
+      freeHtml='';
+    }else if(free>0){
+      const fw=(free/CAP)*100;
+      freeHtml=`<div class="freezone" style="width:${fw}%">空き ${free}h</div>`;
+    }
+    const statCls = over?'over':(free===0?'full':'free');
+    const statTxt = over?`+${u-CAP}h 超過`:(free===0?`満稼働`:`空き ${free}h`);
+    el.innerHTML=`
+      <div class="mtop">
+        <div class="avatar" style="background:${m.color}">${m.name.charAt(0)}</div>
+        <span class="mname">${m.name}</span><span class="mrole">${m.role}</span>
+        <span class="mstat ${statCls} nums">${statTxt}</span>
+      </div>
+      <div class="capbar">${segHtml}${freeHtml}</div>
+      <div class="capnums nums"><span><b>${u}/${CAP}h</b> 使用</span><span>${over?'<span style="color:var(--over)">これ以上振れません</span>':(free===0?'満稼働':`あと ${free}h 振れる`)}</span></div>
+      ${over?'<div class="nofit">⚠ 超過中 — ドロップ不可</div>':''}`;
+    // drop handlers
+    el.addEventListener('dragover', e=>{ if(canDrop(m)){e.preventDefault();} });
+    el.addEventListener('drop', e=>{ e.preventDefault(); if(canDrop(m)) doDrop(m); });
+    wrap.appendChild(el);
+  });
+}
+
+function canDrop(m){
+  if(!dragTask) return false;
+  const free=Math.max(0,CAP-used(m));
+  return used(m)<=CAP && free>=dragTask.hours;
+}
+function refreshTargets(){
+  document.querySelectorAll('.mcard').forEach(el=>{
+    const m=members.find(x=>x.id===el.dataset.id);
+    el.classList.toggle('droptarget', canDrop(m));
+  });
+}
+function clearTargets(){document.querySelectorAll('.mcard').forEach(el=>el.classList.remove('droptarget'));}
+
+function doDrop(m){
+  const t=dragTask;
+  m.segs.push({label:t.name, h:t.hours, proj:t.proj});
+  t.placed=m.name;
+  dragTask=null;
+  clearTargets();
+  renderPool(); renderMembers();
+  toast(`✓ 「${t.name}」を ${m.name} に割当（${used(m)}/${CAP}h）`);
+}
+
+let toastT;
+function toast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.classList.add('show');
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2600);
+}
+
+renderPool(); renderMembers();
+</script>
+</body>
+</html>

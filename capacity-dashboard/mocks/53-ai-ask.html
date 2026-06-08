@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIに聞く — プロジェクトQ&A</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee;
+    --track:#eef1f5; --accent:#3a86ff;
+    --done:#2fa66b; --doing:#3a86ff; --todo:#9aa3af; --blocked:#e5484d;
+    --c-morita:#e5772d; --c-tanaka:#3a86ff; --c-sato:#2fa66b; --c-suzuki:#b657d6;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"palt"; line-height:1.65; -webkit-font-smoothing:antialiased;
+    display:flex; flex-direction:column; height:100vh;
+  }
+  .num{font-variant-numeric:tabular-nums}
+
+  header{
+    background:var(--card); border-bottom:1px solid var(--line);
+    padding:12px 20px; display:flex; align-items:center; gap:12px;
+  }
+  .logo{
+    width:30px;height:30px;border-radius:9px;flex:none;
+    background:linear-gradient(135deg,#3a86ff,#6aa8ff); color:#fff;
+    display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;
+  }
+  header .ttl{font-size:15px;font-weight:700}
+  header .sub{font-size:12px;color:var(--muted)}
+  header .ctx{margin-left:auto;font-size:12px;color:var(--muted);background:var(--track);border-radius:999px;padding:4px 12px}
+  .note{
+    padding:7px 20px; background:#fff7ed; border-bottom:1px solid #ffe2c2;
+    color:#9a5a16; font-size:12px;
+  }
+
+  .stream{flex:1; overflow:auto; padding:22px 0 8px}
+  .stream-inner{max-width:760px; margin:0 auto; padding:0 20px}
+
+  .turn{margin-bottom:22px}
+  .who{display:flex;align-items:center;gap:9px;margin-bottom:8px;font-size:12px;color:var(--muted);font-weight:600}
+  .who .ava{width:24px;height:24px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;flex:none}
+  .ava.user{background:var(--ink)}
+  .ava.ai{background:linear-gradient(135deg,#3a86ff,#6aa8ff)}
+
+  .bubble-user{
+    background:#eef3ff;border:1px solid #dbe6ff;border-radius:14px;padding:11px 15px;
+    display:inline-block;font-size:14.5px;font-weight:600;
+  }
+  .bubble-ai{font-size:14.5px;color:#2b3340}
+  .bubble-ai p{margin:0 0 10px}
+  .bubble-ai strong{font-weight:700;color:var(--ink)}
+  .hl-red{color:#c1342f;font-weight:700}
+
+  /* evidence cards */
+  .cards{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0 4px}
+  .ecard{
+    flex:1 1 200px; min-width:180px;
+    background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;
+    box-shadow:0 1px 2px rgba(20,30,48,.04); text-decoration:none; color:inherit; display:block;
+  }
+  .ecard:hover{border-color:#cdd6e4}
+  .ecard .ec-k{font-size:11px;color:var(--muted);margin-bottom:5px;display:flex;align-items:center;gap:6px}
+  .ecard .ec-v{font-size:15px;font-weight:700}
+  .ecard .ec-meta{font-size:11.5px;color:var(--muted);margin-top:3px}
+  .chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;line-height:1.5}
+  .chip .dot{width:6px;height:6px;border-radius:50%}
+  .st-doing{background:#eaf1ff;color:#2a63c4}
+  .st-blocked{background:#fdecec;color:#c1342f}
+  .pri{background:#fdecec;color:#c1342f}
+  .avatar{width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:700;vertical-align:-4px}
+
+  /* number tiles */
+  .tiles{display:flex;gap:8px;margin:12px 0 4px;flex-wrap:wrap}
+  .tile{flex:1 1 90px;background:#f8fafc;border:1px solid var(--line);border-radius:11px;padding:9px 10px;text-align:center}
+  .tile .n{font-size:19px;font-weight:800}
+  .tile .l{font-size:10.5px;color:var(--muted)}
+
+  .src{font-size:11px;color:var(--muted);margin-top:10px}
+  .src b{color:#4a515c}
+
+  /* composer */
+  .composer{border-top:1px solid var(--line);background:var(--card);padding:14px 0 16px}
+  .composer-inner{max-width:760px;margin:0 auto;padding:0 20px}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:11px}
+  .qchip{
+    font:inherit;font-size:12.5px;font-weight:600;border:1px solid var(--line);background:#fff;
+    color:#3a4250;border-radius:999px;padding:7px 13px;cursor:pointer;transition:.12s;
+  }
+  .qchip:hover{border-color:var(--accent);color:var(--accent);background:#f3f8ff}
+  .inputbar{display:flex;align-items:flex-end;gap:10px;border:1px solid var(--line);border-radius:14px;padding:8px 8px 8px 14px;background:#fff}
+  .inputbar:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px rgba(58,134,255,.12)}
+  #ask{flex:1;border:0;outline:0;resize:none;font:inherit;font-size:14.5px;line-height:1.5;max-height:120px;background:transparent;padding:5px 0}
+  #ask::placeholder{color:#aeb4be}
+  .send{border:0;background:var(--accent);color:#fff;width:38px;height:38px;border-radius:10px;font-size:16px;cursor:pointer;flex:none}
+  .send:hover{background:#2f72e6}
+
+  .thinking{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:13px}
+  .thinking .dotpulse{display:inline-flex;gap:3px}
+  .thinking .dotpulse i{width:6px;height:6px;border-radius:50%;background:var(--accent);animation:bl 1s infinite}
+  .thinking .dotpulse i:nth-child(2){animation-delay:.15s}
+  .thinking .dotpulse i:nth-child(3){animation-delay:.3s}
+  @keyframes bl{0%,60%,100%{opacity:.25}30%{opacity:1}}
+</style>
+</head>
+<body>
+  <header>
+    <div class="logo">C</div>
+    <div>
+      <div class="ttl">AIに聞く</div>
+      <div class="sub">Claudeがプロジェクトの状況を要約して答えます</div>
+    </div>
+    <div class="ctx">📁 新ダッシュボード機能 (v1.2)</div>
+  </header>
+  <div class="note">※ モック（サンプルデータ）。本番は Vikunja API ＋ Claude で要約。</div>
+
+  <div class="stream" id="stream">
+    <div class="stream-inner" id="streamInner">
+      <!-- intro -->
+      <div class="turn">
+        <div class="who"><span class="ava ai">C</span>Claude</div>
+        <div class="bubble-ai">
+          <p>こんにちは。<strong>新ダッシュボード機能 (Release v1.2)</strong> について何でも聞いてください。下のチップから選ぶか、自由に質問できます。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="composer">
+    <div class="composer-inner">
+      <div class="chips" id="chips">
+        <button class="qchip" data-q="weekly">今週ヤバいのは？</button>
+        <button class="qchip" data-q="sato">佐藤の今日は？</button>
+        <button class="qchip" data-q="pj">このPJどうなってる？</button>
+        <button class="qchip" data-q="login">ログイン機能どうなってる？</button>
+      </div>
+      <div class="inputbar">
+        <textarea id="ask" rows="1" placeholder="自由に質問する…（例: ブロッカーの解消見込みは？）"></textarea>
+        <button class="send" id="send" title="送信">↑</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+const av = (t,c)=>`<span class="avatar" style="background:${c}">${t}</span>`;
+
+const ANSWERS = {
+  weekly: {
+    q:'今週ヤバいのは？',
+    a:`<p><strong>2点</strong>に注意が必要です。</p>
+       <p>① <strong>認証フロー実装</strong>が<strong>外部決済API待ちで3日停滞</strong>中。このままだと <span class="hl-red">M2（実装完了6/6）と結合テストが遅延</span>し、リリース全体に波及します。</p>
+       <p>② いま<strong>最優先</strong>は <span class="hl-red">ログイン障害対応</span>（本番障害・森田・今日中）。こちらは本番影響なので即対応です。</p>`,
+    cards:[
+      `<a class="ecard" href="51-task-detail.html"><div class="ec-k">⚑ 根拠タスク</div><div class="ec-v">認証フロー実装</div><div class="ec-meta"><span class="chip st-blocked">⛔ 3日停滞</span> ${av('佐','var(--c-sato)')} 佐藤 / 6/6</div></a>`,
+      `<a class="ecard" href="#"><div class="ec-k">⚑ 根拠タスク</div><div class="ec-v">ログイン障害対応</div><div class="ec-meta"><span class="chip pri">最優先</span> ${av('森','var(--c-morita)')} 森田 / 今日中</div></a>`
+    ],
+    tiles:[ ['58%','PJ進捗'], ['+3日','遅延リスク'], ['1','ブロッカー'], ['6/16','着地予測'] ],
+    src:'タスク #138, ログイン障害対応, マイルストーンM2'
+  },
+  sato:{
+    q:'佐藤の今日は？',
+    a:`<p>佐藤さん（Backend）の担当は <strong class="num">2/5</strong> 完了。メインの<strong>認証フロー実装がブロック中</strong>（外部API待ち）なので、<strong>今日は手が空き気味</strong>です。</p>
+       <p>提案: <strong>空き時間に結合テスト準備を前倒し</strong>しておくと、API復旧後すぐM2に入れて遅延を吸収できます。</p>`,
+    cards:[
+      `<a class="ecard" href="51-task-detail.html"><div class="ec-k">⚑ ブロック中</div><div class="ec-v">認証フロー実装</div><div class="ec-meta"><span class="chip st-blocked">⛔ Blocked</span> 残3h / 6/6</div></a>`,
+      `<a class="ecard" href="#"><div class="ec-k">⚑ 前倒し候補</div><div class="ec-v">結合テスト準備</div><div class="ec-meta">Todo ・ 認証完了待ち</div></a>`
+    ],
+    tiles:[ ['2/5','担当完了'], ['1','ブロック中'], ['空き気味','稼働'] ],
+    src:'佐藤の担当タスク, タスク #138'
+  },
+  pj:{
+    q:'このPJどうなってる？',
+    a:`<p><strong>新ダッシュボード機能 (Release v1.2)</strong> は進捗 <strong class="num">58%</strong>。締切<strong class="num"> 6/13</strong> に対し着地予測は <span class="hl-red num">6/16（+3日の遅延リスク🔴）</span>です。</p>
+       <p>原因は<strong>ブロッカー1件</strong>（認証フローの外部API待ち）。担当別では森田が <strong class="num">8/10</strong> と先行、佐藤が <strong class="num">2/5</strong> でブロック起因の停滞があります。</p>`,
+    cards:[
+      `<a class="ecard" href="#"><div class="ec-k">👥 担当別 進捗</div><div class="ec-v">森田 <span class="num">8/10</span> ・ 田中 <span class="num">4/7</span></div><div class="ec-meta">佐藤 <span class="num">2/5</span> ・ 鈴木 <span class="num">3/3</span></div></a>`,
+      `<a class="ecard" href="51-task-detail.html"><div class="ec-k">⛔ 唯一のブロッカー</div><div class="ec-v">認証フロー実装</div><div class="ec-meta">外部API待ち / 3日停滞</div></a>`
+    ],
+    tiles:[ ['58%','進捗'], ['6/13','締切'], ['6/16','着地'], ['+3日','遅延'] ],
+    src:'PJサマリー, 担当別集計, ブロッカー一覧'
+  },
+  login:{
+    q:'ログイン機能どうなってる？',
+    a:`<p><strong>ログイン機能</strong>は機能実装自体が <strong class="num">60%</strong> 進行中です。</p>
+       <p>ただし現在は <span class="hl-red">本番のログイン障害対応が最優先</span>で動いており（森田・今日中）、新規実装より<strong>障害収束が先</strong>という状況です。実装側の認証フローは外部API待ちでブロック中。</p>`,
+    cards:[
+      `<a class="ecard" href="#"><div class="ec-k">◇ PJ要素</div><div class="ec-v">ログイン機能</div><div class="ec-meta">機能実装 <span class="num">60%</span></div></a>`,
+      `<a class="ecard" href="#"><div class="ec-k">⚑ 最優先で進行中</div><div class="ec-v">ログイン障害対応</div><div class="ec-meta"><span class="chip pri">最優先</span> ${av('森','var(--c-morita)')} 森田</div></a>`
+    ],
+    tiles:[ ['60%','実装'], ['1','本番障害'], ['1','関連ブロック'] ],
+    src:'ログイン機能(PJ要素), ログイン障害対応'
+  }
+};
+
+const stream = document.getElementById('stream');
+const inner = document.getElementById('streamInner');
+
+function tilesHTML(tiles){
+  return `<div class="tiles">${tiles.map(t=>`<div class="tile"><div class="n num">${t[0]}</div><div class="l">${t[1]}</div></div>`).join('')}</div>`;
+}
+function addUser(q){
+  const el=document.createElement('div'); el.className='turn';
+  el.innerHTML=`<div class="who" style="justify-content:flex-end"><span>あなた</span><span class="ava user">U</span></div>
+    <div style="text-align:right"><span class="bubble-user">${q}</span></div>`;
+  inner.appendChild(el); scrollDown();
+}
+function addThinking(){
+  const el=document.createElement('div'); el.className='turn'; el.id='thinking';
+  el.innerHTML=`<div class="who"><span class="ava ai">C</span>Claude</div>
+    <div class="thinking"><span class="dotpulse"><i></i><i></i><i></i></span> 関連タスクを集計しています…</div>`;
+  inner.appendChild(el); scrollDown();
+}
+function addAI(d){
+  const t=document.getElementById('thinking'); if(t) t.remove();
+  const el=document.createElement('div'); el.className='turn';
+  el.innerHTML=`<div class="who"><span class="ava ai">C</span>Claude</div>
+    <div class="bubble-ai">
+      ${d.a}
+      <div class="cards">${d.cards.join('')}</div>
+      ${tilesHTML(d.tiles)}
+      <div class="src">📎 根拠: <b>${d.src}</b></div>
+    </div>`;
+  inner.appendChild(el); scrollDown();
+}
+function scrollDown(){ requestAnimationFrame(()=>{ stream.scrollTop=stream.scrollHeight; }); }
+
+function ask(key, customQ){
+  const d = ANSWERS[key];
+  addUser(d ? d.q : customQ);
+  addThinking();
+  setTimeout(()=>{
+    if(d) addAI(d);
+    else {
+      const t=document.getElementById('thinking'); if(t) t.remove();
+      const el=document.createElement('div'); el.className='turn';
+      el.innerHTML=`<div class="who"><span class="ava ai">C</span>Claude</div>
+        <div class="bubble-ai"><p>（モック）この質問は本番では Vikunja のタスク・進捗データを Claude が集計して回答します。サンプルの定型質問はチップから試せます。</p></div>`;
+      inner.appendChild(el); scrollDown();
+    }
+  }, 650);
+}
+
+document.querySelectorAll('.qchip').forEach(b=>{
+  b.addEventListener('click',()=>ask(b.dataset.q));
+});
+
+const $ask=document.getElementById('ask');
+$ask.addEventListener('input',()=>{ $ask.style.height='auto'; $ask.style.height=Math.min($ask.scrollHeight,120)+'px'; });
+function submit(){
+  const v=$ask.value.trim(); if(!v) return;
+  // map common phrasings to canned answers
+  let key=null;
+  if(/ヤバ|やば|危|今週/.test(v)) key='weekly';
+  else if(/佐藤/.test(v)) key='sato';
+  else if(/ログイン/.test(v)) key='login';
+  else if(/PJ|プロジェクト|どうなって|進捗/.test(v)) key='pj';
+  ask(key, v);
+  $ask.value=''; $ask.style.height='auto';
+}
+document.getElementById('send').addEventListener('click',submit);
+$ask.addEventListener('keydown',e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); submit(); } });
+
+// auto-demo the first answer so reviewers see the format immediately
+setTimeout(()=>ask('weekly'), 400);
+</script>
+</body>
+</html>

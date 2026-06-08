@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>アクティビティフィード — 新ダッシュボード機能</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --done:#2fa66b; --doing:#3a86ff; --todo:#9aa3af; --blocked:#e5484d;
+    --sig-g:#2fa66b; --sig-y:#f5a623; --sig-r:#e5484d;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"palt"; font-variant-numeric:tabular-nums;
+    line-height:1.6; padding:28px 20px 60px;
+  }
+  .wrap{max-width:760px;margin:0 auto}
+  header.page{margin-bottom:18px}
+  .eyebrow{font-size:12px;color:var(--muted);letter-spacing:.04em;font-weight:600}
+  h1{font-size:22px;font-weight:700;margin:2px 0 6px;letter-spacing:.01em}
+  .note{
+    font-size:12px;color:var(--muted);background:#fff;border:1px solid var(--line);
+    border-radius:10px;padding:8px 12px;display:inline-flex;align-items:center;gap:6px;
+  }
+  .note .dot{width:6px;height:6px;border-radius:50%;background:var(--sig-y);flex:none}
+
+  .toolbar{display:flex;gap:8px;margin:18px 0 14px;flex-wrap:wrap}
+  .chip{
+    font-size:12.5px;border:1px solid var(--line);background:#fff;color:var(--muted);
+    padding:6px 12px;border-radius:999px;cursor:default;font-weight:600;
+  }
+  .chip.active{background:var(--ink);color:#fff;border-color:var(--ink)}
+
+  .daygroup{margin-bottom:8px}
+  .dayhead{
+    display:flex;align-items:center;gap:10px;margin:22px 0 12px;
+  }
+  .dayhead .label{font-size:13px;font-weight:700;color:var(--ink)}
+  .dayhead .sub{font-size:12px;color:var(--muted)}
+  .dayhead .rule{flex:1;height:1px;background:var(--line)}
+  .dayhead .count{font-size:11.5px;color:var(--muted);background:var(--track);padding:2px 9px;border-radius:999px;font-weight:600}
+
+  .feed{position:relative;padding-left:8px}
+  .feed::before{
+    content:"";position:absolute;left:22px;top:6px;bottom:6px;width:2px;background:var(--line);
+  }
+  .item{
+    position:relative;display:flex;gap:14px;padding:10px 0;align-items:flex-start;
+  }
+  .avatar{
+    width:30px;height:30px;border-radius:50%;flex:none;z-index:1;
+    display:flex;align-items:center;justify-content:center;color:#fff;font-size:12.5px;font-weight:700;
+    box-shadow:0 0 0 3px var(--bg);
+  }
+  .a-morita{background:var(--m-morita)} .a-tanaka{background:var(--m-tanaka)}
+  .a-sato{background:var(--m-sato)} .a-suzuki{background:var(--m-suzuki)}
+
+  .body{flex:1;min-width:0;
+    background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:11px 14px;box-shadow:0 1px 2px rgba(20,30,50,.04);
+  }
+  .row1{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .who{font-weight:700;font-size:13.5px}
+  .verb{
+    font-size:12px;font-weight:700;padding:2px 8px;border-radius:6px;display:inline-flex;align-items:center;gap:5px;
+  }
+  .verb .ic{font-size:11px;line-height:1}
+  .v-done{background:rgba(47,166,107,.12);color:var(--done)}
+  .v-start{background:rgba(58,134,255,.12);color:var(--doing)}
+  .v-block{background:rgba(229,72,77,.12);color:var(--blocked)}
+  .v-add{background:rgba(229,119,45,.13);color:var(--m-morita)}
+  .v-comment{background:var(--track);color:var(--muted)}
+  .v-pr{background:rgba(182,87,214,.13);color:var(--m-suzuki)}
+  .time{margin-left:auto;font-size:12px;color:var(--muted);white-space:nowrap}
+
+  .target{margin-top:5px;font-size:13.5px;color:var(--ink)}
+  .target .tname{font-weight:600}
+  .meta{margin-top:5px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .tag{font-size:11px;color:var(--muted);background:var(--track);padding:1px 8px;border-radius:6px;font-weight:600}
+  .tag.prio{background:rgba(229,72,77,.1);color:var(--blocked)}
+  .tag.reason{background:rgba(245,166,35,.13);color:#b07400}
+  .pct{font-size:11px;color:var(--muted)}
+  .pbar{height:5px;width:120px;background:var(--track);border-radius:99px;overflow:hidden;display:inline-block;vertical-align:middle}
+  .pbar > i{display:block;height:100%;background:var(--doing);border-radius:99px}
+
+  footer{margin-top:30px;font-size:11.5px;color:var(--muted);text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="page">
+    <div class="eyebrow">プロジェクト · 新ダッシュボード機能</div>
+    <h1>アクティビティフィード</h1>
+    <div class="note"><span class="dot"></span>※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</div>
+  </header>
+
+  <div class="toolbar">
+    <span class="chip active">すべて</span>
+    <span class="chip">状態変化</span>
+    <span class="chip">コメント / PR</span>
+    <span class="chip">自分の関連</span>
+  </div>
+
+  <!-- TODAY -->
+  <div class="daygroup">
+    <div class="dayhead">
+      <span class="label">今日</span>
+      <span class="sub">6/4（木）</span>
+      <span class="rule"></span>
+      <span class="count">3件</span>
+    </div>
+
+    <div class="feed">
+      <div class="item">
+        <div class="avatar a-suzuki">鈴</div>
+        <div class="body">
+          <div class="row1">
+            <span class="who">鈴木</span>
+            <span class="verb v-done"><span class="ic">●</span>完了</span>
+            <span class="time">10:32</span>
+          </div>
+          <div class="target">「<span class="tname">設計ドキュメント</span>」を完了にしました</div>
+          <div class="meta"><span class="tag">Done</span></div>
+        </div>
+      </div>
+
+      <div class="item">
+        <div class="avatar a-sato">佐</div>
+        <div class="body">
+          <div class="row1">
+            <span class="who">佐藤</span>
+            <span class="verb v-block"><span class="ic">▲</span>ブロック</span>
+            <span class="time">09:40</span>
+          </div>
+          <div class="target">「<span class="tname">認証フロー実装</span>」を Blocked に変更しました</div>
+          <div class="meta"><span class="tag">Backend</span><span class="tag reason">理由 · 外部API待ち</span><span class="tag">締切 6/6</span></div>
+        </div>
+      </div>
+
+      <div class="item">
+        <div class="avatar a-morita">森</div>
+        <div class="body">
+          <div class="row1">
+            <span class="who">森田</span>
+            <span class="verb v-add"><span class="ic">＋</span>追加</span>
+            <span class="time">09:05</span>
+          </div>
+          <div class="target">「<span class="tname">ログイン障害対応</span>」を追加しました</div>
+          <div class="meta"><span class="tag">Backend</span><span class="tag prio">最優先</span><span class="tag">締切 今日</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- YESTERDAY -->
+  <div class="daygroup">
+    <div class="dayhead">
+      <span class="label">昨日</span>
+      <span class="sub">6/3（水）</span>
+      <span class="rule"></span>
+      <span class="count">3件</span>
+    </div>
+
+    <div class="feed">
+      <div class="item">
+        <div class="avatar a-tanaka">田</div>
+        <div class="body">
+          <div class="row1">
+            <span class="who">田中</span>
+            <span class="verb v-start"><span class="ic">◐</span>進捗更新</span>
+            <span class="time">17:20</span>
+          </div>
+          <div class="target">「<span class="tname">ダッシュ画面実装</span>」を 60% に更新しました</div>
+          <div class="meta">
+            <span class="pbar"><i style="width:60%"></i></span>
+            <span class="pct">60%</span>
+            <span class="tag">Frontend</span><span class="tag">締切 6/9</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="item">
+        <div class="avatar a-morita">森</div>
+        <div class="body">
+          <div class="row1">
+            <span class="who">森田</span>
+            <span class="verb v-done"><span class="ic">●</span>完了</span>
+            <span class="time">昨日</span>
+          </div>
+          <div class="target">「<span class="tname">API設計</span>」を完了にしました</div>
+          <div class="meta"><span class="tag">Done</span><span class="tag">Backend</span></div>
+        </div>
+      </div>
+
+      <div class="item">
+        <div class="avatar a-sato">佐</div>
+        <div class="body">
+          <div class="row1">
+            <span class="who">佐藤</span>
+            <span class="verb v-pr"><span class="ic">⑂</span>PR作成</span>
+            <span class="time">昨日</span>
+          </div>
+          <div class="target">PR <span class="tname">#142</span> を作成しました（森田 レビュー待ち）</div>
+          <div class="meta"><span class="tag">レビュアー · 森田</span><span class="tag">レビュー待ち</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>表示期間 · 直近2日 / 全6件 — 古い変更を読み込む</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>週プランニング — 日別積み上げ型</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee;
+    --track:#eef1f5; --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0;
+    --caprule:#9aa3af; --amber:#f5a623;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"palt"; -webkit-font-smoothing:antialiased;
+    font-variant-numeric:tabular-nums; padding:22px 26px 60px;
+  }
+  .wrap{max-width:1020px;margin:0 auto;}
+  header.top{display:flex;align-items:flex-end;gap:18px;flex-wrap:wrap;margin-bottom:6px;}
+  header.top h1{font-size:19px;margin:0;font-weight:700;letter-spacing:.02em;}
+  .phase{font-size:12px;color:var(--muted);font-weight:600;}
+  .weeknav{display:flex;align-items:center;gap:10px;margin-left:auto;
+    background:var(--card);border:1px solid var(--line);border-radius:10px;padding:6px 12px;}
+  .weeknav button{border:none;background:transparent;color:var(--muted);font-size:15px;cursor:pointer;
+    padding:2px 6px;border-radius:6px;line-height:1;}
+  .weeknav button:hover{background:var(--track);color:var(--ink);}
+  .weeknav .lbl{font-size:13px;font-weight:600;}
+  .note{font-size:11.5px;color:var(--muted);margin:6px 0 18px;}
+
+  .legend{display:flex;gap:16px;align-items:center;font-size:12px;color:var(--muted);margin-bottom:16px;flex-wrap:wrap;}
+  .legend .lg{display:inline-flex;align-items:center;gap:6px;font-weight:600;}
+  .legend .sw{width:13px;height:13px;border-radius:3px;}
+  .legend .caprule-lg{width:22px;height:0;border-top:2px dashed var(--caprule);}
+
+  .stackcard{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    box-shadow:0 1px 3px rgba(20,30,50,.04);padding:22px 26px 16px;}
+  .chart{display:flex;align-items:flex-end;gap:0;position:relative;height:430px;padding-left:42px;}
+  /* y axis */
+  .yaxis{position:absolute;left:0;top:0;bottom:46px;width:42px;}
+  .ytick{position:absolute;right:8px;font-size:10.5px;color:var(--muted);transform:translateY(-50%);}
+  .gridline{position:absolute;left:42px;right:0;border-top:1px solid var(--track);}
+  .caprule{position:absolute;left:42px;right:0;border-top:2px dashed var(--caprule);z-index:3;}
+  .caprule .clab{position:absolute;right:0;top:-16px;font-size:10.5px;color:var(--caprule);font-weight:700;background:var(--card);padding:0 4px;}
+
+  .plot{display:flex;align-items:flex-end;gap:34px;width:100%;height:384px;position:relative;z-index:2;}
+  .daycol{flex:1;display:flex;flex-direction:column;align-items:center;}
+  .bar{width:84%;max-width:96px;display:flex;flex-direction:column-reverse;border-radius:8px 8px 0 0;
+    overflow:hidden;position:relative;box-shadow:0 1px 2px rgba(20,30,50,.08);}
+  .seg{width:100%;display:flex;align-items:center;justify-content:center;color:#fff;
+    font-size:11px;font-weight:700;position:relative;border-top:1px solid rgba(255,255,255,.35);}
+  .seg:first-child{border-top:none;}
+  .seg.morita{background:var(--m-morita);} .seg.tanaka{background:var(--m-tanaka);}
+  .seg.sato{background:var(--m-sato);} .seg.suzuki{background:var(--m-suzuki);}
+  .seg .sg-h{text-shadow:0 1px 1px rgba(0,0,0,.18);}
+  .seg.tiny .sg-h{font-size:9.5px;}
+  /* over portion overlay marker on the segment that crosses cap */
+  .overcap{position:absolute;left:0;right:0;background:repeating-linear-gradient(45deg,transparent,transparent 4px,rgba(229,72,77,.5) 4px,rgba(229,72,77,.5) 8px);
+    outline:1.5px solid var(--over);}
+
+  .barbase{width:84%;max-width:96px;border-top:2px solid var(--line);}
+  .daymeta{margin-top:10px;text-align:center;}
+  .daymeta .dow{font-size:14px;font-weight:700;}
+  .daymeta .dnum{font-size:11px;color:var(--muted);}
+  .daymeta .dtot{font-size:13px;font-weight:700;margin-top:5px;}
+  .daymeta .dfree{font-size:10.5px;font-weight:600;}
+  .daymeta .dfree.slack{color:var(--free);}
+  .daymeta .dfree.tight{color:var(--amber);}
+  .daymeta .dfree.over{color:var(--over);}
+  .daycol.today .daymeta .dow{color:var(--fill);}
+  .daycol.today .bar{outline:2px solid #cfe1ff;outline-offset:2px;border-radius:8px;}
+
+  .footer{display:flex;gap:22px;flex-wrap:wrap;margin-top:18px;padding:14px 18px;
+    background:var(--card);border:1px solid var(--line);border-radius:12px;font-size:12px;}
+  .footer .stat b{font-size:17px;font-weight:700;} .footer .stat{color:var(--muted);}
+  .footer .stat b.ok{color:var(--free);} .footer .stat b.amb{color:var(--amber);}
+  .hint{font-size:11.5px;color:var(--muted);margin-top:12px;line-height:1.6;}
+  .hint b{color:var(--ink);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <div class="phase">② 計画 ／ 週プランニング</div>
+      <h1>日別積み上げ — どの曜日に余裕／逼迫があるか</h1>
+    </div>
+    <div class="weeknav">
+      <button title="前の週">‹</button>
+      <span class="lbl">6/1〜6/5（今週）</span>
+      <button title="次の週">›</button>
+    </div>
+  </header>
+  <p class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</p>
+
+  <div class="legend">
+    <span class="lg"><span class="sw" style="background:var(--m-morita)"></span>森田</span>
+    <span class="lg"><span class="sw" style="background:var(--m-tanaka)"></span>田中</span>
+    <span class="lg"><span class="sw" style="background:var(--m-sato)"></span>佐藤</span>
+    <span class="lg"><span class="sw" style="background:var(--m-suzuki)"></span>鈴木</span>
+    <span class="lg" style="margin-left:8px"><span class="caprule-lg"></span>チーム日次容量 32h</span>
+    <span class="lg"><span class="sw" style="background:repeating-linear-gradient(45deg,#fff,#fff 3px,rgba(229,72,77,.6) 3px,rgba(229,72,77,.6) 6px);border:1px solid var(--over)"></span>個人超過分</span>
+  </div>
+
+  <div class="stackcard">
+    <div class="chart">
+      <div class="yaxis" id="yaxis"></div>
+      <div id="gridlines"></div>
+      <div class="caprule" id="caprule"><span class="clab">容量 32h</span></div>
+      <div class="plot" id="plot"></div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="stat">チーム週容量 <b>160h</b></div>
+    <div class="stat">アサイン <b class="amb">101h</b>（63%）</div>
+    <div class="stat">空き <b class="ok">59h</b></div>
+    <div class="stat">日次容量 <b>32h</b>（8h×4名）</div>
+  </div>
+  <p class="hint">
+    各バーが容量線（32h）に届かないほどその曜日に余裕がある。<b>金曜は12h</b>で容量線まで大きく空き、最も余裕。<br>
+    一方 <b>木曜は24h</b> でバーが一番高く、内訳でも <b>森田が10h（容量8h超え＝斜線部）</b>。未アサイン作業は金曜や鈴木・田中の枠に寄せると平準化できる。
+  </p>
+</div>
+
+<script>
+  // 日次容量=32h。スケール上限は超過を見せるため 36h とする。
+  const MAX=36, CAP=32, PERSON_CAP=8;
+  const PX=384; // plot height
+  function h2px(h){return h/MAX*PX;}
+
+  const order=['morita','tanaka','sato','suzuki'];
+  const colorName={morita:'森田',tanaka:'田中',sato:'佐藤',suzuki:'鈴木'};
+  // 各日の[森田,田中,佐藤,鈴木]
+  const days=[
+    {dow:'月',dnum:'6/1',today:true, v:{morita:8,tanaka:4,sato:8,suzuki:2}},
+    {dow:'火',dnum:'6/2',today:false,v:{morita:6,tanaka:6,sato:8,suzuki:3}},
+    {dow:'水',dnum:'6/3',today:false,v:{morita:8,tanaka:2,sato:8,suzuki:2}},
+    {dow:'木',dnum:'6/4',today:false,v:{morita:10,tanaka:4,sato:8,suzuki:2}},
+    {dow:'金',dnum:'6/5',today:false,v:{morita:4,tanaka:0,sato:8,suzuki:0}},
+  ];
+
+  // y axis ticks + gridlines (0,8,16,24,32)
+  const yaxis=document.getElementById('yaxis');
+  const gl=document.getElementById('gridlines');
+  [0,8,16,24,32].forEach(t=>{
+    const yFromBottom=h2px(t); // px from bottom of plot
+    const top=PX - yFromBottom;
+    const tk=document.createElement('div');
+    tk.className='ytick'; tk.style.top=top+'px'; tk.textContent=t+'h';
+    yaxis.appendChild(tk);
+    const line=document.createElement('div');
+    line.className='gridline'; line.style.top=top+'px';
+    gl.appendChild(line);
+  });
+  // cap rule position
+  document.getElementById('caprule').style.top=(PX - h2px(CAP))+'px';
+
+  const plot=document.getElementById('plot');
+  days.forEach(d=>{
+    const total=order.reduce((s,k)=>s+d.v[k],0);
+    const free=CAP-total;
+    const col=document.createElement('div');
+    col.className='daycol'+(d.today?' today':'');
+
+    // build bar (column-reverse: first child = bottom)
+    const bar=document.createElement('div');
+    bar.className='bar';
+    bar.style.height=h2px(total)+'px';
+
+    // cumulative to know where person crosses PERSON_CAP for over-marker
+    order.forEach(k=>{
+      const hv=d.v[k];
+      if(hv<=0) return;
+      const seg=document.createElement('div');
+      seg.className='seg '+k+(h2px(hv)<22?' tiny':'');
+      seg.style.height=h2px(hv)+'px';
+      seg.innerHTML=`<span class="sg-h">${hv}h</span>`;
+      // individual over (e.g. 森田 10h on 木): mark top (hv-PERSON_CAP) portion
+      if(hv>PERSON_CAP){
+        const overH=hv-PERSON_CAP;
+        const ov=document.createElement('div');
+        ov.className='overcap';
+        ov.style.height=h2px(overH)+'px';
+        ov.style.top='0'; // top of this segment (highest part)
+        seg.appendChild(ov);
+      }
+      bar.appendChild(seg);
+    });
+    col.appendChild(bar);
+
+    const meta=document.createElement('div');
+    meta.className='daymeta';
+    let fcls = free>=18?'slack' : free<=8?'tight':'';
+    let ftxt = `${free}h 空き`;
+    if(total>CAP){fcls='over'; ftxt=`+${total-CAP}h 超過`;}
+    meta.innerHTML=`<div class="dow">${d.dow}</div><div class="dnum">${d.dnum}</div>
+      <div class="dtot">${total}h<span style="font-weight:400;color:var(--muted);font-size:10px"> /32h</span></div>
+      <div class="dfree ${fcls}">${ftxt}</div>`;
+    col.appendChild(meta);
+    plot.appendChild(col);
+  });
+</script>
+</body>
+</html>

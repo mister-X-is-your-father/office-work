@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>アサインフロー｜キャパダッシュボード</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0;
+    --backend:#3a86ff; --frontend:#2fa66b; --qa:#b657d6; --common:#8a93a0;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"palt"; -webkit-font-smoothing:antialiased;
+  }
+  .nums{font-variant-numeric:tabular-nums;}
+  header{
+    background:var(--card); border-bottom:1px solid var(--line);
+    padding:16px 24px; display:flex; align-items:center; gap:20px; flex-wrap:wrap;
+  }
+  header h1{font-size:17px; margin:0; font-weight:700; letter-spacing:.02em;}
+  .daynav{
+    display:flex; align-items:center; gap:4px; margin-left:8px;
+    background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:4px;
+  }
+  .daynav button{
+    border:none; background:transparent; color:var(--muted); font-size:15px;
+    width:30px; height:30px; border-radius:8px; cursor:pointer;
+  }
+  .daynav button:hover{background:var(--track); color:var(--ink);}
+  .daynav .today{
+    font-size:14px; font-weight:600; color:var(--ink); padding:0 12px;
+    display:flex; align-items:center; gap:7px;
+  }
+  .daynav .badge-today{
+    background:var(--fill); color:#fff; font-size:11px; font-weight:700;
+    padding:1px 7px; border-radius:6px;
+  }
+  .note{margin-left:auto; color:var(--muted); font-size:12px;}
+  main{padding:24px; max-width:1180px; margin:0 auto;}
+  .layout{display:grid; grid-template-columns:380px 1fr; gap:20px; align-items:start;}
+  .panel{
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04); overflow:hidden;
+  }
+  .panel-head{
+    padding:15px 18px; border-bottom:1px solid var(--line);
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .panel-head h2{font-size:14px; margin:0; font-weight:700;}
+  .panel-head .count{
+    font-size:12px; color:var(--muted); background:var(--bg);
+    border:1px solid var(--line); border-radius:20px; padding:2px 10px; font-weight:600;
+  }
+  /* task list */
+  .tasklist{padding:10px;}
+  .task{
+    display:flex; align-items:center; gap:12px; padding:13px 14px; border-radius:11px;
+    cursor:pointer; border:1.5px solid transparent; transition:.12s; margin-bottom:6px;
+  }
+  .task:hover{background:var(--bg);}
+  .task.sel{border-color:var(--fill); background:#eef4ff;}
+  .task .proj-bar{width:4px; align-self:stretch; border-radius:3px; min-height:34px;}
+  .task .tbody{flex:1; min-width:0;}
+  .task .tname{font-size:13.5px; font-weight:600; margin-bottom:3px;}
+  .task .tmeta{display:flex; align-items:center; gap:8px;}
+  .chip{
+    font-size:11px; font-weight:700; padding:2px 8px; border-radius:6px; color:#fff;
+    white-space:nowrap;
+  }
+  .hrs{font-size:12px; color:var(--muted); font-weight:600;}
+  .task .arrow{color:var(--line); font-size:18px;}
+  .task.sel .arrow{color:var(--fill);}
+  /* right: suggestions */
+  .empty{
+    padding:60px 24px; text-align:center; color:var(--muted); font-size:13px;
+  }
+  .empty .big{font-size:34px; margin-bottom:10px; opacity:.5;}
+  .selhead{
+    padding:16px 18px; border-bottom:1px solid var(--line); background:#fafbfc;
+    display:flex; align-items:center; gap:12px;
+  }
+  .selhead .proj-bar{width:4px; height:36px; border-radius:3px;}
+  .selhead .stitle{font-size:15px; font-weight:700;}
+  .selhead .smeta{font-size:12px; color:var(--muted); margin-top:2px;}
+  .cands{padding:12px 14px;}
+  .cand{
+    display:flex; align-items:center; gap:14px; padding:14px; border-radius:12px;
+    border:1px solid var(--line); margin-bottom:10px; background:var(--card);
+  }
+  .cand.ok{border-color:#cfe8d8;}
+  .cand.no{opacity:.62;}
+  .avatar{
+    width:38px; height:38px; border-radius:50%; flex-shrink:0;
+    display:flex; align-items:center; justify-content:center;
+    color:#fff; font-weight:700; font-size:14px;
+  }
+  .cinfo{flex:1; min-width:0;}
+  .crow1{display:flex; align-items:center; gap:9px; margin-bottom:6px;}
+  .cname{font-size:14px; font-weight:700;}
+  .role-badge{
+    font-size:10.5px; color:var(--muted); border:1px solid var(--line);
+    padding:1px 7px; border-radius:5px; font-weight:600;
+  }
+  .match-badge{
+    font-size:10.5px; font-weight:700; padding:1px 8px; border-radius:5px;
+    background:#eafaf1; color:var(--free); border:1px solid #cfe8d8;
+  }
+  .capbar{height:9px; background:var(--track); border-radius:5px; overflow:hidden; display:flex;}
+  .capbar .used{height:100%;}
+  .capbar .over{height:100%; background:var(--over);}
+  .capbar .addseg{height:100%; opacity:.45; background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.35) 0 4px,transparent 4px 8px);}
+  .capnums{display:flex; justify-content:space-between; margin-top:5px; font-size:11.5px; color:var(--muted);}
+  .capnums b{color:var(--ink);}
+  .verdict{
+    flex-shrink:0; text-align:right; min-width:84px;
+  }
+  .verdict .free-h{font-size:18px; font-weight:800;}
+  .verdict.ok .free-h{color:var(--free);}
+  .verdict.no .free-h{color:var(--full);}
+  .verdict .mk{font-size:18px;}
+  .assign-btn{
+    margin-top:5px; font-size:11.5px; font-weight:700; border:none; cursor:pointer;
+    padding:5px 12px; border-radius:8px; background:var(--fill); color:#fff; width:100%;
+  }
+  .assign-btn:disabled{background:var(--track); color:var(--full); cursor:not-allowed;}
+  .legend{
+    display:flex; gap:16px; padding:12px 18px; border-top:1px solid var(--line);
+    font-size:11.5px; color:var(--muted); flex-wrap:wrap;
+  }
+  .legend i{display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:5px; vertical-align:-1px;}
+  .toast{
+    position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px);
+    background:var(--ink); color:#fff; padding:11px 20px; border-radius:10px; font-size:13px;
+    font-weight:600; opacity:0; transition:.25s; pointer-events:none; box-shadow:0 6px 20px rgba(0,0,0,.2);
+  }
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+</style>
+</head>
+<body>
+<header>
+  <h1>📦 アサインフロー</h1>
+  <div class="daynav">
+    <button title="前日">‹</button>
+    <span class="today nums">6/4(木) <span class="badge-today">今日</span></span>
+    <button title="翌日">›</button>
+  </div>
+  <span class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</span>
+</header>
+
+<main>
+  <div class="layout">
+    <!-- LEFT: unassigned tasks -->
+    <section class="panel">
+      <div class="panel-head">
+        <h2>未アサインのタスク</h2>
+        <span class="count nums">3件 · 計6h</span>
+      </div>
+      <div class="tasklist" id="tasklist"></div>
+      <div class="legend">
+        タスクを選ぶと、振れる人を空き順に提案します。
+      </div>
+    </section>
+
+    <!-- RIGHT: suggestions -->
+    <section class="panel" id="suggestPanel">
+      <div class="empty" id="emptyState">
+        <div class="big">👈</div>
+        左のタスクを選ぶと、<br>「今日この仕事を振れる人」を空き容量の多い順に表示します。
+      </div>
+      <div id="suggestBody" style="display:none;"></div>
+    </section>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const PROJ = {
+  Backend:{color:'#3a86ff'}, Frontend:{color:'#2fa66b'},
+  QA:{color:'#b657d6'}, 共通:{color:'#8a93a0'}
+};
+const CAP = 8;
+const tasks = [
+  {id:'t1', name:'ログインバグ修正', hours:3, proj:'Backend'},
+  {id:'t2', name:'LP文言修正', hours:2, proj:'Frontend'},
+  {id:'t3', name:'リリースノート作成', hours:1, proj:'共通'},
+];
+// members: used hours + dominant project for match
+const members = [
+  {id:'morita', name:'森田', color:'#e5772d', used:10, over:true, projs:['Backend']},
+  {id:'tanaka', name:'田中', color:'#3a86ff', used:4, over:false, projs:['Frontend']},
+  {id:'sato',   name:'佐藤', color:'#2fa66b', used:8, over:false, projs:['Backend','QA']},
+  {id:'suzuki', name:'鈴木', color:'#b657d6', used:2, over:false, projs:['共通']},
+];
+
+const tl = document.getElementById('tasklist');
+tasks.forEach(t=>{
+  const c = PROJ[t.proj].color;
+  const el = document.createElement('div');
+  el.className='task'; el.dataset.id=t.id;
+  el.innerHTML=`
+    <div class="proj-bar" style="background:${c}"></div>
+    <div class="tbody">
+      <div class="tname">${t.name}</div>
+      <div class="tmeta">
+        <span class="chip" style="background:${c}">${t.proj}</span>
+        <span class="hrs nums">${t.hours}h</span>
+      </div>
+    </div>
+    <div class="arrow">›</div>`;
+  el.onclick=()=>select(t.id);
+  tl.appendChild(el);
+});
+
+function select(id){
+  document.querySelectorAll('.task').forEach(e=>e.classList.toggle('sel', e.dataset.id===id));
+  const t = tasks.find(x=>x.id===id);
+  const need = t.hours;
+  const pc = PROJ[t.proj].color;
+
+  // score: free desc; fits = free>=need
+  const ranked = members.map(m=>{
+    const free = Math.max(0, CAP - m.used);
+    const fits = !m.over && free >= need;
+    const match = m.projs.includes(t.proj);
+    return {...m, free, fits, match};
+  }).sort((a,b)=> (b.fits-a.fits) || (b.free-a.free));
+
+  let html = `
+    <div class="selhead">
+      <div class="proj-bar" style="background:${pc}"></div>
+      <div>
+        <div class="stitle">${t.name} <span class="hrs nums" style="font-size:13px;">[${t.hours}h]</span></div>
+        <div class="smeta">この仕事を今日振れる人 · <span class="chip" style="background:${pc};display:inline-block">${t.proj}</span> 一致を優先</div>
+      </div>
+    </div>
+    <div class="cands">`;
+
+  ranked.forEach(m=>{
+    const okCls = m.fits ? 'ok':'no';
+    const usedPct = Math.min(100, (m.used/CAP)*100);
+    const addPct = m.fits ? (need/CAP)*100 : 0;
+    let barInner;
+    if(m.over){
+      barInner = `<div class="used" style="width:100%;background:var(--over)"></div>`;
+    }else{
+      barInner = `<div class="used" style="width:${usedPct}%;background:var(--fill)"></div>` +
+                 (m.fits?`<div class="addseg" style="width:${addPct}%;background:${pc}"></div>`:'');
+    }
+    const verdictMark = m.fits ? '⭕' : '✕';
+    const freeLabel = m.over ? `超過` : (m.fits ? `+${m.free}h` : `${m.free}h`);
+    const capLabel = m.over ? `${m.used}/${CAP}h <b style="color:var(--over)">+${m.used-CAP}h超過</b>`
+                            : `<b>${m.used}/${CAP}h</b> · 空き${m.free}h`;
+    html += `
+      <div class="cand ${okCls}">
+        <div class="avatar" style="background:${m.color}">${m.name.charAt(0)}</div>
+        <div class="cinfo">
+          <div class="crow1">
+            <span class="cname">${m.name}</span>
+            <span class="role-badge">${m.projs[0]}担当</span>
+            ${m.match?`<span class="match-badge">✓ ${t.proj}一致</span>`:''}
+          </div>
+          <div class="capbar">${barInner}</div>
+          <div class="capnums nums"><span>${capLabel}</span>${m.fits?`<span style="color:${pc}">+${need}hで ${m.used+need}/${CAP}h</span>`:''}</div>
+        </div>
+        <div class="verdict ${okCls}">
+          <div class="mk">${verdictMark}</div>
+          <div class="free-h nums">${freeLabel}</div>
+          <button class="assign-btn" ${m.fits?'':'disabled'} onclick="doAssign('${m.name}','${t.name}',${m.fits})">${m.fits?'ここに振る':'振れない'}</button>
+        </div>
+      </div>`;
+  });
+  html += `</div>
+    <div class="legend">
+      <span><i style="background:var(--fill)"></i>使用中</span>
+      <span><i style="background:${pc}"></i>このタスク(+${need}h)</span>
+      <span><i style="background:var(--over)"></i>超過</span>
+      <span>⭕ 振れる ／ ✕ 振れない</span>
+    </div>`;
+
+  document.getElementById('emptyState').style.display='none';
+  const sb = document.getElementById('suggestBody');
+  sb.style.display='block'; sb.innerHTML=html;
+}
+
+let toastT;
+function doAssign(who, task, fits){
+  if(!fits) return;
+  const t = document.getElementById('toast');
+  t.textContent = `✓ 「${task}」を ${who} さんにアサインしました（モック）`;
+  t.classList.add('show');
+  clearTimeout(toastT);
+  toastT=setTimeout(()=>t.classList.remove('show'), 2600);
+}
+</script>
+</body>
+</html>

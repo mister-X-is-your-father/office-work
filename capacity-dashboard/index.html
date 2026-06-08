@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Capacity Board — モックギャラリー（切り口別・全72案）</title>
+<style>
+  :root{--bg:#f6f7f9;--card:#fff;--ink:#1d2430;--muted:#6b7480;--line:#e6e9ee;--fill:#3a86ff}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;line-height:1.5}
+  .wrap{max-width:1180px;margin:0 auto;padding:30px 22px 70px}
+  h1{font-size:22px;margin:0 0 4px}
+  .lead{color:var(--muted);font-size:14px;margin:0 0 6px}
+  .req{font-size:12px;color:var(--muted);background:#fff;border:1px solid var(--line);
+    border-radius:10px;padding:10px 14px;margin:14px 0 10px;display:inline-block}
+  .req b{color:var(--ink)}
+  .nav{font-size:12px;color:var(--muted);margin:6px 0 6px;display:flex;gap:8px 14px;flex-wrap:wrap;
+    position:sticky;top:0;background:var(--bg);padding:10px 0;z-index:5;border-bottom:1px solid var(--line)}
+  .nav a{color:var(--fill);text-decoration:none} .nav a:hover{text-decoration:underline}
+  .grp{margin-top:34px;scroll-margin-top:58px}
+  .grp h2{font-size:15px;margin:0 0 2px}
+  .grp .gd{font-size:12px;color:var(--muted);margin:0 0 12px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(248px,1fr));gap:18px}
+  .item{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;
+    text-decoration:none;color:inherit;box-shadow:0 6px 18px rgba(20,30,50,.04);
+    transition:border-color .12s, transform .12s}
+  .item:hover{border-color:var(--fill);transform:translateY(-2px)}
+  .thumb{position:relative;height:168px;background:#fff;border-bottom:1px solid var(--line);overflow:hidden}
+  .thumb iframe{position:absolute;top:0;left:0;width:1100px;height:820px;border:0;
+    transform:scale(.225);transform-origin:top left;pointer-events:none;background:#fff}
+  .thumb .badge{position:absolute;top:8px;left:8px;background:rgba(29,36,48,.86);color:#fff;
+    font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;z-index:2}
+  .cap{padding:11px 13px}
+  .cap .t{font-weight:700;font-size:14px}
+  .cap .d{color:var(--muted);font-size:12px;margin-top:2px}
+</style></head><body>
+<div class="wrap">
+  <h1>今日のキャパ — Capacity Board モックギャラリー</h1>
+  <p class="lead">Instagantt の Workload 相当を OSS 自前で。Vikunja を土台に。UI検討（全72案）。切り口別・サムネクリックで実画面。</p>
+  <div class="req"><b>要件 v0.1</b>　主目的=<b>空き容量さがし</b>／時間軸=<b>今日中心</b>／工数=<b>見積り時間</b>／容量=<b>一律8h/日</b>　·　データ源=Vikunja API（一部 Claude 要約）</div>
+  <div class="nav" id="nav"></div>
+  <div id="groups"></div>
+</div>
+<script>
+const GROUPS = [
+  {key:"overview", title:"総合ビュー", desc:"複数の切り口を1画面に。運用の入口。", items:[
+    ["27","総合ホーム","mocks/27-overview-home.html","今日の空き＋今週負荷＋アラート"],
+    ["28","KPI俯瞰","mocks/28-overview-exec.html","稼働率・空き・着地リスクを数値で"],
+  ]},
+  {key:"today", title:"① 運用・今日（空きさがし）", desc:"「今、誰に振れる？」を即断。主目的。", items:[
+    ["01","横バー","mock.html","使用/容量を横バー"],
+    ["02","縦バー","mock-vertical.html","容量線が横一直線で比較"],
+    ["54","縦積み(タスク名)","mocks/54-today-stack-tasks.html","タスクを積み木、時間で高さ可変"],
+    ["55","横積み(タスク名)","mocks/55-today-hstack-tasks.html","横バーをタスクで分割"],
+    ["56","バレット","mocks/56-today-bullet.html","容量ターゲットに対する弾丸"],
+    ["57","円時計","mocks/57-today-clock.html","1日を円で、タスク扇形＋空き"],
+    ["06","円ゲージ","mocks/06-gauges.html","ドーナツで稼働・空きリング"],
+    ["07","ロードメーター","mocks/07-load-meter.html","サーモメーター行"],
+    ["03","空きランキング","mocks/03-free-ranking.html","空き多い順「あと◯h振れる」"],
+    ["04","残容量カード","mocks/04-availability-cards.html","カードで残容量を大数字"],
+    ["05","振れる枠バッジ","mocks/05-assignable-badges.html","空き枠をピルで主役化"],
+    ["58","1行リーダーボード","mocks/58-today-leaderboard.html","多人数向け高密度・空き順"],
+    ["08","ヒートマップ","mocks/08-heatmap.html","人×PJの濃淡で偏り"],
+    ["09","1日タイムライン","mocks/09-day-timeline.html","9-18時、隙間＝空きを緑"],
+    ["10","空きスロット","mocks/10-free-slots.html","1日8コマ、空き＝点線枠"],
+    ["11","オペ盤(高密度)","mocks/11-dense-ops.html","常時表示向け凝縮版"],
+  ]},
+  {key:"assign", title:"① 振る（アサイン）", desc:"空きさがし→未アサインを振る。", items:[
+    ["12","提案フロー","mocks/12-assign-flow.html","タスク選択→振れる人を提案"],
+    ["13","マッチング盤","mocks/13-match-board.html","左=未アサイン／右=空き容量"],
+    ["14","おすすめ担当","mocks/14-suggest-assignee.html","担当ランキング"],
+  ]},
+  {key:"weekplan", title:"② 週プランニング", desc:"1週間で負荷をならす。", items:[
+    ["18","週プラン盤","mocks/18-week-plan-board.html","人×日のミニバー盤＋配置"],
+    ["19","週プラン積み上げ","mocks/19-week-plan-stack.html","週の埋まり・偏りを俯瞰"],
+    ["31","週カレンダー","mocks/31-weekplan-calendar.html","カレンダー風の週ビュー"],
+    ["32","ヒートグリッド","mocks/32-weekplan-heatgrid.html","人×日の濃淡コンパクト"],
+    ["33","日別積み上げ","mocks/33-weekplan-daystack.html","曜日ごとに積み上げ"],
+    ["34","かんばん配置","mocks/34-weekplan-kanban.html","プール→週レーンへ"],
+    ["35","シート密度","mocks/35-weekplan-sheet.html","左固定＋日別セル（実務密度）"],
+  ]},
+  {key:"plan", title:"② 計画（着地・What-if）", desc:"この先、回る？間に合う？", items:[
+    ["20","着地見込み","mocks/20-forecast-landing.html","完了予測日 vs 締切を赤黄緑"],
+    ["21","着地タイムライン","mocks/21-forecast-timeline.html","先2週、締切超過は赤"],
+    ["22","What-ifシミュ","mocks/22-whatif-sim.html","仮置きで誰がいつ溢れるか"],
+    ["16","週ストリップ","mocks/16-week-strip.html","今日＋今週の空き合計"],
+  ]},
+  {key:"gantt", title:"ガント", desc:"非表示フィルタ＋ソート可。", items:[
+    ["29","ガント(タスク)","mocks/29-gantt-board.html","進捗・依存・締切。フィルタ＋ソート"],
+    ["30","ガント(担当別)","mocks/30-gantt-by-person.html","人でグループ化＋負荷併記"],
+  ]},
+  {key:"project", title:"プロジェクト状況（どうなってる？）", desc:"単一PJの進捗・健全性・遅延。", items:[
+    ["36","健全性スコアカード","mocks/36-proj-scorecard.html","進捗/スケジュール/工数を信号色"],
+    ["41","進捗サマリー","mocks/41-proj-progress-summary.html","全体%＋締切残＋担当別"],
+    ["37","バーンダウン","mocks/37-proj-burndown.html","残作業 vs 理想線"],
+    ["38","バーンアップ","mocks/38-proj-burnup.html","完了 vs スコープ線"],
+    ["39","ステータス内訳","mocks/39-proj-status-breakdown.html","Todo/Doing/Done/Blocked"],
+    ["40","マイルストーン","mocks/40-proj-milestones.html","予定 vs 着地"],
+    ["42","工数バジェット","mocks/42-proj-budget.html","見積り vs 消化 vs 残"],
+    ["43","ブロッカー/リスク","mocks/43-proj-blockers.html","止まってる所を深刻度順"],
+    ["44","ベロシティ","mocks/44-proj-velocity.html","週完了数・トレンド・予測"],
+    ["45","ポートフォリオ","mocks/45-portfolio.html","複数PJを1行サマリーで"],
+  ]},
+  {key:"triage", title:"優先度・トリアージ（今日どれから？）", desc:"今日絶対／ずらせるを切り分け。", items:[
+    ["46","三分類ボード","mocks/46-triage-board.html","今日必須/やるべき/ずらせる"],
+    ["47","優先順リスト","mocks/47-triage-priority-list.html","スコア順に番号付き"],
+    ["48","アイゼンハワー","mocks/48-triage-eisenhower.html","緊急×重要の4象限"],
+    ["49","今日の段取り","mocks/49-triage-day-plan.html","時間順の段取り"],
+    ["50","slackビュー","mocks/50-triage-slack.html","余裕で固定/ずらせる"],
+  ]},
+  {key:"structure", title:"構造化・優先度・バックログ", desc:"階層分解・優先度フレーム。", items:[
+    ["67","WBSツリー","mocks/67-wbs-tree.html","エピック→タスク→サブ、進捗ロールアップ"],
+    ["68","アウトライン","mocks/68-outline-list.html","インデント箇条書き・開閉"],
+    ["72","グルーピング一覧","mocks/72-grouped-list.html","エピック/担当/PJで入れ子"],
+    ["69","優先度バックログ","mocks/69-backlog-priority.html","並べ替え可、上ほど高優先"],
+    ["70","MoSCoW","mocks/70-moscow.html","Must/Should/Could/Won't"],
+    ["71","RICEスコア","mocks/71-rice-scoring.html","R×I×C/Effort でソート"],
+  ]},
+  {key:"taskmgmt", title:"タスク管理（実務ビュー）", desc:"日々の運用に効く定番。", items:[
+    ["59","かんばん","mocks/59-kanban-board.html","Todo/Doing/Blocked/Done"],
+    ["60","一覧テーブル","mocks/60-task-table.html","フィルタ・ソート・一括選択"],
+    ["61","スタンドアップ","mocks/61-daily-standup.html","昨日/今日/ブロッカー"],
+    ["62","アクティビティ","mocks/62-activity-feed.html","最近の変更を時系列"],
+    ["63","アラートセンター","mocks/63-alert-center.html","締切/ブロック/過負荷を重要度別"],
+    ["64","期限カレンダー","mocks/64-deadline-calendar.html","月カレンダーに締切"],
+    ["65","依存グラフ","mocks/65-dependency-graph.html","クリティカルパスを赤"],
+    ["66","レビューキュー","mocks/66-review-queue.html","レビュー/承認待ち行列"],
+  ]},
+  {key:"drill", title:"深掘り・検索・AI", desc:"PJ/タスクの状態に到達・聞く。", items:[
+    ["51","タスク詳細","mocks/51-task-detail.html","1タスクの全貌（依存・ブロック・履歴）"],
+    ["52","検索パレット","mocks/52-search-palette.html","⌘K風。横断検索"],
+    ["53","AI Q&A","mocks/53-ai-ask.html","自然文で聞くと Claude が要約"],
+  ]},
+  {key:"risk", title:"③ リスク・健全性", desc:"誰が危ない？ 燃え尽き検知。", items:[
+    ["25","過負荷ヒストリー","mocks/25-overload-history.html","人×日のヒート。連続赤に警告"],
+  ]},
+  {key:"alloc", title:"④ 配分・ポートフォリオ", desc:"何にリソースを使ってる？", items:[
+    ["26","プロジェクト配分","mocks/26-project-allocation.html","PJ別の投入時間・偏り"],
+  ]},
+  {key:"actual", title:"⑤ 実績・精度", desc:"見積り合ってた？", items:[
+    ["23","見積りvs実績","mocks/23-estimate-vs-actual.html","タスク別の対比＋全体+17%"],
+    ["24","見積り精度","mocks/24-estimate-accuracy.html","人別の精度・プロット"],
+  ]},
+  {key:"misc", title:"周辺・設定", desc:"ドリルダウン・設定。", items:[
+    ["15","個人の今日","mocks/15-person-detail.html","一人の内訳＋超過の中身"],
+    ["17","設定","mocks/17-settings.html","容量モデル・est解析・対象PJ"],
+  ]},
+];
+const nav=document.getElementById("nav"), groups=document.getElementById("groups");
+GROUPS.forEach(g=>{
+  const a=document.createElement("a"); a.href="#"+g.key; a.textContent=g.title.replace(/（.*）/,""); nav.appendChild(a);
+  const sec=document.createElement("section"); sec.className="grp"; sec.id=g.key;
+  sec.innerHTML=`<h2>${g.title}　<span style="color:var(--muted);font-weight:400">(${g.items.length})</span></h2><div class="gd">${g.desc}</div>`;
+  const grid=document.createElement("div"); grid.className="grid";
+  g.items.forEach(([n,t,href,d])=>{
+    const it=document.createElement("a"); it.className="item"; it.href=href; it.target="_blank";
+    it.innerHTML=`<div class="thumb"><span class="badge">${n}</span>
+      <iframe loading="lazy" src="${href}"></iframe></div>
+      <div class="cap"><div class="t">${t}</div><div class="d">${d}</div></div>`;
+    grid.appendChild(it);
+  });
+  sec.appendChild(grid); groups.appendChild(sec);
+});
+</script>
+</body></html>

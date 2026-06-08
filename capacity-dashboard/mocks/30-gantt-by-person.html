@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ガントチャート（担当者別）— キャパダッシュボード</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee;
+    --track:#eef1f5; --bar:#3a86ff; --danger:#e5484d; --ok:#2fa66b; --amber:#f5a623;
+    --p-backend:#3a86ff; --p-frontend:#2fa66b; --p-qa:#b657d6; --p-common:#8a93a0;
+    --m-morita:#e5772d; --m-tanaka:#3a86ff; --m-sato:#2fa66b; --m-suzuki:#b657d6;
+    --row-h:38px; --grp-h:56px; --col-w:78px; --label-w:340px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"tnum"; -webkit-font-smoothing:antialiased;
+    padding:24px 16px 60px;
+  }
+  .wrap{max-width:1100px; margin:0 auto;}
+  header.page{margin-bottom:16px;}
+  header.page h1{font-size:20px; margin:0 0 4px; letter-spacing:.01em;}
+  header.page .note{font-size:12px; color:var(--muted);}
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04), 0 4px 14px rgba(20,30,50,.03);
+    overflow:hidden;
+  }
+  .toolbar{
+    padding:14px 16px; border-bottom:1px solid var(--line);
+    display:flex; flex-wrap:wrap; gap:14px 22px; align-items:flex-start;
+  }
+  .tb-group{display:flex; flex-direction:column; gap:6px;}
+  .tb-label{font-size:11px; color:var(--muted); font-weight:600; letter-spacing:.03em;}
+  .chips{display:flex; flex-wrap:wrap; gap:6px;}
+  .chip{
+    display:inline-flex; align-items:center; gap:6px; cursor:pointer; user-select:none;
+    font-size:12px; padding:5px 11px; border-radius:999px; border:1px solid var(--line);
+    background:#fff; color:var(--ink); transition:.12s;
+  }
+  .chip .dot{width:9px; height:9px; border-radius:50%; flex:none;}
+  .chip[aria-pressed="false"]{opacity:.42; background:#fafbfc;}
+  .chip[aria-pressed="false"] .dot{filter:grayscale(1);}
+  .chip:hover{border-color:#cfd5dd;}
+  .tb-check{display:inline-flex; align-items:center; gap:7px; font-size:12px; cursor:pointer; padding-top:3px;}
+  .tb-check input{accent-color:var(--bar); width:15px; height:15px;}
+  select{
+    font-size:12px; padding:6px 28px 6px 10px; border-radius:8px; border:1px solid var(--line);
+    background:#fff; color:var(--ink); cursor:pointer; font-family:inherit; appearance:none;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M1 1l4 4 4-4' stroke='%236b7480' stroke-width='1.5' fill='none'/></svg>");
+    background-repeat:no-repeat; background-position:right 10px center;
+  }
+  .sort-dir{font-size:12px; padding:6px 10px; border-radius:8px; border:1px solid var(--line);
+    background:#fff; color:var(--ink); cursor:pointer;}
+  .count-badge{margin-left:auto; align-self:center; font-size:12px; color:var(--muted);
+    background:var(--track); padding:6px 12px; border-radius:999px; white-space:nowrap;}
+  .count-badge b{color:var(--ink);}
+
+  .gantt-scroll{overflow-x:auto;}
+  .gantt{min-width:calc(var(--label-w) + var(--col-w)*12); position:relative;}
+  .grid-head{
+    display:grid; grid-template-columns:var(--label-w) repeat(12, var(--col-w));
+    border-bottom:1px solid var(--line); position:sticky; top:0; background:#fff; z-index:5;
+  }
+  .gh-corner{padding:10px 14px; font-size:11px; color:var(--muted); font-weight:600;
+    border-right:1px solid var(--line); display:flex; align-items:center;}
+  .gh-day{text-align:center; padding:7px 2px; border-right:1px solid var(--line);
+    font-size:11px; color:var(--muted);}
+  .gh-day .dow{font-size:10px;}
+  .gh-day.weekend{background:#fafbfc;}
+  .gh-day.today{background:rgba(229,72,77,.07);}
+  .gh-day.today .dom{color:var(--danger); font-weight:700;}
+  .gh-day .dom{font-size:13px; color:var(--ink); font-weight:600;}
+
+  .rows{position:relative;}
+
+  /* group header row */
+  .grp{
+    display:grid; grid-template-columns:var(--label-w) repeat(12, var(--col-w));
+    height:var(--grp-h); border-bottom:1px solid var(--line);
+    background:#fbfcfd; position:relative;
+  }
+  .grp-label{
+    border-right:1px solid var(--line); padding:0 12px; display:flex; align-items:center;
+    gap:10px; cursor:pointer; user-select:none; overflow:hidden;
+  }
+  .grp-label:hover{background:#f3f5f8;}
+  .caret{font-size:10px; color:var(--muted); transition:transform .15s; width:10px; flex:none;}
+  .grp.collapsed .caret{transform:rotate(-90deg);}
+  .avatar{width:30px; height:30px; border-radius:50%; color:#fff; font-size:13px; font-weight:700;
+    display:inline-flex; align-items:center; justify-content:center; flex:none;}
+  .grp-text{min-width:0; display:flex; flex-direction:column; gap:3px; flex:1;}
+  .grp-top{display:flex; align-items:center; gap:8px;}
+  .grp-name{font-size:14px; font-weight:700; white-space:nowrap;}
+  .grp-sub{font-size:10.5px; color:var(--muted); white-space:nowrap;}
+  /* capacity mini-bar in group header (second line) */
+  .cap{display:flex; align-items:center; gap:7px; flex:none;}
+  .cap-track{width:96px; height:7px; border-radius:5px; background:var(--track); overflow:hidden; position:relative; flex:none;}
+  .cap-fill{position:absolute; left:0; top:0; bottom:0; border-radius:5px;}
+  .cap-100{position:absolute; left:100%; top:-2px; bottom:-2px; width:0; border-left:1.5px dashed #b6bcc6;}
+  .cap-text{font-size:11px; font-weight:700; white-space:nowrap;}
+  .cap-text.ok{color:var(--ok);} .cap-text.warn{color:var(--amber);} .cap-text.over{color:var(--danger);}
+  .cap-badge{font-size:9.5px; font-weight:700; padding:1px 6px; border-radius:5px; color:#fff; white-space:nowrap; flex:none;}
+  .cap-badge.ok{background:var(--ok);} .cap-badge.warn{background:var(--amber);} .cap-badge.over{background:var(--danger);}
+
+  .grp-cells{position:absolute; left:var(--label-w); top:0; right:0; bottom:0;
+    display:grid; grid-template-columns:repeat(12, var(--col-w)); pointer-events:none;}
+  .gcell{border-right:1px solid var(--track);}
+  .gcell.weekend{background:rgba(0,0,0,.012);}
+
+  /* task row inside group */
+  .row{
+    display:grid; grid-template-columns:var(--label-w) repeat(12, var(--col-w));
+    border-bottom:1px solid var(--line); height:var(--row-h); position:relative;
+  }
+  .row:hover{background:#fafbfc;}
+  .row.delayed{background:rgba(229,72,77,.05);}
+  .r-label{border-right:1px solid var(--line); padding:0 12px 0 32px; display:flex;
+    align-items:center; gap:8px; overflow:hidden;}
+  .r-pbar{width:4px; height:18px; border-radius:2px; flex:none;}
+  .r-name{font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .r-flag{font-size:9px; font-weight:700; color:#fff; background:var(--danger);
+    padding:1px 5px; border-radius:4px; flex:none;}
+  .r-proj{font-size:10px; color:var(--muted); flex:none;}
+
+  .r-cells{position:absolute; left:var(--label-w); top:0; right:0; bottom:0;
+    display:grid; grid-template-columns:repeat(12, var(--col-w)); pointer-events:none;}
+  .cell{border-right:1px solid var(--track);}
+  .cell.weekend{background:rgba(0,0,0,.012);}
+
+  .bar-area{position:absolute; left:var(--label-w); top:0; right:0; height:var(--row-h);}
+  .bar{position:absolute; top:8px; height:22px; border-radius:6px; background:var(--track);
+    overflow:hidden; box-shadow:inset 0 0 0 1px rgba(0,0,0,.04); pointer-events:auto;}
+  .bar .fill{position:absolute; left:0; top:0; bottom:0; border-radius:6px 0 0 6px;}
+  .bar .blabel{position:absolute; right:7px; top:0; bottom:0; display:flex; align-items:center;
+    font-size:10px; font-weight:700; color:var(--ink);}
+  .bar.done .blabel{color:#fff;}
+  .bar.delayed{box-shadow:inset 0 0 0 1.5px var(--danger);}
+
+  .dline{position:absolute; top:12px; width:13px; height:13px; transform:rotate(45deg);
+    background:#fff; z-index:3; pointer-events:auto;}
+  .dline.over{background:var(--danger); border:1.5px solid var(--danger);}
+  .dline.safe{border:1.5px solid var(--amber); background:#fff;}
+
+  .today-line{position:absolute; top:0; bottom:0; width:0;
+    border-left:2px dashed var(--danger); z-index:6; pointer-events:none;}
+  .today-line .tl-cap{position:absolute; top:-1px; left:-17px; font-size:9px; color:#fff;
+    background:var(--danger); padding:1px 5px; border-radius:4px; white-space:nowrap;}
+
+  .legend{display:flex; flex-wrap:wrap; gap:16px; padding:12px 16px; border-top:1px solid var(--line);
+    font-size:11px; color:var(--muted);}
+  .legend .li{display:inline-flex; align-items:center; gap:6px;}
+  .legend .sw{width:22px; height:11px; border-radius:3px;}
+  .empty{padding:36px; text-align:center; color:var(--muted); font-size:13px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="page">
+    <h1>ガントチャート — 担当者別（負荷一望）</h1>
+    <div class="note">※ モック（サンプルデータ）。本番は Vikunja API（期日・担当・進捗）から自動算出。</div>
+  </header>
+
+  <div class="card">
+    <div class="toolbar">
+      <div class="tb-group">
+        <span class="tb-label">プロジェクト</span>
+        <div class="chips" id="projChips"></div>
+      </div>
+      <div class="tb-group">
+        <span class="tb-label">担当者</span>
+        <div class="chips" id="memberChips"></div>
+      </div>
+      <div class="tb-group">
+        <span class="tb-label">表示オプション</span>
+        <label class="tb-check"><input type="checkbox" id="hideDone"> 完了(100%)を隠す</label>
+      </div>
+      <div class="tb-group">
+        <span class="tb-label">グループ内ソート</span>
+        <div style="display:flex; gap:6px;">
+          <select id="sortKey">
+            <option value="start">開始日</option>
+            <option value="deadline">締切</option>
+            <option value="progress">進捗</option>
+            <option value="project">プロジェクト</option>
+          </select>
+          <button class="sort-dir" id="sortDir" title="昇順/降順">↑ 昇順</button>
+        </div>
+      </div>
+      <div class="count-badge" id="countBadge"></div>
+    </div>
+
+    <div class="gantt-scroll">
+      <div class="gantt">
+        <div class="grid-head" id="gridHead"></div>
+        <div class="rows" id="rows"></div>
+      </div>
+    </div>
+
+    <div class="legend">
+      <span class="li"><span class="sw" style="background:var(--bar)"></span>進捗バー</span>
+      <span class="li"><span class="sw" style="background:var(--ok)"></span>完了</span>
+      <span class="li"><span class="sw" style="background:var(--danger)"></span>遅延リスク</span>
+      <span class="li"><span class="cap-badge ok" style="position:static">空き</span> / <span class="cap-badge warn" style="position:static">余裕少</span> / <span class="cap-badge over" style="position:static">超過</span> 負荷</span>
+      <span class="li"><span style="border-left:2px dashed var(--danger);height:14px;display:inline-block;"></span> 今日(6/4)</span>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+const PROJECTS = {
+  "Backend":  {hex:"#3a86ff"},
+  "Frontend": {hex:"#2fa66b"},
+  "QA":       {hex:"#b657d6"},
+  "共通":     {hex:"#8a93a0"},
+};
+const MEMBERS = {
+  "森田": {hex:"#e5772d", initial:"森", capacity:5}, // capacity = 想定 5 タスク日/週の余力イメージ
+  "田中": {hex:"#3a86ff", initial:"田", capacity:5},
+  "佐藤": {hex:"#2fa66b", initial:"佐", capacity:5},
+  "鈴木": {hex:"#b657d6", initial:"鈴", capacity:5},
+};
+
+const DAYS = [];
+for(let d=2; d<=13; d++){
+  const date = new Date(2026,5,d);
+  DAYS.push({d, dow:["日","月","火","水","木","金","土"][date.getDay()],
+             weekend:[0,6].includes(date.getDay())});
+}
+const TODAY = 4;
+const DAY0 = 2;
+const COL_W = 78;
+const LABEL_W = 340;
+
+const TASKS = [
+  {id:1, name:"設計ドキュメント", project:"共通",   member:"鈴木", start:2, end:3,  progress:100, deadline:null, deps:[]},
+  {id:2, name:"API設計",        project:"Backend", member:"森田", start:2, end:4,  progress:100, deadline:null, deps:[]},
+  {id:3, name:"DBマイグレーション", project:"Backend", member:"森田", start:4, end:5,  progress:80,  deadline:null, deps:[2]},
+  {id:4, name:"ログインバグ修正", project:"Backend", member:"森田", start:4, end:6,  progress:20,  deadline:6,    deps:[], delayRisk:true},
+  {id:5, name:"ダッシュ画面実装", project:"Frontend", member:"田中", start:3, end:9,  progress:60,  deadline:null, deps:[]},
+  {id:6, name:"認証フロー実装",  project:"Backend", member:"佐藤", start:5, end:9,  progress:40,  deadline:null, deps:[3]},
+  {id:7, name:"LP制作",         project:"Frontend", member:"田中", start:8, end:12, progress:0,   deadline:12,   deps:[]},
+  {id:8, name:"結合テスト",      project:"QA",      member:"佐藤", start:9, end:11, progress:0,   deadline:null, deps:[6,5]},
+  {id:9, name:"リリース準備",    project:"共通",   member:"森田", start:12, end:13, progress:0,   deadline:13,   deps:[8]},
+];
+
+const state = {
+  projects: new Set(Object.keys(PROJECTS)),
+  members: new Set(Object.keys(MEMBERS)),
+  hideDone: false,
+  sortKey: "start",
+  sortDir: 1,
+  collapsed: new Set(), // member names that are collapsed
+};
+
+function buildHead(){
+  const head = document.getElementById("gridHead");
+  head.innerHTML = "";
+  const corner = document.createElement("div");
+  corner.className = "gh-corner";
+  corner.textContent = "担当者 / タスク";
+  head.appendChild(corner);
+  DAYS.forEach(day=>{
+    const c = document.createElement("div");
+    c.className = "gh-day" + (day.weekend?" weekend":"") + (day.d===TODAY?" today":"");
+    c.innerHTML = `<div class="dom">${day.d}</div><div class="dow">${day.dow}</div>`;
+    head.appendChild(c);
+  });
+}
+
+function buildChips(){
+  const pc = document.getElementById("projChips");
+  Object.entries(PROJECTS).forEach(([name,info])=>{
+    const b = document.createElement("button");
+    b.className="chip"; b.setAttribute("aria-pressed","true");
+    b.innerHTML = `<span class="dot" style="background:${info.hex}"></span>${name}`;
+    b.onclick = ()=>{ toggleSet(state.projects, name, b); render(); };
+    pc.appendChild(b);
+  });
+  const mc = document.getElementById("memberChips");
+  Object.entries(MEMBERS).forEach(([name,info])=>{
+    const b = document.createElement("button");
+    b.className="chip"; b.setAttribute("aria-pressed","true");
+    b.innerHTML = `<span class="dot" style="background:${info.hex}"></span>${name}`;
+    b.onclick = ()=>{ toggleSet(state.members, name, b); render(); };
+    mc.appendChild(b);
+  });
+}
+function toggleSet(set, key, btn){
+  if(set.has(key)){ set.delete(key); btn.setAttribute("aria-pressed","false"); }
+  else { set.add(key); btn.setAttribute("aria-pressed","true"); }
+}
+
+function filteredTasks(){
+  return TASKS.filter(t =>
+    state.projects.has(t.project) &&
+    state.members.has(t.member) &&
+    !(state.hideDone && t.progress===100)
+  );
+}
+function sortInGroup(arr){
+  const projOrder = Object.keys(PROJECTS);
+  const cmp = {
+    start:    (a,b)=> a.start-b.start || a.end-b.end,
+    deadline: (a,b)=> (a.deadline??99)-(b.deadline??99),
+    progress: (a,b)=> a.progress-b.progress,
+    project:  (a,b)=> projOrder.indexOf(a.project)-projOrder.indexOf(b.project),
+  }[state.sortKey];
+  return arr.slice().sort((a,b)=> cmp(a,b)*state.sortDir || a.id-b.id);
+}
+
+function barGeom(t){
+  const left = (t.start - DAY0) * COL_W;
+  const width = (t.end - t.start + 1) * COL_W;
+  return {left, width};
+}
+
+// capacity: count active (non-done) workload-days within the display window vs capacity model.
+// load% = (sum of remaining task-days for active tasks from TODAY onward) / (member capacity baseline)
+function computeLoad(memberTasks){
+  // remaining workload after today (inclusive), only incomplete tasks
+  let remainingDays = 0;
+  memberTasks.forEach(t=>{
+    if(t.progress===100) return;
+    const from = Math.max(t.start, TODAY);
+    const span = Math.max(0, t.end - from + 1);
+    remainingDays += span * (1 - t.progress/100);
+  });
+  // baseline capacity: ~6 working-ish days remaining in window (6/4..6/13) gives full plate
+  const baseline = 6;
+  const pct = Math.round((remainingDays / baseline) * 100);
+  let tier, label;
+  if(pct >= 100){ tier="over"; label="超過"; }
+  else if(pct >= 70){ tier="warn"; label="余裕少"; }
+  else { tier="ok"; label="空きあり"; }
+  return {pct, tier, label, remainingDays:Math.round(remainingDays*10)/10};
+}
+
+function render(){
+  const rowsEl = document.getElementById("rows");
+  rowsEl.innerHTML = "";
+  const list = filteredTasks();
+
+  document.getElementById("countBadge").innerHTML =
+    `9件中 <b>${list.length}件</b> 表示`;
+
+  // group by member, in defined member order
+  const memberOrder = Object.keys(MEMBERS).filter(m=>state.members.has(m));
+  const groups = memberOrder
+    .map(m=>({member:m, tasks: list.filter(t=>t.member===m)}))
+    .filter(g=>g.tasks.length>0);
+
+  if(groups.length===0){
+    rowsEl.innerHTML = `<div class="empty">表示できるタスクがありません。フィルタを調整してください。</div>`;
+    return;
+  }
+
+  let rowOffset = 0; // px from top, to position today line full height
+  groups.forEach(g=>{
+    const m = MEMBERS[g.member];
+    // capacity uses ALL member tasks passing project filter (not hideDone) for accurate load
+    const allMemberActive = TASKS.filter(t=> t.member===g.member && state.projects.has(t.project));
+    const load = computeLoad(allMemberActive);
+    const collapsed = state.collapsed.has(g.member);
+
+    // group header
+    const grp = document.createElement("div");
+    grp.className = "grp" + (collapsed?" collapsed":"");
+
+    const glabel = document.createElement("div");
+    glabel.className = "grp-label";
+    glabel.innerHTML =
+      `<span class="caret">▼</span>
+       <span class="avatar" style="background:${m.hex}">${m.initial}</span>
+       <span class="grp-text">
+         <span class="grp-top">
+           <span class="grp-name">${g.member}</span>
+           <span class="grp-sub">${g.tasks.length}タスク · 残作業約${load.remainingDays}日</span>
+         </span>
+         <span class="cap">
+           <span class="cap-track">
+             <span class="cap-fill" style="width:${Math.min(load.pct,100)}%;background:${
+               load.tier==='over'?'var(--danger)':load.tier==='warn'?'var(--amber)':'var(--ok)'}"></span>
+             <span class="cap-100"></span>
+           </span>
+           <span class="cap-text ${load.tier}">負荷${load.pct}%</span>
+           <span class="cap-badge ${load.tier}" style="position:static">${load.label}</span>
+         </span>
+       </span>`;
+    glabel.onclick = ()=>{
+      if(state.collapsed.has(g.member)) state.collapsed.delete(g.member);
+      else state.collapsed.add(g.member);
+      render();
+    };
+    grp.appendChild(glabel);
+
+    const gcells = document.createElement("div");
+    gcells.className = "grp-cells";
+    DAYS.forEach(day=>{
+      const c=document.createElement("div");
+      c.className="gcell"+(day.weekend?" weekend":"");
+      gcells.appendChild(c);
+    });
+    grp.appendChild(gcells);
+
+    // summary bars on the group header timeline (compact overview of this person's tasks)
+    const gArea = document.createElement("div");
+    gArea.className = "bar-area";
+    gArea.style.height = "56px";
+    g.tasks.forEach(t=>{
+      const {left,width} = barGeom(t);
+      const mini = document.createElement("div");
+      mini.style.position="absolute";
+      mini.style.left=(left+3)+"px";
+      mini.style.width=(width-6)+"px";
+      mini.style.top="24px"; mini.style.height="8px";
+      mini.style.borderRadius="4px";
+      mini.style.background = t.delayRisk?"var(--danger)":(t.progress===100?"var(--ok)":"var(--bar)");
+      mini.style.opacity = t.progress===100?".55":".85";
+      mini.title = `${t.name} (6/${t.start}–6/${t.end})`;
+      gArea.appendChild(mini);
+    });
+    grp.appendChild(gArea);
+
+    rowsEl.appendChild(grp);
+    rowOffset += 56;
+
+    if(collapsed) return;
+
+    // task rows
+    const tasks = sortInGroup(g.tasks);
+    tasks.forEach(t=>{
+      const row = document.createElement("div");
+      row.className = "row" + (t.delayRisk?" delayed":"");
+
+      const label = document.createElement("div");
+      label.className = "r-label";
+      label.innerHTML =
+        `<span class="r-pbar" style="background:${PROJECTS[t.project].hex}"></span>
+         <span class="r-name">${t.name}</span>
+         ${t.delayRisk?'<span class="r-flag">遅延</span>':''}
+         <span class="r-proj">${t.project}</span>`;
+      row.appendChild(label);
+
+      const cells = document.createElement("div");
+      cells.className="r-cells";
+      DAYS.forEach(day=>{
+        const c=document.createElement("div");
+        c.className="cell"+(day.weekend?" weekend":"");
+        cells.appendChild(c);
+      });
+      row.appendChild(cells);
+
+      const area = document.createElement("div");
+      area.className="bar-area";
+      const {left,width}=barGeom(t);
+      const done=t.progress===100;
+      const bar=document.createElement("div");
+      bar.className="bar"+(done?" done":"")+(t.delayRisk?" delayed":"");
+      bar.style.left=(left+2)+"px";
+      bar.style.width=(width-4)+"px";
+      const fillColor = done?"var(--ok)":(t.delayRisk?"var(--danger)":"var(--bar)");
+      bar.innerHTML =
+        `<div class="fill" style="width:${t.progress}%;background:${fillColor};opacity:${done?1:.9}"></div>
+         <span class="blabel">${t.progress}%</span>`;
+      bar.title=`${t.name} / 6/${t.start}–6/${t.end} / 進捗${t.progress}%`;
+      area.appendChild(bar);
+
+      if(t.deadline){
+        const dm=document.createElement("div");
+        dm.className="dline "+(t.delayRisk?"over":"safe");
+        dm.style.left=((t.deadline-DAY0)*COL_W + COL_W/2 - 6)+"px";
+        dm.title=`締切 6/${t.deadline}`;
+        area.appendChild(dm);
+      }
+      row.appendChild(area);
+      rowsEl.appendChild(row);
+      rowOffset += 38;
+    });
+  });
+
+  // today line spanning full rendered height
+  const tl=document.createElement("div");
+  tl.className="today-line";
+  tl.style.left=(LABEL_W + (TODAY-DAY0)*COL_W + COL_W/2)+"px";
+  tl.style.height=rowOffset+"px";
+  tl.innerHTML=`<span class="tl-cap">今日 6/4</span>`;
+  rowsEl.appendChild(tl);
+}
+
+document.getElementById("hideDone").addEventListener("change", e=>{ state.hideDone=e.target.checked; render(); });
+document.getElementById("sortKey").addEventListener("change", e=>{ state.sortKey=e.target.value; render(); });
+document.getElementById("sortDir").addEventListener("click", function(){
+  state.sortDir*=-1;
+  this.textContent = state.sortDir===1?"↑ 昇順":"↓ 降順";
+  render();
+});
+
+buildHead();
+buildChips();
+render();
+</script>
+</body>
+</html>

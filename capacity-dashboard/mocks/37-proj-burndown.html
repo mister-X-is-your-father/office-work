@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>バーンダウンチャート — 新ダッシュボード機能 (Release v1.2)</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480;
+    --line:#e6e9ee; --track:#eef1f5;
+    --green:#2fa66b; --amber:#f5a623; --red:#e5484d;
+    --ideal:#9aa3af; --actual:#3a86ff; --scope:#1d2430;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    font-feature-settings:"tnum"; -webkit-font-smoothing:antialiased;
+    padding:24px; line-height:1.5;
+  }
+  .wrap{max-width:980px;margin:0 auto;}
+  .tnum{font-variant-numeric:tabular-nums;}
+
+  /* Header */
+  .head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px;flex-wrap:wrap;}
+  .head h1{font-size:20px;margin:0 0 6px;font-weight:700;letter-spacing:.01em;}
+  .proj-pick{
+    display:inline-flex;align-items:center;gap:6px;
+    background:var(--card);border:1px solid var(--line);border-radius:10px;
+    padding:6px 12px;font-size:13.5px;font-weight:600;color:var(--ink);cursor:pointer;
+    box-shadow:0 1px 2px rgba(20,30,50,.04);
+  }
+  .proj-pick .car{color:var(--muted);font-size:11px;}
+  .note{font-size:12px;color:var(--muted);margin-top:8px;}
+  .head-right{text-align:right;}
+  .badge{
+    display:inline-flex;align-items:center;gap:7px;
+    background:rgba(229,72,77,.10);color:var(--red);
+    border:1px solid rgba(229,72,77,.28);border-radius:999px;
+    padding:6px 13px;font-size:13px;font-weight:700;
+  }
+  .badge .dot{width:8px;height:8px;border-radius:50%;background:var(--red);}
+  .badge-sub{font-size:11.5px;color:var(--muted);margin-top:6px;}
+
+  /* Card */
+  .card{
+    background:var(--card);border:1px solid var(--line);border-radius:16px;
+    box-shadow:0 1px 3px rgba(20,30,50,.05),0 8px 24px rgba(20,30,50,.03);
+    padding:22px 24px 18px;
+  }
+  .card-title{font-size:14px;font-weight:700;margin:0 0 2px;}
+  .card-sub{font-size:12px;color:var(--muted);margin:0 0 14px;}
+
+  /* KPI strip */
+  .kpis{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;}
+  .kpi{
+    flex:1 1 120px;background:var(--bg);border:1px solid var(--line);border-radius:12px;
+    padding:11px 13px;min-width:120px;
+  }
+  .kpi .k-lbl{font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.02em;}
+  .kpi .k-val{font-size:21px;font-weight:700;margin-top:3px;}
+  .kpi .k-val small{font-size:12px;color:var(--muted);font-weight:600;}
+  .kpi.warn .k-val{color:var(--red);}
+
+  /* Chart */
+  .chart-area{position:relative;}
+  svg{display:block;width:100%;height:auto;}
+
+  text{font-family:inherit;}
+  .axis-label{font-size:11px;fill:var(--muted);}
+  .axis-title{font-size:11.5px;fill:var(--muted);font-weight:600;}
+  .grid{stroke:var(--line);stroke-width:1;}
+  .grid-soft{stroke:var(--track);stroke-width:1;}
+  .ideal{stroke:var(--ideal);stroke-width:2;stroke-dasharray:5 4;fill:none;}
+  .actual{stroke:var(--actual);stroke-width:2.6;fill:none;}
+  .actual-dot{fill:#fff;stroke:var(--actual);stroke-width:2.4;}
+  .behind-fill{fill:rgba(229,72,77,.10);}
+  .forecast{stroke:var(--red);stroke-width:2;stroke-dasharray:2 4;fill:none;opacity:.85;}
+  .today-line{stroke:var(--ink);stroke-width:1.4;stroke-dasharray:3 3;opacity:.5;}
+  .deadline-line{stroke:var(--red);stroke-width:1.6;opacity:.6;}
+
+  /* Legend */
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin-top:16px;padding-top:14px;border-top:1px solid var(--line);}
+  .leg{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink);}
+  .leg .swatch{width:22px;height:0;border-top-width:3px;border-top-style:solid;border-radius:2px;}
+  .leg .sw-ideal{border-top-style:dashed;border-color:var(--ideal);}
+  .leg .sw-actual{border-color:var(--actual);}
+  .leg .sw-behind{width:14px;height:12px;border:none;border-radius:3px;background:rgba(229,72,77,.16);}
+  .leg .sw-fore{border-top-style:dotted;border-color:var(--red);}
+  .leg-muted{color:var(--muted);}
+
+  .callout{
+    position:absolute;background:var(--card);border:1px solid rgba(229,72,77,.35);
+    border-radius:10px;padding:8px 11px;box-shadow:0 4px 14px rgba(20,30,50,.10);
+    font-size:11.5px;line-height:1.4;max-width:160px;
+  }
+  .callout b{color:var(--red);}
+  .callout .c-sub{color:var(--muted);font-size:10.5px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="head">
+    <div>
+      <h1>バーンダウンチャート</h1>
+      <span class="proj-pick">プロジェクト: 新ダッシュボード機能 <span class="car">▾</span></span>
+      <div class="note">※ モック（サンプルデータ）。本番は Vikunja API から自動算出。</div>
+    </div>
+    <div class="head-right">
+      <span class="badge"><span class="dot"></span>3日遅延リスク</span>
+      <div class="badge-sub">予測着地 6/16 ・ 締切 6/13</div>
+    </div>
+  </header>
+
+  <section class="card">
+    <div class="card-title">残作業の消化見通し（Release v1.2）</div>
+    <div class="card-sub">期間 5/20 〜 6/13（リリース締切） ・ 今日 6/4（木）</div>
+
+    <div class="kpis tnum">
+      <div class="kpi"><div class="k-lbl">見積り総工数</div><div class="k-val">120<small> h</small></div></div>
+      <div class="kpi"><div class="k-lbl">消化済み</div><div class="k-val" style="color:var(--green)">78<small> h</small></div></div>
+      <div class="kpi"><div class="k-lbl">残作業</div><div class="k-val">42<small> h</small></div></div>
+      <div class="kpi warn"><div class="k-lbl">予測着地</div><div class="k-val">6/16<small> ・ +3日</small></div></div>
+    </div>
+
+    <div class="chart-area">
+      <!--
+        Chart geometry:
+        plot left=58  right=900  top=24  bottom=300
+        X: 5/20(day0) .. 6/13(day24). px = 58 + (day/24)*(900-58)=58+day*35.083
+        Y: 0h..120h.  py = 300 - (h/120)*(300-24)=300 - h*2.3
+        today=6/4 = day15  -> x = 58 + 15*35.083 = 584.25
+        deadline=6/13 = day24 -> x = 900
+      -->
+      <svg viewBox="0 0 940 360" role="img" aria-label="バーンダウンチャート">
+        <!-- Y grid + labels (0,30,60,90,120) -->
+        <g>
+          <!-- 120 -->
+          <line class="grid" x1="58" y1="24" x2="900" y2="24"/>
+          <text class="axis-label" x="50" y="28" text-anchor="end">120</text>
+          <!-- 90 -->
+          <line class="grid-soft" x1="58" y1="93" x2="900" y2="93"/>
+          <text class="axis-label" x="50" y="97" text-anchor="end">90</text>
+          <!-- 60 -->
+          <line class="grid-soft" x1="58" y1="162" x2="900" y2="162"/>
+          <text class="axis-label" x="50" y="166" text-anchor="end">60</text>
+          <!-- 30 -->
+          <line class="grid-soft" x1="58" y1="231" x2="900" y2="231"/>
+          <text class="axis-label" x="50" y="235" text-anchor="end">30</text>
+          <!-- 0 -->
+          <line class="grid" x1="58" y1="300" x2="900" y2="300"/>
+          <text class="axis-label" x="50" y="304" text-anchor="end">0</text>
+        </g>
+
+        <!-- Y axis title -->
+        <text class="axis-title" x="16" y="170" transform="rotate(-90 16 170)" text-anchor="middle">残作業 (h)</text>
+
+        <!-- X axis tick labels (weekly + endpoints) -->
+        <g>
+          <!-- 5/20 day0 x=58 -->
+          <text class="axis-label" x="58" y="318" text-anchor="middle">5/20</text>
+          <!-- 5/27 day7 x=58+245.58=303.6 -->
+          <text class="axis-label" x="304" y="318" text-anchor="middle">5/27</text>
+          <!-- 6/3 day14 x=58+491.16=549.2 -->
+          <text class="axis-label" x="549" y="318" text-anchor="middle">6/3</text>
+          <!-- 6/4 today day15 x=584.25 -->
+          <text class="axis-label" x="584" y="332" text-anchor="middle" style="fill:var(--ink);font-weight:700">6/4 今日</text>
+          <!-- 6/10 day21 x=58+736.74=794.7 -->
+          <text class="axis-label" x="795" y="318" text-anchor="middle">6/10</text>
+          <!-- 6/13 day24 x=900 -->
+          <text class="axis-label" x="900" y="318" text-anchor="middle" style="fill:var(--red);font-weight:700">6/13 締切</text>
+        </g>
+        <text class="axis-title" x="479" y="350" text-anchor="middle">日付</text>
+
+        <!-- "Behind" fill between ideal and actual (from day0..day15) -->
+        <!--
+          ideal points: day0(58,300-120*2.3=24) , day15(584.25, 300-(120-15*5)*2.3) ideal at day15 = 120-15*5=45h -> py=300-103.5=196.5
+          actual points (h): d0=120(y24) d7=96(y79.2) d14=66(y148.2) d15=42(y203.4)
+          fill polygon: actual path forward then ideal path back
+        -->
+        <path class="behind-fill" d="
+          M58,24
+          L303.6,79.2
+          L549.2,148.2
+          L584.25,203.4
+          L584.25,196.5
+          L58,24 Z"/>
+
+        <!-- Ideal line: 120 at day0 -> 0 at day24 (full) -->
+        <!-- day0 (58,24) ; day24 (900,300) -->
+        <line class="ideal" x1="58" y1="24" x2="900" y2="300"/>
+
+        <!-- Forecast continuation (actual pace projected to 0) -->
+        <!--
+          actual current at day15 = 42h (584.25,203.4).
+          pace =消化 over last weeks. To land at 0 on day27 (=6/16): from day15->day27 (12 days) burn 42h.
+          x at day27 = 58 + 27*35.083 = 1005 (off-chart right). We clip at x=900 (day24).
+          at day24: remaining = 42 - (9/12)*42 = 42*0.25=10.5h -> py=300-10.5*2.3=275.85
+        -->
+        <line class="forecast" x1="584.25" y1="203.4" x2="900" y2="275.85"/>
+        <!-- small marker where forecast crosses deadline (still 10.5h left) -->
+        <circle cx="900" cy="275.85" r="3.2" fill="var(--red)"/>
+
+        <!-- Actual line -->
+        <polyline class="actual" points="58,24 303.6,79.2 549.2,148.2 584.25,203.4"/>
+        <!-- Actual dots -->
+        <circle class="actual-dot" cx="58" cy="24" r="4"/>
+        <circle class="actual-dot" cx="303.6" cy="79.2" r="4"/>
+        <circle class="actual-dot" cx="549.2" cy="148.2" r="4"/>
+        <circle class="actual-dot" cx="584.25" cy="203.4" r="4.5" stroke-width="3"/>
+
+        <!-- Today vertical line (6/4 = day15) -->
+        <line class="today-line" x1="584.25" y1="18" x2="584.25" y2="300"/>
+        <!-- Deadline vertical (6/13 = day24) -->
+        <line class="deadline-line" x1="900" y1="18" x2="900" y2="300"/>
+        <text class="axis-label" x="896" y="16" text-anchor="end" style="fill:var(--red);font-weight:700">締切</text>
+      </svg>
+
+      <!-- callout near the gap -->
+      <div class="callout" style="left:30%;top:30%;">
+        実績が理想線より<b>上</b>＝遅れ<br>
+        <span class="c-sub">今日時点 残42h（理想は45h消化済で残45h…ではなく実績が高い側）</span>
+      </div>
+    </div>
+
+    <div class="legend">
+      <div class="leg"><span class="swatch sw-actual"></span>実績（残作業）</div>
+      <div class="leg"><span class="swatch sw-ideal"></span>理想線</div>
+      <div class="leg"><span class="swatch sw-fore"></span>現ペース予測</div>
+      <div class="leg"><span class="sw-behind"></span>遅れ（理想との差）</div>
+      <div class="leg leg-muted"><span class="swatch" style="border-color:var(--ink);border-top-style:dashed;width:18px;"></span>今日 6/4</div>
+      <div class="leg leg-muted"><span class="swatch" style="border-color:var(--red);width:18px;"></span>締切 6/13</div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>
