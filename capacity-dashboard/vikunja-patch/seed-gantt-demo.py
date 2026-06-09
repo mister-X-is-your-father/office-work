@@ -4,11 +4,11 @@
 ガントの「スケジュール型バー(start→end)＋依存矢印」を見える化するため、既存タスクに
 start_date/end_date と依存関係(precedes)を投入する。
 
-⚠️ GOTCHA（重要）: Vikunja の `POST /tasks/:id` は **payload に含めなかった関連を空で上書きする**。
-   特に assignees は task 更新時に payload の Assignees で置換されるため、`{title,start_date,end_date}`
-   だけ送ると **担当者が全消去される**（colsToUpdate と同根の「渡さない＝消える」挙動）。
-   → 本スクリプトは更新後に **専用エンドポイント `PUT /tasks/:id/assignees` で担当者を必ず復元する**。
-   日付/見積りだけ直すときも、このスクリプトの ASSIGNEES を真実として再適用すること。
+注記（履歴）: かつて Vikunja の `POST /tasks/:id` は payload に含めなかった assignees/reminders を
+   空で上書きし、`{title,start_date,end_date}` だけ送ると担当者が全消去された。
+   → **ADR-008（#1）でフォークを根治済み**（不在/null=維持、[]=明示クリア）。修正後のバイナリでは
+   下の更新で担当者は消えない。下の assignees 復元ステップは **保険**として残す（旧バイナリ／別環境で
+   走らせても安全＝冪等）。担当の真実は本スクリプトの ASSIGNEES。
 
 使い方: capdemo のトークンを /tmp/cap_token に置いて実行。
   TOKEN=$(curl -s -X POST http://leo:7005/api/v1/login -H 'Content-Type: application/json' \
@@ -56,12 +56,12 @@ ASSIGNEES = {6: 2, 7: 3, 8: 4, 9: 4, 10: 5, 11: 2, 12: 4, 13: 3}
 # from precedes to（from が時間的に先）。Vikunja は逆 follows も自動付与する。
 DEPS = [(3, 4), (4, 1), (1, 5), (8, 12), (11, 12)]
 
-print("=== start/end 投入（※ assignees が消える） ===")
+print("=== start/end 投入（ADR-008修正後は assignees を巻き込まない） ===")
 for tid, (title, s, e) in DATES.items():
     code, _ = req(f"/tasks/{tid}", "POST", {"title": title, "start_date": dt(s), "end_date": dt(e)})
     print(f"#{tid} {title}: {s}->{e} [{code}]")
 
-print("=== assignees 復元（専用エンドポイント・必須） ===")
+print("=== assignees 復元（保険・冪等。旧バイナリ/別環境向け） ===")
 for tid, uid in ASSIGNEES.items():
     code, _ = req(f"/tasks/{tid}/assignees", "PUT", {"user_id": uid})
     print(f"#{tid} <- user {uid}: [{code}]")

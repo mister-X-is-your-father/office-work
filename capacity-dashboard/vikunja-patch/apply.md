@@ -86,6 +86,33 @@ comments のハンドラ登録ブロック（`/tasks/:task/comments` を登録�
 `db.InitTestFixtures(...)` の一覧に `"task_time_entries"` を追加（`"task_comments"` の次など）。
 無いと LoadAndAssertFixtures がこのテーブルを truncate せず、テスト間でデータが漏れる。
 
+### 3-5. `pkg/models/tasks.go` — `Task.Update` を nil ガード（#1 書き込み破壊性の根治・[ADR-008](../docs/01-decisions.md)）
+
+`POST /tasks/:id` で `assignees`/`reminders` を含めない部分更新（例 `{"title":...}`）が既存の担当者・
+リマインダーを**全削除**する upstream バグの根治。`Task.Update` 内の2つの無条件呼び出しを
+「payload に明示されたときだけ実行」にガードする。
+
+(a) **assignees**（`ot.updateTaskAssignees(s, t.Assignees, a)` の呼び出し）を `if t.Assignees != nil { … }` で包む。
+さらに **else 節で現状 assignees を `ot.Assignees` にロード**する（skip 時もレスポンスに現状を載せるため。
+`ot.Reminders` が上で無条件ロードされるのと対称。`getRawTaskAssigneesForTasks` を使用）。
+
+(b) **reminders**（`updateDone(&ot, t)` 直後の `ot.updateReminders(s, t)` 呼び出し）を `if t.Reminders != nil { … }` で包む。
+繰り返しタスクの done 化では `updateDone`→`setTaskDates*` が `t.Reminders` を非nilにするためガードを通過し、
+再スケジュールは従来どおり維持される。
+
+意味論: **不在/`null`＝維持、`[]`＝明示クリア、`[{…}]`＝置換**。upstream の `null=クリア` 契約を
+`null=維持` に変える意図的変更（部分更新の安全性優先）。migration 無し（コードのみ）＝ rollback は `git revert`。
+
+**テスト更新（必須・パッチの一部）**：
+- `pkg/integrations/task_test.go`：`{"assignees":null}` / `{"reminders":null}` の「クリア期待」テスト2件を**維持期待に反転**し、
+  「部分更新で維持」の回帰テストを追加（rebase 時 upstream 版と衝突→ fork 版採用）。
+- `pkg/models/tasks_test.go`：`Task.Update` に「nil で維持 / `[]` でクリア」のモデル単体テストを assignees・reminders 各2本追加。
+
+> 関連の既存債務（同時に修正）：時間トラッキングで Task JSON に `time_estimate`/`time_spent`/`time_planned` を
+> 足した際、`pkg/integrations/task_collection_test.go` のソート系の完全一致 JSON 期待値（15箇所）を更新し忘れ
+> ていた。`"percent_done":N,"identifier"` の間に3フィールドを挿入して green 化した（これは §フェーズ1/2 の
+> 時間トラッキングパッチに属する取りこぼし。rebase 時もこの期待値更新が必要）。
+
 ## 4. テスト（TDD）
 
 同梱のテスト＆フィクスチャを配置:
@@ -148,7 +175,7 @@ curl $B/tasks/1       -H "Authorization: Bearer $TOKEN"   # → time_estimate, t
 
 ## 注意
 
-- これは fork（[ADR-002 改訂](../docs/01-decisions.md)）。本家アップグレード時はこの3新規ファイル＋2編集を rebase する。
+- これは fork（[ADR-002 改訂](../docs/01-decisions.md) / [ADR-007 昇格モデル](../docs/01-decisions.md)）。本家アップグレード時は新規ファイル群＋既存ファイル編集（§3-1〜3-5）を rebase する。特に §3-5（`Task.Update` の nil ガード, [ADR-008](../docs/01-decisions.md)）と §3-5 注記の `task_collection_test.go` 期待値更新は upstream と意図的に衝突する箇所＝ fork 版を採用。
 - upstream main には既に `time_entries`（ライセンスゲート付き v2 タイマー型）がある。将来そちらに寄せる選択肢もある（[05](../docs/05-time-tracking-fork.md) 参照）。本パッチは要件（タスク単位の実績合計）に直球の最小版。
 - 専用エラー型（`ErrTimeEntryDoesNotExist` 等）は実装時に Vikunja の errors 規約に合わせて追加するとよい。
 

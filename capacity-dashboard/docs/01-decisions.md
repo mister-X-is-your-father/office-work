@@ -115,3 +115,60 @@
 **結果**: 23/24/42 が 🔴→✅（[04-feasibility](04-feasibility.md) 更新）。設計・適用コードは [05-time-tracking-fork](05-time-tracking-fork.md) と [`../vikunja-patch/`](../vikunja-patch/)。`est:4h` ラベル方式（ADR-003）は卒業。
 
 **トレードオフ**: 本家アップグレード時に rebase が要る（fork の宿命）。1機能・小差分に閉じることで許容範囲とする。
+
+---
+
+## ADR-007: 開発の成熟度モデル「フォーク孵化→検証→昇格」を正式採用（ADR-002 を更新）
+
+**状態**: 採用 (2026-06)。[ADR-002](#adr-002) を更新。詳細は [06-requirements §5](06-requirements.md)。
+
+**背景**: ADR-002 は「Vikunja 本体は触らず API 越しオーバーレイ」を原則とし、ADR-006 で実績時間に限り fork を例外許可した。その後の基盤固めで、**コアの書き込み挙動のバグ（#1: 部分更新で assignees/reminders が消える）は API 越しでは根治できない**ことが判明（[ADR-008](#adr-008)）。開発の進め方そのものを再定義する。
+
+**検討した選択肢**:
+- **A. 3ステージ昇格モデルを正式採用** — 機能はまず Vikunja フォーク内で孵化（S1）、フォーク上で動作確認（S2）、証明できたら自前製品・自前UI(SPA)へ昇格（S3）。各ステージに品質ゲート（S1: schema-first＋契約＋unit＋rollback / S2: 隔離e2e＋Playwrightモンキー＋回帰ゼロ / S3: 純関数TDD＋snapshot＋SPA e2e）。
+- **B. 現状維持**（fork は時間トラッキングのみの最小例外、以降は API 越し） — #1 のようなコア挙動の問題に対症療法しか打てず、データ破壊リスクが残る。
+
+**決定**: **A**。フォークを「孵化器」と位置づけ、品質ゲートで安全性を担保する。
+
+**理由**: 書き込みの破壊性のようなコア起因の問題はコアでしか根治できず、API オーバーレイの限界が露呈した。フォーク差分は最小・契約テスト付き・rollback 経路つきに閉じ、rebase 追従性（[ADR-002](#adr-002)/[006](#adr-006)）を維持する。
+
+**含意**: コア差分が増えるため rebase 負担は上がるが、各差分は最小・テスト固定に閉じる（[ADR-008](#adr-008) がその実例）。最終的にユーザーが触るのは SPA（オリジナルUI）、Vikunja UI は S2 検証の道具。
+
+---
+
+## ADR-008: 書き込み破壊性（部分更新で関連が消える）を fork の nil ガードで根治
+
+**状態**: 採用 (2026-06)。
+
+**背景**: `POST /tasks/:id` に `assignees`/`reminders` を含めない部分更新で、既存の担当者・リマインダーが**全削除**される（#1。seed で実際に踏んだ）。根本原因（実コード確認）: `pkg/models/tasks.go` `Task.Update` が L927 `ot.updateTaskAssignees(s, t.Assignees, a)` と L1073 `ot.updateReminders(s, t)` を**無条件**に呼び、payload 不在時 `t.Assignees==nil`/`t.Reminders==nil` のまま `task_assignees.go:80` 等の全削除ロジックに入る。
+
+**検討した選択肢**:
+- **A. fork で Update の関連更新を nil ガード**（`if t.Assignees != nil {…}` / `if t.Reminders != nil {…}`）— 「フィールド不在/`null`＝維持、`[]`＝明示クリア、`[{…}]`＝置換」。差分2行＋既存テスト1件の契約更新に閉じる。
+- **B. client 側 safeUpdate ラッパ**（get→merge→post＋assignees 復元）— 対症。全 caller に漏れなく適用する保証がなく、レース・往復コスト・reminders 等の取りこぼしが残る。**却下**。
+- **C. PATCH 別エンドポイント新設**（presence 追跡）— upstream 乖離が大きく、既存 POST の破壊性も残り根治にならない。**却下**。
+- **（検討したが却下）Task に `UnmarshalJSON` を足して presence(不在/null/`[]`)を区別** — `Task` を埋め込む `BulkTask`（一括更新）・`TaskWithComments`（vikunja-fileインポート）でメソッドが昇格し、それらの固有フィールド（`task_ids`/`comments`）が無視されて**壊れる**。将来 `Task` を埋め込む型が増えるたびに静かに壊れる地雷。**却下**。
+
+**決定**: **A（nil ガード）**。
+
+**理由**: 破壊はコアの無条件呼び出しが原因（上記行番号）。コアで直せば全 caller（UI/seed/client/将来の統合）が一律に救われる。最小差分・構造リスクゼロ・rebase 耐性で最も堅牢。`null` は実害なく（SPA は null を送らない、`[]` で明示クリア可能）、`Task` 型・`BulkTask`・`TaskWithComments` には一切触れずに済む。
+
+**トレードオフ**: upstream の `null=クリア` 契約を `null=維持` に変える意図的 fork 仕様変更。`pkg/integrations/task_test.go` の該当テスト1件の期待値を反転し、回帰テスト（#7）で固定する。migration 無し（コードのみ）なので rollback は `git revert` で足りる。繰り返しタスクの done 化では `updateDone`→`setTaskDates*` が `t.Reminders` を非nilに設定するためガードを通過し、再スケジュールは従来通り維持される。
+
+---
+
+## ADR-009: 予定/実績の帰属は `user_id`=対象者・`created_by`=記録者で持つ
+
+**状態**: 採用 (2026-06)。実装は基盤固め #3、決定のみ先行記録。
+
+**背景**: `task_time_entries`/`task_time_plans` の「誰の時間か」をどう持つか。現状は作成者(=代理入力した capdemo)に紐づき、人別集計が崩れる。
+
+**検討した選択肢**:
+- **A. `user_id`=対象者（その時間を負う人）＋ `created_by`=記録者（入力者）の2カラム明示保持** — 代理入力・自己入力を区別でき、按分はビューで導出可能（可逆）。
+- **B. タスク担当者へ按分を正式採用** — 集計は楽だが、誰が記録したか・複数担当時の実配分が失われる（情報欠落）。
+- **C. 両建て** — A を持てば按分は導出できるため冗長。
+
+**決定**: **A**。
+
+**理由**: 帰属は一次データとして保持し、按分は導出（集計/ビュー）に回すのが可逆で堅牢。B は情報欠落、C は冗長。
+
+**含意**: #3 で `task_time_entries`/`task_time_plans` に `created_by` を追加（migration 伴う）。それまでは [planner.js](../app/views/planner.js)/[gantt.js](../app/views/gantt.js) のとおり「タスク担当者へ按分」を暫定運用。
