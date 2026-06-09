@@ -4,7 +4,7 @@
 package models
 
 import (
-	"code.vikunja.io/vikunja/pkg/web"
+	"code.vikunja.io/api/pkg/web"
 	"xorm.io/xorm"
 )
 

@@ -6,8 +6,8 @@ package models
 import (
 	"time"
 
-	"code.vikunja.io/vikunja/pkg/user"
-	"code.vikunja.io/vikunja/pkg/web"
+	"code.vikunja.io/api/pkg/user"
+	"code.vikunja.io/api/pkg/web"
 	"xorm.io/xorm"
 )
 
@@ -30,8 +30,8 @@ type TaskTimeEntry struct {
 	Created time.Time `xorm:"created not null" json:"created" readOnly:"true"`
 	Updated time.Time `xorm:"updated not null" json:"updated" readOnly:"true"`
 
-	web.CRUDable    `xorm:"-" json:"-"`
-	web.Permissions `xorm:"-" json:"-"`
+	web.CRUDable `xorm:"-" json:"-"`
+	web.Rights   `xorm:"-" json:"-"`
 }
 
 // TableName は DB テーブル名。
@@ -60,7 +60,7 @@ func (te *TaskTimeEntry) ReadOne(s *xorm.Session, _ web.Auth) (err error) {
 		return
 	}
 	if !exists {
-		return ErrGenericForbidden{} // 実運用では専用の ErrTimeEntryDoesNotExist を定義
+		return ErrTimeEntryDoesNotExist{ID: te.ID}
 	}
 	te.User, err = user.GetUserByID(s, te.UserID)
 	return
