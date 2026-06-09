@@ -35,6 +35,7 @@ python3 -m http.server 7010 --bind 0.0.0.0   # → http://leo:7010/
 | **[docs/02-screens.md](docs/02-screens.md)** | 全72モックの一覧（切り口別）と、統合プロトタイプへの採用候補 |
 | **[docs/03-integration-plan.md](docs/03-integration-plan.md)** | 統合プロトタイプの設計（アプリ構成・画面遷移・段階的な作り方） |
 | **[docs/04-feasibility.md](docs/04-feasibility.md)** | 実現可能性スクリーニング — 全72案を Vikunja データモデルに照合（🔴別系統必須／🟠履歴要／🟡軽微／✅標準） |
+| **[docs/05-time-tracking-fork.md](docs/05-time-tracking-fork.md)** | 実績時間トラッキング — Vikunja を fork して DB に実装（スキーマ/API/ビルド）。コード雛形は [`vikunja-patch/`](vikunja-patch/) |
 
 ---
 

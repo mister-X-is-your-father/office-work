@@ -37,13 +37,17 @@ repeat_mode, start_date, subscription, title, updated`
 
 ## 結論（先に要点）
 
-### 🔴 別系統が要る（ちょっとの改造では無理）
-- **23 見積りvs実績 / 24 見積り精度** — Vikunja は**実績時間（何時間かけたか）を記録できない**。時間トラッキングの仕組みを別に用意しない限り出せない。**最大の制約**。
+### ✅ 解決済み（fork で DB に実装する方針に変更）— 旧🔴
+- **23 見積りvs実績 / 24 見積り精度 / 42 工数消化** — 当初は「Vikunja に実績時間が無い」ため 🔴 としたが、**Vikunja を fork して `task_time_entries` テーブル＋`tasks.time_estimate` カラムをネイティブ追加する**方針に決定（[ADR-006](01-decisions.md) / [05-time-tracking-fork](05-time-tracking-fork.md)）。→ **ネイティブに成立（✅）**。
+  - ※ コメント解析方式は脆弱なので却下。
+
+### 🔴 別系統が要る（外部連携）
 - **66 レビューキュー** — 「PR #142」等は GitHub 等の外部。Vikunja にレビュー/PR概念なし。※ラベル `review待ち` での簡易版なら 🟡。
 
 ### 🟠 「日次スナップショット」を貯める仕組みが要る
-- **37 バーンダウン / 38 バーンアップ / 25 過負荷ヒストリー / 42 工数バジェット(消化分)**
+- **37 バーンダウン / 38 バーンアップ / 25 過負荷ヒストリー**
   — 完了の積み上げ（done_at）からの時系列は近似できるが、**過去のある時点の「残作業・スコープ・日別負荷」は履歴が無い**。毎日スナップショットを取る小さなジョブが必要。
+  — ※ 25/37 の**実績側**は fork 後 `task_time_entries.logged_on` 別集計で裏付く（[ADR-006](01-decisions.md)）。**42 工数バジェットは fork で ✅化**（上記参照）。
   - 補足: **44 ベロシティ（週の完了"件数"）は done_at から出せるので実は ✅〜🟡**。工数ベースにすると 🟡。
 
 ### 🟡 想定内（est ラベル＋自前計算）
@@ -105,7 +109,7 @@ repeat_mode, start_date, subscription, title, updated`
 | 40 マイルストーン | 🟠 | **Vikunja に milestone 概念なし** → ラベル/特殊タスク/期日タスクで代替 |
 | 37 バーンダウン | 🟠 | 残作業の**時系列に履歴スナップショットが要る** |
 | 38 バーンアップ | 🟠 | 完了=done_atで近似可、スコープ増減履歴=要スナップショット |
-| 42 工数バジェット | 🟠 | 見積り=Σest(🟡)、**「消化」は実績時間が無い**→ percent×est で近似（真値は🔴） |
+| 42 工数バジェット | ✅ | **fork後**: 見積り=`tasks.time_estimate`、消化=`SUM(task_time_entries.seconds)`（[ADR-006](01-decisions.md)） |
 | 44 ベロシティ | 🟡 | 週の完了"件数"は done_at から出せる(✅寄り)、工数ベースは est |
 
 ### 優先度・トリアージ
@@ -146,8 +150,8 @@ repeat_mode, start_date, subscription, title, updated`
 |---|---|---|---|
 | 25 過負荷ヒストリー | 🟠 | 過去の日別負荷は**履歴スナップショットが要る**（当日分は近似可） |
 | 26 プロジェクト配分 | 🟡 | PJ別 Σest、プロジェクト=✅ |
-| 23 見積りvs実績 | 🔴 | **実績時間トラッキングが Vikunja に無い** → 別系統必須 |
-| 24 見積り精度 | 🔴 | 同上（実績が無いと精度が測れない） |
+| 23 見積りvs実績 | ✅ | **fork後**: 見積り=`tasks.time_estimate`、実績=`task_time_entries`（[ADR-006](01-decisions.md)） |
+| 24 見積り精度 | ✅ | 同上。人別の見積り精度も `task_time_entries` から算出 |
 
 ### 周辺・設定
 | # | 画面 | 判定 | 根拠 |
@@ -161,7 +165,7 @@ repeat_mode, start_date, subscription, title, updated`
 
 | 課題 | 対処案 |
 |---|---|
-| **実績時間（23,24,42消化）** | ①割り切って「進捗%×est」で近似 ②Vikunja外に worklog を持つ（Supabase に `task_id, user, date, hours`）③外部タイムトラッカー連携。まずは①で代替、精度が要れば②。 |
+| **実績時間（23,24,42消化）** | ✅ **採用**: Vikunja を fork し `task_time_entries` テーブル＋`tasks.time_estimate` カラムをネイティブ追加（[ADR-006](01-decisions.md) / [05](05-time-tracking-fork.md) / [`../vikunja-patch/`](../vikunja-patch/)）。〔却下案: コメント解析=脆弱、外部Supabaseストア=分断〕 |
 | **履歴スナップショット（25,37,38）** | 日次の cron で「全タスクの残est・done状況」を Supabase にスナップショット。数テーブルで済む。P2以降に追加。 |
 | **マイルストーン（40）** | `milestone:M2` ラベル or 専用プロジェクト、達成判定は配下タスクの done 集計。 |
 | **レビュー/PR（66）** | GitHub webhook 連携（将来）。当面は Vikunja ラベル `review待ち` の簡易キュー。 |
@@ -169,7 +173,8 @@ repeat_mode, start_date, subscription, title, updated`
 ## まとめ
 
 - **統合プロト P1（静的・サンプル）には影響なし** — 全画面そのまま組める。
-- **P2（Vikunja 実データ）で効いてくる**: 🔴の **実績系（23,24）と PR（66）は別途用意が要る**。🟠の **履歴系（25,37,38,42）はスナップショット導入が前提**。
-- それ以外は **est:4h ラベル＋自前キャパ計算** で素直に出せる。
+- **実績系（23,24,42）は Vikunja fork で解決**（[ADR-006](01-decisions.md)）。残る別系統は **PR連携（66）** のみ。
+- **履歴系（25,37,38）** はスナップショット導入が前提（実績側は fork の `task_time_entries` が裏付ける）。
+- それ以外は **見積りカラム/ラベル＋自前キャパ計算** で素直に出せる。
 
 → MVP 8画面（[03-integration-plan.md](03-integration-plan.md)）には 🔴 が含まれないため、**実データ化はスムーズに始められる**。
