@@ -4,8 +4,7 @@
 Instagantt の Workload ビュー相当を **OSS・自前ホスト（データ主権あり）** で実現することを狙い、
 タスクの箱には **Vikunja** を採用し、その上に自前の可視化レイヤーを載せる構成を検討している。
 
-> **状態: UIモック段階（72案）→ 統合プロトタイプ設計へ**
-> 実データ（Vikunja API）接続前。各画面は静的HTML・サンプルデータ駆動。
+> **状態: ① UIモック72案 → ② フォークしたVikunjaで実績時間トラッキング実装(本番稼働) → ③ 実データ統合SPA(進行中)**
 
 ---
 
@@ -13,10 +12,12 @@ Instagantt の Workload ビュー相当を **OSS・自前ホスト（データ�
 
 | 方法 | URL |
 |---|---|
-| **GitHub Pages（公開・永続）** | https://mister-x-is-your-father.github.io/office-work/capacity-dashboard/ |
-| ローカル（Tailscale, 稼働中のみ） | http://leo:7010/ |
+| **🟢 実データSPA（leo稼働時）** | http://leo:7010/app/ — Vikunja実データ。ホーム/空き探し/週/トリアージ/見積りvs実績 |
+| 切り口別ギャラリー（モック72案） | http://leo:7010/ ／ Pages: https://mister-x-is-your-father.github.io/office-work/capacity-dashboard/ |
 
-`index.html` が **切り口別ギャラリー**（全72案・ライブサムネ）。main に push すると Pages は自動更新。
+`app/` が **実データ統合SPA**（`lib/vikunja.js` API client＋`lib/capacity.js` 純関数＋ハッシュルータ）。
+Vikunja は fork 済み（`tasks.time_estimate` / `task_time_entries` / `time_spent`、[docs/05](docs/05-time-tracking-fork.md)）。
+`index.html` は **切り口別ギャラリー**（全72案・ライブサムネ）。main に push すると Pages は自動更新。
 
 ローカル配信:
 ```bash

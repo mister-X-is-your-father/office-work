@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>見積り vs 実績（実データ・Vikunja）</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
+    --est:#9aa3af; --actual:#3a86ff; --over:#e5484d; --under:#2fa66b; --amber:#f5a623;
+    --font:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);
+    -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums;padding:30px 22px 60px}
+  .wrap{max-width:840px;margin:0 auto}
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+  h1{font-size:21px;margin:0}
+  .sub{font-size:12.5px;color:var(--muted)}
+  .src{font-size:11.5px;color:var(--muted);margin:6px 0 18px}
+  .src b{color:var(--ink)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    box-shadow:0 2px 10px rgba(20,30,50,.05)}
+  /* login */
+  .login{padding:22px;max-width:360px}
+  .login h2{font-size:15px;margin:0 0 4px}
+  .login p{font-size:12px;color:var(--muted);margin:0 0 14px}
+  .login label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px}
+  .login input{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:9px;font:inherit}
+  .login button{margin-top:16px;width:100%;padding:10px;border:0;border-radius:9px;background:var(--actual);
+    color:#fff;font-weight:700;cursor:pointer;font-size:14px}
+  .login button:disabled{opacity:.6;cursor:default}
+  .err{color:var(--over);font-size:12px;margin-top:10px;min-height:16px}
+  /* summary */
+  .summary{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0 14px}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px;min-width:128px;
+    box-shadow:0 1px 2px rgba(20,30,50,.04)}
+  .kpi .l{font-size:11px;color:var(--muted);margin-bottom:5px}
+  .kpi .v{font-size:20px;font-weight:700;line-height:1}
+  .kpi .v small{font-size:12px;color:var(--muted);font-weight:600}
+  .kpi.over .v{color:var(--over)} .kpi.under .v{color:var(--under)}
+  /* rows */
+  .rows{padding:6px 4px}
+  .row{padding:13px 16px;border-bottom:1px solid var(--line)}
+  .row:last-child{border-bottom:0}
+  .rhead{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:8px}
+  .rname{font-weight:600;font-size:14px}
+  .rdiff{font-size:12px;font-weight:700}
+  .rdiff.over{color:var(--over)} .rdiff.under{color:var(--under)} .rdiff.exact{color:var(--muted)}
+  .bars{position:relative}
+  .barline{display:flex;align-items:center;gap:8px;margin:3px 0}
+  .barlbl{width:42px;font-size:10.5px;color:var(--muted);text-align:right;flex:none}
+  .bartrack{flex:1;height:16px;background:var(--track);border-radius:6px;position:relative;overflow:hidden}
+  .barfill{position:absolute;left:0;top:0;bottom:0;border-radius:6px}
+  .barval{width:48px;font-size:11.5px;font-weight:600;flex:none}
+  .toolbar{display:flex;gap:10px;align-items:center;margin:0 2px 12px}
+  .toolbar button{border:1px solid var(--line);background:var(--card);border-radius:8px;padding:6px 12px;
+    font:inherit;font-size:12.5px;cursor:pointer;color:var(--ink)}
+  .toolbar button:hover{background:var(--track)}
+  .toolbar .who{font-size:12px;color:var(--muted)}
+  .loading{padding:30px;text-align:center;color:var(--muted);font-size:13px}
+  .legend{display:flex;gap:16px;margin:12px 2px 0;font-size:11.5px;color:var(--muted)}
+  .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>見積り vs 実績</h1>
+    <span class="sub">実データ・Vikunja API 接続版</span>
+  </header>
+  <div class="src">データ源: <b id="apilabel">http://leo:7005/api/v1</b> ／ <code>tasks.time_estimate</code> と <code>SUM(task_time_entries.seconds)=time_spent</code>（フォークのネイティブ実績時間トラッキング）</div>
+
+  <div id="view"></div>
+</div>
+
+<script>
+const API = "http://leo:7005/api/v1";
+const TKEY = "vikunja_token";
+const $ = (s,r=document)=>r.querySelector(s);
+const h = (sec)=> (sec/3600);
+const fmtH = (sec)=> (sec/3600).toFixed(sec%3600?1:0)+"h";
+
+function token(){ return sessionStorage.getItem(TKEY) || ""; }
+
+function showLogin(msg){
+  $("#view").innerHTML = `
+    <div class="card login">
+      <h2>Vikunja に接続</h2>
+      <p>このダッシュボードは Vikunja の実データを読みます。ログインしてください。</p>
+      <label>ユーザー名</label><input id="u" autocomplete="username" value="">
+      <label>パスワード</label><input id="p" type="password" autocomplete="current-password">
+      <button id="go">接続</button>
+      <div class="err" id="err">${msg||""}</div>
+    </div>`;
+  $("#go").onclick = doLogin;
+  $("#p").onkeydown = e=>{ if(e.key==="Enter") doLogin(); };
+}
+
+async function doLogin(){
+  const u=$("#u").value.trim(), p=$("#p").value;
+  $("#go").disabled=true; $("#err").textContent="接続中…";
+  try{
+    const r = await fetch(API+"/login",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({username:u,password:p})});
+    const d = await r.json();
+    if(!r.ok || !d.token) throw new Error(d.message||"ログイン失敗");
+    sessionStorage.setItem(TKEY, d.token);
+    load();
+  }catch(e){ $("#go").disabled=false; $("#err").textContent = "× "+e.message; }
+}
+
+async function load(){
+  $("#view").innerHTML = `<div class="card"><div class="loading">読み込み中…</div></div>`;
+  try{
+    const r = await fetch(API+"/tasks/all?per_page=200",{headers:{Authorization:"Bearer "+token()}});
+    if(r.status===401){ sessionStorage.removeItem(TKEY); return showLogin("セッション切れ。再ログインしてください。"); }
+    if(!r.ok) throw new Error("取得失敗 "+r.status);
+    const tasks = await r.json();
+    render(tasks.filter(t => (t.time_estimate||0)>0 || (t.time_spent||0)>0));
+  }catch(e){ $("#view").innerHTML = `<div class="card"><div class="loading">エラー: ${e.message}</div></div>`; }
+}
+
+function render(tasks){
+  if(!tasks.length){
+    $("#view").innerHTML = `<div class="card"><div class="loading">見積り/実績のあるタスクがありません（タスクに見積り時間を設定し、実績を記録してください）。</div></div>`;
+    addToolbar(); return;
+  }
+  const totEst = tasks.reduce((s,t)=>s+(t.time_estimate||0),0);
+  const totAct = tasks.reduce((s,t)=>s+(t.time_spent||0),0);
+  const ratio = totEst? totAct/totEst : 0;
+  const maxSec = Math.max(...tasks.flatMap(t=>[t.time_estimate||0, t.time_spent||0]), 1);
+  const overallCls = totAct>totEst?"over":(totAct<totEst?"under":"");
+  const overallTxt = totEst? (totAct>=totEst?"+":"")+Math.round((ratio-1)*100)+"%" : "—";
+
+  // 最も外したタスク（|実績-見積|/見積 最大）
+  let worst=null, worstP=-1;
+  tasks.forEach(t=>{ const e=t.time_estimate||0; if(e){ const p=Math.abs((t.time_spent||0)-e)/e; if(p>worstP){worstP=p;worst=t;} }});
+
+  const rows = tasks.map(t=>{
+    const e=t.time_estimate||0, a=t.time_spent||0;
+    const diff = e? (a-e)/e : 0;
+    const cls = a>e?"over":(a<e?"under":"exact");
+    const diffTxt = e? (a>=e?"+":"")+Math.round(diff*100)+"%" : "実績のみ";
+    const estW = (e/maxSec*100), actW=(a/maxSec*100);
+    const actColor = a>e? "var(--over)" : "var(--actual)";
+    return `<div class="row">
+      <div class="rhead"><span class="rname">${esc(t.title)}</span>
+        <span class="rdiff ${cls}">${diffTxt}　<span style="color:var(--muted);font-weight:400">${fmtH(e)} → ${fmtH(a)}</span></span></div>
+      <div class="bars">
+        <div class="barline"><span class="barlbl">見積り</span><span class="bartrack"><span class="barfill" style="width:${estW}%;background:var(--est)"></span></span><span class="barval">${fmtH(e)}</span></div>
+        <div class="barline"><span class="barlbl">実績</span><span class="bartrack"><span class="barfill" style="width:${actW}%;background:${actColor}"></span></span><span class="barval">${fmtH(a)}</span></div>
+      </div>
+    </div>`;
+  }).join("");
+
+  $("#view").innerHTML = `
+    <div class="summary">
+      <div class="kpi"><div class="l">見積り合計</div><div class="v">${fmtH(totEst)}</div></div>
+      <div class="kpi"><div class="l">実績合計</div><div class="v">${fmtH(totAct)}</div></div>
+      <div class="kpi ${overallCls}"><div class="l">全体差分</div><div class="v">${overallTxt}</div></div>
+      <div class="kpi"><div class="l">最も外した</div><div class="v" style="font-size:14px;font-weight:700">${worst?esc(worst.title):"—"}<br><small>${worst?(((worst.time_spent||0)>= (worst.time_estimate||0)?"+":"")+Math.round(((worst.time_spent||0)/(worst.time_estimate||1)-1)*100)+"%"):""}</small></div></div>
+    </div>
+    <div id="tb"></div>
+    <div class="card"><div class="rows">${rows}</div></div>
+    <div class="legend"><span><i style="background:var(--est)"></i>見積り</span><span><i style="background:var(--actual)"></i>実績(見積り内)</span><span><i style="background:var(--over)"></i>実績(超過)</span></div>`;
+  addToolbar();
+}
+
+function addToolbar(){
+  const tb = $("#tb") || (()=>{ const d=document.createElement("div"); d.id="tb"; $("#view").prepend(d); return d; })();
+  tb.outerHTML = `<div class="toolbar" id="tb">
+    <button id="reload">↻ 再読込</button>
+    <button id="logout">ログアウト</button>
+    <span class="who" id="who"></span></div>`;
+  $("#reload").onclick = load;
+  $("#logout").onclick = ()=>{ sessionStorage.removeItem(TKEY); showLogin(""); };
+}
+
+function esc(s){ return (s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+// init
+if(token()) load(); else showLogin("");
+</script>
+</body>
+</html>
