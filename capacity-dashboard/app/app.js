@@ -8,13 +8,14 @@ const ROUTES = {
   triage:   { label: "トリアージ",    grp: "今日",   mod: "./views/triage.js" },
   week:     { label: "週プラン",      grp: "計画",   mod: "./views/week.js" },
   planner:  { label: "週プランナー",  grp: "計画",   mod: "./views/planner.js" },
+  freefinder:{ label: "月次空き",     grp: "計画",   mod: "./views/freefinder.js" },
   estactual:{ label: "見積りvs実績",  grp: "実績",   mod: "./views/estactual.js" },
   kanban:   { label: "かんばん",      grp: "仕事",   soon: true },
   list:     { label: "一覧",          grp: "仕事",   soon: true },
   gantt:    { label: "予実ガント",    grp: "仕事",   mod: "./views/gantt.js" },
   settings: { label: "設定",          grp: "その他", soon: true },
 };
-const ORDER = ["home", "today", "triage", "week", "planner", "estactual", "kanban", "list", "gantt", "settings"];
+const ORDER = ["home", "today", "triage", "week", "planner", "freefinder", "estactual", "kanban", "list", "gantt", "settings"];
 
 const app = document.getElementById("app");
 

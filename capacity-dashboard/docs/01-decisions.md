@@ -194,3 +194,25 @@
 **理由**: 共通作業も会議も「関与者全員がその時間を負う」のが実態 → 全員フルが正しい（B は会議の実拘束を過小評価）。会議に必要な要素（複数参加者/所要/日付/定例）はタスクで全て表せ、A の規則により**会議は多担当タスクとして自動でキャパに計上**される。専用エンティティ（D）は車輪の再発明。
 
 **含意**: 計算層から `/aids.length` 按分を全廃（[capacity.js](../app/lib/capacity.js) `toMemberDayEntries`/`taskPlannedHoursByMemberOn`、[planner.js](../app/views/planner.js)）。特定の対象者(`user_id`, [ADR-009](#adr-009)) が付くエントリはその1人にフル。**専用会議エンティティは「時刻帯ブロッキング/出欠/外部カレンダー同期」が要件化したら再 ADR**（現状不要）。
+
+---
+
+## ADR-011: 定期タスク/会議は RRULE(RFC5545) で持ち、SPA(rrule.js) で展開／祝日・個人休暇で容量を 0 に
+
+**状態**: 採用・実装済み (2026-06, フェーズ5)。
+
+**背景**: 1ヶ月先の「Aが特定日に N時間空き」を出すには、繰り返し（定例タスク/会議）を未来に展開する必要がある。Vikunja 標準の `repeat_after` は**完了時シフト型で未来回を展開しない**＋「毎月第N曜日」等の柔軟ルールを表現できない。祝日・個人休暇も容量に効かせたい。
+
+**検討した選択肢**:
+- 繰り返し表現： **A. RRULE(RFC5545)**（`FREQ=WEEKLY;BYDAY=MO`/`MONTHLY;BYDAY=2TU`/`INTERVAL=2` で毎週N曜/毎月第N曜/隔週を網羅） vs B. 自前ルール型（曜日/週/月のフラグ）。
+- 展開場所： **C. SPA側 rrule.js**（fork は RRULE 文字列を dumb storage） vs D. fork側 Go(rrule-go) で展開API。
+- 会議エンティティ： **E. 多担当タスク/定期で表現**（[ADR-010](#adr-010)） vs F. 専用エンティティ。
+- 可用性： **G. 祝日(チーム)＋個人休暇(PTO)** vs 祝日のみ。
+
+**決定**: **A（RRULE）／C（SPA rrule.js 展開）／E（会議＝多担当）／G（祝日＋休暇）**。fork に `recurrences`（RRULE文字列・duration・assignee_ids[JSON]・kind）/`holidays`/`member_unavailability` を新設（dumb storage）。展開・空き計算は SPA（[recurrence.js](../app/lib/recurrence.js)＋ベンダリングした [rrule.mjs](../app/lib/vendor/rrule.mjs)）。occurrence は**仮想**（実タスク/plans 非生成・計画用）。
+
+**理由**: 「使えるライブラリは必ず使う」＝recurrence 計算は RRULE 標準＋rrule.js 一択（自前計算は禁止）。展開は派生データなので計算層([capacity.js])に集約し fork を最小（Go依存追加なし）に。assignee は JSON列で4つ目の表を回避（前例 `api_tokens.Permissions xorm:"json"`）。容量は週末/祝日/休暇を 0 とし、占有が非稼働日に重なれば over（衝突）として可視化。
+
+**結果**: [freefinder](../app/views/freefinder.js)（月次空き）で「毎週月/毎月第2火/隔週/祝日/休暇」が ~5週間先まで (メンバー×日) 空きに反映。S1(go test)→S2(隔離CRUD/migration)→本番 `leo-vikunja:0.24.6-timetracking-fix4`→seed→Playwright で確認済。
+
+**トレードオフ**: occurrence は仮想なので、定期の「実績/完了」追跡は別途 materialize が要る（将来）。時刻帯ブロッキング（時間単位）は日次粒度の本モデル外（要件化したら再 ADR）。rrule.js は ESM を依存インライン化して単一ファイルにベンダリング（buildless維持）。

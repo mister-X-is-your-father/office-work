@@ -66,3 +66,17 @@ export async function getPlans(taskId) { return req(`/tasks/${taskId}/plans`); }
 export async function logPlan(taskId, seconds, planDateISO, note = "") {
   return req(`/tasks/${taskId}/plans`, { method: "PUT", body: { seconds, plan_date: planDateISO + "T00:00:00Z", note } });
 }
+
+// 定期タスク/会議(RRULE)＋祝日＋個人休暇（フェーズ5・グローバルCRUD）
+export async function getRecurrences() { return req("/recurrences"); }
+export async function createRecurrence(body) { return req("/recurrences", { method: "PUT", body }); }
+export async function updateRecurrence(id, body) { return req(`/recurrences/${id}`, { method: "POST", body }); }
+export async function deleteRecurrence(id) { return req(`/recurrences/${id}`, { method: "DELETE" }); }
+
+export async function getHolidays() { return req("/holidays"); }
+export async function createHoliday(body) { return req("/holidays", { method: "PUT", body }); }
+export async function deleteHoliday(id) { return req(`/holidays/${id}`, { method: "DELETE" }); }
+
+export async function getUnavailability() { return req("/unavailability"); }
+export async function createUnavailability(body) { return req("/unavailability", { method: "PUT", body }); }
+export async function deleteUnavailability(id) { return req(`/unavailability/${id}`, { method: "DELETE" }); }

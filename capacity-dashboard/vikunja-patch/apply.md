@@ -243,3 +243,28 @@ pkg/migration/20260610032051.go   (両テーブルに created_by 追加＋backfi
 
 計算層（SPA, [capacity.js](../app/lib/capacity.js) `toMemberDayEntries`）: entry.user_id が信頼できる時（assignee 無 or uid∈assignee）は対象者へ全量、それ以外は assignee 按分（**非regression**: 旧データ uid=capdemo は按分に落ちる）。SPA 配線（フォームの対象者選択・logTime/logPlan の user_id 送信）は次パス。
 v0.24.6 にて TDD全green・回帰なし・隔離e2e（user_id で対象者指定→対象者/記録者分離・task-write で他者エントリ削除可）・Playwright(UI console 0) 確認済み。配布 `leo-vikunja:0.24.6-timetracking-fix3`。
+
+---
+
+## フェーズ5: 定期タスク/会議(RRULE)＋祝日＋個人休暇（[ADR-011](../docs/01-decisions.md)）
+
+1ヶ月先の (メンバー×日) 空きを「定期/会議・祝日・休暇込み」で出すためのデータ層。**fork は RRULE 文字列を保存するだけ（dumb storage、展開しない）**、展開は SPA(rrule.js)。
+新規ファイル（model/rights/error/test ＋ migration ＋ 空fixture）:
+```
+pkg/models/recurrence.go / recurrence_rights.go / error_recurrence.go(15003) / recurrence_test.go
+pkg/models/holiday.go / error_holiday.go(15004) / holiday_test.go
+pkg/models/member_unavailability.go / error_member_unavailability.go(15005) / member_unavailability_test.go
+pkg/migration/20260610081121.go                      (3テーブル作成)
+pkg/db/fixtures/{recurrences,holidays,member_unavailability}.yml (空[])
+```
+既存編集（time系と同じ4箇所）:
+- `pkg/models/models.go` GetTables に `&Recurrence{} &Holiday{} &MemberUnavailability{}`
+- `pkg/models/unit_tests.go` fixture一覧に3テーブル名
+- `pkg/routes/routes.go` に `/recurrences`(+`:recurrence`)/`/holidays`/`/unavailability` の WebHandler CRUD（**認証済みグループ a 配下＝認証ユーザーCRUD可**、`label_rights.go` 流の Can* で実装）
+
+要点・gotcha:
+- **GonicMapper の列名ズレ**: `DTStart`→`d_t_start`、`RRule`→`r_rule`、`AssigneeIDs`→`assignee_i_ds` になるため、`xorm:"... 'dtstart'"` のように**明示列名**を付ける（model と migration の両方）。`UserID`/`ProjectID`/`CreatedBy` は GonicMapper が正しく `user_id`/`project_id`/`created_by` にする。
+- **JSON列**: `AssigneeIDs []int64 xorm:"json not null 'assignee_ids'"`（前例 `api_tokens`）。4つ目の表を回避。多担当=全員フル(ADR-010)。
+- soft delete(#2)/created_by(#3) 踏襲。グローバル設定なので親委譲なし。occurrence は仮想。
+- API: `PUT /recurrences {title,kind,rrule,dtstart,duration_seconds,assignee_ids,...}`、`/holidays {date,name}`、`/unavailability {user_id,start_date,end_date,reason}`。
+v0.24.6 で S1(models+integrations green)→S2(隔離7011: migration3表＋JSON往復＋soft delete)→本番 `leo-vikunja:0.24.6-timetracking-fix4`→seed(`seed-recurrence-demo.py`)→Playwright(freefinder で定期/祝日/休暇 反映・console0) 確認済み。

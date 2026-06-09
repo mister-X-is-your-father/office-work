@@ -69,7 +69,8 @@ Instagantt の Workload 相当を **OSS・自前ホスト（データ主権）**
 | FR-D5 | 予定/実績に**「誰の」**を正しく持つ：`user_id`=対象者・`created_by`=記録者 | ✅ | **完了(#3, ADR-009)**: fork に created_by 追加・user_id を対象者として API 設定可。SPA 配線は次パス |
 | FR-D6 | タスクの**スケジュール枠**（start/end）と**依存**（related_tasks）を持つ | ✅ | Vikunja標準。デモ投入済（`seed-gantt-demo.py`） |
 | FR-D7 | 上記すべてが **soft delete・created/updated/deleted_at** を備える | ✅ | **完了(#2)**: times/plans に `deleted_at`、Delete soft化、SUM除外。`leo-vikunja:0.24.6-timetracking-fix2` |
-| FR-D8 | 書き込みが**非破壊**（部分更新で無関係データを消さない） | ⬜ | `POST /tasks/:id` がassignees等を空上書き＝**最重要バグ**（ADR候補） |
+| FR-D8 | 書き込みが**非破壊**（部分更新で無関係データを消さない） | ✅ | **完了**: 関連は fork nilガード(#1/ADR-008)、スカラは client full-send(#9/`updateTask`) |
+| FR-D9 | **定期タスク/会議(RRULE)＋祝日＋個人休暇** を持つ | ✅ | **完了(ADR-011)**: fork `recurrences`(RRULE・dumb storage)/`holidays`/`member_unavailability`。`fix4` |
 
 ### 3.2 計算層（capacity.js・純関数・単一真実）
 | ID | 要件 | 状態 | 備考 |
@@ -81,6 +82,7 @@ Instagantt の Workload 相当を **OSS・自前ホスト（データ主権）**
 | FR-C5 | 予定/実績の人別日別集計 | ✅ | `sumByMemberDay`/`toMemberDayEntries` |
 | FR-C6 | ガントの範囲・依存・日付軸 | ✅ | `taskRanges`/`dependencyEdges`/`dayScale` |
 | FR-C7 | **負荷計算の単一真実** — 予定(plans)があればそれを、無ければ見積り日割りを使う、を全ビューで統一 | ✅ | **完了(#4)**: `taskPlannedHoursByMemberOn` で plans 優先・全員フル。today/home/week が plansByTask を共有。多担当(会議含む)は全員にフル |
+| FR-C8 | **定期/会議の RRULE 展開＋祝日/休暇で容量0** → 1ヶ月先の (人×日) 空き | ✅ | **完了(ADR-011)**: `recurrence.js`(rrule.js)。週末/祝日/休暇=0、占有衝突=over |
 
 ### 3.3 製品ビュー（SPA・オリジナルUI）
 | ID | 要件 | 状態 | 代表モック |
@@ -91,6 +93,7 @@ Instagantt の Workload 相当を **OSS・自前ホスト（データ主権）**
 | FR-V4 | 週プラン / 週プランナー（予定×実績・読み書き） | ✅ | 18 |
 | FR-V5 | 見積りvs実績 | ✅ | 23 |
 | FR-V6 | **予実ガント**（タスク行＋人別レーン） | ✅ | 29/30 |
+| FR-V10 | **月次空き**（~5週先まで 人×日 空き・定期/会議/祝日/休暇込み） | ✅ | **完了(ADR-011)**: `freefinder.js`。`fix4`+seed で確認 |
 | FR-V7 | かんばん / 一覧 / 設定 | ⬜ | 59/60/17 |
 | FR-V8 | 容量・対象プロジェクトの**設定**（8h/日のハードコード解消） | ⬜ | 17。これが入るまで全ビューが「デモ専用」 |
 | FR-V9 | AI Q&A（自然文要約） | ⬜ | 53。別API要・保留 |

@@ -3,7 +3,9 @@
 > status: **稼働中**（2026-06-10）。モック72案 → Vikunjaフォークで時間管理をDB実装（本番稼働） → 実データ統合SPA（中核＋日別予定＋予実ガント） → **基盤固め完了（#1-#4,#7,#9）**。本番イメージ `leo-vikunja:0.24.6-timetracking-fix3`。残: SPA配線・かんばん/一覧/設定・P2清掃。
 > 次の人がコンテキスト無しで読む前提。困ったらまず本書 → 要件 `docs/06-requirements.md` → `docs/00-05` → 各ADR（特に [01-decisions](docs/01-decisions.md) の ADR-007〜010）。
 >
-> **基盤固めフェーズ（昇格モデル S1→S2→本番 をフルゲートで）完了**：#1 書き込み破壊性根治(ADR-008) / #2 soft delete / #3 帰属(ADR-009 user_id=対象者・created_by=記録者) / #4 負荷の単一真実(plans優先・多担当=全員フル, ADR-010) / #7 回帰網 / #9 スカラ更新の安全化(client updateTask)。要件・進捗は `docs/06-requirements.md`。
+> **基盤固めフェーズ（昇格モデル S1→S2→本番 をフルゲートで）完了**：#1 書き込み破壊性根治(ADR-008) / #2 soft delete / #3 帰属(ADR-009 user_id=対象者・created_by=記録者) / #4 負荷の単一真実(plans優先・多担当=全員フル, ADR-010) / #7 回帰網 / #9 スカラ更新の安全化(client updateTask)。
+>
+> **定期/会議＋祝日＋休暇 → 月次空き（ADR-011・本番 fix4）完了**：fork に `recurrences`(RRULE文字列・dumb storage)/`holidays`/`member_unavailability` 新設。SPA は rrule.js(ベンダリング `app/lib/vendor/rrule.mjs`) で展開、`app/lib/recurrence.js` で空き計算、`app/views/freefinder.js`「月次空き」で ~5週先まで (メンバー×日) 空きを「定期/会議・祝日・休暇込み」表示。多担当/会議=全員フル。seed=`vikunja-patch/seed-recurrence-demo.py`。要件・進捗は `docs/06-requirements.md`。
 
 ## 0. これは何 / なぜ
 
