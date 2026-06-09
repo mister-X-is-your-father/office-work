@@ -157,12 +157,12 @@ CLAUDE.md の DB conventions を fork の自前テーブルに適用する。Vik
 | 3 | ~~予定/実績の帰属が作成者依存~~ **完了** | ✅ | FR-D5 | model設計 |
 | 4 | ~~負荷計算が二系統（見積り/plans）~~ **完了** | ✅ | FR-C7 | 計算層 |
 | 7 | ~~assignees消去を捕まえるテストが無い~~ **完了(#1で回帰テスト追加)** | ✅ | NFR-2 | テスト |
-| 9 | **`POST /tasks/:id` がスカラ(start/end/due/priority等)を空上書き** — #1の関連版。Vikunja のスカラ全置換仕様で、title 等だけ送ると日付が消える。SPA `setEstimate` が地雷（検証中に task6 の日付が飛んだ） | 🟠 | 新FR | fork or client |
+| 9 | ~~`POST /tasks/:id` がスカラを空上書き~~ **完了(client: `updateTask` full-send)**。fork のスカラ全置換は意図仕様として維持、SPA を非破壊な full-send に。`setEstimate` を載せ替え | ✅ | — | client |
 | 5 | members=assigneesの和（projectusers未統合） | 🟡 | — | データソース |
 | 6 | `est:Nh`ラベルが`time_estimate`と二重残存 | 🟡 | — | データ整合 |
 | 8 | 日別内訳のバッチ取得が無い（N+1） | 🟡 | NFR-6 | API |
 
-**推奨着手順（DB規範まで徹底の前提）**：~~P0=#1 → P1=#2,#3,#4,#7~~ 完了 → **次: #9（スカラ消去・#1の関連版）→ P2=#5,#6,#8**。
+**推奨着手順（DB規範まで徹底の前提）**：~~P0=#1 → P1=#2,#3,#4,#7 → #9~~ 完了 → **残り P2=#5,#6,#8**。
 各対応は [§5](#5-昇格モデル成熟度パイプライン) のステージを通す（特にfork変更 は S1→S2 を必ず経由）。
 
 ---

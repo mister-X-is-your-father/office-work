@@ -112,6 +112,7 @@ docker run --rm -v "$PWD":/app -v vikunja-gocache:/go -w /app -e VIKUNJA_SERVICE
 - **週プランナーの帰属** = plan.user_id ではなく **タスクの担当者**に按分（capdemoが代理入力したため）。自己計画なら user_id を使う設計に寄せられる。
 - Vikunja gotcha: username≥3文字 / 共有の `user_id` は文字列(ユーザー名) / `colsToUpdate` に列追加必須 / 新モデルは `GetTables()`＋テスト fixture 一覧＋空yml が必須 / エラーコードは未使用帯(15001=times,15002=plans)。
 - ~~`POST /tasks/:id` は payload に含めない関連を空で上書き（assignees/reminders が消える）~~ → **ADR-008（#1）でフォーク根治済み**。`Task.Update` を nil ガード（不在/`null`=維持・`[]`=明示クリア・`[{…}]`=置換）。部分更新（title だけ等）で担当者・リマインダーは消えなくなった。差分は `vikunja-patch/apply.md §3-5`、根拠は `docs/01-decisions.md` ADR-008。本番イメージ `leo-vikunja:0.24.6-timetracking-fix1`。
+- **⚠️ `POST /tasks/:id` は「スカラ」(start/end/due/priority/percent_done等)は意図的に全置換**（payloadに無い＝クリア。Vikunja仕様、`*_unset`テストが前提）。→ **SPA は必ず `vikunja.js updateTask(taskId, patch)` で更新**（現タスクをGET→全スカラ保持→patch上書きでPOST＝full-send・#9）。生 `POST /tasks/:id` で部分更新するとスカラが消える。`setEstimate` も updateTask 経由に載せ替え済。将来のガント・ドラッグ編集等も updateTask 必須。
 - ガント: 予定バー範囲は plans優先→start/end→due点の階層（`taskRanges`）。依存は Vikunja が `precedes` 作成時に逆 `follows` も自動付与するので `dependencyEdges` で前向き辺に正規化＋重複除去。21日窓と交差しないタスクは描画除外。人別帰属は担当者按分（plans.user_id=null のため）。
 - bash の `UID` は予約変数（配列名に使わない）。
 

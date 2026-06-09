@@ -36,8 +36,23 @@ export async function getProjectMembers(projectId) { return req(`/projects/${pro
 export async function whoami() { return req("/user"); }
 
 // 書き込み（任意・P3寄り）
-export async function setEstimate(taskId, title, seconds) {
-  return req(`/tasks/${taskId}`, { method: "POST", body: { title, time_estimate: seconds } });
+// ── #9 タスクのスカラ更新は必ず updateTask を経由する（生 POST 禁止）。
+// Vikunja の POST /tasks/:id はスカラ全置換（payload に無い＝クリア）なので、
+// 部分 POST すると start/end/due/priority 等が消える。full-send で非破壊にする。
+const TASK_SCALARS = ["title", "description", "done", "due_date", "start_date", "end_date",
+  "priority", "percent_done", "repeat_after", "repeat_mode", "hex_color", "time_estimate", "is_favorite"];
+
+// 現タスクを読み、全スカラを保ったまま patch を上書きして POST（非破壊な部分更新）。
+// 関連(assignees/reminders/labels)は payload に載せない＝#1(ADR-008)のガードで維持される。
+export async function updateTask(taskId, patch) {
+  const cur = await getTask(taskId);
+  const body = {};
+  for (const k of TASK_SCALARS) if (k in cur) body[k] = cur[k];
+  Object.assign(body, patch);
+  return req(`/tasks/${taskId}`, { method: "POST", body });
+}
+export async function setEstimate(taskId, seconds) {
+  return updateTask(taskId, { time_estimate: seconds });
 }
 export async function logTime(taskId, seconds, note = "", loggedOn = null) {
   const body = { seconds, note };
