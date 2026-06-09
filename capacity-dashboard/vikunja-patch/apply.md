@@ -202,3 +202,23 @@ pkg/db/fixtures/task_time_plans.yml  (空[])
 API: `PUT/GET /tasks/:task/plans {seconds, plan_date, note}`。Task に `time_planned`(合計) が乗る。
 → 3軸: `time_estimate`(見積り) / `time_planned`(予定合計) / `time_spent`(実績合計)。日別は plan_date / logged_on で取得。
 v0.24.6 にて TDD全green・pkg/models回帰なし・隔離e2e・本番デプロイ・Playwright(予定の入力→保存→反映) 確認済み。
+
+---
+
+## フェーズ3: soft delete（#2・DB規範。[06-requirements §6](../docs/06-requirements.md)）
+
+`task_time_entries`/`task_time_plans` を **論理削除**に（CLAUDE.md「全テーブルに deleted_at／hard delete 禁止」準拠）。
+新規ファイル:
+```
+pkg/migration/20260610024916.go   (両テーブルに deleted_at 追加。Rollback=DROP COLUMN)
+```
+既存編集（model コピーに反映済み）:
+- `pkg/models/task_time_entry.go` / `task_time_plan.go` の struct に
+  `DeletedAt time.Time xorm:"deleted_at deleted"` を追加（xorm が Delete を UPDATE 化、struct クエリから自動除外）。
+- **同ファイルの SUM ローダ（`addTimeSpentToTasks`/`addTimePlannedToTasks`）に `Where("deleted_at IS NULL")` を追加**
+  （**最重要**: 生テーブル SELECT は xorm の soft-delete フィルタが効かないため、明示しないと論理削除分が集計に残る）。
+- テスト（`task_time_entry_test.go`/`task_time_plan_test.go`）: Delete を soft 用に更新（行は残り `deleted_at` セット・ReadOne は ErrXxxDoesNotExist）＋ SUM 除外テスト＋ plan 側 Delete テスト新設。
+
+意味論: `Delete()` は `deleted_at=now` の UPDATE。Find/Get/Count（struct）は自動で `deleted_at IS NULL`。
+列は nullable（既存行は NULL=未削除）。migration は `tx.Sync`（無い列を足す・既存データ保持）。
+v0.24.6 にて TDD全green・pkg/models+integrations 回帰なし・隔離e2e（削除→time_spent減・GET除外・DB行残存＋deleted_at セット）・Playwright(UI console 0) 確認済み。配布 `leo-vikunja:0.24.6-timetracking-fix2`。

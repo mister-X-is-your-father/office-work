@@ -71,6 +71,41 @@ func TestTaskTimePlan_PlannedAggregation(t *testing.T) {
 	})
 }
 
+func TestTaskTimePlan_Delete(t *testing.T) {
+	u := &user.User{ID: 1}
+	t.Run("soft delete keeps row but hides from reads (#2)", func(t *testing.T) {
+		db.LoadAndAssertFixtures(t)
+		s := db.NewSession()
+		defer s.Close()
+
+		tp := &TaskTimePlan{TaskID: 1, Seconds: 3600, PlanDate: planDate("2026-06-10")}
+		require.NoError(t, tp.Create(s, u))
+		require.NoError(t, tp.Delete(s, u))
+		require.NoError(t, s.Commit())
+
+		db.AssertExists(t, "task_time_plans", map[string]interface{}{"id": tp.ID}, false)
+		err := (&TaskTimePlan{ID: tp.ID}).ReadOne(s, u)
+		require.Error(t, err)
+		assert.True(t, IsErrTimePlanDoesNotExist(err))
+	})
+	t.Run("soft-deleted plans are excluded from TimePlanned (#2)", func(t *testing.T) {
+		db.LoadAndAssertFixtures(t)
+		s := db.NewSession()
+		defer s.Close()
+
+		keep := &TaskTimePlan{TaskID: 1, Seconds: 14400, PlanDate: planDate("2026-06-10")}
+		require.NoError(t, keep.Create(s, u))
+		del := &TaskTimePlan{TaskID: 1, Seconds: 10800, PlanDate: planDate("2026-06-11")}
+		require.NoError(t, del.Create(s, u))
+		require.NoError(t, del.Delete(s, u))
+		require.NoError(t, s.Commit())
+
+		taskMap := map[int64]*Task{1: {ID: 1}}
+		require.NoError(t, addTimePlannedToTasks(s, []int64{1}, taskMap))
+		assert.Equal(t, int64(14400), taskMap[1].TimePlanned, "論理削除分(10800)は集計から除外")
+	})
+}
+
 func TestTaskTimePlan_Rights(t *testing.T) {
 	owner := &user.User{ID: 1}
 	other := &user.User{ID: 2}

@@ -83,7 +83,7 @@ func TestTaskTimeEntry_TimeSpentAggregation(t *testing.T) {
 
 func TestTaskTimeEntry_Delete(t *testing.T) {
 	u := &user.User{ID: 1}
-	t.Run("normal", func(t *testing.T) {
+	t.Run("soft delete keeps row but hides from reads (#2)", func(t *testing.T) {
 		db.LoadAndAssertFixtures(t)
 		s := db.NewSession()
 		defer s.Close()
@@ -92,7 +92,29 @@ func TestTaskTimeEntry_Delete(t *testing.T) {
 		require.NoError(t, te.Create(s, u))
 		require.NoError(t, te.Delete(s, u))
 		require.NoError(t, s.Commit())
-		db.AssertMissing(t, "task_time_entries", map[string]interface{}{"id": te.ID})
+
+		// 行は残る（監査痕跡）。xorm の deleted タグで Delete は deleted_at をセットする UPDATE になる。
+		db.AssertExists(t, "task_time_entries", map[string]interface{}{"id": te.ID}, false)
+		// が、struct クエリ（ReadOne=Get）からは除外され「存在しない」扱い。
+		err := (&TaskTimeEntry{ID: te.ID}).ReadOne(s, u)
+		require.Error(t, err)
+		assert.True(t, IsErrTimeEntryDoesNotExist(err))
+	})
+	t.Run("soft-deleted entries are excluded from TimeSpent (#2)", func(t *testing.T) {
+		db.LoadAndAssertFixtures(t)
+		s := db.NewSession()
+		defer s.Close()
+
+		keep := &TaskTimeEntry{TaskID: 1, Seconds: 3600}
+		require.NoError(t, keep.Create(s, u))
+		del := &TaskTimeEntry{TaskID: 1, Seconds: 1800}
+		require.NoError(t, del.Create(s, u))
+		require.NoError(t, del.Delete(s, u))
+		require.NoError(t, s.Commit())
+
+		taskMap := map[int64]*Task{1: {ID: 1}}
+		require.NoError(t, addTimeSpentToTasks(s, []int64{1}, taskMap))
+		assert.Equal(t, int64(3600), taskMap[1].TimeSpent, "論理削除分(1800)は集計から除外")
 	})
 }
 

@@ -68,7 +68,7 @@ Instagantt の Workload 相当を **OSS・自前ホスト（データ主権）**
 | FR-D4 | 予定/実績を **(task, user, day)** 粒度で集計できる | 🟡 | 帰属の真実が未確立（[§6](#6-データモデル要件)・FR-D5） |
 | FR-D5 | 予定/実績に**「誰の」**を正しく持つ：`user_id`=対象者・`created_by`=記録者 | ⬜ | 確定方針（ADR-009/A）。現状は作成者依存で崩れる。fork列の意味付け変更＋`created_by`追加 |
 | FR-D6 | タスクの**スケジュール枠**（start/end）と**依存**（related_tasks）を持つ | ✅ | Vikunja標準。デモ投入済（`seed-gantt-demo.py`） |
-| FR-D7 | 上記すべてが **soft delete・created/updated/deleted_at** を備える | 🟡 | times/plans に `deleted_at` 無し＝CLAUDE.md規範違反（[§6](#6-データモデル要件)） |
+| FR-D7 | 上記すべてが **soft delete・created/updated/deleted_at** を備える | ✅ | **完了(#2)**: times/plans に `deleted_at`、Delete soft化、SUM除外。`leo-vikunja:0.24.6-timetracking-fix2` |
 | FR-D8 | 書き込みが**非破壊**（部分更新で無関係データを消さない） | ⬜ | `POST /tasks/:id` がassignees等を空上書き＝**最重要バグ**（ADR候補） |
 
 ### 3.2 計算層（capacity.js・純関数・単一真実）
@@ -135,7 +135,7 @@ CLAUDE.md の DB conventions を fork の自前テーブルに適用する。Vik
 
 | 規範 | 現状 | 充足 | 対応方針 |
 |---|---|---|---|
-| 全tableに `created_at`/`updated_at`/`deleted_at`(soft delete) | times/plans は created/updated のみ、**deleted_at無し** | ❌ | `deleted_at` 追加＋削除をsoft化（hard deleteはaudit除き禁止） |
+| 全tableに `created_at`/`updated_at`/`deleted_at`(soft delete) | times/plans に `deleted_at` 追加済（#2・ADR後）。Delete はsoft化、SUMは `deleted_at IS NULL` 除外 | ✅ | **完了(#2)**。tasks 本体等は upstream 管轄 |
 | 帰属（誰のデータか） | plans/timesの`UserID`は作成者。代理入力で全部capdemoに | ❌ | **確定**: `user_id`=対象者・`created_by`=記録者（ADR-009/A）。FR-D5 |
 | 書き込みの非破壊性 | `POST /tasks/:id`が無関係列(assignees)を空上書き | ❌ | 部分更新の安全化。FR-D8（ADR候補） |
 | 負荷の単一真実 | today/week=見積り日割り、planner/gantt=plans の二系統 | ❌ | 「plansあればplans、無ければ見積り」を計算層で統一。FR-C7 |
@@ -153,7 +153,7 @@ CLAUDE.md の DB conventions を fork の自前テーブルに適用する。Vik
 | # | 穴 | 深刻度 | 対応FR | 種類 |
 |---|---|---|---|---|
 | 1 | `POST /tasks/:id` がassignees等を空上書き（書き込み破壊性） | 🔴 | FR-D8 | fork or client |
-| 2 | times/plans に soft delete 無し | 🟠 | FR-D7 | fork schema |
+| 2 | ~~times/plans に soft delete 無し~~ **完了** | ✅ | FR-D7 | fork schema |
 | 3 | 予定/実績の帰属が作成者依存（代理で崩れる） | 🟠 | FR-D5 | model設計 |
 | 4 | 負荷計算が二系統（見積り/plans） | 🟠 | FR-C7 | 計算層 |
 | 7 | assignees消去を捕まえるテストが無い（回帰網の穴） | 🟠 | NFR-2 | テスト |

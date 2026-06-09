@@ -29,6 +29,9 @@ type TaskTimeEntry struct {
 
 	Created time.Time `xorm:"created not null" json:"created" readOnly:"true"`
 	Updated time.Time `xorm:"updated not null" json:"updated" readOnly:"true"`
+	// 論理削除マーカー（#2 soft delete）。列名 deleted_at。xorm が Delete を UPDATE 化し、
+	// struct クエリ（Find/Get/Count）から自動除外する。
+	DeletedAt time.Time `xorm:"deleted_at deleted" json:"-"`
 
 	web.CRUDable `xorm:"-" json:"-"`
 	web.Rights   `xorm:"-" json:"-"`
@@ -109,6 +112,7 @@ func addTimeSpentToTasks(s *xorm.Session, taskIDs []int64, taskMap map[int64]*Ta
 	var rows []timeSpentRow
 	err := s.Table("task_time_entries").
 		Select("task_id, SUM(seconds) AS seconds").
+		Where("deleted_at IS NULL"). // #2: 論理削除分を集計から除外（生テーブルSELECTはxormのsoft-deleteフィルタが効かない）
 		In("task_id", taskIDs).
 		GroupBy("task_id").
 		Find(&rows)

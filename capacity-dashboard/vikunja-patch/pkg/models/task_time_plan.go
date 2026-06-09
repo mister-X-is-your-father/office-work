@@ -25,6 +25,8 @@ type TaskTimePlan struct {
 
 	Created time.Time `xorm:"created not null" json:"created" readOnly:"true"`
 	Updated time.Time `xorm:"updated not null" json:"updated" readOnly:"true"`
+	// 論理削除マーカー（#2 soft delete）。列名 deleted_at。
+	DeletedAt time.Time `xorm:"deleted_at deleted" json:"-"`
 
 	web.CRUDable `xorm:"-" json:"-"`
 	web.Rights   `xorm:"-" json:"-"`
@@ -95,6 +97,7 @@ func addTimePlannedToTasks(s *xorm.Session, taskIDs []int64, taskMap map[int64]*
 	var rows []plannedRow
 	err := s.Table("task_time_plans").
 		Select("task_id, SUM(seconds) AS seconds").
+		Where("deleted_at IS NULL"). // #2: 論理削除分を集計から除外
 		In("task_id", taskIDs).
 		GroupBy("task_id").
 		Find(&rows)
