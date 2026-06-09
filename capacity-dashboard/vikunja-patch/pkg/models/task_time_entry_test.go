@@ -96,6 +96,30 @@ func TestTaskTimeEntry_Delete(t *testing.T) {
 	})
 }
 
+func TestTask_TimeEstimate_Persisted(t *testing.T) {
+	u := &user.User{ID: 1}
+	db.LoadAndAssertFixtures(t)
+	s := db.NewSession()
+	defer s.Close()
+
+	// 既存タスクをフルで読み、見積りだけ変えて更新（title 等を消さない）
+	task, err := GetTaskByIDSimple(s, 1)
+	require.NoError(t, err)
+	task.TimeEstimate = 18000
+	require.NoError(t, (&task).Update(s, u))
+	require.NoError(t, s.Commit())
+
+	db.AssertExists(t, "tasks", map[string]interface{}{
+		"id":            1,
+		"time_estimate": 18000,
+	}, false)
+	// title が消えていないことも確認（colsToUpdate の副作用回帰防止）
+	reread, err := GetTaskByIDSimple(s, 1)
+	require.NoError(t, err)
+	assert.NotEmpty(t, reread.Title)
+	assert.Equal(t, int64(18000), reread.TimeEstimate)
+}
+
 func TestTaskTimeEntry_Rights(t *testing.T) {
 	owner := &user.User{ID: 1}
 	other := &user.User{ID: 2}

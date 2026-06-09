@@ -1,8 +1,12 @@
 # 実績時間トラッキング — Vikunja フォークで DB に実装
 
-> status: 設計確定。コメント解析方式は**却下**（脆弱・破綻する）。Vikunja を fork し、
-> **DB にテーブル/カラムを足すネイティブ実装**にする。[ADR-006](01-decisions.md)
-> 関連: [ADR-002 改訂](01-decisions.md)（time tracking に限り fork を許可）
+> status: **実装・隔離検証済み（2026-06-09）**。コメント解析方式は却下（脆弱）。Vikunja v0.24.6 を fork し
+> **DB にテーブル/カラムを足すネイティブ実装**。TDDユニット全green＋pkg/models回帰なし＋使い捨てDBで
+> e2e（見積り5h/実績4.5h・権限403/200）成功。本番イメージ生成＋差し替えは残（実 frontend の一度きりビルドが必要）。
+> [ADR-006](01-decisions.md) / 関連: [ADR-002 改訂](01-decisions.md)（time tracking に限り fork を許可）
+>
+> 検証で判明し修正した実バグ: `Task.Update` の `colsToUpdate` に `time_estimate` が無く見積りが永続化されなかった
+> → 追加＋ユニットテスト `TestTask_TimeEstimate_Persisted` を追加。e2e が捕捉した。
 
 ## なぜ fork / DB変更なのか
 

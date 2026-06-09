@@ -46,6 +46,16 @@ pkg/migration/20260609090000.go            ← vikunja-patch/pkg/migration/20260
 ```
 （`addTimeSpentToTasks(s, taskIDs, taskMap)` は `task_time_entry.go` に同梱。他の `addXToTasks` と同一シグネチャ。）
 
+(c) **`Task.Update` の `colsToUpdate` リストに `"time_estimate"` を追加**（**必須**。これが無いと
+見積りが永続化されない＝e2e で検出したバグ）:
+```go
+	colsToUpdate := []string{
+		...
+		"cover_image_attachment_id",
+		"time_estimate",   // 追加
+	}
+```
+
 ### 3-2. `pkg/routes/routes.go`
 
 comments のハンドラ登録ブロック（`/tasks/:task/comments` を登録している箇所）の直後に追加:
@@ -94,10 +104,22 @@ docker run --rm -v "$PWD":/app -v vikunja-gocache:/go -w /app golang:1.22 \
 
 ## 5. ビルド
 
+### 軽量検証ビルド（API のみ・xgo/node 不要）— 推奨の開発ループ
+frontend を最小スタブにして、ネイティブ `go build` で API バイナリだけ作る（CGO sqlite）:
 ```bash
-# 配布用イメージ（既存 Dockerfile, multi-stage。ホストに Go 不要）
+mkdir -p frontend/dist && echo '<!doctype html>' > frontend/dist/index.html
+docker run --rm -v "$PWD":/app -v vikunja-gocache:/go -w /app -e CGO_ENABLED=1 \
+  golang:1.22 go build -buildvcs=false -ldflags "-s -w" -o vikunja .
+```
+これを使い捨て sqlite で起動して migration＋API を検証できる（本パッチはこの方法で実証済み）。
+
+### 配布用イメージ（実 frontend 入り）
+`Dockerfile` の frontend ステージは corepack の署名キー不整合(node:20.16.0)でコケるため、
+`RUN corepack enable && pnpm install ...` を **`RUN npm install -g pnpm@9.10.0 && pnpm install ...`** に変更してから:
+```bash
 docker build -t leo-vikunja:0.24.6-timetracking .
 ```
+（frontend は一度ビルドすれば以後の Go 修正では再ビルド不要＝キャッシュが効く）
 
 ## 5. デプロイ（pm-trials の Vikunja を差し替え）
 
