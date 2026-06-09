@@ -26,8 +26,8 @@ func (err ErrTimeEntryDoesNotExist) Error() string {
 }
 
 // ErrorCodeTimeEntryDoesNotExist は Vikunja のエラーコード規約に沿った識別子。
-// 既存コードと衝突しない番号を割り当てること（error.go の最大値の次など）。
-const ErrorCodeTimeEntryDoesNotExist = 6001
+// v0.24.6 の既存コード最大は 14002 のため、未使用の 15001 を採番（衝突確認済み）。
+const ErrorCodeTimeEntryDoesNotExist = 15001
 
 // HTTPError は HTTP レスポンス表現。
 func (err ErrTimeEntryDoesNotExist) HTTPError() web.HTTPError {

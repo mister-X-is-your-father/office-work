@@ -96,25 +96,29 @@ func (te *TaskTimeEntry) Delete(s *xorm.Session, _ web.Auth) (err error) {
 	return
 }
 
-// sumTaskTimeSpent は複数タスクの実績合計(秒)を task_id => seconds で返す。
-// tasks.go の addMoreInfoToTasks から呼び、Task.TimeSpent に attach する。
-func sumTaskTimeSpent(s *xorm.Session, taskIDs []int64) (map[int64]int64, error) {
+// addTimeSpentToTasks は task_time_entries の SUM(seconds) を各 Task.TimeSpent に attach する。
+// tasks.go の addMoreInfoToTasks から、他の addXToTasks(s, taskIDs, taskMap) と同じ形で呼ぶ。
+func addTimeSpentToTasks(s *xorm.Session, taskIDs []int64, taskMap map[int64]*Task) error {
 	if len(taskIDs) == 0 {
-		return map[int64]int64{}, nil
+		return nil
 	}
-	type row struct {
+	type timeSpentRow struct {
 		TaskID  int64 `xorm:"task_id"`
 		Seconds int64 `xorm:"seconds"`
 	}
-	var rows []row
+	var rows []timeSpentRow
 	err := s.Table("task_time_entries").
 		Select("task_id, SUM(seconds) AS seconds").
 		In("task_id", taskIDs).
 		GroupBy("task_id").
 		Find(&rows)
-	out := make(map[int64]int64, len(rows))
-	for _, r := range rows {
-		out[r.TaskID] = r.Seconds
+	if err != nil {
+		return err
 	}
-	return out, err
+	for _, r := range rows {
+		if t, ok := taskMap[r.TaskID]; ok {
+			t.TimeSpent = r.Seconds
+		}
+	}
+	return nil
 }

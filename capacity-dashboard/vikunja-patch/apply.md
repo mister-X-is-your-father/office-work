@@ -35,26 +35,16 @@ pkg/migration/20260609090000.go            ← vikunja-patch/pkg/migration/20260
 	TimeSpent int64 `xorm:"-" json:"time_spent"`
 ```
 
-(b) `addMoreInfoToTasks(s *xorm.Session, taskMap map[int64]*Task, a web.Auth, view *ProjectView)` の
-末尾近く（`addAssigneesToTasks` 等を呼んでいる箇所）に SUM ローダ呼び出しを追加。
-**この関数は `taskMap` を受け取るので、taskIDs は keys から導出する**:
+(b) `addMoreInfoToTasks(s *xorm.Session, taskMap map[int64]*Task, a web.Auth, view *ProjectView)` 内、
+`addAttachmentsToTasks(s, taskIDs, taskMap)` 呼び出しの直後に、同じ形でローダを追加（`taskIDs` は同関数内の既存変数）:
 ```go
 	// 実績合計(time_spent)を attach
-	timeTaskIDs := make([]int64, 0, len(taskMap))
-	for id := range taskMap {
-		timeTaskIDs = append(timeTaskIDs, id)
-	}
-	spentMap, err := sumTaskTimeSpent(s, timeTaskIDs)
+	err = addTimeSpentToTasks(s, taskIDs, taskMap)
 	if err != nil {
-		return err
-	}
-	for id, secs := range spentMap {
-		if t, ok := taskMap[id]; ok {
-			t.TimeSpent = secs
-		}
+		return
 	}
 ```
-（`sumTaskTimeSpent` は `task_time_entry.go` に同梱済み。`taskMap` は同関数の引数。）
+（`addTimeSpentToTasks(s, taskIDs, taskMap)` は `task_time_entry.go` に同梱。他の `addXToTasks` と同一シグネチャ。）
 
 ### 3-2. `pkg/routes/routes.go`
 
@@ -72,14 +62,41 @@ comments のハンドラ登録ブロック（`/tasks/:task/comments` を登録�
 ```
 （パスパラメータ名 `:task` / `:timeentry` はモデルの `param:"task"` / `param:"timeentry"` と一致させること。）
 
-## 4. ビルド
+### 3-3. `pkg/models/models.go` — `GetTables()` に登録（**必須**）
+
+テストDB・新規インストールのスキーマ生成に必要。`&TaskComment{}` の直後に1行追加:
+```go
+		&TaskComment{},
+		&TaskTimeEntry{},
+		&Bucket{},
+```
+
+### 3-4. `pkg/models/unit_tests.go` — テスト fixture 一覧に登録（**必須**）
+
+`db.InitTestFixtures(...)` の一覧に `"task_time_entries"` を追加（`"task_comments"` の次など）。
+無いと LoadAndAssertFixtures がこのテーブルを truncate せず、テスト間でデータが漏れる。
+
+## 4. テスト（TDD）
+
+同梱のテスト＆フィクスチャを配置:
+```
+pkg/models/task_time_entry_test.go     ← vikunja-patch/pkg/models/task_time_entry_test.go
+pkg/db/fixtures/task_time_entries.yml  ← vikunja-patch/pkg/db/fixtures/task_time_entries.yml （空[]）
+```
+※ フィクスチャは空（`[]`）。エントリは各テスト内で生成する（全タスク比較の順序テストを汚さないため）。
+v0.24.6 にて全テスト green・`pkg/models` 回帰なしを確認済み。
+ホストに Go が無くてもコンテナで実行可:
+```bash
+docker run --rm -v "$PWD":/app -v vikunja-gocache:/go -w /app golang:1.22 \
+  go test ./pkg/models/ -run TaskTimeEntry -count=1 -v
+```
+（Create / ReadAll / time_spent集計(=4.5h) / 権限 / Delete を検証）
+
+## 5. ビルド
 
 ```bash
-# クイック検証（API のみ。frontend/dist が既にあればOK）
-go build ./...
-
-# 配布用イメージ（既存 Dockerfile, multi-stage）
-docker build -t leo-vikunja:timetracking .
+# 配布用イメージ（既存 Dockerfile, multi-stage。ホストに Go 不要）
+docker build -t leo-vikunja:0.24.6-timetracking .
 ```
 
 ## 5. デプロイ（pm-trials の Vikunja を差し替え）
