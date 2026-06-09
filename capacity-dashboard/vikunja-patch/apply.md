@@ -151,3 +151,27 @@ curl $B/tasks/1       -H "Authorization: Bearer $TOKEN"   # → time_estimate, t
 - これは fork（[ADR-002 改訂](../docs/01-decisions.md)）。本家アップグレード時はこの3新規ファイル＋2編集を rebase する。
 - upstream main には既に `time_entries`（ライセンスゲート付き v2 タイマー型）がある。将来そちらに寄せる選択肢もある（[05](../docs/05-time-tracking-fork.md) 参照）。本パッチは要件（タスク単位の実績合計）に直球の最小版。
 - 専用エラー型（`ErrTimeEntryDoesNotExist` 等）は実装時に Vikunja の errors 規約に合わせて追加するとよい。
+
+---
+
+## フェーズ2: 日別の予定 `task_time_plans`（実績 task_time_entries と対称）
+
+実績(`task_time_entries`)と同型に「日別の予定」を追加。「何日に何を何時間やる予定か」を持つ。
+新規ファイル（`task_time_entries` のコピー改名）:
+```
+pkg/models/task_time_plan.go         (model+CRUDable+addTimePlannedToTasks)
+pkg/models/task_time_plan_rights.go  (権限: 親委譲＋本人所有)
+pkg/models/error_time_plan.go        (ErrTimePlanDoesNotExist, code 15002)
+pkg/models/task_time_plan_test.go    (TDD: CRUD/日別/集計/権限)
+pkg/migration/20260609100000.go      (task_time_plans 作成)
+pkg/db/fixtures/task_time_plans.yml  (空[])
+```
+既存編集（`times` と同じ箇所に追加）:
+- `pkg/models/models.go` GetTables に `&TaskTimePlan{}`
+- `pkg/models/unit_tests.go` fixture一覧に `"task_time_plans"`
+- `pkg/models/tasks.go` Task に `TimePlanned int64 xorm:"-" json:"time_planned"`（computed）＋ `addMoreInfoToTasks` で `addTimePlannedToTasks` 呼び出し
+- `pkg/routes/routes.go` に `/tasks/:task/plans`（GET/PUT/POST/DELETE、param `:timeplan`）
+
+API: `PUT/GET /tasks/:task/plans {seconds, plan_date, note}`。Task に `time_planned`(合計) が乗る。
+→ 3軸: `time_estimate`(見積り) / `time_planned`(予定合計) / `time_spent`(実績合計)。日別は plan_date / logged_on で取得。
+v0.24.6 にて TDD全green・pkg/models回帰なし・隔離e2e・本番デプロイ・Playwright(予定の入力→保存→反映) 確認済み。

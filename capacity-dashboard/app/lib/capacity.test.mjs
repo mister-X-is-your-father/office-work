@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   toH, dateOnly, hasDate, isActiveOn, taskHoursOn,
-  loadByMember, weekLoadByMember, estimateVsActual, triage,
+  loadByMember, weekLoadByMember, estimateVsActual, triage, sumByMemberDay,
 } from "./capacity.js";
 
 const TODAY = "2026-06-10";
@@ -86,6 +86,18 @@ test("triage 分類", () => {
   assert.equal(r.find((x) => x.id === 1).cls, "must");
   assert.equal(r.find((x) => x.id === 2).cls, "should");
   assert.equal(r.find((x) => x.id === 3).cls, "movable");
+});
+
+test("sumByMemberDay: 予定/実績の人別日別集計", () => {
+  const r = sumByMemberDay([
+    { memberId: 1, day: "2026-06-10", h: 4 },
+    { memberId: 1, day: "2026-06-10", h: 1 },
+    { memberId: 1, day: "2026-06-11", h: 3 },
+    { memberId: 2, day: "2026-06-10", h: 2 },
+  ]);
+  assert.equal(r[1]["2026-06-10"], 5);
+  assert.equal(r[1]["2026-06-11"], 3);
+  assert.equal(r[2]["2026-06-10"], 2);
 });
 
 test("weekLoadByMember", () => {

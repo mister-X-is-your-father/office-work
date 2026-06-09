@@ -103,4 +103,14 @@ export function triage(tasks, isoDay) {
   });
 }
 
+// 予定/実績エントリ [{memberId, day:"YYYY-MM-DD", h}] を memberId -> day -> h に集計
+export function sumByMemberDay(entries) {
+  const m = {};
+  for (const e of entries) {
+    (m[e.memberId] ||= {});
+    m[e.memberId][e.day] = round1((m[e.memberId][e.day] || 0) + e.h);
+  }
+  return m;
+}
+
 function round1(x) { return Math.round(x * 10) / 10; }
