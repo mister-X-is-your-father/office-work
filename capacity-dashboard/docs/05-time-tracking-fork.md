@@ -1,8 +1,11 @@
 # 実績時間トラッキング — Vikunja フォークで DB に実装
 
-> status: **実装・隔離検証済み（2026-06-09）**。コメント解析方式は却下（脆弱）。Vikunja v0.24.6 を fork し
+> status: **本番デプロイ・検証済み（2026-06-09）**。コメント解析方式は却下（脆弱）。Vikunja v0.24.6 を fork し
 > **DB にテーブル/カラムを足すネイティブ実装**。TDDユニット全green＋pkg/models回帰なし＋使い捨てDBで
-> e2e（見積り5h/実績4.5h・権限403/200）成功。本番イメージ生成＋差し替えは残（実 frontend の一度きりビルドが必要）。
+> e2e（見積り5h/実績4.5h・権限403/200）成功 → **本番 leo:7005 を自前イメージ `leo-vikunja:0.24.6-timetracking`
+> に差し替え（volumeバックアップ済み・既存データ無傷・migration自動適用）** → 本番でも見積り/実績API稼働確認 →
+> **Playwright で Vikunja UI 周辺モンキーテスト（ログイン/各ビュー/タスク作成）console error 0・回帰なし**。
+> ビルドは軽量化（xgo不使用＝ネイティブgo build、frontendは一度きり）。配布は `vikunja-patch/Dockerfile.deploy`。
 > [ADR-006](01-decisions.md) / 関連: [ADR-002 改訂](01-decisions.md)（time tracking に限り fork を許可）
 >
 > 検証で判明し修正した実バグ: `Task.Update` の `colsToUpdate` に `time_estimate` が無く見積りが永続化されなかった
