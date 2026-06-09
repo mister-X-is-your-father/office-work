@@ -25,16 +25,16 @@ export async function render(root) {
     Promise.all(actualTasks.map(t => vik.getTimes(t.id).then(p => [t, p]).catch(() => [t, []]))),
   ]);
   const plannedEntries = [], actualEntries = [];
-  for (const [t, plans] of plansArr) {
-    const aids = (t.assignees || []).map(a => a.id); if (!aids.length) continue;
-    for (const p of plans || []) for (const aid of aids)
-      plannedEntries.push({ memberId: aid, day: dateOnly(p.plan_date), h: toH(p.seconds) / aids.length });
-  }
-  for (const [t, times] of timesArr) {
-    const aids = (t.assignees || []).map(a => a.id); if (!aids.length) continue;
-    for (const e of times || []) for (const aid of aids)
-      actualEntries.push({ memberId: aid, day: dateOnly(e.logged_on), h: toH(e.seconds) / aids.length });
-  }
+  // 多担当=全員にフル（按分しない・#4）。対象者(user_id)が信頼できればその1人にフル。
+  const attribute = (t, entry, dateKey, sink) => {
+    const aids = (t.assignees || []).map(a => a.id);
+    const day = dateOnly(entry[dateKey]); if (!day) return;
+    const h = toH(entry.seconds), uid = entry.user_id;
+    if (uid && (aids.length === 0 || aids.includes(uid))) sink.push({ memberId: uid, day, h });
+    else for (const aid of aids) sink.push({ memberId: aid, day, h });
+  };
+  for (const [t, plans] of plansArr) for (const p of plans || []) attribute(t, p, "plan_date", plannedEntries);
+  for (const [t, times] of timesArr) for (const e of times || []) attribute(t, e, "logged_on", actualEntries);
   const planned = sumByMemberDay(plannedEntries);
   const actual = sumByMemberDay(actualEntries);
 

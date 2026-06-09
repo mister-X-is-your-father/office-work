@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   toH, dateOnly, hasDate, isActiveOn, taskHoursOn,
   loadByMember, weekLoadByMember, estimateVsActual, triage, sumByMemberDay,
-  shiftISO, taskRanges, dependencyEdges, dayScale, toMemberDayEntries,
+  shiftISO, taskRanges, dependencyEdges, dayScale, toMemberDayEntries, taskPlannedHoursByMemberOn,
 } from "./capacity.js";
 
 const TODAY = "2026-06-10";
@@ -190,11 +190,11 @@ test("shiftISO", () => {
   assert.equal(shiftISO("2026-06-30", 1), "2026-07-01");
 });
 
-test("toMemberDayEntries: 按分とエッジ", () => {
+test("toMemberDayEntries: 多担当=全員フル（#4・按分しない）とエッジ", () => {
   const plan2 = toMemberDayEntries([[{ assignees: [{ id: 1 }, { id: 2 }] }, [plan("2026-06-10", 14400)]]], "plan");
   assert.equal(plan2.length, 2);
-  assert.deepEqual(plan2[0], { memberId: 1, day: "2026-06-10", h: 2 });
-  assert.deepEqual(plan2[1], { memberId: 2, day: "2026-06-10", h: 2 });
+  assert.deepEqual(plan2[0], { memberId: 1, day: "2026-06-10", h: 4 }); // 4h を各担当にフル
+  assert.deepEqual(plan2[1], { memberId: 2, day: "2026-06-10", h: 4 });
   // time
   const t = toMemberDayEntries([[{ assignees: [{ id: 3 }] }, [time("2026-06-11", 3600)]]], "time");
   assert.deepEqual(t, [{ memberId: 3, day: "2026-06-11", h: 1 }]);
@@ -210,11 +210,56 @@ test("toMemberDayEntries: user_id 優先（#3 帰属）", () => {
   // uid が assignee に含まれる → 対象者に全量（按分しない）
   const a = toMemberDayEntries([[{ assignees: [{ id: 1 }, { id: 2 }] }, [withUid("2026-06-10", 14400, 2)]]], "plan");
   assert.deepEqual(a, [{ memberId: 2, day: "2026-06-10", h: 4 }]);
-  // uid が非assignee（代理の旧データ）→ assignee へ按分（従来挙動）
+  // uid が非assignee（代理の旧データ）→ assignee へフル（#4: 按分しない）
   const b = toMemberDayEntries([[{ assignees: [{ id: 1 }, { id: 2 }] }, [withUid("2026-06-10", 14400, 99)]]], "plan");
   assert.equal(b.length, 2);
-  assert.deepEqual(b[0], { memberId: 1, day: "2026-06-10", h: 2 });
+  assert.deepEqual(b[0], { memberId: 1, day: "2026-06-10", h: 4 });
   // assignee 無 & uid あり → uid に全量
   const c = toMemberDayEntries([[{ assignees: [] }, [withUid("2026-06-10", 3600, 5)]]], "plan");
   assert.deepEqual(c, [{ memberId: 5, day: "2026-06-10", h: 1 }]);
+});
+
+// ── #4 負荷計算の単一真実（plans 優先・見積りフォールバック・全員フル） ──
+
+test("taskPlannedHoursByMemberOn: plans優先/見積りフォールバック/done/多担当フル", () => {
+  const task = { time_estimate: 28800, start_date: due("2026-06-09"), end_date: due("2026-06-11"), assignees: [{ id: 1 }, { id: 2 }] };
+  // plans 当日あり → plan 値（各担当にフル）。見積りは無視。
+  const r1 = taskPlannedHoursByMemberOn(task, "2026-06-10", [plan("2026-06-10", 7200), plan("2026-06-11", 3600)]);
+  assert.equal(r1.get(1), 2); assert.equal(r1.get(2), 2); // 7200=2h を各担当にフル
+  // plans あるが当日に無い → 0（見積りにフォールバックしない）
+  const r2 = taskPlannedHoursByMemberOn(task, "2026-06-10", [plan("2026-06-11", 3600)]);
+  assert.equal(r2.size, 0);
+  // plans 無し → 見積り日割り（8h/3日=2.67h）を各担当にフル
+  const r3 = taskPlannedHoursByMemberOn(task, "2026-06-10", null);
+  assert.ok(Math.abs(r3.get(1) - 8 / 3) < 1e-9); assert.ok(Math.abs(r3.get(2) - 8 / 3) < 1e-9);
+  // done → 負荷ゼロ
+  assert.equal(taskPlannedHoursByMemberOn({ ...task, done: true }, "2026-06-10", null).size, 0);
+  // uid∈assignee の plan → 対象者1人にフル
+  const r4 = taskPlannedHoursByMemberOn(task, "2026-06-10", [{ plan_date: due("2026-06-10"), seconds: 3600, user_id: 2 }]);
+  assert.equal(r4.get(2), 1); assert.equal(r4.has(1), false);
+});
+
+test("loadByMember: plansByTask で plans優先・見積り混在（後方互換）", () => {
+  const tasks = [
+    { id: 1, title: "plan task", assignees: [{ id: 1 }], time_estimate: 36000, due_date: due(TODAY) }, // 見積り10hだが plans 優先
+    { id: 2, title: "est task", assignees: [{ id: 2 }], time_estimate: 7200, due_date: due(TODAY) },    // plans 無し→見積り2h
+  ];
+  const plansByTask = new Map([[1, [plan(TODAY, 5400)]]]); // task1 当日 1.5h
+  const rows = loadByMember(tasks, members, TODAY, 8, plansByTask);
+  assert.equal(rows.find((r) => r.id === 1).assignedH, 1.5); // plans 値（見積り10hではない）
+  assert.equal(rows.find((r) => r.id === 2).assignedH, 2);   // 見積り
+  // 後方互換: plansByTask 無し → 純見積り
+  const rowsNoPlan = loadByMember(tasks, members, TODAY, 8);
+  assert.equal(rowsNoPlan.find((r) => r.id === 1).assignedH, 10);
+});
+
+test("weekLoadByMember: plansByTask で日別 plans/見積り混在", () => {
+  const tasks = [{ id: 1, title: "A", assignees: [{ id: 1 }], time_estimate: 14400, due_date: due("2026-06-11") }];
+  const week = ["2026-06-10", "2026-06-11", "2026-06-12"];
+  const plansByTask = new Map([[1, [plan("2026-06-10", 3600), plan("2026-06-12", 7200)]]]);
+  const m = weekLoadByMember(tasks, members, week, 8, plansByTask).find((r) => r.id === 1);
+  assert.equal(m.days.find((d) => d.day === "2026-06-10").h, 1); // plan 1h
+  assert.equal(m.days.find((d) => d.day === "2026-06-11").h, 0); // plans有・当日無→0（見積りにしない）
+  assert.equal(m.days.find((d) => d.day === "2026-06-12").h, 2); // plan 2h
+  assert.equal(m.weekH, 3);
 });

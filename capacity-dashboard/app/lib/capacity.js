@@ -41,17 +41,44 @@ export function taskHoursOn(task, isoDay) {
   return 0;
 }
 
-// 指定日の人別負荷
-export function loadByMember(tasks, members, isoDay, capH = 8) {
+// plansByTask（Map or obj: taskId -> plan entries）から該当タスクの plan 配列を引く。
+function planEntriesFor(plansByTask, taskId) {
+  if (!plansByTask) return null;
+  return (plansByTask.get ? plansByTask.get(taskId) : plansByTask[taskId]) || null;
+}
+
+// 【単一真実】タスクの isoDay 当日の予定負荷を memberId -> h で返す（#4）。
+// plans があればその日の plan 秒を、無ければ見積り日割りを。いずれも担当者全員に「フル」（按分しない）。
+// 特定の対象者(user_id, #3)が信頼できる場合はその1人にフル。done タスクは負荷ゼロ。
+export function taskPlannedHoursByMemberOn(task, isoDay, planEntries) {
+  const out = new Map();
+  if (task.done) return out;
+  const add = (mid, h) => { if (h > 0) out.set(mid, (out.get(mid) || 0) + h); };
+  const aids = assigneeIds(task);
+  if (planEntries && planEntries.length) {
+    for (const e of planEntries) {
+      if (dateOnly(e.plan_date) !== isoDay) continue;
+      const h = toH(e.seconds), uid = e.user_id;
+      if (uid && (aids.length === 0 || aids.includes(uid))) add(uid, h);
+      else for (const aid of aids) add(aid, h); // 多担当=全員にフル
+    }
+  } else {
+    const h = taskHoursOn(task, isoDay);
+    if (h > 0) for (const aid of aids) add(aid, h); // 多担当=全員にフル
+  }
+  return out;
+}
+
+// 指定日の人別負荷。plansByTask を渡すと plans 優先（無いタスクは見積り日割り）。
+export function loadByMember(tasks, members, isoDay, capH = 8, plansByTask = null) {
   const map = new Map(members.map((m) => [m.id, { id: m.id, name: m.name || m.username, capH, assignedH: 0, tasks: [] }]));
   for (const t of tasks) {
-    const h = taskHoursOn(t, isoDay);
-    if (h <= 0) continue;
-    for (const aid of assigneeIds(t)) {
-      const row = map.get(aid);
+    const byMember = taskPlannedHoursByMemberOn(t, isoDay, planEntriesFor(plansByTask, t.id));
+    for (const [mid, h] of byMember) {
+      const row = map.get(mid);
       if (!row) continue;
       row.assignedH += h;
-      row.tasks.push({ id: t.id, title: t.title, h });
+      row.tasks.push({ id: t.id, title: t.title, h: round1(h) });
     }
   }
   return [...map.values()].map((r) => ({
@@ -63,12 +90,15 @@ export function loadByMember(tasks, members, isoDay, capH = 8) {
   }));
 }
 
-// 週（isoDays配列）の人別×日 負荷
-export function weekLoadByMember(tasks, members, isoDays, capH = 8) {
+// 週（isoDays配列）の人別×日 負荷。plansByTask を渡すと plans 優先。
+export function weekLoadByMember(tasks, members, isoDays, capH = 8, plansByTask = null) {
   return members.map((m) => {
     const days = isoDays.map((day) => {
       let h = 0;
-      for (const t of tasks) if (assigneeIds(t).includes(m.id)) h += taskHoursOn(t, day);
+      for (const t of tasks) {
+        const byMember = taskPlannedHoursByMemberOn(t, day, planEntriesFor(plansByTask, t.id));
+        h += byMember.get(m.id) || 0;
+      }
       return { day, h: round1(h), over: h > capH + 1e-6 };
     });
     return { id: m.id, name: m.name || m.username, capH, days, weekH: round1(days.reduce((s, d) => s + d.h, 0)) };
@@ -213,7 +243,7 @@ export function toMemberDayEntries(taskPairs, kind) {
       if (uid && (aids.length === 0 || aids.includes(uid))) {
         out.push({ memberId: uid, day, h: hTotal }); // 対象者そのものに全量
       } else if (aids.length) {
-        for (const aid of aids) out.push({ memberId: aid, day, h: hTotal / aids.length }); // 按分
+        for (const aid of aids) out.push({ memberId: aid, day, h: hTotal }); // 多担当=全員にフル（按分しない・#4）
       }
     }
   }

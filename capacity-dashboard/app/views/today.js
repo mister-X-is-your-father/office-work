@@ -4,9 +4,9 @@ import { loadByMember } from "../lib/capacity.js";
 import { C, fmtH, esc, capacityBar, todayISO } from "../lib/ui.js";
 
 export async function render(root) {
-  const { tasks, members } = await load();
+  const { tasks, members, plansByTask } = await load();
   const day = todayISO();
-  const rows = loadByMember(tasks, members, day, 8).sort((a, b) => b.freeH - a.freeH);
+  const rows = loadByMember(tasks, members, day, 8, plansByTask).sort((a, b) => b.freeH - a.freeH);
   const totCap = rows.reduce((s, r) => s + r.capH, 0);
   const totAsg = rows.reduce((s, r) => s + r.assignedH, 0);
   const free = Math.max(0, totCap - totAsg);
@@ -32,4 +32,4 @@ function rowHtml(r) {
     <div style="width:150px;flex:none;text-align:right"><div style="font-weight:700;font-variant-numeric:tabular-nums">${fmtH(r.assignedH)} / ${r.capH}h</div><div style="font-size:11.5px">${status}</div></div>
   </div>`;
 }
-const empty = () => `<div style="padding:34px;text-align:center;color:${C.muted}">今日アクティブな担当タスク（期日が今日 or 期間に今日を含む＋見積りあり）がありません。<br>タスクに担当・期日・見積り時間を設定してください。</div>`;
+const empty = () => `<div style="padding:34px;text-align:center;color:${C.muted}">今日の予定負荷（日別予定があれば予定、無ければ見積りを期間日割り）を持つ担当タスクがありません。<br>タスクに担当・期日・見積り、または日別予定を設定してください。</div>`;

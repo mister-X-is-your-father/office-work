@@ -11,7 +11,13 @@ export async function load(force = false) {
   for (const t of tasks || []) for (const a of t.assignees || []) {
     if (!mmap.has(a.id)) mmap.set(a.id, { id: a.id, username: a.username, name: a.name || a.username });
   }
-  cache = { tasks: tasks || [], projects: projects || [], members: [...mmap.values()] };
+  // 日別予定(plans)を持つタスクだけ N+1 で取得し plansByTask に集約（#4 単一真実の負荷源）。
+  // today/home/week が共有してキャッシュ（重複取得を避ける）。
+  const plannedTasks = (tasks || []).filter((t) => (t.time_planned || 0) > 0);
+  const planPairs = await Promise.all(
+    plannedTasks.map((t) => vik.getPlans(t.id).then((p) => [t.id, p || []]).catch(() => [t.id, []]))
+  );
+  cache = { tasks: tasks || [], projects: projects || [], members: [...mmap.values()], plansByTask: new Map(planPairs) };
   return cache;
 }
 export function invalidate() { cache = null; }

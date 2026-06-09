@@ -80,7 +80,7 @@ Instagantt の Workload 相当を **OSS・自前ホスト（データ主権）**
 | FR-C4 | トリアージ分類（must/should/movable） | ✅ | `triage` |
 | FR-C5 | 予定/実績の人別日別集計 | ✅ | `sumByMemberDay`/`toMemberDayEntries` |
 | FR-C6 | ガントの範囲・依存・日付軸 | ✅ | `taskRanges`/`dependencyEdges`/`dayScale` |
-| FR-C7 | **負荷計算の単一真実** — 予定(plans)があればそれを、無ければ見積り日割りを使う、を全ビューで統一 | ⬜ | 今 today/week=見積り、planner/gantt=plans の二系統（[§6](#6-データモデル要件)） |
+| FR-C7 | **負荷計算の単一真実** — 予定(plans)があればそれを、無ければ見積り日割りを使う、を全ビューで統一 | ✅ | **完了(#4)**: `taskPlannedHoursByMemberOn` で plans 優先・全員フル。today/home/week が plansByTask を共有。多担当(会議含む)は全員にフル |
 
 ### 3.3 製品ビュー（SPA・オリジナルUI）
 | ID | 要件 | 状態 | 代表モック |
@@ -138,7 +138,7 @@ CLAUDE.md の DB conventions を fork の自前テーブルに適用する。Vik
 | 全tableに `created_at`/`updated_at`/`deleted_at`(soft delete) | times/plans に `deleted_at` 追加済（#2・ADR後）。Delete はsoft化、SUMは `deleted_at IS NULL` 除外 | ✅ | **完了(#2)**。tasks 本体等は upstream 管轄 |
 | 帰属（誰のデータか） | plans/timesの`UserID`は作成者。代理入力で全部capdemoに | ✅ | **完了(#3)**: `user_id`=対象者・`created_by`=記録者（ADR-009/A）。SPA 送信は次パス |
 | 書き込みの非破壊性 | `POST /tasks/:id`が無関係列(assignees)を空上書き | ❌ | 部分更新の安全化。FR-D8（ADR候補） |
-| 負荷の単一真実 | today/week=見積り日割り、planner/gantt=plans の二系統 | ❌ | 「plansあればplans、無ければ見積り」を計算層で統一。FR-C7 |
+| 負荷の単一真実 | today/week=見積り日割り、planner/gantt=plans の二系統 | ✅ | **完了(#4)**: plans優先・無ければ見積り・全員フルで統一。多担当(会議)=全員フル |
 | データの二重表現の排除 | `time_estimate`カラムと`est:Nh`ラベルが併存 | 🟡 | 残存ラベルを掃除（移行で一括変換済みのはずの取りこぼし） |
 | ID=UUID v7 | Vikunjaはbigint autoincr | — | **確定**: Vikunja踏襲（bigint autoincr）。JOIN/idiom一貫・rebase追従のためUUID v7は本fork適用外 |
 | snake_case / 命名 | 準拠 | ✅ | — |
@@ -152,17 +152,18 @@ CLAUDE.md の DB conventions を fork の自前テーブルに適用する。Vik
 
 | # | 穴 | 深刻度 | 対応FR | 種類 |
 |---|---|---|---|---|
-| 1 | `POST /tasks/:id` がassignees等を空上書き（書き込み破壊性） | 🔴 | FR-D8 | fork or client |
+| 1 | ~~`POST /tasks/:id` がassignees/reminders を空上書き~~ **完了(ADR-008 nilガード)** | ✅ | FR-D8 | fork |
 | 2 | ~~times/plans に soft delete 無し~~ **完了** | ✅ | FR-D7 | fork schema |
 | 3 | ~~予定/実績の帰属が作成者依存~~ **完了** | ✅ | FR-D5 | model設計 |
-| 4 | 負荷計算が二系統（見積り/plans） | 🟠 | FR-C7 | 計算層 |
-| 7 | assignees消去を捕まえるテストが無い（回帰網の穴） | 🟠 | NFR-2 | テスト |
+| 4 | ~~負荷計算が二系統（見積り/plans）~~ **完了** | ✅ | FR-C7 | 計算層 |
+| 7 | ~~assignees消去を捕まえるテストが無い~~ **完了(#1で回帰テスト追加)** | ✅ | NFR-2 | テスト |
+| 9 | **`POST /tasks/:id` がスカラ(start/end/due/priority等)を空上書き** — #1の関連版。Vikunja のスカラ全置換仕様で、title 等だけ送ると日付が消える。SPA `setEstimate` が地雷（検証中に task6 の日付が飛んだ） | 🟠 | 新FR | fork or client |
 | 5 | members=assigneesの和（projectusers未統合） | 🟡 | — | データソース |
 | 6 | `est:Nh`ラベルが`time_estimate`と二重残存 | 🟡 | — | データ整合 |
 | 8 | 日別内訳のバッチ取得が無い（N+1） | 🟡 | NFR-6 | API |
 
-**推奨着手順（DB規範まで徹底の前提）**：P0=#1 → P1=#2,#3,#4,#7 → P2=#5,#6,#8。
-各対応は [§5](#5-昇格モデル成熟度パイプライン) のステージを通す（特にfork変更=#1,#2,#3 は S1→S2 を必ず経由）。
+**推奨着手順（DB規範まで徹底の前提）**：~~P0=#1 → P1=#2,#3,#4,#7~~ 完了 → **次: #9（スカラ消去・#1の関連版）→ P2=#5,#6,#8**。
+各対応は [§5](#5-昇格モデル成熟度パイプライン) のステージを通す（特にfork変更 は S1→S2 を必ず経由）。
 
 ---
 

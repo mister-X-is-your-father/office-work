@@ -4,9 +4,9 @@ import { loadByMember, estimateVsActual, triage } from "../lib/capacity.js";
 import { C, fmtH, esc, capacityBar, todayISO } from "../lib/ui.js";
 
 export async function render(root) {
-  const { tasks, members } = await load();
+  const { tasks, members, plansByTask } = await load();
   const day = todayISO();
-  const rows = loadByMember(tasks, members, day, 8).sort((a, b) => b.freeH - a.freeH);
+  const rows = loadByMember(tasks, members, day, 8, plansByTask).sort((a, b) => b.freeH - a.freeH);
   const ev = estimateVsActual(tasks);
   const tri = triage(tasks, day);
 

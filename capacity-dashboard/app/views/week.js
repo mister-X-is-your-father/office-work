@@ -12,10 +12,10 @@ function weekDates(iso) {
 }
 
 export async function render(root) {
-  const { tasks, members } = await load();
+  const { tasks, members, plansByTask } = await load();
   const today = todayISO();
   const days = weekDates(today);
-  const rows = weekLoadByMember(tasks, members, days, 8);
+  const rows = weekLoadByMember(tasks, members, days, 8, plansByTask);
 
   const head = `<th style="text-align:left">メンバー</th>` +
     days.map((d, i) => `<th style="${d === today ? "color:" + C.fill : ""}">${DOW[i]}<div style="font-size:10px;color:${C.muted}">${d.slice(5)}</div></th>`).join("") +
@@ -33,6 +33,6 @@ export async function render(root) {
     <div class="card" style="padding:6px 12px 12px">
       <table class="wtable">${`<thead><tr>${head}</tr></thead><tbody>${body}</tbody>`}</table>
     </div>
-    <div style="font-size:11.5px;color:${C.muted};margin-top:10px">※ 見積りを期間で日割り表示（! = 容量超過）。フェーズ2で「日別の予定」を直接入力できるようにします。</div>
+    <div style="font-size:11.5px;color:${C.muted};margin-top:10px">※ 日別予定(plans)があれば予定、無ければ見積りを期間日割り（! = 容量超過）。多担当タスクは全員にフル時間。日別予定は「週プランナー」で入力。</div>
     <style>.wtable{width:100%;border-collapse:collapse;font-size:13px}.wtable th{font-size:11px;color:${C.muted};font-weight:600;padding:8px 6px;border-bottom:1px solid ${C.line}}.wtable td{padding:9px 6px;border-bottom:1px solid ${C.line};font-variant-numeric:tabular-nums}</style>`;
 }
