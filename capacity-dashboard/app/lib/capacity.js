@@ -113,4 +113,105 @@ export function sumByMemberDay(entries) {
   return m;
 }
 
+// ── ガント用（予実ガント） ──────────────────────────────────────────
+
+// ISO日に n 日足す（UTC, "YYYY-MM-DD" 入出力）
+export function shiftISO(iso, n) {
+  const d = new Date(iso + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+// タスクの予定/実績の範囲・合計を正規化（描画のフォールバック階層をここに閉じ込める）
+// plans: [{plan_date, seconds}], times: [{logged_on, seconds}]
+export function taskRanges(task, plans = [], times = []) {
+  const estH = toH(task.time_estimate), spentH = toH(task.time_spent);
+  // 予定: plans優先 → start/end → due点 → null
+  let planned;
+  const pdays = (plans || []).map((p) => dateOnly(p.plan_date)).filter(Boolean).sort();
+  if (pdays.length) {
+    planned = { start: pdays[0], end: pdays[pdays.length - 1],
+                h: round1((plans || []).reduce((s, p) => s + toH(p.seconds), 0)), source: "plans" };
+  } else if (hasDate(task.start_date) && hasDate(task.end_date)) {
+    planned = { start: dateOnly(task.start_date), end: dateOnly(task.end_date), h: estH, source: "dates" };
+  } else if (hasDate(task.due_date)) {
+    planned = { start: dateOnly(task.due_date), end: dateOnly(task.due_date), h: estH, source: "due" };
+  } else {
+    planned = { start: null, end: null, h: 0, source: null };
+  }
+  // 実績: times の logged_on 範囲
+  let actual;
+  const tdays = (times || []).map((t) => dateOnly(t.logged_on)).filter(Boolean).sort();
+  if (tdays.length) {
+    actual = { start: tdays[0], end: tdays[tdays.length - 1],
+               h: round1((times || []).reduce((s, t) => s + toH(t.seconds), 0)) };
+  } else {
+    actual = { start: null, end: null, h: 0 };
+  }
+  return { planned, actual, estH, spentH, percent: task.percent_done || 0, over: estH > 0 && spentH > estH };
+}
+
+// related_tasks を前向き辺リスト [{from, to, kind}] に正規化（時間的 前→後）
+// precedes/blocks はそのまま、follows/blocked は反転。他kindは無視。重複・自己参照・片端欠落を除去。
+export function dependencyEdges(tasks) {
+  const ids = new Set((tasks || []).map((t) => t.id));
+  const seen = new Set(), edges = [];
+  for (const t of tasks || []) {
+    const rt = t.related_tasks || {};
+    for (const [kind, arr] of Object.entries(rt)) {
+      for (const rel of arr || []) {
+        let from, to;
+        if (kind === "precedes" || kind === "blocks") { from = t.id; to = rel.id; }
+        else if (kind === "follows" || kind === "blocked") { from = rel.id; to = t.id; }
+        else continue;
+        if (from === to || !ids.has(from) || !ids.has(to)) continue;
+        const key = `${from}->${to}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        edges.push({ from, to, kind: kind === "blocks" || kind === "blocked" ? "blocks" : "precedes" });
+      }
+    }
+  }
+  return edges;
+}
+
+// 日付軸スケール器。startISO から days 日の窓。列index と範囲→span を返す。
+export function dayScale(startISO, days) {
+  const axis = [];
+  for (let i = 0; i < days; i++) {
+    const iso = shiftISO(startISO, i);
+    const dow = new Date(iso + "T00:00:00Z").getUTCDay();
+    axis.push({ iso, dow, weekend: dow === 0 || dow === 6, isToday: (t) => t === iso });
+  }
+  const indexOf = (iso) => daysUntil(startISO, iso);
+  const clamp = (i) => Math.max(0, Math.min(days - 1, i));
+  const range = (startIso, endIso) => {
+    const a = indexOf(startIso), b = indexOf(endIso);
+    const fromIdx = clamp(a), toIdx = clamp(b);
+    return { fromIdx, toIdx, span: Math.max(1, toIdx - fromIdx + 1),
+             clippedLeft: a < 0, clippedRight: b > days - 1 };
+  };
+  // 窓と交差するか（範囲が窓に少しでも重なるか）
+  const intersects = (startIso, endIso) => indexOf(endIso) >= 0 && indexOf(startIso) <= days - 1;
+  return { startISO, days, axis, indexOf, range, intersects };
+}
+
+// [[task, entries], ...] を [{memberId, day, h}] に。担当者数で按分（planner と同方式）。
+// kind: "plan" → entries は {plan_date, seconds} / "time" → {logged_on, seconds}
+export function toMemberDayEntries(taskPairs, kind) {
+  const dateKey = kind === "plan" ? "plan_date" : "logged_on";
+  const out = [];
+  for (const [task, entries] of taskPairs || []) {
+    const aids = (task.assignees || []).map((a) => a.id);
+    if (!aids.length) continue;
+    for (const e of entries || []) {
+      const day = dateOnly(e[dateKey]);
+      if (!day) continue;
+      const h = toH(e.seconds) / aids.length;
+      for (const aid of aids) out.push({ memberId: aid, day, h });
+    }
+  }
+  return out;
+}
+
 function round1(x) { return Math.round(x * 10) / 10; }

@@ -1,6 +1,6 @@
 # ハンドオフ — Capacity Board
 
-> status: **稼働中**（2026-06-09）。モック72案 → Vikunjaフォークで時間管理をDB実装（本番稼働） → 実データ統合SPA（中核＋日別予定まで動作、タスク系ビューは未）。
+> status: **稼働中**（2026-06-09）。モック72案 → Vikunjaフォークで時間管理をDB実装（本番稼働） → 実データ統合SPA（中核＋日別予定＋**予実ガント**まで動作、かんばん/一覧/設定は未）。
 > 次の人がコンテキスト無しで読む前提。困ったらまず本書 → `docs/00-05` → 各ADR。
 
 ## 0. これは何 / なぜ
@@ -30,10 +30,10 @@ office-work/capacity-dashboard/          # ← このプロジェクト（gitは
 │   ├── index.html  app.js               # シェル＋ハッシュルータ＋ログイン
 │   ├── lib/ vikunja.js capacity.js store.js ui.js   # APIクライアント / 計算(純関数) / キャッシュ / UI
 │   ├── lib/capacity.test.mjs            # capacity.js のTDD（node --test, 9件green）
-│   └── views/ home today week planner triage estactual .js
+│   └── views/ home today week planner triage estactual gantt .js
 ├── live/estimate-vs-actual.html         # 単発ライブページ（接続パターンの原型）
 ├── docs/ 00-design 01-decisions 02-screens 03-integration 04-feasibility 05-time-tracking-fork
-└── vikunja-patch/                       # ★Vikunjaフォークのパッチ一式（再現可能）＋ apply.md
+└── vikunja-patch/                       # ★Vikunjaフォークのパッチ一式（再現可能）＋ apply.md ＋ seed-gantt-demo.py
 
 /home/neo/vikunja-fork/vikunja/          # ← Vikunja v0.24.6 clone ＋ パッチ適用済（ビルド元）
 /home/neo/pm-trials/vikunja/docker-compose.yml  # ← 本番Vikunjaの compose（image差し替え済）
@@ -58,9 +58,11 @@ office-work/capacity-dashboard/          # ← このプロジェクト（gitは
 - Vikunjaフォーク: 実績時間トラッキング(`time_estimate`/`time_spent`/`/times`) ＋ 日別予定(`time_planned`/`/plans`)。**本番デプロイ・検証済**（TDD/隔離e2e/Playwright/ロールバック網）。
 - SPA中核ビュー（実データ）: **ホーム・空き探し(54)・週プラン(18)・週プランナー(予定×実績)・トリアージ(46)・見積りvs実績(23)**。
 - 週プランナーは**読み書き両方**（フォームで「日・タスク・時間」の予定を保存→Vikunja永続）。
+- **予実ガント(29/30)**: タスク行モード（予定/実績2本バー＋進捗fill＋見積超過の赤枠＋依存矢印＋今日線）／人別レーンモード（容量バー＋日別予定>8h赤帯＋折り畳み）をトグル切替。取得はフロントN+1（plans/times）。`views/gantt.js`＋`capacity.js` に純関数4つ(`taskRanges`/`dependencyEdges`/`dayScale`/`toMemberDayEntries`)追加・TDD全green(17件)。デモデータ(start/end/依存)は `vikunja-patch/seed-gantt-demo.py` で投入。
 
 **TODO / 未**
-- **SPA-C/D**: かんばん(59)・一覧(60)・ガント(29)・設定(17) ＝ ナビに「準備中」枠のみ。
+- **SPA-C/D**: かんばん(59)・一覧(60)・設定(17) ＝ ナビに「準備中」枠のみ。
+- ガント作り込み: スクロール窓の前後送り、締切ダイヤ、バーのドラッグ編集、容量ミニバーをヘッダタイムラインへ。
 - AI Q&A(53): Claude バックエンドが要る → 保留（要相談）。
 - 週プランナー作り込み: ドラッグで予定配置、容量超過の強警告、予定の編集/削除UI。
 - 既知の割り切り（下記）。
@@ -109,13 +111,16 @@ docker run --rm -v "$PWD":/app -v vikunja-gocache:/go -w /app -e VIKUNJA_SERVICE
 - **日別負荷(today/week)** = 見積りを [start,end] で日割り or due日に全量（`capacity.js taskHoursOn`）。本来は予定(plans)で上書きすべき → 週プランナーは plans を使うが、today/week は estimate ベース。統一余地あり。
 - **週プランナーの帰属** = plan.user_id ではなく **タスクの担当者**に按分（capdemoが代理入力したため）。自己計画なら user_id を使う設計に寄せられる。
 - Vikunja gotcha: username≥3文字 / 共有の `user_id` は文字列(ユーザー名) / `colsToUpdate` に列追加必須 / 新モデルは `GetTables()`＋テスト fixture 一覧＋空yml が必須 / エラーコードは未使用帯(15001=times,15002=plans)。
+- **⚠️ `POST /tasks/:id` は payload に含めない関連を空で上書きする**（特に **assignees が消える**）。日付や見積りだけ直すつもりで `{title,start_date,end_date}` を送ると担当が全消去 → ガントの人別が空に。対策: 更新後に `PUT /tasks/:id/assignees {user_id}`（専用・加算的）で必ず復元。担当の真実は `vikunja-patch/seed-gantt-demo.py` の `ASSIGNEES`。
+- ガント: 予定バー範囲は plans優先→start/end→due点の階層（`taskRanges`）。依存は Vikunja が `precedes` 作成時に逆 `follows` も自動付与するので `dependencyEdges` で前向き辺に正規化＋重複除去。21日窓と交差しないタスクは描画除外。人別帰属は担当者按分（plans.user_id=null のため）。
 - bash の `UID` は予約変数（配列名に使わない）。
 
 ## 8. 次の一手（おすすめ順）
 
-1. **SPA-C/D**: かんばん(bucket)→一覧(table)→ガント(start/end/done/deps)→設定(容量/対象PJ)。`docs/03-integration-plan.md` の8画面MVP。
-2. 週プランナー作り込み（ドラッグ配置・予定編集削除・容量警告）。
-3. members を projectusers と統合、today/week も予定(plans)優先に統一。
-4. AI Q&A(53) を別API化するか判断。
+1. **SPA-C**: かんばん(bucket)→一覧(table)→設定(容量/対象PJ)。`docs/03-integration-plan.md` の8画面MVP。ガント(29/30)は完了。
+2. ガント作り込み（窓の前後送り・締切ダイヤ・バーのドラッグ編集・容量ミニバーのヘッダ表示）。
+3. 週プランナー作り込み（ドラッグ配置・予定編集削除・容量警告）。
+4. members を projectusers と統合、today/week も予定(plans)優先に統一。
+5. AI Q&A(53) を別API化するか判断。
 
 参照: 計画ファイル `~/.claude/plans/polished-frolicking-panda.md`（フェーズ1/2の全体計画）。
