@@ -31,9 +31,7 @@ func (tp *TaskTimePlan) canModify(s *xorm.Session, a web.Auth) (bool, error) {
 		return false, err
 	}
 	tp.TaskID = saved.TaskID
-	if saved.UserID != a.GetID() {
-		return false, nil
-	}
+	// #3 ADR-009: 親タスクに書ける人なら誰でも編集/削除可（記録者/対象者を問わない）。
 	t := Task{ID: saved.TaskID}
 	return t.CanWrite(s, a)
 }

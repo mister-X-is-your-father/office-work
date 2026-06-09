@@ -222,3 +222,24 @@ pkg/migration/20260610024916.go   (両テーブルに deleted_at 追加。Rollba
 意味論: `Delete()` は `deleted_at=now` の UPDATE。Find/Get/Count（struct）は自動で `deleted_at IS NULL`。
 列は nullable（既存行は NULL=未削除）。migration は `tx.Sync`（無い列を足す・既存データ保持）。
 v0.24.6 にて TDD全green・pkg/models+integrations 回帰なし・隔離e2e（削除→time_spent減・GET除外・DB行残存＋deleted_at セット）・Playwright(UI console 0) 確認済み。配布 `leo-vikunja:0.24.6-timetracking-fix2`。
+
+---
+
+## フェーズ4: 帰属 user_id=対象者 / created_by=記録者（#3・[ADR-009](../docs/01-decisions.md)）
+
+「誰の時間か(対象者)」と「誰が記録したか(記録者)」を分離。
+新規ファイル:
+```
+pkg/migration/20260610032051.go   (両テーブルに created_by 追加＋backfill created_by=user_id)
+```
+既存編集（model コピーに反映済み）:
+- `task_time_entry.go` / `task_time_plan.go`:
+  - `UserID` を **対象者**として client 設定可に（`json:"user_id"`。旧 `json:"-"`）。
+  - `CreatedBy int64 xorm:"created_by index not null default 0" json:"-"` ＋ `CreatedByUser *user.User xorm:"-" json:"created_by_user"` を追加。
+  - `Create`: `CreatedBy=auth`、`UserID==0` なら `UserID=auth`（対象者未指定→記録者）。Read*/ReadAll で両 user を attach。Update Cols に `user_id` 追加（対象者の付け替え可、created_by は不変）。
+- `task_time_entry_permissions.go` / `task_time_plan_rights.go`:
+  - `canModify` の `UserID==auth` 所有者チェックを**削除** → **task write のみ**（記録者/対象者問わず編集/削除可。小人数チーム向け）。
+- テスト: Create 帰属（created_by=記録者・user_id=対象者/未指定なら記録者）・CreatedByUser attach・「task write を持てば他者の対象者エントリも削除可」。
+
+計算層（SPA, [capacity.js](../app/lib/capacity.js) `toMemberDayEntries`）: entry.user_id が信頼できる時（assignee 無 or uid∈assignee）は対象者へ全量、それ以外は assignee 按分（**非regression**: 旧データ uid=capdemo は按分に落ちる）。SPA 配線（フォームの対象者選択・logTime/logPlan の user_id 送信）は次パス。
+v0.24.6 にて TDD全green・回帰なし・隔離e2e（user_id で対象者指定→対象者/記録者分離・task-write で他者エントリ削除可）・Playwright(UI console 0) 確認済み。配布 `leo-vikunja:0.24.6-timetracking-fix3`。

@@ -35,6 +35,29 @@ func TestTaskTimeEntry_Create(t *testing.T) {
 			"seconds": 1800,
 		}, false)
 	})
+	t.Run("attribution: created_by=recorder, user_id=target (#3)", func(t *testing.T) {
+		db.LoadAndAssertFixtures(t)
+		s := db.NewSession()
+		defer s.Close()
+
+		// user1 が user2 のために代理記録（対象者=2）
+		te := &TaskTimeEntry{TaskID: 1, Seconds: 1800, UserID: 2}
+		require.NoError(t, te.Create(s, u)) // recorder = user1
+		require.NoError(t, s.Commit())
+		assert.Equal(t, int64(1), te.CreatedBy, "記録者=呼び出し元")
+		assert.Equal(t, int64(2), te.UserID, "対象者=指定値")
+		require.NotNil(t, te.User)
+		assert.Equal(t, int64(2), te.User.ID)
+		require.NotNil(t, te.CreatedByUser)
+		assert.Equal(t, int64(1), te.CreatedByUser.ID)
+		db.AssertExists(t, "task_time_entries", map[string]interface{}{"id": te.ID, "user_id": 2, "created_by": 1}, false)
+
+		// 対象者未指定 → 記録者
+		te2 := &TaskTimeEntry{TaskID: 1, Seconds: 600}
+		require.NoError(t, te2.Create(s, u))
+		assert.Equal(t, int64(1), te2.UserID, "未指定なら対象者=記録者")
+		assert.Equal(t, int64(1), te2.CreatedBy)
+	})
 }
 
 func TestTaskTimeEntry_ReadAll(t *testing.T) {
@@ -162,23 +185,25 @@ func TestTaskTimeEntry_Rights(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, can)
 	})
-	t.Run("non-owner cannot delete others entry", func(t *testing.T) {
-		db.LoadAndAssertFixtures(t)
-		s := db.NewSession()
-		defer s.Close()
-		te := &TaskTimeEntry{TaskID: 1, Seconds: 600}
-		require.NoError(t, te.Create(s, owner)) // owned by user 1
-		can, err := (&TaskTimeEntry{ID: te.ID}).CanDelete(s, other)
-		require.NoError(t, err)
-		assert.False(t, can)
-	})
-	t.Run("owner can delete own entry", func(t *testing.T) {
+	t.Run("user without task write cannot delete (#3: task-write gated)", func(t *testing.T) {
 		db.LoadAndAssertFixtures(t)
 		s := db.NewSession()
 		defer s.Close()
 		te := &TaskTimeEntry{TaskID: 1, Seconds: 600}
 		require.NoError(t, te.Create(s, owner))
-		can, err := (&TaskTimeEntry{ID: te.ID}).CanDelete(s, owner)
+		// user2 は project1 に書き込み権が無い → 削除不可
+		can, err := (&TaskTimeEntry{ID: te.ID}).CanDelete(s, other)
+		require.NoError(t, err)
+		assert.False(t, can)
+	})
+	t.Run("task-write user can delete regardless of recorder/target (#3)", func(t *testing.T) {
+		db.LoadAndAssertFixtures(t)
+		s := db.NewSession()
+		defer s.Close()
+		// 対象者=user2 の代理エントリ（記録者=user1）。旧コードは UserID(2)!=auth(1) で不可だった。
+		te := &TaskTimeEntry{TaskID: 1, Seconds: 600, UserID: 2}
+		require.NoError(t, te.Create(s, owner))
+		can, err := (&TaskTimeEntry{ID: te.ID}).CanDelete(s, owner) // user1 は task write を持つ
 		require.NoError(t, err)
 		assert.True(t, can)
 	})

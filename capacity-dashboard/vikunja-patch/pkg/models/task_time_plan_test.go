@@ -32,6 +32,19 @@ func TestTaskTimePlan_Create(t *testing.T) {
 			"id": tp.ID, "task_id": 1, "user_id": 1, "seconds": 14400,
 		}, false)
 	})
+	t.Run("attribution: created_by=recorder, user_id=target (#3)", func(t *testing.T) {
+		db.LoadAndAssertFixtures(t)
+		s := db.NewSession()
+		defer s.Close()
+		tp := &TaskTimePlan{TaskID: 1, Seconds: 7200, PlanDate: planDate("2026-06-10"), UserID: 2}
+		require.NoError(t, tp.Create(s, u)) // recorder=1, 対象者=2
+		require.NoError(t, s.Commit())
+		assert.Equal(t, int64(1), tp.CreatedBy)
+		assert.Equal(t, int64(2), tp.UserID)
+		require.NotNil(t, tp.CreatedByUser)
+		assert.Equal(t, int64(1), tp.CreatedByUser.ID)
+		db.AssertExists(t, "task_time_plans", map[string]interface{}{"id": tp.ID, "user_id": 2, "created_by": 1}, false)
+	})
 }
 
 func TestTaskTimePlan_ReadAll_perDay(t *testing.T) {

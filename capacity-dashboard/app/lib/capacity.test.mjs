@@ -198,9 +198,23 @@ test("toMemberDayEntries: 按分とエッジ", () => {
   // time
   const t = toMemberDayEntries([[{ assignees: [{ id: 3 }] }, [time("2026-06-11", 3600)]]], "time");
   assert.deepEqual(t, [{ memberId: 3, day: "2026-06-11", h: 1 }]);
-  // assignees空 → 0行
+  // assignees空 & user_idなし → 0行
   assert.deepEqual(toMemberDayEntries([[{ assignees: [] }, [plan("2026-06-10", 3600)]]], "plan"), []);
   // sumByMemberDay と合成
   const m = sumByMemberDay(toMemberDayEntries([[{ assignees: [{ id: 1 }] }, [plan("2026-06-10", 3600), plan("2026-06-10", 3600)]]], "plan"));
   assert.equal(m[1]["2026-06-10"], 2);
+});
+
+test("toMemberDayEntries: user_id 優先（#3 帰属）", () => {
+  const withUid = (d, sec, uid) => ({ plan_date: due(d), seconds: sec, user_id: uid });
+  // uid が assignee に含まれる → 対象者に全量（按分しない）
+  const a = toMemberDayEntries([[{ assignees: [{ id: 1 }, { id: 2 }] }, [withUid("2026-06-10", 14400, 2)]]], "plan");
+  assert.deepEqual(a, [{ memberId: 2, day: "2026-06-10", h: 4 }]);
+  // uid が非assignee（代理の旧データ）→ assignee へ按分（従来挙動）
+  const b = toMemberDayEntries([[{ assignees: [{ id: 1 }, { id: 2 }] }, [withUid("2026-06-10", 14400, 99)]]], "plan");
+  assert.equal(b.length, 2);
+  assert.deepEqual(b[0], { memberId: 1, day: "2026-06-10", h: 2 });
+  // assignee 無 & uid あり → uid に全量
+  const c = toMemberDayEntries([[{ assignees: [] }, [withUid("2026-06-10", 3600, 5)]]], "plan");
+  assert.deepEqual(c, [{ memberId: 5, day: "2026-06-10", h: 1 }]);
 });

@@ -158,7 +158,7 @@
 
 ## ADR-009: 予定/実績の帰属は `user_id`=対象者・`created_by`=記録者で持つ
 
-**状態**: 採用 (2026-06)。実装は基盤固め #3、決定のみ先行記録。
+**状態**: 採用・**実装済み (2026-06, #3)**。fork（`user_id`=対象者／`created_by`=記録者・migration 20260610032051）＋計算層（[capacity.js](../app/lib/capacity.js) `toMemberDayEntries`）完了。SPA 配線（フォームの対象者選択・logTime/logPlan の user_id 送信）は次の view パス。
 
 **背景**: `task_time_entries`/`task_time_plans` の「誰の時間か」をどう持つか。現状は作成者(=代理入力した capdemo)に紐づき、人別集計が崩れる。
 

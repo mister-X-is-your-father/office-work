@@ -66,7 +66,7 @@ Instagantt の Workload 相当を **OSS・自前ホスト（データ主権）**
 | FR-D2 | **実績**を日別worklogで持ち合計をcomputed（`task_time_entries`/`time_spent`） | ✅ | フルCRUD API |
 | FR-D3 | **予定**を日別で持ち合計をcomputed（`task_time_plans`/`time_planned`） | ✅ | フルCRUD API（GET/PUT/POST/DELETE） |
 | FR-D4 | 予定/実績を **(task, user, day)** 粒度で集計できる | 🟡 | 帰属の真実が未確立（[§6](#6-データモデル要件)・FR-D5） |
-| FR-D5 | 予定/実績に**「誰の」**を正しく持つ：`user_id`=対象者・`created_by`=記録者 | ⬜ | 確定方針（ADR-009/A）。現状は作成者依存で崩れる。fork列の意味付け変更＋`created_by`追加 |
+| FR-D5 | 予定/実績に**「誰の」**を正しく持つ：`user_id`=対象者・`created_by`=記録者 | ✅ | **完了(#3, ADR-009)**: fork に created_by 追加・user_id を対象者として API 設定可。SPA 配線は次パス |
 | FR-D6 | タスクの**スケジュール枠**（start/end）と**依存**（related_tasks）を持つ | ✅ | Vikunja標準。デモ投入済（`seed-gantt-demo.py`） |
 | FR-D7 | 上記すべてが **soft delete・created/updated/deleted_at** を備える | ✅ | **完了(#2)**: times/plans に `deleted_at`、Delete soft化、SUM除外。`leo-vikunja:0.24.6-timetracking-fix2` |
 | FR-D8 | 書き込みが**非破壊**（部分更新で無関係データを消さない） | ⬜ | `POST /tasks/:id` がassignees等を空上書き＝**最重要バグ**（ADR候補） |
@@ -136,7 +136,7 @@ CLAUDE.md の DB conventions を fork の自前テーブルに適用する。Vik
 | 規範 | 現状 | 充足 | 対応方針 |
 |---|---|---|---|
 | 全tableに `created_at`/`updated_at`/`deleted_at`(soft delete) | times/plans に `deleted_at` 追加済（#2・ADR後）。Delete はsoft化、SUMは `deleted_at IS NULL` 除外 | ✅ | **完了(#2)**。tasks 本体等は upstream 管轄 |
-| 帰属（誰のデータか） | plans/timesの`UserID`は作成者。代理入力で全部capdemoに | ❌ | **確定**: `user_id`=対象者・`created_by`=記録者（ADR-009/A）。FR-D5 |
+| 帰属（誰のデータか） | plans/timesの`UserID`は作成者。代理入力で全部capdemoに | ✅ | **完了(#3)**: `user_id`=対象者・`created_by`=記録者（ADR-009/A）。SPA 送信は次パス |
 | 書き込みの非破壊性 | `POST /tasks/:id`が無関係列(assignees)を空上書き | ❌ | 部分更新の安全化。FR-D8（ADR候補） |
 | 負荷の単一真実 | today/week=見積り日割り、planner/gantt=plans の二系統 | ❌ | 「plansあればplans、無ければ見積り」を計算層で統一。FR-C7 |
 | データの二重表現の排除 | `time_estimate`カラムと`est:Nh`ラベルが併存 | 🟡 | 残存ラベルを掃除（移行で一括変換済みのはずの取りこぼし） |
@@ -154,7 +154,7 @@ CLAUDE.md の DB conventions を fork の自前テーブルに適用する。Vik
 |---|---|---|---|---|
 | 1 | `POST /tasks/:id` がassignees等を空上書き（書き込み破壊性） | 🔴 | FR-D8 | fork or client |
 | 2 | ~~times/plans に soft delete 無し~~ **完了** | ✅ | FR-D7 | fork schema |
-| 3 | 予定/実績の帰属が作成者依存（代理で崩れる） | 🟠 | FR-D5 | model設計 |
+| 3 | ~~予定/実績の帰属が作成者依存~~ **完了** | ✅ | FR-D5 | model設計 |
 | 4 | 負荷計算が二系統（見積り/plans） | 🟠 | FR-C7 | 計算層 |
 | 7 | assignees消去を捕まえるテストが無い（回帰網の穴） | 🟠 | NFR-2 | テスト |
 | 5 | members=assigneesの和（projectusers未統合） | 🟡 | — | データソース |
@@ -172,7 +172,7 @@ CLAUDE.md の DB conventions を fork の自前テーブルに適用する。Vik
 |---|---|---|
 | **ADR-007 昇格モデル** | ADR-002「forkしない」を「forkを孵化器に→昇格」へ更新 | **方向確定（A=本書§5を正式化）**。残作業=ADR化のみ |
 | **ADR-008 書き込み安全化(#1)** | assignees消去をどう根治するか | **未確定**。(A)forkで`Task.Update`を部分更新化（根治） / (B)client側復元ラッパ（対症） → **まず`pkg/models/tasks.go`を深掘り調査→根拠つきで確定** |
-| **ADR-009 予定/実績の帰属(#3)** | 「誰の予定/実績か」をどう持つか | **確定（A）**: `user_id`=対象者・`created_by`=記録者を明示保持。代理入力でも帰属正確 |
+| **ADR-009 予定/実績の帰属(#3)** | 「誰の予定/実績か」をどう持つか | **実装済み（#3）**: `user_id`=対象者・`created_by`=記録者。fork＋計算層 完了、SPA配線は次パス |
 
 ---
 

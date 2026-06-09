@@ -15,8 +15,12 @@ import (
 type TaskTimePlan struct {
 	ID       int64      `xorm:"bigint autoincr not null unique pk" json:"id" param:"timeplan"`
 	TaskID   int64      `xorm:"bigint index not null" json:"-" param:"task"`
-	UserID   int64      `xorm:"bigint index not null" json:"-"`
-	User     *user.User `xorm:"-" json:"user" readOnly:"true"`
+	// 対象者（誰の予定か。client が user_id で指定可、未指定なら記録者）
+	UserID int64      `xorm:"bigint index not null" json:"user_id"`
+	User   *user.User `xorm:"-" json:"user" readOnly:"true"`
+	// 記録者（auth から自動設定・不変。#3 ADR-009）
+	CreatedBy     int64      `xorm:"bigint index not null default 0" json:"-"`
+	CreatedByUser *user.User `xorm:"-" json:"created_by_user" readOnly:"true"`
 	// 予定時間（秒）
 	Seconds int64 `xorm:"bigint not null" json:"seconds" valid:"required"`
 	// 予定日
@@ -36,14 +40,20 @@ func (*TaskTimePlan) TableName() string { return "task_time_plans" }
 
 func (tp *TaskTimePlan) Create(s *xorm.Session, a web.Auth) (err error) {
 	tp.ID = 0
-	tp.UserID = a.GetID()
+	tp.CreatedBy = a.GetID() // 記録者
+	if tp.UserID == 0 {      // 対象者（未指定なら記録者）
+		tp.UserID = a.GetID()
+	}
 	if tp.PlanDate.IsZero() {
 		tp.PlanDate = time.Now()
 	}
 	if _, err = s.Insert(tp); err != nil {
 		return
 	}
-	tp.User, err = user.GetUserByID(s, tp.UserID)
+	if tp.User, err = user.GetUserByID(s, tp.UserID); err != nil {
+		return
+	}
+	tp.CreatedByUser, err = user.GetUserByID(s, tp.CreatedBy)
 	return
 }
 
@@ -55,7 +65,10 @@ func (tp *TaskTimePlan) ReadOne(s *xorm.Session, _ web.Auth) (err error) {
 	if !exists {
 		return ErrTimePlanDoesNotExist{ID: tp.ID}
 	}
-	tp.User, err = user.GetUserByID(s, tp.UserID)
+	if tp.User, err = user.GetUserByID(s, tp.UserID); err != nil {
+		return
+	}
+	tp.CreatedByUser, err = user.GetUserByID(s, tp.CreatedBy)
 	return
 }
 
@@ -70,13 +83,14 @@ func (tp *TaskTimePlan) ReadAll(s *xorm.Session, _ web.Auth, _ string, page int,
 	}
 	for _, e := range plans {
 		e.User, _ = user.GetUserByID(s, e.UserID)
+		e.CreatedByUser, _ = user.GetUserByID(s, e.CreatedBy)
 	}
 	total, err = s.Where("task_id = ?", tp.TaskID).Count(&TaskTimePlan{})
 	return plans, len(plans), total, err
 }
 
 func (tp *TaskTimePlan) Update(s *xorm.Session, _ web.Auth) (err error) {
-	_, err = s.ID(tp.ID).Cols("seconds", "note", "plan_date").Update(tp)
+	_, err = s.ID(tp.ID).Cols("seconds", "note", "plan_date", "user_id").Update(tp)
 	return
 }
 

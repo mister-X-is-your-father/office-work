@@ -196,19 +196,25 @@ export function dayScale(startISO, days) {
   return { startISO, days, axis, indexOf, range, intersects };
 }
 
-// [[task, entries], ...] を [{memberId, day, h}] に。担当者数で按分（planner と同方式）。
-// kind: "plan" → entries は {plan_date, seconds} / "time" → {logged_on, seconds}
+// [[task, entries], ...] を [{memberId, day, h}] に。
+// 帰属（#3 ADR-009）: entry.user_id（対象者）が信頼できる時はそのまま全量を帰属、
+// それ以外（user_id 未設定 or 非assignee=代理の旧データ）は担当者へ按分（従来挙動）。
+// kind: "plan" → entries は {plan_date, seconds, user_id} / "time" → {logged_on, seconds, user_id}
 export function toMemberDayEntries(taskPairs, kind) {
   const dateKey = kind === "plan" ? "plan_date" : "logged_on";
   const out = [];
   for (const [task, entries] of taskPairs || []) {
     const aids = (task.assignees || []).map((a) => a.id);
-    if (!aids.length) continue;
     for (const e of entries || []) {
       const day = dateOnly(e[dateKey]);
       if (!day) continue;
-      const h = toH(e.seconds) / aids.length;
-      for (const aid of aids) out.push({ memberId: aid, day, h });
+      const hTotal = toH(e.seconds);
+      const uid = e.user_id;
+      if (uid && (aids.length === 0 || aids.includes(uid))) {
+        out.push({ memberId: uid, day, h: hTotal }); // 対象者そのものに全量
+      } else if (aids.length) {
+        for (const aid of aids) out.push({ memberId: aid, day, h: hTotal / aids.length }); // 按分
+      }
     }
   }
   return out;

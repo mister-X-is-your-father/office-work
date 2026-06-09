@@ -31,16 +31,14 @@ func (te *TaskTimeEntry) CanDelete(s *xorm.Session, a web.Auth) (bool, error) {
 }
 
 func (te *TaskTimeEntry) canModify(s *xorm.Session, a web.Auth) (bool, error) {
-	// 保存済みエントリを引いて所有者を確認
+	// 保存済みエントリから親タスクを引く（ID→TaskID 確定）
 	saved := &TaskTimeEntry{}
 	exists, err := s.ID(te.ID).Get(saved)
 	if err != nil || !exists {
 		return false, err
 	}
 	te.TaskID = saved.TaskID
-	if saved.UserID != a.GetID() {
-		return false, nil
-	}
+	// #3 ADR-009: 親タスクに書ける人なら誰でも編集/削除可（記録者/対象者を問わない）。
 	t := Task{ID: saved.TaskID}
 	return t.CanWrite(s, a)
 }

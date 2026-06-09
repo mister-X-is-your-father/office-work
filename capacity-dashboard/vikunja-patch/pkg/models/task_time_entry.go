@@ -17,9 +17,12 @@ type TaskTimeEntry struct {
 	ID int64 `xorm:"bigint autoincr not null unique pk" json:"id" param:"timeentry"`
 	// 対象タスク
 	TaskID int64 `xorm:"bigint index not null" json:"-" param:"task"`
-	// 記録者（auth から自動設定）
-	UserID int64      `xorm:"bigint index not null" json:"-"`
+	// 対象者（その時間を負う人。client が user_id で指定可、未指定なら記録者）
+	UserID int64      `xorm:"bigint index not null" json:"user_id"`
 	User   *user.User `xorm:"-" json:"user" readOnly:"true"`
+	// 記録者（auth から自動設定・不変。#3 ADR-009）
+	CreatedBy     int64      `xorm:"bigint index not null default 0" json:"-"`
+	CreatedByUser *user.User `xorm:"-" json:"created_by_user" readOnly:"true"`
 	// 実績の長さ（秒）
 	Seconds int64 `xorm:"bigint not null" json:"seconds" valid:"required"`
 	// 作業日（既定: now）
@@ -45,14 +48,20 @@ func (*TaskTimeEntry) TableName() string {
 // Create は実績エントリを1件記録する。記録者は認証ユーザー。
 func (te *TaskTimeEntry) Create(s *xorm.Session, a web.Auth) (err error) {
 	te.ID = 0
-	te.UserID = a.GetID()
+	te.CreatedBy = a.GetID() // 記録者
+	if te.UserID == 0 {      // 対象者（未指定なら記録者）
+		te.UserID = a.GetID()
+	}
 	if te.LoggedOn.IsZero() {
 		te.LoggedOn = time.Now()
 	}
 	if _, err = s.Insert(te); err != nil {
 		return
 	}
-	te.User, err = user.GetUserByID(s, te.UserID)
+	if te.User, err = user.GetUserByID(s, te.UserID); err != nil {
+		return
+	}
+	te.CreatedByUser, err = user.GetUserByID(s, te.CreatedBy)
 	return
 }
 
@@ -65,7 +74,10 @@ func (te *TaskTimeEntry) ReadOne(s *xorm.Session, _ web.Auth) (err error) {
 	if !exists {
 		return ErrTimeEntryDoesNotExist{ID: te.ID}
 	}
-	te.User, err = user.GetUserByID(s, te.UserID)
+	if te.User, err = user.GetUserByID(s, te.UserID); err != nil {
+		return
+	}
+	te.CreatedByUser, err = user.GetUserByID(s, te.CreatedBy)
 	return
 }
 
@@ -79,9 +91,10 @@ func (te *TaskTimeEntry) ReadAll(s *xorm.Session, _ web.Auth, _ string, page int
 	if err = q.Find(&entries); err != nil {
 		return nil, 0, 0, err
 	}
-	// 記録者をまとめて attach
+	// 対象者・記録者をまとめて attach
 	for _, e := range entries {
 		e.User, _ = user.GetUserByID(s, e.UserID)
+		e.CreatedByUser, _ = user.GetUserByID(s, e.CreatedBy)
 	}
 	total, err = s.Where("task_id = ?", te.TaskID).Count(&TaskTimeEntry{})
 	return entries, len(entries), total, err
@@ -89,7 +102,7 @@ func (te *TaskTimeEntry) ReadAll(s *xorm.Session, _ web.Auth, _ string, page int
 
 // Update は自分のエントリの seconds/note/logged_on を更新する。
 func (te *TaskTimeEntry) Update(s *xorm.Session, _ web.Auth) (err error) {
-	_, err = s.ID(te.ID).Cols("seconds", "note", "logged_on").Update(te)
+	_, err = s.ID(te.ID).Cols("seconds", "note", "logged_on", "user_id").Update(te)
 	return
 }
 
