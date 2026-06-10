@@ -1,4 +1,4 @@
-// TaskStation フォーク用パッチ: 日別の予定時間（plan）モデル
+// Vikunja フォーク用パッチ: 日別の予定時間（plan）モデル
 // 「user が plan_date に task に seconds 充てる予定」。実績(task_time_entries)と対称。
 // 配置先: <vikunja>/pkg/models/task_time_plan.go
 package models
@@ -25,7 +25,9 @@ type TaskTimePlan struct {
 	Seconds int64 `xorm:"bigint not null" json:"seconds" valid:"required"`
 	// 予定日
 	PlanDate time.Time `xorm:"DATETIME index not null" json:"plan_date"`
-	Note     string    `xorm:"text null" json:"note"`
+	// 開始時刻（0:00からの分。null=終日/未配置・非null=カレンダー上の時刻配置。ADR-013）
+	StartMinute *int64 `xorm:"'start_minute' null" json:"start_minute"`
+	Note        string `xorm:"text null" json:"note"`
 
 	Created time.Time `xorm:"created not null" json:"created" readOnly:"true"`
 	Updated time.Time `xorm:"updated not null" json:"updated" readOnly:"true"`

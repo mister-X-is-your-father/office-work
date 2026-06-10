@@ -1,6 +1,6 @@
 # ハンドオフ — Capacity Board
 
-> status: **稼働中**（2026-06-10）。モック72案 → TaskStationフォークで時間管理をDB実装（本番） → 実データSPA（中核＋予実ガント） → **基盤固め完了**（#1-#4,#7,#9）→ **定期/会議＋祝日＋休暇→月次空き完了**（ADR-011）→ **UI全面TaskStationブランド化**（フォーク由来表記の排除・新ロゴ/favicon・frontend再ビルド）。本番イメージ **`leo-taskstation:0.24.6-fix5`**。
+> status: **稼働中**（2026-06-10）。モック72案 → TaskStationフォークで時間管理をDB実装（本番） → 実データSPA（中核＋予実ガント） → **基盤固め完了**（#1-#4,#7,#9）→ **定期/会議＋祝日＋休暇→月次空き完了**（ADR-011）→ **UI全面TaskStationブランド化**（新ロゴ/favicon）→ **本日の稼働予定(円時計)＋リスケ＋レビュー依頼/キュー**（ADR-012 種別2軸）→ **切り口別ビュー群**（一覧/残容量/週日別/アウトライン/依存グラフ）→ **時刻カレンダー**（ADR-013 `start_minute`・ドラッグ配置）。本番イメージ **`leo-taskstation:0.24.6-fix7`**。
 > 次の人がコンテキスト無しで読む前提。まず本書 → 要件 [`docs/06-requirements.md`](docs/06-requirements.md) → ADR [`docs/01-decisions.md`](docs/01-decisions.md)（**ADR-006〜011 が現行設計**）→ `docs/00,05`。
 > **確定（2026-06-10）**: 容量は当面 **全員 8h/平日 固定で十分**（時刻帯の空き・半日休暇・人別可変キャパ＝時短 は保留。詳細は §8）。
 
@@ -12,7 +12,7 @@
 |---|---|
 | **実データSPA** | http://leo:7010/app/ （capdemo / CapDemoPass123） |
 | モックギャラリー(72案) | http://leo:7010/ ／ Pages: https://mister-x-is-your-father.github.io/office-work/capacity-dashboard/ |
-| **TaskStation（フォーク本番）** | http://leo:7005 （image **`leo-taskstation:0.24.6-fix5`**） |
+| **TaskStation（フォーク本番）** | http://leo:7005 （image **`leo-taskstation:0.24.6-fix7`**） |
 | GitHub | https://github.com/mister-x-is-your-father/office-work → `capacity-dashboard/` |
 
 配信は `capacity-dashboard/` で `python3 -m http.server 7010 --bind 0.0.0.0`（leo:7010）。落ちてたら再起動。
@@ -30,7 +30,7 @@ office-work/capacity-dashboard/
 ├── docs/ 00..06（06=要件・進捗の正本）
 └── backend-patch/                       # ★フォーク差分の再現一式＋apply.md＋seed-*.py
 /home/neo/vikunja-fork/vikunja/          # ← TaskStation v0.24.6 clone＋パッチ適用済（ビルド元）
-/home/neo/pm-trials/vikunja/docker-compose.yml  # ← 本番compose(image=leo-taskstation:...fix5)
+/home/neo/pm-trials/vikunja/docker-compose.yml  # ← 本番compose(image=leo-taskstation:...fix7)
 ```
 
 ## 3. アーキテクチャ（3層）＝ 昇格モデル S1孵化(fork)→S2検証(隔離)→S3製品(SPA)（[ADR-007](docs/01-decisions.md)）
@@ -65,7 +65,7 @@ office-work/capacity-dashboard/
 - AI Q&A(53)＝別API、保留。
 
 ## 5. 運用 runbook
-### フォークを直して再デプロイ（fix5 系の作り方）
+### フォークを直して再デプロイ（fix7 系の作り方）
 ホストに Go 無し。**xgo不使用**＝docker golang:1.22 でネイティブビルド。frontend は `frontend/dist`（go:embed）。
 **ブランド化はソース側**（`frontend/src` の大文字"Vikunja"→"TaskStation"・`src/assets/logo*.svg`/`public/favicon.*`・`src/urls.ts`）→ frontend再ビルドで dist に反映。
 ```bash
@@ -74,10 +74,10 @@ cd /home/neo/vikunja-fork/vikunja
 #   ※dist/が過去のdocker由来でroot所有なら先に: docker run --rm -v "$PWD/frontend":/w -w /w alpine rm -rf dist stats.html
 docker run --rm -v "$PWD":/app -v vikunja-gocache:/go -w /app -e CGO_ENABLED=1 \
   golang:1.22 sh -c 'go build -buildvcs=false -ldflags "-s -w" -o vikunja .'
-docker build -f Dockerfile.deploy -t leo-taskstation:0.24.6-fix6 .   # 次は fix6
+docker build -f Dockerfile.deploy -t leo-taskstation:0.24.6-fix8 .   # 次は fix8
 # 本番反映（必ず backup → image差し替え → recreate。migrationは起動時自動）
 docker run --rm -v vikunja_vikunja-db:/from -v vikunja_vikunja-db-backup-fixN:/to alpine sh -c 'cp -a /from/. /to/'
-# pm-trials/vikunja/docker-compose.yml の image: を fix6 に編集
+# pm-trials/vikunja/docker-compose.yml の image: を fix8 に編集
 cd /home/neo/pm-trials/vikunja && docker compose up -d --force-recreate
 ```
 ### テスト

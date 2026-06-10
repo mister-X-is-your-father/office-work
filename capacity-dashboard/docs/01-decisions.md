@@ -243,3 +243,25 @@
 **理由**: 種別と時間属性は直交（レビューでも当日追加でありうる）→ 軸を分けるのが素直。種別保存はラベル規約で十分（[ADR-010](#adr-010)と一貫・フォーク不変）。「本日=plan」を一本化すると move 操作（別日へ移す）の二分岐の根本原因が消える方向に揃う。
 
 **含意 / トレードオフ**: 今回は **計算層の正規化と明文化に留め**、(1) plan への完全一本化（due/範囲ベースの暫定表示の廃止）と (2) 定期 occurrence の materialize（[ADR-011](#adr-011) で将来保留）は**据え置き**。move は当面 plan系/期日系の二分岐を温存。これらは「定期の実績/完了を追う」「本日表示の挙動を統一する」要件が出たら次ADRで着手。検証: [today_items.test.mjs](../app/lib/today_items.test.mjs) に「レビュー×当日追加＝`kind:review, flags.adhoc:true`」を追加（35件 green）、leo:7010 Playwright で円時計の併存表示を確認。
+
+---
+
+## ADR-013: 時刻配置は `task_time_plans.start_minute`（0:00からの分・null可）で持つ／[ADR-011]の「時刻帯保留」を plan 限定で解除
+
+**状態**: 採用・実装済み (2026-06)。本番イメージ `leo-taskstation:0.24.6-fix7`。
+
+**背景**: 「Googleカレンダー的に本日のタスクを時刻配置・ドラッグ操作したい」という要望。だが従来モデルは**日次粒度**で、`task_time_plans` は「その日に何h」しか持たず**壁時計の時刻が無い**（[ADR-011](#adr-011) で時刻帯は明示保留）。一方、他の切り口（一覧/カード/依存グラフ/週積み等）は既存データで実現でき、時刻が要るのは**カレンダーのみ**だった。
+
+**検討した選択肢**:
+- **A. `task_time_plans` に `start_minute integer NULL`（0:00からの分）を追加**（採用）。null=終日/未配置（従来どおり・後方互換）、非null=カレンダー上の時刻。所要は既存 `seconds`。
+- B. `start_time TIME` 列（TZ/比較が面倒）。
+- C. 専用 `calendar_blocks` 表（4つ目の表・過剰。plan と二重管理になる）。
+- D. 時刻を持たず順序のみの「段取りリスト」（カレンダーに見えるが Google カレンダー的操作にならない・ユーザー却下）。
+
+**決定**: **A**。fork（自前テーブル `task_time_plans`）に `start_minute` を1カラム追加（[backend-patch](../backend-patch/) の migration 雛形に倣い追加のみ）。書込は `PUT /tasks/:task/plans`（`start_minute` 任意）。**移動は delete+create**（POST更新を増やさない）。容量・営業時間（8:00–20:00）は当面固定。
+
+**理由**: 「使えるものは使う」＝plan を時刻配置の器に流用すれば**新テーブル不要**で、終日/時刻配置を1表で選択制にできる（[ADR-009/010]の plan 設計と一貫）。分整数は TZ 非依存で比較・描画が単純。自前テーブルへの**追加のみ**なので回帰は自前テスト範囲（上流 `TestTaskCollection_ReadAll` は無関係）— 実際に pkg/models・integrations とも green、当日割り当て露出（Task#5）で踏んだ上流テスト破壊を回避できた。
+
+**結果**: [views/calendar.js](../app/views/calendar.js)（本日の資源タイムライン・メンバー列）。`start_minute` 付き plan をブロック配置、未配置タスクをトレイからドラッグ→列(担当)×縦位置(時刻)で `start_minute` 確定（delete+create）。S1(go test models+integrations)→本番fix7(backup-fix7→recreate)→API往復→Playwrightでドラッグ配置の永続を確認。
+
+**トレードオフ**: occurrence(会議/定例)は仮想なので時刻配置の対象外（[ADR-011] 継承・materialize したら対象化）。リサイズ(所要変更)・営業時間/容量の可変化・複数日カレンダーは将来。
