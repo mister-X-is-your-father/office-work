@@ -35,18 +35,18 @@ function showAuth(mode = "login", msg = "") {
   app.innerHTML = `
     <div class="login">
       <h2>TaskStation</h2>
-      <p>${isReg ? "新しいアカウントを作成します。" : "実データ版。ログインしてください。"}</p>
-      <label>ユーザー名</label><input id="u" autocomplete="username">
-      ${isReg ? `<label>メールアドレス</label><input id="em" type="email" autocomplete="email">` : ""}
-      <label>パスワード</label><input id="p" type="password" autocomplete="${isReg ? "new-password" : "current-password"}">
-      <button id="go">${isReg ? "アカウント作成" : "接続"}</button>
+      <p>${isReg ? "アカウントを作成" : "ログイン"}</p>
+      <label>ユーザー名</label><input id="u" autocomplete="username" placeholder="ユーザー名">
+      ${isReg ? `<label>メールアドレス</label><input id="em" type="email" autocomplete="email" placeholder="you@example.com">` : ""}
+      <label>パスワード</label><input id="p" type="password" autocomplete="${isReg ? "new-password" : "current-password"}" placeholder="パスワード">
+      <button id="go">${isReg ? "アカウントを作成" : "ログイン"}</button>
       <div class="err" id="err">${msg}</div>
       <div style="margin-top:14px;font-size:13px;color:var(--muted)">${sw}</div>
     </div>`;
   const go = async () => {
     const b = document.getElementById("go"), err = document.getElementById("err");
     const u = document.getElementById("u").value.trim(), p = document.getElementById("p").value;
-    b.disabled = true; err.textContent = isReg ? "作成中…" : "接続中…";
+    b.disabled = true; err.textContent = isReg ? "作成中…" : "ログイン中…";
     try {
       if (isReg) await vik.register(u, document.getElementById("em").value.trim(), p);
       await vik.login(u, p);
