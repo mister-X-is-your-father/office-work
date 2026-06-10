@@ -1,7 +1,7 @@
 # ハンドオフ — Capacity Board
 
 > status: **稼働中**（2026-06-10）。モック72案 → TaskStationフォークで時間管理をDB実装（本番） → 実データSPA（中核＋予実ガント） → **基盤固め完了**（#1-#4,#7,#9）→ **定期/会議＋祝日＋休暇→月次空き完了**（ADR-011）→ **UI全面TaskStationブランド化**（新ロゴ/favicon）→ **本日の稼働予定(円時計)＋リスケ＋レビュー依頼/キュー**（ADR-012 種別2軸）→ **切り口別ビュー群**（一覧/残容量/週日別/アウトライン/依存グラフ）→ **時刻カレンダー**（ADR-013 `start_minute`・ドラッグ配置）。本番イメージ **`leo-taskstation:0.24.6-fix7`**。
-> 次の人がコンテキスト無しで読む前提。まず本書 → 要件 [`docs/06-requirements.md`](docs/06-requirements.md) → ADR [`docs/01-decisions.md`](docs/01-decisions.md)（**ADR-006〜011 が現行設計**）→ `docs/00,05`。
+> 次の人がコンテキスト無しで読む前提。まず本書 → 要件 [`docs/06-requirements.md`](docs/06-requirements.md) → ADR [`docs/01-decisions.md`](docs/01-decisions.md)（**ADR-006〜013 が現行設計**。012=種別kind×時間属性flagsの2軸／013=plan.start_minuteで時刻配置）→ `docs/00,05`。
 > **確定（2026-06-10）**: 容量は当面 **全員 8h/平日 固定で十分**（時刻帯の空き・半日休暇・人別可変キャパ＝時短 は保留。詳細は §8）。
 
 ## 0. これは何 / なぜ
@@ -23,10 +23,12 @@ office-work/capacity-dashboard/
 ├── index.html / mocks/                  # モック72案
 ├── app/                                 # 実データSPA（Vanilla ESM・ビルド不要）
 │   ├── index.html  app.js               # シェル＋ハッシュルータ＋ログイン（ROUTES）
-│   ├── lib/ vikunja.js capacity.js recurrence.js store.js ui.js
+│   ├── lib/ api.js(旧vikunja.js) capacity.js recurrence.js store.js ui.js
+│   │        kinds.js(種別/色/模様の単一定義・ADR-012) today_items.js(本日WorkItem整形)
 │   ├── lib/vendor/rrule.mjs             # rrule.js を自己完結ESMにベンダリング（#ADR-011）
-│   ├── lib/capacity.test.mjs (21) / recurrence.test.mjs (8)   # node --test
-│   └── views/ home today week planner freefinder triage estactual gantt .js
+│   ├── lib/*.test.mjs                    # node --test 計37件(capacity/recurrence/today_items)
+│   └── views/ home today(円時計/積み上げ) triage review availability calendar week planner
+│              freefinder weekstack estactual gantt list(table) outline depgraph .js
 ├── docs/ 00..06（06=要件・進捗の正本）
 └── backend-patch/                       # ★フォーク差分の再現一式＋apply.md＋seed-*.py
 /home/neo/vikunja-fork/vikunja/          # ← TaskStation v0.24.6 clone＋パッチ適用済（ビルド元）
@@ -39,15 +41,18 @@ office-work/capacity-dashboard/
 |---|---|---|
 | 見積り | `tasks.time_estimate`(秒) | `POST /tasks/:id`（**updateTask 経由**, §7） |
 | 実績 | `task_time_entries`(logged_on,seconds,user_id=対象者,created_by) ＋ computed `time_spent` | `PUT/GET/POST/DELETE /tasks/:task/times` |
-| 予定 | `task_time_plans`(plan_date,seconds,user_id,created_by) ＋ computed `time_planned` | `…/plans` |
-| スケジュール/依存 | tasks.start_date/end_date/due_date / related_tasks | TaskStation標準 |
+| 予定 | `task_time_plans`(plan_date,seconds,user_id,created_by, **start_minute**=時刻配置/null可 ADR-013) ＋ computed `time_planned` | `…/plans` |
+| スケジュール/依存/サブ | tasks.start_date/end_date/due_date / related_tasks(precedes/follows/subtask) | TaskStation標準 |
+| 種別ラベル | `labels`（「レビュー」=レビュー種別。kind判定に使用 ADR-012） | `/tasks/:id/labels`, `/tasks/:id/relations` |
 | **定期/会議** | `recurrences`(rrule[RFC5545文字列・dumb storage], dtstart, duration_seconds, kind['task'\|'meeting'], assignee_ids[JSON], project_id) | `PUT/GET/POST/DELETE /recurrences` |
 | **祝日** | `holidays`(date, name) | `/holidays` |
 | **個人休暇** | `member_unavailability`(user_id, start_date, end_date, reason) | `/unavailability` |
 
-**2. 計算（純関数・TDD）.** `app/lib/capacity.js`(空き/負荷/予実/ガント/トリアージ・21テスト) ＋ `app/lib/recurrence.js`(RRULE展開・空き・8テスト)。
+**2. 計算（純関数・TDD・計37テスト）.** `capacity.js`(空き/負荷/予実/ガント/トリアージ/`buildTaskTree`/`depLayers`) ＋ `recurrence.js`(RRULE展開・空き) ＋ `today_items.js`(本日WorkItem) ＋ `kinds.js`(種別定義)。
 - 負荷の**単一真実**（[ADR-010](docs/01-decisions.md)/#4）: タスクは **plansあれば plans、無ければ見積り日割り**。**多担当=全員にフル**（按分しない。会議も同様）。`user_id`(対象者)が信頼できれば その1人にフル。
-- 月次空き（[ADR-011](docs/01-decisions.md)）: `expandRecurrences`(rrule.js でウィンドウ展開・仮想occurrence)＋`occurrenceLoadEntries`(全員フル)＋`capacityOn`(週末/祝日/休暇=0)＋`freeByMemberDay`(capacity−load, 衝突=over)。
+- 月次空き（[ADR-011](docs/01-decisions.md)）: `expandRecurrences`(rrule.js)＋`occurrenceLoadEntries`(全員フル)＋`capacityOn`(週末/祝日/休暇=0)＋`freeByMemberDay`。
+- 本日WorkItem（[ADR-012](docs/01-decisions.md)）: `todayItemsByMember` が `{kind, prio, flags:{adhoc,advanced}}` を返す。**kind=種別**(会議/定例/レビュー/タスク=`recurrences.kind`＋ラベル)、**flags=時間属性**(当日追加=created当日/前倒し=plan当日かつ期日先)。表示トークンは `kinds.js`。
+- 時刻配置（[ADR-013](docs/01-decisions.md)）: 「本日にやる＝`task_time_plan`」、`start_minute`(0:00からの分・null=終日)でカレンダー配置。移動=delete+create。
 
 **3. UI（`app/views/`）= 描画だけ.** 見た目はモック資産流用。ルータは `app.js` の ROUTES。
 
@@ -55,14 +60,17 @@ office-work/capacity-dashboard/
 **Done（本番稼働）**
 - モック72案（Pages）。
 - フォーク: 実績/予定/見積り（3軸）＋ **定期(RRULE)/祝日/休暇**。S1→S2→本番フルゲート通過。
-- SPAビュー: ホーム・空き探し(54)・トリアージ(46)・週プラン(18)・週プランナー(予定×実績・読み書き)・**月次空き(freefinder)**・見積りvs実績(23)・**予実ガント(29/30)**。
+- SPAビュー(本番稼働・全15ルート描画OK・コンソールエラー0):
+  - **本日**: 稼働予定(円時計57/積み上げ54・色=優先度/模様=種別/外周=超過、別日へ移す=空き日提案リスケ/本日から外す)・トリアージ(46)・**レビュー(キュー66＋⋯からレビュー依頼ワンポチ=タスク生成)**・**残容量(04)**・**時刻カレンダー(49・start_minuteドラッグ配置)**。
+  - **計画**: 週プラン(18)・週プランナー(予定×実績・読み書き)・月次空き(freefinder)・**週日別負荷(33・担当別/合算)**。
+  - **実績/仕事**: 見積りvs実績(23)・予実ガント(29/30)・**一覧(60・ソート/絞り込み)**・**アウトライン(68・サブタスク階層)**・**依存グラフ(65・クリティカルパス)**。
 - 基盤固め: #1 書き込み破壊性根治(ADR-008) / #2 soft delete / #3 帰属(ADR-009) / #4 負荷の単一真実(ADR-010) / #7 回帰網 / #9 スカラ更新安全化(client updateTask)。
 
-**残り**（§8 の到達点マップ参照。多くは“UIだけ”）
+**残り**
 - **入力UI**: 定期/祝日/休暇を**ブラウザから登録・編集**（今は seed/API のみ）。#3 対象者選択UI（planner フォーム）。
-- 残ビュー: かんばん(59・TaskStation bucket流用可)/一覧(60)/**設定(17)**。設定が入ると 8h/対象PJ のハードコード解消。
-- ガント作り込み（窓送り・締切ダイヤ・**ドラッグ編集=updateTask**）。
-- AI Q&A(53)＝別API、保留。
+- 残ビュー: かんばん(59・bucket流用可)/**設定(17)**。設定が入ると 8h/対象PJ のハードコード解消。
+- カレンダー作り込み: ブロックの**リサイズ(所要変更)**・営業時間/容量の可変化・複数日。
+- 据え置き(ADRで明記): 「本日=plan」完全一本化(due/範囲の暫定表示廃止・ADR-012)/定期occurrenceのmaterialize(ADR-011)/人別可変キャパ(時短)/AI Q&A(53)。
 
 ## 5. 運用 runbook
 ### フォークを直して再デプロイ（fix7 系の作り方）
