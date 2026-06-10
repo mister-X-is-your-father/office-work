@@ -15,10 +15,11 @@ const ROUTES = {
   estactual:{ label: "見積りvs実績",  grp: "実績",   mod: "./views/estactual.js" },
   kanban:   { label: "かんばん",      grp: "仕事",   soon: true },
   list:     { label: "一覧",          grp: "仕事",   mod: "./views/table.js" },
+  outline:  { label: "アウトライン",  grp: "仕事",   mod: "./views/outline.js" },
   gantt:    { label: "予実ガント",    grp: "仕事",   mod: "./views/gantt.js" },
   settings: { label: "設定",          grp: "その他", soon: true },
 };
-const ORDER = ["home", "today", "triage", "review", "availability", "week", "planner", "freefinder", "weekstack", "estactual", "kanban", "list", "gantt", "settings"];
+const ORDER = ["home", "today", "triage", "review", "availability", "week", "planner", "freefinder", "weekstack", "estactual", "kanban", "list", "outline", "gantt", "settings"];
 
 const app = document.getElementById("app");
 

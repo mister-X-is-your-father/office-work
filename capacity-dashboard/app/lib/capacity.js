@@ -205,6 +205,27 @@ export function dependencyEdges(tasks) {
   return edges;
 }
 
+// related_tasks.subtask から親子フォレストを構築。返り値: [{task, children:[...]}]。
+// ルート=どの subtask にもならないタスク。循環は guard で打ち切り。
+export function buildTaskTree(tasks) {
+  const list = tasks || [];
+  const byId = new Map(list.map((t) => [t.id, t]));
+  const childIds = new Set();
+  const childrenOf = new Map();
+  for (const t of list) {
+    const ids = (((t.related_tasks || {}).subtask) || []).map((s) => s.id).filter((id) => byId.has(id) && id !== t.id);
+    childrenOf.set(t.id, ids);
+    ids.forEach((id) => childIds.add(id));
+  }
+  const seen = new Set();
+  const node = (t) => {
+    if (!t || seen.has(t.id)) return { task: t, children: [] };
+    seen.add(t.id);
+    return { task: t, children: (childrenOf.get(t.id) || []).map((id) => node(byId.get(id))) };
+  };
+  return list.filter((t) => !childIds.has(t.id)).map(node);
+}
+
 // 日付軸スケール器。startISO から days 日の窓。列index と範囲→span を返す。
 export function dayScale(startISO, days) {
   const axis = [];

@@ -4,7 +4,23 @@ import {
   toH, dateOnly, hasDate, isActiveOn, taskHoursOn,
   loadByMember, weekLoadByMember, estimateVsActual, triage, sumByMemberDay,
   shiftISO, taskRanges, dependencyEdges, dayScale, toMemberDayEntries, taskPlannedHoursByMemberOn,
+  buildTaskTree,
 } from "./capacity.js";
+
+test("buildTaskTree: subtask 親子フォレスト", () => {
+  const tasks = [
+    { id: 1, title: "Epic", related_tasks: { subtask: [{ id: 2 }, { id: 3 }] } },
+    { id: 2, title: "子A", related_tasks: { subtask: [{ id: 4 }] } },
+    { id: 3, title: "子B" },
+    { id: 4, title: "孫" },
+    { id: 5, title: "単独" },
+  ];
+  const forest = buildTaskTree(tasks);
+  assert.deepEqual(forest.map((n) => n.task.id), [1, 5]); // ルート=Epicと単独
+  const epic = forest[0];
+  assert.deepEqual(epic.children.map((c) => c.task.id), [2, 3]);
+  assert.deepEqual(epic.children[0].children.map((c) => c.task.id), [4]); // 子A→孫
+});
 
 const TODAY = "2026-06-10";
 const members = [
