@@ -37,7 +37,8 @@ function parseSmartDate(raw) {
   return null;
 }
 const fmtDisplay = (iso) => { const [y, mo, da] = iso.split("-"); return `${y}/${mo}/${da}`; };
-const dueDisplay = (t) => (t && t.due_date && !t.due_date.startsWith("0001") ? fmtDisplay(t.due_date.slice(0, 10)) : "");
+// task の日付フィールド（due_date/start_date/end_date）を YYYY/MM/DD 表示に（未設定=空）
+const fieldDisplay = (t, f) => (t && t[f] && !t[f].startsWith("0001") ? fmtDisplay(t[f].slice(0, 10)) : "");
 
 let _mounted = false;
 
@@ -63,9 +64,15 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     `<option value="${v}"${(task ? (task.priority || 0) : 0) === v ? " selected" : ""}>${n}</option>`).join("");
   const estH = task && task.time_estimate ? Math.round((task.time_estimate / 3600) * 10) / 10 : "";
   // 親タスク候補（自分自身は除外）＝既存タイトルの候補リスト
-  const parentOpts = (tasks || []).filter((t) => !task || t.id !== task.id)
-    .map((t) => `<option value="${esc(t.title)}"></option>`).join("");
+  const candidates = (tasks || []).filter((t) => !task || t.id !== task.id);
+  const parentOpts = candidates.map((t) => `<option value="${esc(t.title)}"></option>`).join("");
   const curParentTitle = curParent ? curParent.title : "";
+  // 先行タスク（依存元）= related_tasks.follows（このタスクが follows する＝その前に完了が必要）
+  const curPreds = (task && task.related_tasks && (task.related_tasks.follows || [])) || [];
+  const depOpts = candidates.map((t) => `<option value="${esc(t.title)}"></option>`).join("");
+  const taskById = new Map((tasks || []).map((t) => [t.id, t]));
+  for (const p of curPreds) if (!taskById.has(p.id)) taskById.set(p.id, p);
+  const predSet = new Set(curPreds.map((p) => p.id)); // 編集中の作業セット（id）
 
   wrap.innerHTML = `
     <div class="tf-bg"></div>
@@ -93,14 +100,28 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
             <select id="tf-prio" class="tf-in">${prioOpts}</select>
           </div>
           <div class="tf-col">
-            <label class="tf-l">期日</label>
-            <input id="tf-due" class="tf-in" type="text" inputmode="numeric" autocomplete="off" value="${dueDisplay(task)}" placeholder="例: 1112 → 11/12">
-          </div>
-          <div class="tf-col">
             <label class="tf-l">見積り(h)</label>
             <input id="tf-est" class="tf-in" type="number" min="0" step="0.5" value="${estH}" placeholder="—">
           </div>
         </div>
+        <div class="tf-row">
+          <div class="tf-col">
+            <label class="tf-l">開始日 <span class="tf-hint">（ガント開始）</span></label>
+            <input id="tf-start" class="tf-in" type="text" inputmode="numeric" autocomplete="off" value="${fieldDisplay(task, "start_date")}" placeholder="例: 1112">
+          </div>
+          <div class="tf-col">
+            <label class="tf-l">終了日 <span class="tf-hint">（ガント終了）</span></label>
+            <input id="tf-end" class="tf-in" type="text" inputmode="numeric" autocomplete="off" value="${fieldDisplay(task, "end_date")}" placeholder="例: 1120">
+          </div>
+          <div class="tf-col">
+            <label class="tf-l">期日</label>
+            <input id="tf-due" class="tf-in" type="text" inputmode="numeric" autocomplete="off" value="${fieldDisplay(task, "due_date")}" placeholder="例: 1112 → 11/12">
+          </div>
+        </div>
+        <label class="tf-l">先行タスク <span class="tf-hint">（このタスクの前に完了が必要・複数可）</span></label>
+        <input id="tf-dep" class="tf-in" list="tf-dep-list" autocomplete="off" placeholder="先行タスクを選んで追加">
+        <datalist id="tf-dep-list">${depOpts}</datalist>
+        <div class="tf-chips" id="tf-dep-chips"></div>
         <label class="tf-l">説明</label>
         <textarea id="tf-desc" class="tf-in tf-ta" rows="3" placeholder="任意">${esc(task ? (task.description || "") : "")}</textarea>
         ${isEdit ? `<label class="tf-chk"><input id="tf-done" type="checkbox"${task.done ? " checked" : ""}> 完了にする</label>` : ""}
@@ -119,17 +140,46 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
   $("#tf-cancel").onclick = close;
   $("#tf-title").focus();
 
-  // 期日: フォーカスを外したら正規表示（YYYY/MM/DD）に整形
-  const dueEl = $("#tf-due");
-  dueEl.onblur = () => { const iso = parseSmartDate(dueEl.value); if (iso) dueEl.value = fmtDisplay(iso); };
+  // 日付3欄（開始/終了/期日）: フォーカスを外したら正規表示（YYYY/MM/DD）に整形
+  for (const id of ["#tf-start", "#tf-end", "#tf-due"]) {
+    const el = $(id);
+    el.onblur = () => { const iso = parseSmartDate(el.value); if (iso) el.value = fmtDisplay(iso); };
+  }
+
+  // 先行タスク: datalist で選択→チップ追加、× で除去（作業セット predSet を更新）
+  const renderChips = () => {
+    const el = $("#tf-dep-chips");
+    el.innerHTML = [...predSet].map((id) => {
+      const t = taskById.get(id);
+      return `<span class="tf-chip">${esc(t ? t.title : "#" + id)}<button type="button" class="tf-chip-x" data-id="${id}">×</button></span>`;
+    }).join("");
+    el.querySelectorAll(".tf-chip-x").forEach((b) => { b.onclick = () => { predSet.delete(+b.dataset.id); renderChips(); }; });
+  };
+  renderChips();
+  const depEl = $("#tf-dep");
+  depEl.onchange = () => {
+    const v = depEl.value.trim();
+    const t = candidates.find((x) => x.title === v);
+    if (t) { predSet.add(t.id); renderChips(); }
+    depEl.value = "";
+  };
 
   $("#tf-save").onclick = async () => {
     const err = $("#tf-err");
     const title = $("#tf-title").value.trim();
     if (!title) { err.textContent = "タイトルを入力してください。"; return; }
-    const dueRaw = $("#tf-due").value.trim();
-    const dueISO = dueRaw ? parseSmartDate(dueRaw) : null;
-    if (dueRaw && !dueISO) { err.textContent = "期日の形式が不正です（例: 1112 → 11/12）。"; return; }
+    const parseField = (sel, label) => {
+      const raw = $(sel).value.trim();
+      if (!raw) return { iso: null, ok: true };
+      const iso = parseSmartDate(raw);
+      if (!iso) { err.textContent = `${label}の形式が不正です（例: 1112 → 11/12）。`; return { iso: null, ok: false }; }
+      return { iso, ok: true };
+    };
+    const startF = parseField("#tf-start", "開始日"); if (!startF.ok) return;
+    const endF = parseField("#tf-end", "終了日"); if (!endF.ok) return;
+    const dueF = parseField("#tf-due", "期日"); if (!dueF.ok) return;
+    const startISO = startF.iso, endISO = endF.iso, dueISO = dueF.iso;
+    if (startISO && endISO && endISO < startISO) { err.textContent = "終了日は開始日以降にしてください。"; return; }
     const pid = +$("#tf-proj").value;
     const asg = $("#tf-asg").value ? +$("#tf-asg").value : null;
     const prio = +$("#tf-prio").value;
@@ -142,17 +192,22 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     const btn = $("#tf-save");
     btn.disabled = true; err.textContent = "";
     try {
+      const dt = (iso) => iso + "T00:00:00Z";
       let childId;
       if (!isEdit) {
         const body = { title, description: desc, priority: prio, time_estimate: estSec };
-        if (dueISO) body.due_date = dueISO + "T00:00:00Z";
+        if (dueISO) body.due_date = dt(dueISO);
+        if (startISO) body.start_date = dt(startISO);
+        if (endISO) body.end_date = dt(endISO);
         const created = await createTaskInProject(pid, body);
         childId = created.id;
         if (asg) await addAssignee(childId, asg);
       } else {
         const patch = {
           title, description: desc, priority: prio,
-          due_date: dueISO ? dueISO + "T00:00:00Z" : ZERO_DATE,
+          due_date: dueISO ? dt(dueISO) : ZERO_DATE,
+          start_date: startISO ? dt(startISO) : ZERO_DATE,
+          end_date: endISO ? dt(endISO) : ZERO_DATE,
           time_estimate: estSec,
           done: $("#tf-done").checked,
         };
@@ -162,6 +217,12 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
         for (const a of curAssignees) if (a.id !== asg) await removeAssignee(task.id, a.id);
         if (asg && asg !== curAssigneeId) await addAssignee(task.id, asg);
       }
+
+      // 先行タスク diff（このタスクが follows する＝前に完了が必要）。
+      // capacity.js dependencyEdges は follows を rel→t（前→後）に正規化。逆 precedes は自動付与。
+      const curPredIds = new Set(curPreds.map((p) => p.id));
+      for (const pid2 of predSet) if (pid2 !== childId && !curPredIds.has(pid2)) await addRelation(childId, pid2, "follows");
+      for (const pid2 of curPredIds) if (!predSet.has(pid2)) await removeRelation(childId, "follows", pid2);
 
       // 親タスクの解決（既存タイトル一致=その親 / 新名=同ワークスペースに親を新規作成）と関連 diff。
       // 親が子を持つ＝親側に subtask 関連を張る（capacity.js buildTaskTree と整合）。
@@ -203,6 +264,10 @@ function ensureStyle() {
   .tf-ta{resize:vertical;line-height:1.45}
   .tf-row{display:flex;gap:12px}.tf-col{flex:1;min-width:0}
   .tf-chk{display:flex;align-items:center;gap:7px;font-size:13px;color:${C.ink};margin:14px 0 4px;cursor:pointer}
+  .tf-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
+  .tf-chip{display:inline-flex;align-items:center;gap:4px;background:#eef2f7;border:1px solid ${C.line};border-radius:20px;padding:3px 5px 3px 11px;font-size:12px;color:${C.ink}}
+  .tf-chip-x{border:0;background:transparent;color:${C.muted};cursor:pointer;font-size:14px;line-height:1;padding:0 3px}
+  .tf-chip-x:hover{color:${C.over}}
   .tf-err{color:${C.over};font-size:12.5px;min-height:18px;margin:8px 0 2px;font-weight:600}
   .tf-acts{display:flex;justify-content:flex-end;gap:10px;padding:6px 22px 20px}
   .tf-acts button{font:inherit;font-size:13.5px;font-weight:600;padding:9px 18px;border-radius:9px;cursor:pointer;border:1px solid ${C.line}}
