@@ -25,8 +25,8 @@ function isAdvanced(task, planEntries, isoDay) {
   return (planEntries || []).some((e) => dateOnly(e.plan_date) === isoDay);
 }
 
-const REVIEW_LABEL = "レビュー";
-const isReviewTask = (t) => (t.labels || []).some((l) => (l.title || "") === REVIEW_LABEL);
+export const REVIEW_LABEL = "レビュー";
+export const isReviewTask = (t) => (t.labels || []).some((l) => (l.title || "") === REVIEW_LABEL);
 const CRANK = { meeting: 0, recurring: 1, review: 2, planned: 3, adhoc: 3 };
 
 // data: { tasks, members, plansByTask, recurrences }
