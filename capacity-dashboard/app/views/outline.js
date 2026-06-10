@@ -22,7 +22,7 @@ export async function render(root) {
 
   root.innerHTML = `
     <style>${css()}</style>
-    <h1 class="vtitle">アウトライン <small>${forest.length}トップ ・ 親子(サブタスク)階層</small></h1>
+    <h1 class="vtitle">アウトライン <small>${forest.length}トップ ・ プロジェクト＞タスク階層</small></h1>
     <div class="card ol-card">${rows.join("") || `<div class="ol-empty">タスクがありません。</div>`}</div>`;
 
   root.querySelectorAll(".ol-tw").forEach((tw) => {

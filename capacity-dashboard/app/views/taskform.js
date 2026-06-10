@@ -1,7 +1,8 @@
 // タスクの追加・編集モーダル（再利用・どの画面からでも開ける）。
 // body 直下に append する自己完結モーダル。clock.js の .ck-modal パターンを踏襲。
 // 作成=createTaskInProject / 更新=updateTask(#9 非破壊) / 担当=add|removeAssignee /
-// 親タスク=related_tasks.subtask（親に subtask 関連を張る・名前入力で親を新規作成も可）。
+// プロジェクト(UI呼称)=親タスク。related_tasks.subtask（親に subtask 関連を張る・名前入力で親を新規作成も可）。
+// 階層: ワークスペース(=API project) ＞ プロジェクト(=親タスク) ＞ タスク。
 import { load, invalidate } from "../lib/store.js";
 import { getTask, createTaskInProject, updateTask, addAssignee, removeAssignee, addRelation, removeRelation } from "../lib/api.js";
 import { C, esc } from "../lib/ui.js";
@@ -83,8 +84,8 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
             <select id="tf-asg" class="tf-in">${memOpts}</select>
           </div>
         </div>
-        <label class="tf-l">親タスク <span class="tf-hint">（任意・新しい名前を入れるとその親を新規作成）</span></label>
-        <input id="tf-parent" class="tf-in" list="tf-parent-list" autocomplete="off" value="${esc(curParentTitle)}" placeholder="既存の親を選ぶ / 新しい親名を入力">
+        <label class="tf-l">プロジェクト <span class="tf-hint">（任意・新しい名前を入れると新規作成）</span></label>
+        <input id="tf-parent" class="tf-in" list="tf-parent-list" autocomplete="off" value="${esc(curParentTitle)}" placeholder="既存のプロジェクトを選ぶ / 新しいプロジェクト名を入力">
         <datalist id="tf-parent-list">${parentOpts}</datalist>
         <div class="tf-row">
           <div class="tf-col">
