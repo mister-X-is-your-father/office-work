@@ -109,7 +109,7 @@ cd capacity-dashboard/app/lib/vendor && docker run --rm -v "$PWD":/out node:20-a
 
 ## 6. 認証・デモデータ
 - **capdemo / CapDemoPass123**（SPAログイン・id=1）。メンバー **morita(2)/tanaka(3)/satou(4)/suzuki(5)**（各 TeamPass123）。
-- CORS は compose で許可済（別オリジンSPA用）。`VIKUNJA_SERVICE_ENABLEREGISTRATION` は隔離検証時のみ true。
+- CORS は compose で許可済（別オリジンSPA用）。**`VIKUNJA_SERVICE_ENABLEREGISTRATION: "true"`**（本番compose・SPAのアカウント作成画面用）。SPAログイン画面は ログイン⇔新規作成 を相互遷移（`app.js showAuth`、登録は `api.register`→`/register`）。
 - seed（冪等・`/tmp/cap_token` に capdemo トークンを置いて実行）:
   - `backend-patch/seed-gantt-demo.py` … タスクの start/end/依存/担当（**⚠️ POST はスカラ全置換なので assignees も再適用、§7**）。
   - `backend-patch/seed-recurrence-demo.py` … 定期(毎週月会議/毎月第2火/隔週水)・祝日(6/22)・morita休暇(6/29-7/1)。

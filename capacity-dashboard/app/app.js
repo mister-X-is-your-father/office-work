@@ -25,26 +25,38 @@ const ORDER = ["home", "today", "triage", "review", "availability", "calendar", 
 
 const app = document.getElementById("app");
 
-function showLogin(msg = "") {
+function showLogin(msg = "") { showAuth("login", msg); }
+
+function showAuth(mode = "login", msg = "") {
+  const isReg = mode === "register";
+  const sw = isReg
+    ? `すでにアカウントをお持ちですか？ <a href="#" id="toLogin">ログイン</a>`
+    : `アカウントがない場合は <a href="#" id="toReg">新規作成</a>`;
   app.innerHTML = `
     <div class="login">
-      <h2>Capacity Board</h2>
-      <p>実データ版。TaskStation にログインしてください。</p>
+      <h2>TaskStation</h2>
+      <p>${isReg ? "新しいアカウントを作成します。" : "実データ版。ログインしてください。"}</p>
       <label>ユーザー名</label><input id="u" autocomplete="username">
-      <label>パスワード</label><input id="p" type="password" autocomplete="current-password">
-      <button id="go">接続</button>
+      ${isReg ? `<label>メールアドレス</label><input id="em" type="email" autocomplete="email">` : ""}
+      <label>パスワード</label><input id="p" type="password" autocomplete="${isReg ? "new-password" : "current-password"}">
+      <button id="go">${isReg ? "アカウント作成" : "接続"}</button>
       <div class="err" id="err">${msg}</div>
+      <div style="margin-top:14px;font-size:13px;color:var(--muted)">${sw}</div>
     </div>`;
   const go = async () => {
-    const b = document.getElementById("go");
-    b.disabled = true; document.getElementById("err").textContent = "接続中…";
+    const b = document.getElementById("go"), err = document.getElementById("err");
+    const u = document.getElementById("u").value.trim(), p = document.getElementById("p").value;
+    b.disabled = true; err.textContent = isReg ? "作成中…" : "接続中…";
     try {
-      await vik.login(document.getElementById("u").value.trim(), document.getElementById("p").value);
+      if (isReg) await vik.register(u, document.getElementById("em").value.trim(), p);
+      await vik.login(u, p);
       store.invalidate(); boot();
-    } catch (e) { b.disabled = false; document.getElementById("err").textContent = "× " + e.message; }
+    } catch (e) { b.disabled = false; err.textContent = "× " + e.message; }
   };
   document.getElementById("go").onclick = go;
   document.getElementById("p").onkeydown = e => { if (e.key === "Enter") go(); };
+  const tr = document.getElementById("toReg"); if (tr) tr.onclick = e => { e.preventDefault(); showAuth("register"); };
+  const tl = document.getElementById("toLogin"); if (tl) tl.onclick = e => { e.preventDefault(); showAuth("login"); };
 }
 
 function shell() {
@@ -57,7 +69,7 @@ function shell() {
   app.innerHTML = `
     <div class="shell">
       <aside class="sidebar">
-        <div class="brand">Capacity Board<small>TaskStation 実データ</small></div>
+        <div class="brand">TaskStation<small>キャパ可視化・実データ</small></div>
         <nav class="nav" id="nav">${nav}</nav>
       </aside>
       <div class="main">

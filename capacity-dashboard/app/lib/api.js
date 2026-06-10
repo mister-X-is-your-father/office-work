@@ -27,6 +27,9 @@ export async function login(username, password) {
   setToken(d.token);
   return d.token;
 }
+export async function register(username, email, password) {
+  return req("/register", { method: "POST", auth: false, body: { username, email, password } });
+}
 
 // 全タスク（time_estimate / time_spent / assignees / 日付 / priority / done 等を含む）
 export async function getTasks() { return req("/tasks/all?per_page=250"); }
