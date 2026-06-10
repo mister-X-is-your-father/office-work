@@ -145,7 +145,7 @@
   <h1>📦 アサインフロー</h1>
   <div class="daynav">
     <button title="前日">‹</button>
-    <span class="today nums">6/4(木) <span class="badge-today">今日</span></span>
+    <span class="today nums">6/4(木) <span class="badge-today">本日</span></span>
     <button title="翌日">›</button>
   </div>
   <span class="note">※ モック（サンプルデータ）。本番は TaskStation API から自動算出。</span>
@@ -161,7 +161,7 @@
       </div>
       <div class="tasklist" id="tasklist"></div>
       <div class="legend">
-        タスクを選ぶと、振れる人を空き順に提案します。
+        タスクを選ぶと、割り当てられる人を空き順に提案します。
       </div>
     </section>
 
@@ -169,7 +169,7 @@
     <section class="panel" id="suggestPanel">
       <div class="empty" id="emptyState">
         <div class="big">👈</div>
-        左のタスクを選ぶと、<br>「今日この仕事を振れる人」を空き容量の多い順に表示します。
+        左のタスクを選ぶと、<br>「本日この仕事を割り当てられる人」を空き工数の多い順に表示します。
       </div>
       <div id="suggestBody" style="display:none;"></div>
     </section>
@@ -235,7 +235,7 @@ function select(id){
       <div class="proj-bar" style="background:${pc}"></div>
       <div>
         <div class="stitle">${t.name} <span class="hrs nums" style="font-size:13px;">[${t.hours}h]</span></div>
-        <div class="smeta">この仕事を今日振れる人 · <span class="chip" style="background:${pc};display:inline-block">${t.proj}</span> 一致を優先</div>
+        <div class="smeta">この仕事を本日割り当てられる人 · <span class="chip" style="background:${pc};display:inline-block">${t.proj}</span> 一致を優先</div>
       </div>
     </div>
     <div class="cands">`;
@@ -270,7 +270,7 @@ function select(id){
         <div class="verdict ${okCls}">
           <div class="mk">${verdictMark}</div>
           <div class="free-h nums">${freeLabel}</div>
-          <button class="assign-btn" ${m.fits?'':'disabled'} onclick="doAssign('${m.name}','${t.name}',${m.fits})">${m.fits?'ここに振る':'振れない'}</button>
+          <button class="assign-btn" ${m.fits?'':'disabled'} onclick="doAssign('${m.name}','${t.name}',${m.fits})">${m.fits?'ここに割り当てる':'割り当てられない'}</button>
         </div>
       </div>`;
   });
@@ -279,7 +279,7 @@ function select(id){
       <span><i style="background:var(--fill)"></i>使用中</span>
       <span><i style="background:${pc}"></i>このタスク(+${need}h)</span>
       <span><i style="background:var(--over)"></i>超過</span>
-      <span>⭕ 振れる ／ ✕ 振れない</span>
+      <span>⭕ 割り当てられる ／ ✕ 割り当てられない</span>
     </div>`;
 
   document.getElementById('emptyState').style.display='none';

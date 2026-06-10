@@ -196,7 +196,7 @@
       <span class="li"><span class="sw" style="background:var(--danger)"></span>遅延リスク</span>
       <span class="li"><span style="display:inline-block;width:11px;height:11px;transform:rotate(45deg);border:1.5px solid var(--amber);"></span> 締切</span>
       <span class="li"><span style="display:inline-block;width:11px;height:11px;transform:rotate(45deg);background:var(--danger);"></span> 締切超過リスク</span>
-      <span class="li"><span style="border-left:2px dashed var(--danger);height:14px;display:inline-block;"></span> 今日(6/4)</span>
+      <span class="li"><span style="border-left:2px dashed var(--danger);height:14px;display:inline-block;"></span> 本日(6/4)</span>
     </div>
   </div>
 </div>
@@ -406,7 +406,7 @@ function render(){
   const tl = document.createElement("div");
   tl.className = "today-line";
   tl.style.left = (LABEL_W + colLeft(TODAY-DAY0) + COL_W/2) + "px";
-  tl.innerHTML = `<span class="tl-cap">今日 6/4</span>`;
+  tl.innerHTML = `<span class="tl-cap">本日 6/4</span>`;
   rowsEl.appendChild(tl);
 
   drawDeps(list, rowIndexById);

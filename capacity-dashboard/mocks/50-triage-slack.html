@@ -118,11 +118,11 @@
 <header>
   <div>
     <div class="h-title">動かせる / 動かせない — slackビュー</div>
-    <div class="h-sub">締切までの余裕（slack）でタスクを並べる。余裕ゼロは固定、余裕が大きいほど逃がせる。</div>
+    <div class="h-sub">締切までの余裕（slack）でタスクを並べる。余裕ゼロは固定、余裕が大きいほど後ろ倒しできる。</div>
   </div>
   <div class="daynav">
     <button title="前日">‹</button>
-    <span class="cur">6/4(木)<span class="tag">今日</span></span>
+    <span class="cur">6/4(木)<span class="tag">本日</span></span>
     <button title="翌日">›</button>
   </div>
 </header>
@@ -134,7 +134,7 @@
   <div class="zone fix">
     <span class="ic">📌</span>
     <div>
-      <div class="zt">今日に固定すべき</div>
+      <div class="zt">本日に固定すべき</div>
       <div class="zs">slack=0／本番障害。動かすと即・影響が出る。</div>
     </div>
     <span class="cnt">1</span>
@@ -142,8 +142,8 @@
   <div class="zone move">
     <span class="ic">🪁</span>
     <div>
-      <div class="zt">他の日に逃がせる</div>
-      <div class="zs">締切まで余裕あり。今日やらなくても遅れない。</div>
+      <div class="zt">他の日へ移せる</div>
+      <div class="zs">締切まで余裕あり。本日やらなくても遅れない。</div>
     </div>
     <span class="cnt">4</span>
   </div>
@@ -155,19 +155,19 @@
     <div>タスク / 担当</div>
     <div class="axis">締切までの余裕（slack）→
       <div class="ticks">
-        <span>今日</span><span>+1日</span><span>+3日</span><span>+5日</span><span>+7日</span><span>+9日↑</span>
+        <span>本日</span><span>+1日</span><span>+3日</span><span>+5日</span><span>+7日</span><span>+9日↑</span>
       </div>
     </div>
     <div style="text-align:right">判定</div>
   </div>
 
   <!-- ===== GROUP: 固定 ===== -->
-  <div class="grouplbl"><span class="gd" style="background:var(--must)"></span><span class="gn">余裕ゼロ — 今日固定</span></div>
+  <div class="grouplbl"><span class="gd" style="background:var(--must)"></span><span class="gn">余裕ゼロ — 本日固定</span></div>
 
   <!-- 1. ログイン障害 slack=0 -->
   <div class="row">
     <div class="task">
-      <div class="tn"><span class="pri" style="background:var(--must)">🔴 今日必須</span>ログイン障害対応</div>
+      <div class="tn"><span class="pri" style="background:var(--must)">🔴 本日必須</span>ログイン障害対応</div>
       <div class="tm"><span class="av" style="background:var(--m-morita)">森</span>森田
         <span class="pjchip" style="background:var(--pj-be)">Backend</span>2h・本番障害</div>
     </div>
@@ -175,7 +175,7 @@
       <div class="stk">
         <div class="gl" style="left:16.6%"></div><div class="gl" style="left:33.3%"></div>
         <div class="gl" style="left:50%"></div><div class="gl" style="left:66.6%"></div><div class="gl" style="left:83.3%"></div>
-        <div class="todayline"><span class="tlb">今日</span></div>
+        <div class="todayline"><span class="tlb">本日</span></div>
         <div class="fill" style="width:2px;background:var(--must)"></div>
         <div class="pin">📌</div>
         <span class="deadlineflag" style="left:30px;color:var(--must);border-color:#f4c7c8;">slack 0 — 即対応</span>
@@ -188,12 +188,12 @@
   </div>
 
   <!-- ===== GROUP: ほぼ固定 ===== -->
-  <div class="grouplbl"><span class="gd" style="background:var(--should)"></span><span class="gn">余裕わずか — 今日やるべき</span></div>
+  <div class="grouplbl"><span class="gd" style="background:var(--should)"></span><span class="gn">余裕わずか — 本日着手</span></div>
 
   <!-- 2. DBマイグレ slack=1日 -->
   <div class="row">
     <div class="task">
-      <div class="tn"><span class="pri" style="background:var(--should)">🟠 今日やるべき</span>DBマイグレーション</div>
+      <div class="tn"><span class="pri" style="background:var(--should)">🟠 本日着手</span>DBマイグレーション</div>
       <div class="tm"><span class="av" style="background:var(--m-morita)">森</span>森田
         <span class="pjchip" style="background:var(--pj-be)">Backend</span>3h・締切 6/5</div>
     </div>
@@ -201,14 +201,14 @@
       <div class="stk">
         <div class="gl" style="left:16.6%"></div><div class="gl" style="left:33.3%"></div>
         <div class="gl" style="left:50%"></div><div class="gl" style="left:66.6%"></div><div class="gl" style="left:83.3%"></div>
-        <div class="todayline"><span class="tlb">今日</span></div>
+        <div class="todayline"><span class="tlb">本日</span></div>
         <div class="fill" style="width:16.6%;background:var(--should)">slack 1日</div>
         <span class="deadlineflag" style="left:16.6%;margin-left:8px;">締切 6/5</span>
       </div>
     </div>
     <div class="verdict">
       <span class="vbadge v-soon">明日まで</span>
-      <div class="vsub">逃がす余地は1日だけ</div>
+      <div class="vsub">後ろ倒しの余地は1日だけ</div>
     </div>
   </div>
 
@@ -224,7 +224,7 @@
     </div>
     <div class="slackcell">
       <div class="stk" style="background:repeating-linear-gradient(45deg,#eef1f5,#eef1f5 6px,#e6e9ee 6px,#e6e9ee 7px)">
-        <div class="todayline"><span class="tlb">今日</span></div>
+        <div class="todayline"><span class="tlb">本日</span></div>
         <div class="fill" style="width:33.3%;background:var(--block);opacity:.55">外部API待ち</div>
         <span class="deadlineflag" style="left:33.3%;margin-left:8px;">締切 6/6</span>
       </div>
@@ -235,13 +235,13 @@
     </div>
   </div>
 
-  <!-- ===== GROUP: 逃がせる ===== -->
-  <div class="grouplbl"><span class="gd" style="background:var(--shift)"></span><span class="gn">余裕大 — 他の日へ逃がせる</span></div>
+  <!-- ===== GROUP: 後ろ倒し可 ===== -->
+  <div class="grouplbl"><span class="gd" style="background:var(--shift)"></span><span class="gn">余裕大 — 他の日へ移せる</span></div>
 
   <!-- 4. API設計レビュー slack大 -->
   <div class="row">
     <div class="task">
-      <div class="tn"><span class="pri" style="background:var(--shift)">🟢 ずらせる</span>API設計レビュー</div>
+      <div class="tn"><span class="pri" style="background:var(--shift)">🟢 後日可</span>API設計レビュー</div>
       <div class="tm"><span class="av" style="background:var(--m-morita)">森</span>森田
         <span class="pjchip" style="background:var(--pj-common)">共通</span>1h・締切なし</div>
     </div>
@@ -249,12 +249,12 @@
       <div class="stk">
         <div class="gl" style="left:16.6%"></div><div class="gl" style="left:33.3%"></div>
         <div class="gl" style="left:50%"></div><div class="gl" style="left:66.6%"></div><div class="gl" style="left:83.3%"></div>
-        <div class="todayline"><span class="tlb">今日</span></div>
+        <div class="todayline"><span class="tlb">本日</span></div>
         <div class="fill" style="width:100%;background:linear-gradient(90deg,#2fa66b,#7fcda3)">slack 大（締切なし）</div>
       </div>
     </div>
     <div class="verdict">
-      <span class="vbadge v-move">逃がせる</span>
+      <span class="vbadge v-move">後ろ倒し可</span>
       <div class="vsub">森田が満杯→明日へ</div>
     </div>
   </div>
@@ -262,7 +262,7 @@
   <!-- 5. ダッシュ画面 slack=5日 -->
   <div class="row">
     <div class="task">
-      <div class="tn"><span class="pri" style="background:var(--shift)">🟢 ずらせる</span>ダッシュ画面実装</div>
+      <div class="tn"><span class="pri" style="background:var(--shift)">🟢 後日可</span>ダッシュ画面実装</div>
       <div class="tm"><span class="av" style="background:var(--m-tanaka)">田</span>田中
         <span class="pjchip" style="background:var(--pj-fe)">Frontend</span>4h・締切 6/9</div>
     </div>
@@ -270,13 +270,13 @@
       <div class="stk">
         <div class="gl" style="left:16.6%"></div><div class="gl" style="left:33.3%"></div>
         <div class="gl" style="left:50%"></div><div class="gl" style="left:66.6%"></div><div class="gl" style="left:83.3%"></div>
-        <div class="todayline"><span class="tlb">今日</span></div>
+        <div class="todayline"><span class="tlb">本日</span></div>
         <div class="fill" style="width:83.3%;background:linear-gradient(90deg,#2fa66b,#6cc695)">slack 5日</div>
         <span class="deadlineflag" style="left:83.3%;margin-left:8px;">締切 6/9</span>
       </div>
     </div>
     <div class="verdict">
-      <span class="vbadge v-move">逃がせる</span>
+      <span class="vbadge v-move">後ろ倒し可</span>
       <div class="vsub">余裕5日</div>
     </div>
   </div>
@@ -284,7 +284,7 @@
   <!-- 6. 設計ドキュメント slack大（締切なし・低） -->
   <div class="row">
     <div class="task">
-      <div class="tn"><span class="pri" style="background:var(--shift)">🟢 ずらせる</span>設計ドキュメント整備</div>
+      <div class="tn"><span class="pri" style="background:var(--shift)">🟢 後日可</span>設計ドキュメント整備</div>
       <div class="tm"><span class="av" style="background:var(--m-suzuki)">鈴</span>鈴木
         <span class="pjchip" style="background:var(--pj-common)">共通</span>2h・締切なし</div>
     </div>
@@ -292,12 +292,12 @@
       <div class="stk">
         <div class="gl" style="left:16.6%"></div><div class="gl" style="left:33.3%"></div>
         <div class="gl" style="left:50%"></div><div class="gl" style="left:66.6%"></div><div class="gl" style="left:83.3%"></div>
-        <div class="todayline"><span class="tlb">今日</span></div>
+        <div class="todayline"><span class="tlb">本日</span></div>
         <div class="fill" style="width:100%;background:linear-gradient(90deg,#2fa66b,#8fd4ad)">slack 大（優先度 低）</div>
       </div>
     </div>
     <div class="verdict">
-      <span class="vbadge v-move">逃がせる</span>
+      <span class="vbadge v-move">後ろ倒し可</span>
       <div class="vsub">埋め草でよい</div>
     </div>
   </div>
@@ -305,7 +305,7 @@
   <!-- 7. リリースノート slack=9日 -->
   <div class="row">
     <div class="task">
-      <div class="tn"><span class="pri" style="background:var(--shift)">🟢 ずらせる</span>リリースノート作成</div>
+      <div class="tn"><span class="pri" style="background:var(--shift)">🟢 後日可</span>リリースノート作成</div>
       <div class="tm"><span class="av" style="background:var(--pj-common)">未</span>未アサイン
         <span class="pjchip" style="background:var(--pj-common)">共通</span>1h・締切 6/13</div>
     </div>
@@ -313,13 +313,13 @@
       <div class="stk">
         <div class="gl" style="left:16.6%"></div><div class="gl" style="left:33.3%"></div>
         <div class="gl" style="left:50%"></div><div class="gl" style="left:66.6%"></div><div class="gl" style="left:83.3%"></div>
-        <div class="todayline"><span class="tlb">今日</span></div>
+        <div class="todayline"><span class="tlb">本日</span></div>
         <div class="fill" style="width:100%;background:linear-gradient(90deg,#2fa66b,#9bd9b6)">slack 9日（最も余裕）</div>
         <span class="deadlineflag" style="right:6px;">締切 6/13</span>
       </div>
     </div>
     <div class="verdict">
-      <span class="vbadge v-move">逃がせる</span>
+      <span class="vbadge v-move">後ろ倒し可</span>
       <div class="vsub">担当決めも後で</div>
     </div>
   </div>
@@ -330,9 +330,9 @@
 <div class="deps">
   <h3>🔗 ずらすと何が遅れるか（依存）</h3>
   <div class="dlist">
-    <div class="di"><span class="k">ログイン障害</span><span class="arrow">→</span><span>逃がせない。放置＝本番ユーザーがログイン不可のまま。依存なしだが影響が最大。</span></div>
+    <div class="di"><span class="k">ログイン障害</span><span class="arrow">→</span><span>後ろ倒しできない。放置＝本番ユーザーがログイン不可のまま。依存なしだが影響が最大。</span></div>
     <div class="di"><span class="k">DBマイグレ</span><span class="arrow">→</span><span>遅らせると <b style="color:var(--ink)">認証フロー実装</b>の前提が揃わない。明日が限界。</span></div>
-    <div class="di"><span class="k">認証フロー</span><span class="arrow">→</span><span>外部API＋DBマイグレ完了が前提。今日は待ち。両方揃えば着手。</span></div>
+    <div class="di"><span class="k">認証フロー</span><span class="arrow">→</span><span>外部API＋DBマイグレ完了が前提。本日は待ち。両方揃えば着手。</span></div>
     <div class="di"><span class="k">API設計レビュー</span><span class="arrow">→</span><span>後続なし。森田が満杯のため明日へ。遅れても他に波及しない。</span></div>
     <div class="di"><span class="k">ダッシュ画面</span><span class="arrow">→</span><span>独立タスク。6/9 までに着手すれば間に合う。</span></div>
     <div class="di"><span class="k">設計Doc / リリースノート</span><span class="arrow">→</span><span>誰の前提にもなっていない。最後でよい。</span></div>
@@ -342,9 +342,9 @@
 <div class="legend">
   <span class="it"><span class="dot" style="background:var(--must)"></span>📌 slack=0 固定ピン</span>
   <span class="it"><span class="dot" style="background:var(--should)"></span>余裕わずか</span>
-  <span class="it"><span class="dot" style="background:var(--shift)"></span>余裕大・逃がせる</span>
+  <span class="it"><span class="dot" style="background:var(--shift)"></span>余裕大・後ろ倒し可</span>
   <span class="it"><span class="dot" style="background:var(--block)"></span>外部待ち</span>
-  <span class="it"><span class="dot" style="background:var(--today)"></span>今日ライン</span>
+  <span class="it"><span class="dot" style="background:var(--today)"></span>本日ライン</span>
 </div>
 
 </body>

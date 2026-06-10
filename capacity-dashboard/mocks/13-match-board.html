@@ -92,7 +92,7 @@
   <h1>🧩 マッチング盤</h1>
   <div class="daynav">
     <button title="前日">‹</button>
-    <span class="today nums">6/4(木) <span class="badge-today">今日</span></span>
+    <span class="today nums">6/4(木) <span class="badge-today">本日</span></span>
     <button title="翌日">›</button>
   </div>
   <span class="note">※ モック（サンプルデータ）。本番は TaskStation API から自動算出。</span>
@@ -106,7 +106,7 @@
       <div class="pool" id="pool"></div>
     </div>
     <div>
-      <h3 class="col-head">メンバーの空き容量 <span class="count">cap 8h/人</span></h3>
+      <h3 class="col-head">メンバーの空き工数 <span class="count">cap 8h/人</span></h3>
       <div class="members" id="members"></div>
     </div>
   </div>
@@ -201,7 +201,7 @@ function renderMembers(){
         <span class="mstat ${statCls} nums">${statTxt}</span>
       </div>
       <div class="capbar">${segHtml}${freeHtml}</div>
-      <div class="capnums nums"><span><b>${u}/${CAP}h</b> 使用</span><span>${over?'<span style="color:var(--over)">これ以上振れません</span>':(free===0?'満稼働':`あと ${free}h 振れる`)}</span></div>
+      <div class="capnums nums"><span><b>${u}/${CAP}h</b> 使用</span><span>${over?'<span style="color:var(--over)">これ以上割り当てられません</span>':(free===0?'満稼働':`あと ${free}h 割り当てられる`)}</span></div>
       ${over?'<div class="nofit">⚠ 超過中 — ドロップ不可</div>':''}`;
     // drop handlers
     el.addEventListener('dragover', e=>{ if(canDrop(m)){e.preventDefault();} });

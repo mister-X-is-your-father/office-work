@@ -62,13 +62,13 @@
 </head>
 <body>
   <header class="app">
-    <h1>キャパダッシュボード — 今日の空き容量</h1>
+    <h1>キャパダッシュボード — 本日の稼働予定</h1>
     <div class="daynav">
       <button aria-label="前日">‹</button>
-      <span class="today tnum">6/4(木) <small>今日</small></span>
+      <span class="today tnum">6/4(木) <small>本日</small></span>
       <button aria-label="翌日">›</button>
     </div>
-    <p class="note">※ モック（サンプルデータ）。本番は TaskStation API から自動算出。 ／ 容量 8h/人・日。色が濃いほど高負荷、空白セルは余白＝振れる余地。</p>
+    <p class="note">※ モック（サンプルデータ）。本番は TaskStation API から自動算出。 ／ 容量 8h/人・日。色が濃いほど高負荷、空白セルは余白＝割り当てられる余地。</p>
   </header>
 
   <section class="panel">
@@ -83,7 +83,7 @@
   </section>
 
   <div class="legend">
-    <span class="li"><span class="swempty"></span>空きセル（振れる余地）</span>
+    <span class="li"><span class="swempty"></span>空きセル（割り当てられる余地）</span>
     <span class="li"><span class="sw" style="background:#eaf7f0;border:1px solid #cfead9"></span>空きあり</span>
     <span class="li"><span class="sw" style="background:#fdeaea;border:1px solid #f4caca"></span>超過</span>
     <span class="li" style="margin-left:auto;">行＝メンバー ／ 列＝プロジェクト</span>
@@ -140,7 +140,7 @@ people.forEach(p=>{
   let fc, fv, fl;
   if(over){ fc='free-over'; fv='+'+(p.total-CAP)+'h'; fl='超過'; }
   else if(full){ fc='free-full'; fv='0h'; fl='ちょうど'; }
-  else { fc='free-yes'; fv=p.free+'h'; fl='振れる'; }
+  else { fc='free-yes'; fv=p.free+'h'; fl='割り当てられる'; }
   row+=`<td class="free"><div class="box ${fc}"><span class="v tnum">${fv}</span><span class="l">${fl}</span></div></td>`;
   row+='</tr>';
   tbl.innerHTML+=row;

@@ -4,9 +4,9 @@ import { triage } from "../lib/capacity.js";
 import { C, fmtH, esc, todayISO } from "../lib/ui.js";
 
 const COLS = [
-  { key: "must", label: "🔴 今日必須", color: C.over },
-  { key: "should", label: "🟠 今日やるべき", color: C.amber },
-  { key: "movable", label: "🟢 ずらせる", color: C.free },
+  { key: "must", label: "🔴 本日必須", color: C.over },
+  { key: "should", label: "🟠 本日着手", color: C.amber },
+  { key: "movable", label: "🟢 後日可", color: C.free },
 ];
 
 export async function render(root) {
@@ -22,12 +22,12 @@ export async function render(root) {
     </div>`;
   };
   root.innerHTML = `
-    <h1 class="vtitle">優先度・トリアージ <small>今日どれから？ ${todayISO()}</small></h1>
+    <h1 class="vtitle">優先度・トリアージ <small>本日の着手優先度 ${todayISO()}</small></h1>
     <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start">${COLS.map(col).join("")}</div>`;
 }
 
 function cardHtml(t) {
-  const due = t.due ? `締切 ${t.due.slice(5)}${t.slack != null ? `（${t.slack <= 0 ? "超過/今日" : "あと" + t.slack + "日"}）` : ""}` : "締切なし";
+  const due = t.due ? `締切 ${t.due.slice(5)}${t.slack != null ? `（${t.slack <= 0 ? "超過/本日" : "あと" + t.slack + "日"}）` : ""}` : "締切なし";
   const pr = t.priority >= 4 ? `<span style="color:${C.over};font-weight:700">優先${t.priority}</span>` : `優先${t.priority}`;
   return `<div style="padding:11px 14px;border-bottom:1px solid ${C.line}">
     <div style="font-weight:600;font-size:13.5px">${esc(t.title)}</div>

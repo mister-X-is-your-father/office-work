@@ -115,7 +115,7 @@
   <h1>🏆 おすすめ担当ランキング</h1>
   <div class="daynav">
     <button title="前日">‹</button>
-    <span class="today nums">6/4(木) <span class="badge-today">今日</span></span>
+    <span class="today nums">6/4(木) <span class="badge-today">本日</span></span>
     <button title="翌日">›</button>
   </div>
   <span class="note">※ モック（サンプルデータ）。本番は TaskStation API から自動算出。</span>
@@ -186,12 +186,12 @@ function render(){
   document.getElementById('target').innerHTML=`
     <div class="tbar" style="background:${c}"></div>
     <div class="tinfo">
-      <div class="tlabel">この仕事を誰に振る？</div>
+      <div class="tlabel">この仕事を誰に割り当てる？</div>
       <div class="tname">${current.name}</div>
       <div class="tmeta">
         <span class="chip" style="background:${c}">${current.proj}</span>
         <span class="hrs nums">所要 ${current.hours}h</span>
-        <span class="hrs">／ 今日 cap 8h/人</span>
+        <span class="hrs">／ 本日 cap 8h/人</span>
       </div>
     </div>
     <div class="picker" id="picker"></div>`;
@@ -239,7 +239,7 @@ function render(){
         </div>
         <div class="factors">${factorsHtml}</div>
         <div class="capbar">${barInner}</div>
-        <div class="capcap nums"><b>${m.used}/${CAP}h</b> 使用 ${overBar?`<span style="color:var(--over)">(+${m.used-CAP}h超過)</span>`:(r.fits?`→ 振ると <b>${m.used+current.hours}/${CAP}h</b>`:`· 残り${r.free}h`)}</div>
+        <div class="capcap nums"><b>${m.used}/${CAP}h</b> 使用 ${overBar?`<span style="color:var(--over)">(+${m.used-CAP}h超過)</span>`:(r.fits?`→ 割り当てると <b>${m.used+current.hours}/${CAP}h</b>`:`· 残り${r.free}h`)}</div>
       </div>
       <div class="score ${scoreCls}">
         <div class="ring" style="background:${ring}">
@@ -250,7 +250,7 @@ function render(){
         <div class="lbl">SCORE</div>
       </div>
       <div class="assign">
-        <button ${r.fits?'':'disabled'} onclick="doAssign('${m.name}',${r.fits})">${r.fits?'振る':'不可'}</button>
+        <button ${r.fits?'':'disabled'} onclick="doAssign('${m.name}',${r.fits})">${r.fits?'割り当て':'不可'}</button>
       </div>`;
     wrap.appendChild(el);
   });

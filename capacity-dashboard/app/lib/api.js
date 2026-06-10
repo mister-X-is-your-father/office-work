@@ -63,8 +63,13 @@ export async function getTimes(taskId) { return req(`/tasks/${taskId}/times`); }
 
 // 日別の予定（フェーズ2: task_time_plans）
 export async function getPlans(taskId) { return req(`/tasks/${taskId}/plans`); }
-export async function logPlan(taskId, seconds, planDateISO, note = "") {
-  return req(`/tasks/${taskId}/plans`, { method: "PUT", body: { seconds, plan_date: planDateISO + "T00:00:00Z", note } });
+export async function logPlan(taskId, seconds, planDateISO, note = "", userId = null) {
+  const body = { seconds, plan_date: planDateISO + "T00:00:00Z", note };
+  if (userId) body.user_id = userId;
+  return req(`/tasks/${taskId}/plans`, { method: "PUT", body });
+}
+export async function deletePlan(taskId, planId) {
+  return req(`/tasks/${taskId}/plans/${planId}`, { method: "DELETE" });
 }
 
 // 定期タスク/会議(RRULE)＋祝日＋個人休暇（フェーズ5・グローバルCRUD）

@@ -133,8 +133,8 @@
   <div class="composer">
     <div class="composer-inner">
       <div class="chips" id="chips">
-        <button class="qchip" data-q="weekly">今週ヤバいのは？</button>
-        <button class="qchip" data-q="sato">佐藤の今日は？</button>
+        <button class="qchip" data-q="weekly">今週の要注意は？</button>
+        <button class="qchip" data-q="sato">佐藤の本日は？</button>
         <button class="qchip" data-q="pj">このPJどうなってる？</button>
         <button class="qchip" data-q="login">ログイン機能どうなってる？</button>
       </div>
@@ -150,20 +150,20 @@ const av = (t,c)=>`<span class="avatar" style="background:${c}">${t}</span>`;
 
 const ANSWERS = {
   weekly: {
-    q:'今週ヤバいのは？',
+    q:'今週の要注意は？',
     a:`<p><strong>2点</strong>に注意が必要です。</p>
        <p>① <strong>認証フロー実装</strong>が<strong>外部決済API待ちで3日停滞</strong>中。このままだと <span class="hl-red">M2（実装完了6/6）と結合テストが遅延</span>し、リリース全体に波及します。</p>
-       <p>② いま<strong>最優先</strong>は <span class="hl-red">ログイン障害対応</span>（本番障害・森田・今日中）。こちらは本番影響なので即対応です。</p>`,
+       <p>② いま<strong>最優先</strong>は <span class="hl-red">ログイン障害対応</span>（本番障害・森田・本日中）。こちらは本番影響なので即対応です。</p>`,
     cards:[
       `<a class="ecard" href="51-task-detail.html"><div class="ec-k">⚑ 根拠タスク</div><div class="ec-v">認証フロー実装</div><div class="ec-meta"><span class="chip st-blocked">⛔ 3日停滞</span> ${av('佐','var(--c-sato)')} 佐藤 / 6/6</div></a>`,
-      `<a class="ecard" href="#"><div class="ec-k">⚑ 根拠タスク</div><div class="ec-v">ログイン障害対応</div><div class="ec-meta"><span class="chip pri">最優先</span> ${av('森','var(--c-morita)')} 森田 / 今日中</div></a>`
+      `<a class="ecard" href="#"><div class="ec-k">⚑ 根拠タスク</div><div class="ec-v">ログイン障害対応</div><div class="ec-meta"><span class="chip pri">最優先</span> ${av('森','var(--c-morita)')} 森田 / 本日中</div></a>`
     ],
     tiles:[ ['58%','PJ進捗'], ['+3日','遅延リスク'], ['1','ブロッカー'], ['6/16','着地予測'] ],
     src:'タスク #138, ログイン障害対応, マイルストーンM2'
   },
   sato:{
-    q:'佐藤の今日は？',
-    a:`<p>佐藤さん（Backend）の担当は <strong class="num">2/5</strong> 完了。メインの<strong>認証フロー実装がブロック中</strong>（外部API待ち）なので、<strong>今日は手が空き気味</strong>です。</p>
+    q:'佐藤の本日は？',
+    a:`<p>佐藤さん（Backend）の担当は <strong class="num">2/5</strong> 完了。メインの<strong>認証フロー実装がブロック中</strong>（外部API待ち）なので、<strong>本日は手が空き気味</strong>です。</p>
        <p>提案: <strong>空き時間に結合テスト準備を前倒し</strong>しておくと、API復旧後すぐM2に入れて遅延を吸収できます。</p>`,
     cards:[
       `<a class="ecard" href="51-task-detail.html"><div class="ec-k">⚑ ブロック中</div><div class="ec-v">認証フロー実装</div><div class="ec-meta"><span class="chip st-blocked">⛔ Blocked</span> 残3h / 6/6</div></a>`,
@@ -186,7 +186,7 @@ const ANSWERS = {
   login:{
     q:'ログイン機能どうなってる？',
     a:`<p><strong>ログイン機能</strong>は機能実装自体が <strong class="num">60%</strong> 進行中です。</p>
-       <p>ただし現在は <span class="hl-red">本番のログイン障害対応が最優先</span>で動いており（森田・今日中）、新規実装より<strong>障害収束が先</strong>という状況です。実装側の認証フローは外部API待ちでブロック中。</p>`,
+       <p>ただし現在は <span class="hl-red">本番のログイン障害対応が最優先</span>で動いており（森田・本日中）、新規実装より<strong>障害収束が先</strong>という状況です。実装側の認証フローは外部API待ちでブロック中。</p>`,
     cards:[
       `<a class="ecard" href="#"><div class="ec-k">◇ PJ要素</div><div class="ec-v">ログイン機能</div><div class="ec-meta">機能実装 <span class="num">60%</span></div></a>`,
       `<a class="ecard" href="#"><div class="ec-k">⚑ 最優先で進行中</div><div class="ec-v">ログイン障害対応</div><div class="ec-meta"><span class="chip pri">最優先</span> ${av('森','var(--c-morita)')} 森田</div></a>`

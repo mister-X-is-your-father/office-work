@@ -100,7 +100,7 @@
     <h1>デイリースタンドアップ</h1>
     <span class="date nums">2026/6/4(木) 朝会</span>
   </div>
-  <div class="sub">メンバーごとに 昨日やったこと / 今日やること / ブロッカー を確認</div>
+  <div class="sub">メンバーごとに 昨日やったこと / 本日やること / ブロッカー を確認</div>
   <div class="note">※ モック（サンプルデータ）。本番は TaskStation API から自動算出。</div>
   <div class="legend">
     <span><span class="d" style="background:var(--done)"></span>Done</span>
@@ -122,8 +122,8 @@ const MEMBERS = {
 const PJ = {'Backend':'var(--pj-backend)','Frontend':'var(--pj-frontend)','QA':'var(--pj-qa)','共通':'var(--pj-common)'};
 const STATECOL = {Todo:'var(--todo)', Doing:'var(--doing)', Blocked:'var(--blocked)', Done:'var(--done)'};
 
-// 朝会の3区分: 昨日やったこと=Done / 今日やること=Doing+Todo / ブロッカー=Blocked
-// 今日=6/4
+// 朝会の3区分: 昨日やったこと=Done / 本日やること=Doing+Todo / ブロッカー=Blocked
+// 本日=6/4
 const tasks = [
   {n:'設計ドキュメント', who:'鈴木', pj:'共通', st:'Done', pct:100, due:'5/27', est:2},
   {n:'API設計', who:'森田', pj:'Backend', st:'Done', pct:100, due:null, est:4},
@@ -150,7 +150,7 @@ function dueCls(due){
 function dueTxt(t){
   if(!t.due) return '';
   const c=dueCls(t.due);
-  return `締切 ${t.due}${c==='due-today'?'（今日）':c==='due-over'?'（超過）':''}`;
+  return `締切 ${t.due}${c==='due-today'?'（本日）':c==='due-over'?'（超過）':''}`;
 }
 function pjTag(t){ return `<span class="pj" style="background:${PJ[t.pj]}">${t.pj}</span>`; }
 
@@ -197,7 +197,7 @@ function memberHtml(name){
       <span><span class="m-name">${name}</span> <span class="m-role">${m.role}</span></span>
       <span class="m-stat">
         <span class="chip nums">Done ${done.length}</span>
-        <span class="chip nums">今日 ${today.length}</span>
+        <span class="chip nums">本日 ${today.length}</span>
         ${blockers.length?`<span class="chip warn nums">ブロッカー ${blockers.length}</span>`:''}
       </span>
     </div>
@@ -207,7 +207,7 @@ function memberHtml(name){
         <ul class="items">${done.map(doneItem).join('') || '<li class="empty">— なし</li>'}</ul>
       </div>
       <div class="col">
-        <div class="col-h"><span class="d" style="background:var(--doing)"></span>今日やること</div>
+        <div class="col-h"><span class="d" style="background:var(--doing)"></span>本日やること</div>
         <ul class="items">${today.map(todayItem).join('') || '<li class="empty">— なし</li>'}</ul>
       </div>
       <div class="col blocker">

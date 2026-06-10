@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>振れる枠バッジ — キャパダッシュボード</title>
+<title>割り当てられる枠バッジ — キャパダッシュボード</title>
 <style>
   :root{
     --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
@@ -111,17 +111,17 @@
 <body>
 <div class="wrap">
   <header class="head">
-    <h1>振れる枠</h1>
+    <h1>割り当てられる枠</h1>
     <div class="daynav">
       <button aria-label="前の日">‹</button>
       <span class="today tnum">6/4(木)</span>
-      <span class="badge">今日</span>
+      <span class="badge">本日</span>
       <button aria-label="次の日">›</button>
     </div>
     <p class="note">※ モック（サンプルデータ）。本番は TaskStation API から自動算出。</p>
   </header>
 
-  <p class="lede">今日 新しい仕事を振れる枠は 合計 <b>+10h</b>（2名）。バッジをタップすると内訳が開きます。</p>
+  <p class="lede">本日 新しい仕事を割り当てられる枠は 合計 <b>+10h</b>（2名）。バッジをタップすると内訳が開きます。</p>
 
   <!-- assignable pills -->
   <div class="pills">
@@ -143,7 +143,7 @@
   <!-- detail panels (each placed after pills row so it spans full width) -->
   <div class="detail" id="d-suzuki">
     <div class="inner">
-      <div class="dtitle"><span class="mini" style="background:#b657d6;">鈴</span>鈴木 の今日<span class="right tnum">2h 使用 / 6h 空き</span></div>
+      <div class="dtitle"><span class="mini" style="background:#b657d6;">鈴</span>鈴木 の本日<span class="right tnum">2h 使用 / 6h 空き</span></div>
       <div class="dbar">
         <div class="seg" style="width:25%;background:#8a93a0;"></div>
         <div class="freezone"></div>
@@ -151,13 +151,13 @@
       </div>
       <div class="dscale tnum"><span>0h</span><span>4h</span><span>容量 8h</span></div>
       <div class="drow"><span class="pdot" style="background:#8a93a0;"></span><span class="tn">設計ドキュメント <span class="pj">共通</span></span><span class="th tnum">2h</span></div>
-      <div class="drow freerow"><span class="pdot"></span><span class="tn">振れる空き</span><span class="th tnum">+6h</span></div>
+      <div class="drow freerow"><span class="pdot"></span><span class="tn">空き工数</span><span class="th tnum">+6h</span></div>
     </div>
   </div>
 
   <div class="detail" id="d-tanaka">
     <div class="inner">
-      <div class="dtitle"><span class="mini" style="background:#3a86ff;">田</span>田中 の今日<span class="right tnum">4h 使用 / 4h 空き</span></div>
+      <div class="dtitle"><span class="mini" style="background:#3a86ff;">田</span>田中 の本日<span class="right tnum">4h 使用 / 4h 空き</span></div>
       <div class="dbar">
         <div class="seg" style="width:50%;background:#2fa66b;"></div>
         <div class="freezone"></div>
@@ -165,7 +165,7 @@
       </div>
       <div class="dscale tnum"><span>0h</span><span>4h</span><span>容量 8h</span></div>
       <div class="drow"><span class="pdot" style="background:#2fa66b;"></span><span class="tn">ダッシュ画面実装 <span class="pj">Frontend</span></span><span class="th tnum">4h</span></div>
-      <div class="drow freerow"><span class="pdot"></span><span class="tn">振れる空き</span><span class="th tnum">+4h</span></div>
+      <div class="drow freerow"><span class="pdot"></span><span class="tn">空き工数</span><span class="th tnum">+4h</span></div>
     </div>
   </div>
 
@@ -181,7 +181,7 @@
 
   <div class="detail" id="d-sato">
     <div class="inner">
-      <div class="dtitle"><span class="mini" style="background:#2fa66b;">佐</span>佐藤 の今日<span class="right tnum">8h 使用 / 0h 空き</span></div>
+      <div class="dtitle"><span class="mini" style="background:#2fa66b;">佐</span>佐藤 の本日<span class="right tnum">8h 使用 / 0h 空き</span></div>
       <div class="dbar">
         <div class="seg" style="width:62.5%;background:#3a86ff;"></div>
         <div class="seg" style="width:37.5%;background:#b657d6;"></div>
@@ -195,7 +195,7 @@
 
   <!-- warning -->
   <div class="warnsec">
-    <h2>⚠ 超過 — 振れない / 要調整</h2>
+    <h2>⚠ 超過 — 割り当てられない / 要調整</h2>
     <button class="warntag" aria-expanded="false" data-target="d-morita">
       <span class="ava" style="background:#e5772d;">森</span>
       <span class="info"><span class="wname">森田</span><span class="wmeta tnum">割当 10h / 8h ・タスク3件</span></span>
@@ -208,7 +208,7 @@
 
     <div class="detail" id="d-morita">
       <div class="inner">
-        <div class="dtitle"><span class="mini" style="background:#e5772d;">森</span>森田 の今日<span class="right tnum" style="color:var(--over);">10h 使用 / 2h 超過</span></div>
+        <div class="dtitle"><span class="mini" style="background:#e5772d;">森</span>森田 の本日<span class="right tnum" style="color:var(--over);">10h 使用 / 2h 超過</span></div>
         <div class="dbar">
           <div class="seg" style="width:40%;background:#3a86ff;"></div>
           <div class="seg" style="width:30%;background:#3a86ff;opacity:.78;"></div>

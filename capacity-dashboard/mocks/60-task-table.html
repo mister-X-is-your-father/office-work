@@ -239,7 +239,7 @@ function visible(){
 function rowHtml(t){
   const mem = MEMBERS[t.who];
   const dc = dueClass(t.due);
-  const dueTxt = t.due ? `${t.due}${dc==='today'?'（今日）':dc==='over'?'（超過）':''}` : '—';
+  const dueTxt = t.due ? `${t.due}${dc==='today'?'（本日）':dc==='over'?'（超過）':''}` : '—';
   return `
   <tr data-id="${t._id}" class="${t._sel?'sel':''}">
     <td class="c-check"><input type="checkbox" class="rowchk" ${t._sel?'checked':''}></td>

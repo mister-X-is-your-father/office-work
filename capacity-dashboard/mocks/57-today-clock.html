@@ -3,13 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>今日の空き容量さがし — 円時計ビュー</title>
+<title>本日の稼働予定 — 円時計ビュー</title>
 <style>
   :root{
     --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee;
     --track:#eef1f5; --fill:#3a86ff; --over:#e5484d; --free:#2fa66b; --full:#8a93a0;
     --caplinecol:#9aa3af;
-    --p-backend:#3a86ff; --p-frontend:#2fa66b; --p-qa:#b657d6; --p-common:#8a93a0;
+    /* priority palette: 高いほど暖色（起点12時側） */
+    --p4:#e5484d; --p3:#f5872e; --p2:#3a86ff; --p1:#8a93a0;
     --font:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
   }
   *{box-sizing:border-box;}
@@ -42,17 +43,18 @@
   /* ---- team summary strip ---- */
   .teamstrip{display:flex; flex-wrap:wrap; gap:14px; margin-bottom:26px;}
   .kpi{background:var(--card); border:1px solid var(--line); border-radius:14px;
-    padding:14px 18px; box-shadow:0 1px 2px rgba(20,30,50,.04); flex:1 1 180px;}
+    padding:14px 18px; box-shadow:0 1px 2px rgba(20,30,50,.04); flex:1 1 200px;}
   .kpi .lbl{font-size:11.5px; color:var(--muted); margin-bottom:3px;}
   .kpi .val{font-size:24px; font-weight:700; letter-spacing:.01em;}
-  .kpi .val small{font-size:13px; color:var(--muted); font-weight:500;}
-  .kpi.free .val{color:var(--free);}
+  .kpi .val small{font-size:13px; color:var(--muted); font-weight:600; margin-left:3px;}
+  .kpi .ksub{font-size:10.5px; color:var(--muted); margin-top:6px; min-height:13px;}
   .kpi.over .val{color:var(--over);}
+  .kpi.over.zero .val{color:var(--free);}
   .teambar{height:8px; border-radius:6px; background:var(--track); overflow:hidden; margin-top:9px; display:flex;}
   .teambar i{display:block; height:100%;}
 
   /* ---- grid of clocks ---- */
-  .clockgrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(248px,1fr)); gap:18px;}
+  .clockgrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(252px,1fr)); gap:18px;}
   .clockcard{background:var(--card); border:1px solid var(--line); border-radius:16px;
     padding:18px 16px 16px; box-shadow:0 1px 3px rgba(20,30,50,.05); position:relative;}
   .clockcard.is-over{border-color:#f3c9cb;}
@@ -69,14 +71,32 @@
   .center-num{font-size:23px; font-weight:700;}
   .center-lbl{font-size:10.5px;}
 
-  /* task legend under each clock */
-  .tasklist{margin-top:6px; border-top:1px solid var(--line); padding-top:9px;}
-  .trow{display:flex; align-items:center; gap:8px; font-size:12px; padding:2.5px 0;}
-  .dot{width:9px; height:9px; border-radius:3px; flex:none;}
+  /* task list under each clock — grouped by category, collapsible */
+  .tasklist{margin-top:8px; border-top:1px solid var(--line); padding-top:8px;}
+  details.tsec{margin-top:7px;}
+  details.tsec:first-of-type{margin-top:1px;}
+  details.tsec>summary{list-style:none; cursor:pointer; display:flex; align-items:center; gap:7px;
+    padding:4px 9px; background:#eef1f5; border-radius:7px; font-size:10.5px; font-weight:700;
+    color:#54606e; letter-spacing:.02em; user-select:none;}
+  details.tsec>summary::-webkit-details-marker{display:none;}
+  details.tsec>summary:hover{background:#e6eaf0;}
+  .tsec .chev{font-size:8px; color:var(--muted); transition:transform .15s; transform:rotate(90deg);}
+  details.tsec[open] .chev{transform:rotate(180deg);}
+  .tsec .kic{width:11px; height:11px; border-radius:3px; flex:none; background:var(--full);}
+  .tsec .kic.meeting{background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.85) 0 1.4px,transparent 1.4px 3px);}
+  .tsec .kic.routine{background-image:radial-gradient(rgba(255,255,255,.9) .9px,transparent 1.1px); background-size:3px 3px;}
+  .tsec .kic.adhoc{box-shadow:inset 0 0 0 1.4px #fff;}
+  .tsec .cnt{color:var(--muted); font-weight:600;}
+  .tsec .n{margin-left:auto; font-weight:700; color:#54606e; font-variant-numeric:tabular-nums;}
+  .trow{display:flex; align-items:center; gap:8px; font-size:12.5px; padding:3px 4px 3px 12px;}
+  .dot{width:10px; height:10px; border-radius:3px; flex:none;}
+  .dot.meeting{background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.85) 0 1.4px,transparent 1.4px 3px);}
+  .dot.routine{background-image:radial-gradient(rgba(255,255,255,.9) .9px,transparent 1.1px); background-size:3px 3px;}
+  .dot.adhoc{box-shadow:inset 0 0 0 1.4px #fff;}
   .trow .tn{color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
   .trow .th{margin-left:auto; color:var(--muted); font-variant-numeric:tabular-nums;}
-  .trow.free .tn{color:var(--free); font-weight:600;}
-  .trow.over .tn{color:var(--over); font-weight:600;}
+  .trow.free{padding:6px 4px 0 4px; font-weight:600;}
+  .trow.free .tn{color:var(--free);}
 
   .cta{margin-top:11px; width:100%; border:1px solid var(--line); background:#fff; color:var(--fill);
     font-weight:600; font-size:12.5px; border-radius:9px; padding:7px; cursor:pointer; font-family:inherit;}
@@ -84,25 +104,42 @@
   .cta.dim{color:var(--muted); cursor:default;}
   .cta.dim:hover{background:#fff; border-color:var(--line);}
 
-  /* project legend footer */
-  .plegend{display:flex; flex-wrap:wrap; gap:16px; margin-top:28px; padding-top:16px;
-    border-top:1px solid var(--line); font-size:12px; color:var(--muted);}
-  .plegend span{display:inline-flex; align-items:center; gap:6px;}
-  .plegend .sw{width:11px; height:11px; border-radius:3px;}
+  /* legend footer */
+  .plegend{display:flex; flex-wrap:wrap; gap:10px 16px; margin-top:28px; padding-top:16px;
+    border-top:1px solid var(--line); font-size:12px; color:var(--muted); align-items:center;}
+  .plegend .grp{display:inline-flex; align-items:center; gap:10px; flex-wrap:wrap;}
+  .plegend .glbl{font-weight:600; color:var(--ink);}
+  .plegend span.it{display:inline-flex; align-items:center; gap:6px;}
+  .plegend .sw{width:13px; height:13px; border-radius:3px; display:inline-block; background:var(--full);}
+  .plegend .sw.hatch{background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.85) 0 1.6px,transparent 1.6px 3.4px);}
+  .plegend .sw.dots{background-image:radial-gradient(rgba(255,255,255,.85) 1px,transparent 1.3px); background-size:4px 4px;}
+  .plegend .sw.adhoc{box-shadow:inset 0 0 0 1.6px #fff;}
+  .plegend .sep{width:1px; height:14px; background:var(--line);}
 </style>
 </head>
 <body>
+
+<!-- global SVG defs: 会議=斜線ストライプ / 定例=ドット（どちらもアーク色に白で重ねる・リングは連続） -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <pattern id="mtgHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+    <line x1="3" y1="0" x2="3" y2="6" stroke="#ffffff" stroke-width="2.4" stroke-opacity="0.55"/>
+  </pattern>
+  <pattern id="routineDots" width="5" height="5" patternUnits="userSpaceOnUse">
+    <circle cx="2.5" cy="2.5" r="1.15" fill="#ffffff" fill-opacity="0.62"/>
+  </pattern>
+</defs></svg>
+
 <div class="wrap">
 
   <header class="top">
     <div class="title">
-      <h1>今日の空き容量さがし</h1>
-      <p class="sub">円時計ビュー — 誰にあと何時間振れる？ 空き多い順</p>
+      <h1>本日の稼働予定</h1>
+      <p class="sub">円時計ビュー — 並び=会議→定例→優先度（12時起点）／色=優先度／模様=種別／外周=超過</p>
     </div>
     <div class="daynav" role="group" aria-label="日送り">
       <button title="前日">‹</button>
       <span class="cur tnum">6/4(木)</span>
-      <span class="today-pill">今日</span>
+      <span class="today-pill">本日</span>
       <button title="翌日">›</button>
     </div>
   </header>
@@ -110,190 +147,213 @@
   <div class="note">※ モック（サンプルデータ）。本番は TaskStation API から自動算出。容量は一律 8h/日。</div>
 
   <!-- team summary -->
-  <div class="teamstrip">
-    <div class="kpi">
-      <div class="lbl">チーム稼働</div>
-      <div class="val tnum">24<small> / 32h</small></div>
-      <div class="teambar">
-        <i style="width:75%;background:var(--fill);"></i>
-        <i style="width:25%;background:var(--track);"></i>
-      </div>
-    </div>
-    <div class="kpi free">
-      <div class="lbl">空き容量（合計）</div>
-      <div class="val tnum">8h</div>
-      <div class="teambar"><i style="width:100%;background:var(--free);opacity:.85;"></i></div>
-    </div>
-    <div class="kpi over">
-      <div class="lbl">超過（合計）</div>
-      <div class="val tnum">+2h</div>
-      <div class="teambar"><i style="width:100%;background:var(--over);opacity:.85;"></i></div>
-    </div>
-    <div class="kpi">
-      <div class="lbl">充足率</div>
-      <div class="val tnum">75<small>%</small></div>
-      <div class="teambar"><i style="width:75%;background:var(--full);"></i></div>
-    </div>
-  </div>
+  <div class="teamstrip" id="strip"></div>
 
   <!-- clocks (sorted: most free first) -->
   <div class="clockgrid" id="grid"></div>
 
-  <!-- project legend -->
+  <!-- legend -->
   <div class="plegend">
-    <span><i class="sw" style="background:var(--p-backend)"></i>Backend</span>
-    <span><i class="sw" style="background:var(--p-frontend)"></i>Frontend</span>
-    <span><i class="sw" style="background:var(--p-qa)"></i>QA</span>
-    <span><i class="sw" style="background:var(--p-common)"></i>共通</span>
-    <span style="margin-left:auto"><i class="sw" style="background:var(--free);opacity:.25"></i>薄いアーク = 空き容量</span>
-    <span><i class="sw" style="background:var(--over)"></i>外側リング = 超過</span>
+    <span class="grp"><span class="glbl">優先度</span>
+      <span class="it"><i class="sw" style="background:var(--p4)"></i>最優先</span>
+      <span class="it"><i class="sw" style="background:var(--p3)"></i>高</span>
+      <span class="it"><i class="sw" style="background:var(--p2)"></i>中</span>
+      <span class="it"><i class="sw" style="background:var(--p1)"></i>低</span>
+    </span>
+    <span class="sep"></span>
+    <span class="grp"><span class="glbl">種別</span>
+      <span class="it"><i class="sw"></i>タスク</span>
+      <span class="it"><i class="sw hatch"></i>会議</span>
+      <span class="it"><i class="sw dots"></i>定例</span>
+      <span class="it"><i class="sw adhoc"></i>当日追加</span>
+    </span>
+    <span class="sep"></span>
+    <span class="grp">
+      <span class="it"><i class="sw" style="background:#e7ebf0"></i>空き工数</span>
+      <span class="it"><i class="sw" style="background:linear-gradient(90deg,var(--p4),var(--p2))"></i>外周=超過（そのタスク色）</span>
+    </span>
   </div>
 
 </div>
 
 <script>
-/* ---------- sample data (task-level, exact) ---------- */
+/* ---------- config ---------- */
 const CAP = 8;
-const PCOL = {Backend:'#3a86ff', Frontend:'#2fa66b', QA:'#b657d6', '共通':'#8a93a0'};
+// 優先度: 4=最優先 / 3=高 / 2=中 / 1=低
+const PRIO = { 4:{c:'#e5484d',n:'最優先'}, 3:{c:'#f5872e',n:'高'}, 2:{c:'#3a86ff',n:'中'}, 1:{c:'#8a93a0',n:'低'} };
+// カテゴリ: リストのセクション分け＋クロックの模様。pat: solid/meeting(斜線)/routine(ドット)
+const CATS = [
+  {key:'meeting',  label:'会議',       pat:'meeting'},
+  {key:'recurring',label:'定例',       pat:'routine'},
+  {key:'planned',  label:'予定タスク', pat:'task'},
+  {key:'adhoc',    label:'当日追加',   pat:'adhoc'},
+];
+const CRANK={meeting:0, recurring:1, planned:2, adhoc:2}; // クロック並び: 会議→定例→タスク
+const CATMAP = Object.fromEntries(CATS.map((c,i)=>[c.key,{...c,ord:i}]));
+const FIXED = new Set(['meeting','recurring']); // 固定枠（会議・定例＝実作業以外）
+
+/* ---------- sample data (task-level) ---------- */
 const members = [
   { name:'森田', color:'#e5772d', tasks:[
-    {t:'API設計', h:4, p:'Backend'},
-    {t:'DBマイグレ', h:3, p:'Backend'},
-    {t:'PRレビュー', h:3, p:'共通'},
+    {t:'デイリーMTG',  h:0.5, prio:2, cat:'meeting'},
+    {t:'PRレビュー',   h:1,   prio:2, cat:'recurring'},
+    {t:'API設計',      h:3,   prio:4, cat:'planned'},
+    {t:'DBマイグレ',   h:3,   prio:3, cat:'planned'},
   ]},
   { name:'田中', color:'#3a86ff', tasks:[
-    {t:'ダッシュ画面実装', h:4, p:'Frontend'},
+    {t:'デイリーMTG',     h:0.5, prio:2, cat:'meeting'},
+    {t:'ダッシュ画面実装', h:4,   prio:3, cat:'planned'},
+    {t:'不具合修正（緊急）', h:1, prio:4, cat:'adhoc'},
   ]},
   { name:'佐藤', color:'#2fa66b', tasks:[
-    {t:'認証フロー実装', h:5, p:'Backend'},
-    {t:'結合テスト', h:3, p:'QA'},
+    {t:'設計レビュー会', h:1, prio:3, cat:'meeting'},
+    {t:'週次レポート',   h:1, prio:2, cat:'recurring'},
+    {t:'認証フロー実装', h:5, prio:4, cat:'planned'},
+    {t:'結合テスト',     h:3, prio:2, cat:'planned'},
   ]},
   { name:'鈴木', color:'#b657d6', tasks:[
-    {t:'設計ドキュメント', h:2, p:'共通'},
+    {t:'日次報告',         h:1, prio:1, cat:'recurring'},
+    {t:'設計ドキュメント', h:2, prio:2, cat:'planned'},
   ]},
 ];
 
 /* derived */
 members.forEach(m=>{
+  m.tasks.forEach(t=>{ t.pat = CATMAP[t.cat].pat; });
+  // クロック描画順: 会議→定例→タスク(優先度高→低)。12時起点から。
+  m.draw = [...m.tasks].sort((a,b)=> (CRANK[a.cat]-CRANK[b.cat]) || (b.prio - a.prio));
   m.used = m.tasks.reduce((s,t)=>s+t.h,0);
   m.free = Math.max(0, CAP - m.used);
   m.over = Math.max(0, m.used - CAP);
 });
-/* sort: most free first, then least over */
 members.sort((a,b)=> (b.free - a.free) || (a.over - b.over));
 
-/* ---------- geometry ---------- */
-const R=84, CX=100, CY=100, STROKE=15;
-const C = 2*Math.PI*R;
-// 12 o'clock start, clockwise
-function polar(frac){ // frac 0..1 -> point on circle
-  const ang = -Math.PI/2 + frac*2*Math.PI;
-  return [CX + R*Math.cos(ang), CY + R*Math.sin(ang)];
-}
-function arc(r, fromFrac, toFrac){
-  const a0=-Math.PI/2+fromFrac*2*Math.PI, a1=-Math.PI/2+toFrac*2*Math.PI;
+/* ---------- clock geometry ---------- */
+const R=80, CX=100, CY=100, STROKE=15;
+const OR=95, OVERW=7;
+function arc(r, f0, f1){
+  const a0=-Math.PI/2+f0*2*Math.PI, a1=-Math.PI/2+f1*2*Math.PI;
   const x0=CX+r*Math.cos(a0), y0=CY+r*Math.sin(a0);
   const x1=CX+r*Math.cos(a1), y1=CY+r*Math.sin(a1);
-  const large = (toFrac-fromFrac)>0.5 ? 1 : 0;
+  const large=(f1-f0)>0.5?1:0;
   return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
 }
-
-function clockSVG(m){
-  const segs=[];
-  // background empty track (full ring)
-  segs.push(`<circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="var(--track)" stroke-width="${STROKE}"/>`);
-
-  // hour ticks (8h work-day quarters)
-  let ticks='';
-  for(let i=0;i<8;i++){
-    const f=i/8;
-    const [ox,oy]=polar(f); // outer
-    const ir=R-STROKE/2-3, orr=R+STROKE/2+3;
-    const a=-Math.PI/2+f*2*Math.PI;
-    const x1=CX+ir*Math.cos(a), y1=CY+ir*Math.sin(a);
-    const x2=CX+orr*Math.cos(a), y2=CY+orr*Math.sin(a);
-    ticks+=`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${i===0?'#c2c9d4':'#dde2e9'}" stroke-width="${i===0?2:1}"/>`;
+/* 1セグメント: 色=優先度。アークは常に連続（塗りっぱなし）で会議=白斜線/定例=白ドットを重ねるだけ */
+function seg(r, f0, f1, color, pat, width){
+  if(f1<=f0) return '';
+  let s = `<path d="${arc(r,f0,f1)}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linecap="butt"/>`;
+  if(pat==='meeting') s += `<path d="${arc(r,f0,f1)}" fill="none" stroke="url(#mtgHatch)" stroke-width="${width}" stroke-linecap="butt"/>`;
+  if(pat==='routine') s += `<path d="${arc(r,f0,f1)}" fill="none" stroke="url(#routineDots)" stroke-width="${width}" stroke-linecap="butt"/>`;
+  if(pat==='adhoc'){ // 当日追加: 弧の中点に白ピンマーカー
+    const a=-Math.PI/2+((f0+f1)/2)*2*Math.PI;
+    s += `<circle cx="${(CX+r*Math.cos(a)).toFixed(1)}" cy="${(CY+r*Math.sin(a)).toFixed(1)}" r="3.6" fill="#fff" stroke="${color}" stroke-width="1.8"/>`;
   }
-
-  // task arcs around the dial (each hour = 1/8 of circle)
-  let acc=0;
-  m.tasks.forEach(t=>{
-    const within = Math.min(t.h, Math.max(0, CAP-acc)); // portion within 8h cap
-    if(within>0){
-      const f0=acc/CAP, f1=(acc+within)/CAP;
-      segs.push(`<path d="${arc(R,f0,f1)}" fill="none" stroke="${PCOL[t.p]}" stroke-width="${STROKE}" stroke-linecap="butt"/>`);
-    }
+  return s;
+}
+const FREECOL='#e7ebf0';  // 空き=うっすいグレー塗り
+function clockSVG(m){
+  const out=[];
+  for(let i=0;i<8;i++){
+    const a=-Math.PI/2+(i/8)*2*Math.PI, ir=R-STROKE/2-3, orr=R+STROKE/2+3;
+    out.push(`<line x1="${(CX+ir*Math.cos(a)).toFixed(1)}" y1="${(CY+ir*Math.sin(a)).toFixed(1)}" x2="${(CX+orr*Math.cos(a)).toFixed(1)}" y2="${(CY+orr*Math.sin(a)).toFixed(1)}" stroke="${i===0?'#c2c9d4':'#dde2e9'}" stroke-width="${i===0?2:1}"/>`);
+  }
+  let acc=0, accOver=0;
+  m.draw.forEach(t=>{
+    const col=(PRIO[t.prio]||PRIO[1]).c;
+    const within=Math.min(t.h, Math.max(0, CAP-acc));
+    if(within>0) out.push(seg(R, acc/CAP, (acc+within)/CAP, col, t.pat, STROKE));
+    const over=t.h-within;
+    if(over>0){ out.push(seg(OR, accOver/CAP, Math.min(1,(accOver+over)/CAP), col, t.pat, OVERW)); accOver+=over; }
     acc+=t.h;
   });
-
-  // free arc (light green) for remaining capacity
-  if(m.free>0){
-    const f0=m.used/CAP, f1=1;
-    segs.push(`<path d="${arc(R,f0,f1)}" fill="none" stroke="var(--free)" stroke-opacity="0.22" stroke-width="${STROKE}" stroke-linecap="butt"/>`);
-    // dashed boundary marker at start of free
-    const [bx,by]=polar(m.used/CAP);
-  }
-
-  // overflow ring (outer, red) when over capacity — wraps beyond 1 turn
-  if(m.over>0){
-    const OR=R+STROKE/2+6;
-    const f1=Math.min(1, m.over/CAP);
-    segs.push(`<path d="${arc(OR,0,f1)}" fill="none" stroke="var(--over)" stroke-width="6" stroke-linecap="round"/>`);
-    // little caret at overflow tip
-    const [tx,ty]=(function(){const a=-Math.PI/2+f1*2*Math.PI;return [CX+OR*Math.cos(a),CY+OR*Math.sin(a)];})();
-  }
-
-  // capacity line (12 o'clock baseline, where ring closes)
-  const [capx,capy]=polar(0);
-  const capInner=R-STROKE/2-6, capOuter=R+STROKE/2+(m.over>0?13:6);
-  segs.push(`<line x1="${CX}" y1="${(CY-capInner).toFixed(1)}" x2="${CX}" y2="${(CY-capOuter).toFixed(1)}" stroke="var(--caplinecol)" stroke-width="2"/>`);
-
-  // center text
-  const big = m.over>0 ? `+${m.over}h` : (m.free>0 ? `${m.free}h` : '満');
-  const bigcol = m.over>0 ? 'var(--over)' : (m.free>0 ? 'var(--free)' : 'var(--full)');
-  const sub = m.over>0 ? '超過' : (m.free>0 ? '空き' : 'ちょうど');
-
+  if(m.free>0) out.push(`<path d="${arc(R, m.used/CAP, 1)}" fill="none" stroke="${FREECOL}" stroke-width="${STROKE}" stroke-linecap="butt"/>`);
+  const capInner=R-STROKE/2-6, capOuter=(m.over>0?99:R+STROKE/2+5);
+  out.push(`<line x1="${CX}" y1="${(CY-capInner).toFixed(1)}" x2="${CX}" y2="${(CY-capOuter).toFixed(1)}" stroke="var(--caplinecol)" stroke-width="2"/>`);
+  const big=m.over>0?`+${m.over}h`:(m.free>0?`${m.free}h`:'満');
+  const bigcol=m.over>0?'var(--over)':(m.free>0?'var(--free)':'var(--full)');
+  const sub=m.over>0?'超過':(m.free>0?'空き':'ちょうど');
   return `<svg class="dial" width="200" height="200" viewBox="0 0 200 200" role="img" aria-label="${m.name} ${sub} ${big}">
-    ${ticks}
-    ${segs.join('\n    ')}
+    ${out.join('\n    ')}
     <text x="${CX}" y="${CY-3}" text-anchor="middle" class="center-num" fill="${bigcol}" style="font-variant-numeric:tabular-nums">${big}</text>
     <text x="${CX}" y="${CY+14}" text-anchor="middle" class="center-lbl" fill="var(--muted)">${sub} · ${m.used}/${CAP}h</text>
   </svg>`;
 }
 
+/* ---------- card with category sections ---------- */
 function cardHTML(m){
-  const stateCls = m.over>0?'over':(m.free>0?'free':'just');
-  const stateTxt = m.over>0?`超過 +${m.over}h`:(m.free>0?`空き ${m.free}h`:'ちょうど');
-  // task rows
-  let rows = m.tasks.map(t=>`
-    <div class="trow"><i class="dot" style="background:${PCOL[t.p]}"></i>
-      <span class="tn">${t.t}</span><span class="th tnum">${t.h}h</span></div>`).join('');
-  if(m.free>0){
-    rows += `<div class="trow free"><i class="dot" style="background:var(--free);opacity:.4"></i>
-      <span class="tn">空き</span><span class="th tnum">${m.free}h</span></div>`;
+  const stateCls=m.over>0?'over':(m.free>0?'free':'just');
+  const stateTxt=m.over>0?`超過 +${m.over}h`:(m.free>0?`空き ${m.free}h`:'ちょうど');
+  // group tasks by category, in CATS order — each section collapsible (<details>)
+  let sections='';
+  for(const c of CATS){
+    const items=m.tasks.filter(t=>t.cat===c.key).sort((a,b)=>b.prio-a.prio);
+    if(!items.length) continue;
+    const sumH=items.reduce((s,t)=>s+t.h,0);
+    const cls = c.pat!=='task' ? c.pat : (c.key==='adhoc'?'adhoc':'');
+    const rows = items.map(t=>{
+      const col=(PRIO[t.prio]||PRIO[1]).c;
+      return `<div class="trow"><i class="dot ${cls}" style="background:${col}"></i><span class="tn">${t.t}</span><span class="th tnum">${t.h}h</span></div>`;
+    }).join('');
+    sections += `<details class="tsec" open>
+      <summary><span class="chev">▾</span><i class="kic ${cls}"></i>${c.label}<span class="cnt">${items.length}</span><span class="n">${sumH}h</span></summary>
+      ${rows}
+    </details>`;
   }
-  if(m.over>0){
-    rows += `<div class="trow over"><i class="dot" style="background:var(--over)"></i>
-      <span class="tn">超過分</span><span class="th tnum">+${m.over}h</span></div>`;
-  }
+  if(m.free>0) sections += `<div class="trow free"><i class="dot" style="background:var(--free);opacity:.4"></i><span class="tn">空き工数</span><span class="th tnum">${m.free}h</span></div>`;
+
   let cta;
-  if(m.free>0) cta=`<button class="cta">＋ ${m.name}に振る（あと${m.free}h）</button>`;
+  if(m.free>0) cta=`<button class="cta">＋ ${m.name}に割り当てる（あと${m.free}h）</button>`;
   else if(m.over>0) cta=`<button class="cta dim">超過中 — まず${m.over}h外す</button>`;
   else cta=`<button class="cta dim">空きなし</button>`;
 
   return `<div class="clockcard ${m.over>0?'is-over':''}">
-    <div class="ch">
-      <span class="avatar" style="background:${m.color}">${m.name[0]}</span>
-      <span class="nm">${m.name}</span>
-      <span class="badge ${stateCls}">${stateTxt}</span>
-    </div>
+    <div class="ch"><span class="avatar" style="background:${m.color}">${m.name[0]}</span><span class="nm">${m.name}</span><span class="badge ${stateCls}">${stateTxt}</span></div>
     ${clockSVG(m)}
-    <div class="tasklist">${rows}</div>
+    <div class="tasklist">${sections}</div>
     ${cta}
   </div>`;
 }
-
 document.getElementById('grid').innerHTML = members.map(cardHTML).join('');
+
+/* ---------- team KPIs（注意を要する項目に寄せる） ---------- */
+(function(){
+  const cap = members.length*CAP;
+  const usedAll = members.reduce((s,m)=>s+Math.min(m.used,CAP),0);
+  const rate = Math.round(usedAll/cap*100);
+  const overMembers = members.filter(m=>m.over>0);
+  const overH = members.reduce((s,m)=>s+m.over,0);
+  let mustN=0, mustH=0, fixedH=0, mtgH=0, rtnH=0, adhocN=0;
+  members.forEach(m=>m.tasks.forEach(t=>{
+    if(t.prio===4){ mustN++; mustH+=t.h; }
+    if(FIXED.has(t.cat)) fixedH+=t.h;
+    if(t.cat==='meeting') mtgH+=t.h;
+    if(t.cat==='recurring') rtnH+=t.h;
+    if(t.cat==='adhoc') adhocN++;
+  }));
+  const realH = usedAll - Math.min(fixedH, usedAll);
+  const strip = document.getElementById('strip');
+  strip.innerHTML = `
+    <div class="kpi">
+      <div class="lbl">チーム稼働</div>
+      <div class="val tnum">${usedAll}<small>/ ${cap}h ・ ${rate}%</small></div>
+      <div class="teambar"><i style="width:${rate}%;background:var(--fill)"></i><i style="flex:1;background:var(--track)"></i></div>
+    </div>
+    <div class="kpi over ${overH>0?'':'zero'}">
+      <div class="lbl">要再配分（超過）</div>
+      <div class="val tnum">${overH>0?'+'+overH+'h':'なし'}</div>
+      <div class="ksub">${overMembers.length?overMembers.map(m=>m.name).join('・')+' が超過 → 移し先を検討':'全員が容量内'}</div>
+    </div>
+    <div class="kpi">
+      <div class="lbl">本日の最優先</div>
+      <div class="val tnum">${mustN}<small>件 ・ ${mustH}h</small></div>
+      <div class="ksub">落とせない最優先（赤）。当日追加 ${adhocN}件</div>
+    </div>
+    <div class="kpi">
+      <div class="lbl">固定枠（会議・定例）</div>
+      <div class="val tnum">${fixedH}<small>h</small></div>
+      <div class="ksub">会議${mtgH}h・定例${rtnH}h／実作業に使えるのは ${realH}h</div>
+    </div>`;
+})();
 </script>
 </body>
 </html>

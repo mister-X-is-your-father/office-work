@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>今日のトリアージ — 三分類ボード</title>
+<title>本日のトリアージ — 三分類ボード</title>
 <style>
   :root{
     --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
@@ -102,11 +102,11 @@
 <body>
 <header>
   <div class="titlerow">
-    <h1>今日のトリアージ — 三分類ボード</h1>
+    <h1>本日のトリアージ — 三分類ボード</h1>
     <div class="daynav">
       <button aria-label="前日">‹</button>
       <span class="today tnum">6/4(木)</span>
-      <span class="badge">今日</span>
+      <span class="badge">本日</span>
       <button aria-label="翌日">›</button>
     </div>
   </div>
@@ -115,28 +115,28 @@
 
 <!-- summary -->
 <section class="summary">
-  <div class="sumcard red"><span class="lbl">🔴 今日必須</span><span class="val tnum">1<span style="font-size:13px;font-weight:600;color:var(--muted)"> 件</span></span><span class="sub tnum">合計 2h・動かせない</span></div>
-  <div class="sumcard amber"><span class="lbl">🟠 今日やるべき</span><span class="val tnum">1<span style="font-size:13px;font-weight:600;color:var(--muted)"> 件</span></span><span class="sub tnum">合計 3h・明日もギリ可</span></div>
+  <div class="sumcard red"><span class="lbl">🔴 本日必須</span><span class="val tnum">1<span style="font-size:13px;font-weight:600;color:var(--muted)"> 件</span></span><span class="sub tnum">合計 2h・動かせない</span></div>
+  <div class="sumcard amber"><span class="lbl">🟠 本日着手</span><span class="val tnum">1<span style="font-size:13px;font-weight:600;color:var(--muted)"> 件</span></span><span class="sub tnum">合計 3h・明日もギリ可</span></div>
   <div class="sumcard block"><span class="lbl">⛔ ブロック中</span><span class="val tnum">1<span style="font-size:13px;font-weight:600;color:var(--muted)"> 件</span></span><span class="sub">外部API待ち</span></div>
-  <div class="sumcard green"><span class="lbl">🟢 ずらせる</span><span class="val tnum">4<span style="font-size:13px;font-weight:600;color:var(--muted)"> 件</span></span><span class="sub tnum">合計 8h・余裕あり</span></div>
+  <div class="sumcard green"><span class="lbl">🟢 後日可</span><span class="val tnum">4<span style="font-size:13px;font-weight:600;color:var(--muted)"> 件</span></span><span class="sub tnum">合計 8h・余裕あり</span></div>
 </section>
 
 <!-- hero -->
 <div class="hero">
   <span class="flag">🔥</span>
   <div class="htxt">
-    <div class="hkick">今日絶対やるべきは これ</div>
+    <div class="hkick">本日絶対やるべきは これ</div>
     <div class="htitle">ログイン障害対応</div>
-    <div class="hmeta">本番障害・<b>期限 今日中</b>・担当 <b>森田</b>・見積 <b>2h</b>・slack=0（1分も動かせない）</div>
+    <div class="hmeta">本番障害・<b>期限 本日中</b>・担当 <b>森田</b>・見積 <b>2h</b>・slack=0（1分も動かせない）</div>
   </div>
 </div>
 
 <!-- board -->
 <section class="board">
 
-  <!-- 今日必須 -->
+  <!-- 本日必須 -->
   <div class="col red">
-    <div class="colhead"><span class="dot"></span><span class="ttl">🔴 今日必須</span><span class="cnt tnum">1件</span><span class="hrs tnum">2h</span></div>
+    <div class="colhead"><span class="dot"></span><span class="ttl">🔴 本日必須</span><span class="cnt tnum">1件</span><span class="hrs tnum">2h</span></div>
     <div class="colhint">動かせない。最優先で着手。</div>
 
     <div class="task lead">
@@ -150,17 +150,17 @@
         <span class="chip proj"><span class="pb" style="background:var(--p-backend)"></span>Backend</span>
         <span class="chip hrs">⏱ 2h</span>
       </div>
-      <div class="deadline urgent">⏰ <span class="dl">期限 今日中</span>
+      <div class="deadline urgent">⏰ <span class="dl">期限 本日中</span>
         <span class="slack">slack 0d<span class="bar"><i style="width:100%;background:var(--red)"></i></span></span>
       </div>
-      <div class="reason"><b>本番障害</b>で多数ユーザがログイン不可。今着手しないと損失が拡大。今日のすべてに優先。</div>
+      <div class="reason"><b>本番障害</b>で多数ユーザがログイン不可。今着手しないと損失が拡大。本日のすべてに優先。</div>
     </div>
   </div>
 
-  <!-- 今日やるべき -->
+  <!-- 本日着手 -->
   <div class="col amber">
-    <div class="colhead"><span class="dot"></span><span class="ttl">🟠 今日やるべき</span><span class="cnt tnum">1件</span><span class="hrs tnum">3h</span></div>
-    <div class="colhint">明日もギリ可だが、今日進めると安全。</div>
+    <div class="colhead"><span class="dot"></span><span class="ttl">🟠 本日着手</span><span class="cnt tnum">1件</span><span class="hrs tnum">3h</span></div>
+    <div class="colhint">明日もギリ可だが、本日進めると安全。</div>
 
     <div class="task">
       <span class="topbar"></span>
@@ -176,13 +176,13 @@
       <div class="deadline soon">📅 <span class="dl tnum">締切 6/5</span>
         <span class="slack" style="color:#b87410">slack 1d<span class="bar"><i style="width:28%;background:var(--amber)"></i></span></span>
       </div>
-      <div class="reason">締切は<b>明日 6/5</b>。今日障害対応の後に着手できれば理想。最悪 明日午前でも間に合う。</div>
+      <div class="reason">締切は<b>明日 6/5</b>。本日障害対応の後に着手できれば理想。最悪 明日午前でも間に合う。</div>
     </div>
   </div>
 
-  <!-- ずらせる + ブロック -->
+  <!-- 後日可 + ブロック -->
   <div class="col green">
-    <div class="colhead"><span class="dot"></span><span class="ttl">🟢 ずらせる</span><span class="cnt tnum">4件</span><span class="hrs tnum">8h</span></div>
+    <div class="colhead"><span class="dot"></span><span class="ttl">🟢 後日可</span><span class="cnt tnum">4件</span><span class="hrs tnum">8h</span></div>
     <div class="colhint">余裕あり。手が空いたら / 後日でOK。</div>
 
     <div class="task">
@@ -210,7 +210,7 @@
       <div class="deadline calm">📅 <span class="dl tnum">締切 6/9</span>
         <span class="slack" style="color:var(--green)">slack 5d<span class="bar"><i style="width:90%;background:var(--green)"></i></span></span>
       </div>
-      <div class="reason">締切 6/9 で余裕。今日詰める必要なし。</div>
+      <div class="reason">締切 6/9 で余裕。本日詰める必要なし。</div>
     </div>
 
     <div class="task">
@@ -242,7 +242,7 @@
     </div>
 
     <!-- block sub-section -->
-    <div class="colhead" style="margin-top:8px"><span class="dot" style="background:var(--block)"></span><span class="ttl" style="font-size:13px">⛔ ブロック中</span><span class="cnt tnum">1件</span><span class="hrs">今日は不可</span></div>
+    <div class="colhead" style="margin-top:8px"><span class="dot" style="background:var(--block)"></span><span class="ttl" style="font-size:13px">⛔ ブロック中</span><span class="cnt tnum">1件</span><span class="hrs">本日は不可</span></div>
     <div class="colhint">依存解消まで進められない。待ち。</div>
 
     <div class="task blocked">
@@ -256,7 +256,7 @@
       <div class="deadline soon">📅 <span class="dl tnum">締切 6/6</span>
         <span class="slack" style="color:var(--block)">外部API待ち</span>
       </div>
-      <div class="reason">⛔ <b>外部API待ち</b>。今日は進められない。優先度は高なので、依存が解けたら即着手の構え。</div>
+      <div class="reason">⛔ <b>外部API待ち</b>。本日は進められない。優先度は高なので、依存が解けたら即着手の構え。</div>
     </div>
   </div>
 

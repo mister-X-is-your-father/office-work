@@ -4,8 +4,8 @@ import * as store from "./lib/store.js";
 
 const ROUTES = {
   home:     { label: "ホーム",        grp: "総合",   mod: "./views/home.js" },
-  today:    { label: "空き探し",      grp: "今日",   mod: "./views/today.js" },
-  triage:   { label: "トリアージ",    grp: "今日",   mod: "./views/triage.js" },
+  today:    { label: "稼働予定",      grp: "本日",   mod: "./views/today.js" },
+  triage:   { label: "トリアージ",    grp: "本日",   mod: "./views/triage.js" },
   week:     { label: "週プラン",      grp: "計画",   mod: "./views/week.js" },
   planner:  { label: "週プランナー",  grp: "計画",   mod: "./views/planner.js" },
   freefinder:{ label: "月次空き",     grp: "計画",   mod: "./views/freefinder.js" },

@@ -205,7 +205,7 @@
       <span class="li"><span class="sw" style="background:var(--ok)"></span>完了</span>
       <span class="li"><span class="sw" style="background:var(--danger)"></span>遅延リスク</span>
       <span class="li"><span class="cap-badge ok" style="position:static">空き</span> / <span class="cap-badge warn" style="position:static">余裕少</span> / <span class="cap-badge over" style="position:static">超過</span> 負荷</span>
-      <span class="li"><span style="border-left:2px dashed var(--danger);height:14px;display:inline-block;"></span> 今日(6/4)</span>
+      <span class="li"><span style="border-left:2px dashed var(--danger);height:14px;display:inline-block;"></span> 本日(6/4)</span>
     </div>
   </div>
 </div>
@@ -489,7 +489,7 @@ function render(){
   tl.className="today-line";
   tl.style.left=(LABEL_W + (TODAY-DAY0)*COL_W + COL_W/2)+"px";
   tl.style.height=rowOffset+"px";
-  tl.innerHTML=`<span class="tl-cap">今日 6/4</span>`;
+  tl.innerHTML=`<span class="tl-cap">本日 6/4</span>`;
   rowsEl.appendChild(tl);
 }
 

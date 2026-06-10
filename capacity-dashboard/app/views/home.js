@@ -17,21 +17,21 @@ export async function render(root) {
 
   const alerts = [];
   over.forEach(r => alerts.push([C.over, `${esc(r.name)} が過負荷（+${fmtH(r.overH)}）`]));
-  must.slice(0, 4).forEach(t => alerts.push([C.amber, `今日必須: ${esc(t.title)}`]));
+  must.slice(0, 4).forEach(t => alerts.push([C.amber, `本日必須: ${esc(t.title)}`]));
   if (ev.totEst && ev.ratio > 1.1) alerts.push([C.over, `見積り超過 全体 +${Math.round((ev.ratio - 1) * 100)}%`]);
-  if (!alerts.length) alerts.push([C.free, "過負荷・必須タスクなし。落ち着いています。"]);
+  if (!alerts.length) alerts.push([C.free, "過負荷・必須タスクはありません。"]);
 
   root.innerHTML = `
     <h1 class="vtitle">ホーム <small>${day}</small></h1>
     <div class="kpis">
       <div class="kpi"><div class="l">チーム稼働</div><div class="v">${fmtH(totAsg)}<small>/${fmtH(totCap)}</small></div></div>
-      <div class="kpi free"><div class="l">振れる空き</div><div class="v">${fmtH(Math.max(0, totCap - totAsg))}</div></div>
+      <div class="kpi free"><div class="l">空き工数</div><div class="v">${fmtH(Math.max(0, totCap - totAsg))}</div></div>
       <div class="kpi ${over.length ? "over" : ""}"><div class="l">過負荷</div><div class="v">${over.length}<small>名</small></div></div>
-      <div class="kpi"><div class="l">今日必須</div><div class="v">${must.length}<small>件</small></div></div>
+      <div class="kpi"><div class="l">本日必須</div><div class="v">${must.length}<small>件</small></div></div>
     </div>
     <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px;align-items:start">
       <div class="card" style="padding:6px 0">
-        <div style="padding:10px 16px;font-weight:700;font-size:13px;border-bottom:1px solid ${C.line}">今日の空き <span style="color:${C.muted};font-weight:400">→ 空き探し</span></div>
+        <div style="padding:10px 16px;font-weight:700;font-size:13px;border-bottom:1px solid ${C.line}">本日の稼働予定 <span style="color:${C.muted};font-weight:400">→ 稼働予定</span></div>
         ${rows.slice(0, 6).map(r => `<div style="display:flex;align-items:center;gap:12px;padding:10px 16px">
           <div style="width:90px;font-weight:600;font-size:13px">${esc(r.name)}</div>
           <div style="flex:1">${capacityBar(r.assignedH, r.capH)}</div>

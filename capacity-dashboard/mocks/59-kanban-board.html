@@ -126,7 +126,7 @@ const PJ = {
 };
 const STATECOL = {Todo:'var(--todo)', Doing:'var(--doing)', Blocked:'var(--blocked)', Done:'var(--done)'};
 
-// 今日 = 6/4
+// 本日 = 6/4
 const tasks = [
   {n:'設計ドキュメント', who:'鈴木', pj:'共通', st:'Done', pct:100, due:'5/27', est:'2h'},
   {n:'API設計', who:'森田', pj:'Backend', st:'Done', pct:100, due:null, est:'4h'},
@@ -159,7 +159,7 @@ function dueLabel(t){
   if(!t.due) return '';
   const c = dueClass(t.due);
   let suffix = '';
-  if(c==='today') suffix = '（今日）';
+  if(c==='today') suffix = '（本日）';
   else if(c==='over') suffix = '（超過）';
   return `締切 ${t.due}${suffix}`;
 }

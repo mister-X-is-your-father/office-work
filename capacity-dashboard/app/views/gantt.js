@@ -185,7 +185,7 @@ export async function render(root) {
       const lw = state.mode === "task" ? LABEL_W : LABEL_W_P;
       const left = lw + ti * COL_W + COL_W / 2;
       rowsEl.insertAdjacentHTML("beforeend",
-        `<div class="today-line" style="left:${left}px;height:${totalH}px"><span class="tl-cap">今日</span></div>`);
+        `<div class="today-line" style="left:${left}px;height:${totalH}px"><span class="tl-cap">本日</span></div>`);
     }
     if (!withDeps || !rowIndexById) return;
     // 依存矢印（予定バー right→left のL字）
@@ -270,7 +270,7 @@ function shell(projects, members, memberIdx) {
       <span class="li"><span class="sw" style="background:${C.fill}"></span>実績進捗</span>
       <span class="li"><span class="sw" style="background:${C.free}"></span>完了</span>
       <span class="li"><span class="sw" style="background:${C.over}"></span>見積超過</span>
-      <span class="li"><span style="border-left:2px dashed ${C.over};height:13px;display:inline-block"></span> 今日</span>
+      <span class="li"><span style="border-left:2px dashed ${C.over};height:13px;display:inline-block"></span> 本日</span>
       <span class="li"><span style="display:inline-block;width:14px;border-top:1.4px dashed ${C.capline}"></span> 依存</span>
     </div>
   </div>

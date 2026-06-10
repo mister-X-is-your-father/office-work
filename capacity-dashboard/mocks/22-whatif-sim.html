@@ -133,7 +133,7 @@
         </div>
 
         <div class="fld-row">
-          <label class="fld">追加する作業量（今日分）</label>
+          <label class="fld">追加する作業量（本日分）</label>
           <div class="slider-wrap">
             <input type="range" id="hrs" min="0" max="8" step="0.5" value="3" />
             <div class="hrs-val"><span id="hrsNum">3</span><small>h</small></div>
@@ -156,7 +156,7 @@
 
     <!-- RIGHT: capacity bars -->
     <div class="card">
-      <h2>各メンバーの今日の容量（1日 8h）</h2>
+      <h2>各メンバーの本日の容量（1日 8h）</h2>
       <div class="members" id="members"></div>
       <div class="quick">
         <span style="font-size:12px;color:var(--muted);font-weight:600;align-self:center;margin-right:2px">試算プリセット:</span>
@@ -172,7 +172,7 @@
 </div>
 
 <script>
-  // 各人の既存稼働（今日／8h中）。空き = 8 - used
+  // 各人の既存稼働（本日／8h中）。空き = 8 - used
   const MEMBERS = [
     {k:'morita', name:'森田', color:'#e5772d', used:8},  // 空き0h・超過寸前
     {k:'tanaka', name:'田中', color:'#3a86ff', used:4},  // 空き4h
@@ -241,7 +241,7 @@
     }
     if(total>CAP){
       v.className='verdict bad'; ic.textContent='⚠';
-      t.innerHTML=`<b>${m.name}</b> は即超過。空き ${free}h に対し +${add}h → <b>${total-CAP}h あふれる</b>。別の担当へ振るか期日調整が必要。`;
+      t.innerHTML=`<b>${m.name}</b> は即超過。空き ${free}h に対し +${add}h → <b>${total-CAP}h あふれる</b>。別の担当へ割り当てるか期日調整が必要。`;
     } else if(total===CAP){
       v.className='verdict warn'; ic.textContent='!';
       t.innerHTML=`<b>${m.name}</b> はギリギリ収まる（空き ${free}h ＝ +${add}h で満稼働）。これ以上は溢れます。`;
