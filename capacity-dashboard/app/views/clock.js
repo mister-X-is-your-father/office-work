@@ -1,25 +1,16 @@
 // 本日の稼働予定 — 円時計ビュー（mock 57 を実データ配線）。
 // 色=優先度／模様=種別／外周=超過／空き=薄グレー／カテゴリ別の折りたたみセクション。
 import { todayItemsByMember, suggestDays } from "../lib/today_items.js";
+import { KINDS, KIND_ORDER, PRIO, NEUTRAL } from "../lib/kinds.js";
 import { fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 import { dateOnly, hasDate, shiftISO } from "../lib/capacity.js";
 import { deletePlan, logPlan, updateTask, requestReview } from "../lib/api.js";
 import { invalidate } from "../lib/store.js";
 
 const CAP = 8;
-const PRIO = { 4: { c: "#e5484d", n: "最優先" }, 3: { c: "#f5872e", n: "高" }, 2: { c: "#3a86ff", n: "中" }, 1: { c: "#8a93a0", n: "低" } };
-const NEUTRAL = "#8a93a0";   // 会議/定例（優先度なし）
 const FREECOL = "#e7ebf0";   // 空き=薄グレー
-const CATS = [
-  { key: "meeting", label: "会議", pat: "meeting" },
-  { key: "recurring", label: "定例", pat: "routine" },
-  { key: "review", label: "レビュー", pat: "review" },
-  { key: "planned", label: "予定タスク", pat: "task" },
-  { key: "adhoc", label: "当日追加", pat: "adhoc" },
-];
-const CATMAP = Object.fromEntries(CATS.map((c) => [c.key, c]));
 const itemColor = (it) => (it.prio ? PRIO[it.prio].c : NEUTRAL);
-const itemPat = (it) => CATMAP[it.cat].pat;
+const patCls = (kind) => (KINDS[kind].pattern !== "task" ? KINDS[kind].pattern : ""); // dot/kic 用クラス
 
 /* ---------- geometry ---------- */
 const R = 80, CX = 100, CY = 100, STROKE = 15, OR = 95, OVERW = 7;
@@ -30,19 +21,17 @@ function arc(r, f0, f1) {
   const large = (f1 - f0) > 0.5 ? 1 : 0;
   return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
 }
-function seg(r, f0, f1, color, pat, width) {
+// 模様=種別(kind)、ピン=当日追加(adhoc フラグ)。軸が別なので両方を重ねられる。
+function seg(r, f0, f1, color, kind, adhoc, width) {
   if (f1 <= f0) return "";
+  const mid = -Math.PI / 2 + ((f0 + f1) / 2) * 2 * Math.PI;
+  const mx = (CX + r * Math.cos(mid)).toFixed(1), my = (CY + r * Math.sin(mid)).toFixed(1);
+  const pat = KINDS[kind].pattern;
   let s = `<path d="${arc(r, f0, f1)}" fill="none" stroke="${color}" stroke-width="${width}" stroke-linecap="butt"/>`;
   if (pat === "meeting") s += `<path d="${arc(r, f0, f1)}" fill="none" stroke="url(#ckHatch)" stroke-width="${width}" stroke-linecap="butt"/>`;
   if (pat === "routine") s += `<path d="${arc(r, f0, f1)}" fill="none" stroke="url(#ckDots)" stroke-width="${width}" stroke-linecap="butt"/>`;
-  if (pat === "adhoc") {
-    const a = -Math.PI / 2 + ((f0 + f1) / 2) * 2 * Math.PI;
-    s += `<circle cx="${(CX + r * Math.cos(a)).toFixed(1)}" cy="${(CY + r * Math.sin(a)).toFixed(1)}" r="3.6" fill="#fff" stroke="${color}" stroke-width="1.8"/>`;
-  }
-  if (pat === "review") { // 中空の白リングマーカー
-    const a = -Math.PI / 2 + ((f0 + f1) / 2) * 2 * Math.PI;
-    s += `<circle cx="${(CX + r * Math.cos(a)).toFixed(1)}" cy="${(CY + r * Math.sin(a)).toFixed(1)}" r="4" fill="none" stroke="#fff" stroke-width="1.8"/>`;
-  }
+  if (pat === "review") s += `<circle cx="${mx}" cy="${my}" r="4" fill="none" stroke="#fff" stroke-width="1.8"/>`; // 中空リング
+  if (adhoc) s += `<circle cx="${mx}" cy="${my}" r="2.6" fill="#fff" stroke="${color}" stroke-width="1.4"/>`;     // 当日追加ピン
   return s;
 }
 function clockSVG(m) {
@@ -53,11 +42,11 @@ function clockSVG(m) {
   }
   let acc = 0, accOver = 0;
   for (const it of m.items) {
-    const col = itemColor(it), pat = itemPat(it);
+    const col = itemColor(it), adhoc = it.flags && it.flags.adhoc;
     const within = Math.min(it.h, Math.max(0, CAP - acc));
-    if (within > 0) out.push(seg(R, acc / CAP, (acc + within) / CAP, col, pat, STROKE));
+    if (within > 0) out.push(seg(R, acc / CAP, (acc + within) / CAP, col, it.kind, adhoc, STROKE));
     const over = it.h - within;
-    if (over > 0) { out.push(seg(OR, accOver / CAP, Math.min(1, (accOver + over) / CAP), col, pat, OVERW)); accOver += over; }
+    if (over > 0) { out.push(seg(OR, accOver / CAP, Math.min(1, (accOver + over) / CAP), col, it.kind, adhoc, OVERW)); accOver += over; }
     acc += it.h;
   }
   if (m.freeH > 0) out.push(`<path d="${arc(R, m.usedH / CAP, 1)}" fill="none" stroke="${FREECOL}" stroke-width="${STROKE}" stroke-linecap="butt"/>`);
@@ -79,19 +68,19 @@ function cardHTML(m, idx) {
   const stateCls = m.overH > 0 ? "over" : (m.freeH > 0 ? "free" : "just");
   const stateTxt = m.overH > 0 ? `超過 +${fmtH(m.overH)}` : (m.freeH > 0 ? `空き ${fmtH(m.freeH)}` : "ちょうど");
   let sections = "";
-  for (const c of CATS) {
-    const items = m.items.filter((it) => it.cat === c.key);
+  for (const kind of KIND_ORDER) {
+    const items = m.items.filter((it) => it.kind === kind);
     if (!items.length) continue;
     const sumH = items.reduce((s, it) => s + it.h, 0);
-    const cls = c.pat !== "task" ? c.pat : (c.key === "adhoc" ? "adhoc" : "");
+    const cls = patCls(kind);
+    const canEdit = kind === "task" || kind === "review"; // 会議/定例(occurrence)は操作不可
     const rows = items.map((it) => {
-      const adv = it.advanced ? `<span class="ck-tag">前倒し</span>` : "";
-      const canEdit = it.cat === "planned" || it.cat === "adhoc";
+      const tags = `${it.flags && it.flags.adhoc ? `<span class="ck-tag adhoc">当日</span>` : ""}${it.flags && it.flags.advanced ? `<span class="ck-tag">前倒し</span>` : ""}`;
       const menu = canEdit ? `<button class="ck-more" data-task="${it.taskId}" data-member="${m.member.id}" data-h="${it.h}" data-title="${esc(it.title)}" title="別日へ移す">⋯</button>` : "";
-      return `<div class="ck-row"><i class="ck-dot ${cls}" style="background:${itemColor(it)}"></i><span class="ck-tn">${esc(it.title)}${adv}</span><span class="ck-th">${fmtH(it.h)}</span>${menu}</div>`;
+      return `<div class="ck-row"><i class="ck-dot ${cls}" style="background:${itemColor(it)}"></i><span class="ck-tn">${esc(it.title)}${tags}</span><span class="ck-th">${fmtH(it.h)}</span>${menu}</div>`;
     }).join("");
     sections += `<details class="ck-sec" open>
-      <summary><span class="ck-chev">▾</span><i class="ck-kic ${cls}"></i>${c.label}<span class="ck-cnt">${items.length}</span><span class="ck-n">${fmtH(sumH)}</span></summary>
+      <summary><span class="ck-chev">▾</span><i class="ck-kic ${cls}"></i>${KINDS[kind].label}<span class="ck-cnt">${items.length}</span><span class="ck-n">${fmtH(sumH)}</span></summary>
       ${rows}
     </details>`;
   }
@@ -114,9 +103,9 @@ function kpiStrip(states) {
   let mustN = 0, mustH = 0, fixedH = 0, mtgH = 0, rtnH = 0, adhocN = 0;
   for (const m of states) for (const it of m.items) {
     if (it.prio === 4) { mustN++; mustH += it.h; }
-    if (it.cat === "meeting") { fixedH += it.h; mtgH += it.h; }
-    if (it.cat === "recurring") { fixedH += it.h; rtnH += it.h; }
-    if (it.cat === "adhoc") adhocN++;
+    if (it.kind === "meeting") { fixedH += it.h; mtgH += it.h; }
+    if (it.kind === "recurring") { fixedH += it.h; rtnH += it.h; }
+    if (it.flags && it.flags.adhoc) adhocN++;
   }
   const realH = Math.round((usedAll - Math.min(fixedH, usedAll)) * 10) / 10;
   return `<div class="ck-strip">
@@ -139,12 +128,15 @@ function legend() {
       <span class="it"><i class="sw"></i>タスク</span>
       <span class="it"><i class="sw hatch"></i>会議</span>
       <span class="it"><i class="sw dots"></i>定例</span>
-      <span class="it"><i class="sw review"></i>レビュー</span>
-      <span class="it"><i class="sw adhoc"></i>当日追加</span></span>
+      <span class="it"><i class="sw review"></i>レビュー</span></span>
+    <span class="sep"></span>
+    <span class="grp"><span class="glbl">属性</span>
+      <span class="it"><i class="sw pin"></i>当日追加</span>
+      <span class="it"><span class="ck-tag" style="margin:0">前倒し</span></span></span>
     <span class="sep"></span>
     <span class="grp">
       <span class="it"><i class="sw" style="background:${FREECOL}"></i>空き工数</span>
-      <span class="it"><i class="sw" style="background:linear-gradient(90deg,${PRIO[4].c},${PRIO[2].c})"></i>外周=超過（そのタスク色）</span></span>
+      <span class="it"><i class="sw" style="background:linear-gradient(90deg,${PRIO[4].c},${PRIO[2].c})"></i>外周=超過</span></span>
   </div>`;
 }
 
@@ -158,7 +150,7 @@ export function renderClock(container, data, day, rerender) {
   const states = data.members.map((m) => map.get(m.id)).filter(Boolean)
     .sort((a, b) => (b.freeH - a.freeH) || (a.overH - b.overH));
   container.innerHTML = `<style>${css()}</style>${DEFS}
-    <div class="ck-subtitle">並び=会議→定例→優先度（12時起点）／色=優先度／模様=種別／外周=超過</div>
+    <div class="ck-subtitle">並び=会議→定例→レビュー→優先度（12時起点）／色=優先度／模様=種別／ピン=当日追加／外周=超過</div>
     ${states.length ? kpiStrip(states) : ""}
     <div class="ck-grid">${states.map((m, i) => cardHTML(m, i)).join("")}</div>
     ${states.length ? legend() : `<div class="ck-empty">本日のメンバー負荷がありません。</div>`}
@@ -293,6 +285,7 @@ function css() {
   .ck-dot{width:10px;height:10px;border-radius:3px;flex:none}
   .ck-tn{color:#1d2430;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ck-tag{font-size:9.5px;color:#f5872e;border:1px solid #f6d4ad;border-radius:5px;padding:0 4px;margin-left:6px;vertical-align:1px}
+  .ck-tag.adhoc{color:#3a86ff;border-color:#cfe0ff}
   .ck-th{margin-left:auto;color:#6b7480;font-variant-numeric:tabular-nums}
   .ck-more{border:0;background:transparent;color:#9aa3af;cursor:pointer;font-size:14px;line-height:1;padding:0 2px;border-radius:5px}
   .ck-more:hover{background:#eef1f5;color:#1d2430}
@@ -305,8 +298,8 @@ function css() {
   .ck-legend .sw{width:13px;height:13px;border-radius:3px;display:inline-block;background:#8a93a0}
   .ck-legend .sw.hatch{background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.85) 0 1.6px,transparent 1.6px 3.4px)}
   .ck-legend .sw.dots{background-image:radial-gradient(rgba(255,255,255,.85) 1px,transparent 1.3px);background-size:4px 4px}
-  .ck-legend .sw.adhoc{box-shadow:inset 0 0 0 1.6px #fff}
-  .ck-legend .sw.review{background-image:radial-gradient(#fff 0 1.8px,transparent 2.1px)}
+  .ck-legend .sw.review{background-image:radial-gradient(transparent 2.2px,#fff 2.4px,#fff 3.2px,transparent 3.4px)}
+  .ck-legend .sw.pin{background-image:radial-gradient(#fff 0 2.4px,transparent 2.6px)}
   .ck-legend .sep{width:1px;height:14px;background:#e6e9ee}
   .ck-modal{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center}
   .ck-modal[hidden]{display:none}

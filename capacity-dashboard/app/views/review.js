@@ -1,7 +1,7 @@
 // レビュー ／ 承認キュー（mock 66 相当・実データ）。レビューラベル付き未完了タスクを「あなた宛/その他」で一覧。
 import { load, projectName, invalidate } from "../lib/store.js";
 import { whoami, updateTask } from "../lib/api.js";
-import { isReviewTask } from "../lib/today_items.js";
+import { isReviewTask } from "../lib/kinds.js";
 import { C, esc, member_color } from "../lib/ui.js";
 
 const TS_BASE = "http://leo:7005";

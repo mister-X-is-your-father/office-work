@@ -1,21 +1,17 @@
 // 本日の稼働予定（円時計ビュー）用の整形レイヤー（純関数・TDD対象）。
-// タスク(予定/見積り日割り)＋会議/定例(RRULE展開)を統合し、メンバー別にカテゴリ・優先度・前倒し付きで列挙。
-// 並び: 会議 → 定例 → 予定タスク(優先度 最優先→低)。色/模様はビュー側。
+// タスク(予定/見積り日割り)＋会議/定例(RRULE展開)を統合し、メンバー別に WorkItem として列挙。
+// WorkItem は「種別(kind) × 時間属性(flags: adhoc/advanced)」の2軸（ADR-012）。色/模様はビュー側。
+// 並び: 会議 → 定例 → レビュー → タスク(優先度 最優先→低)。
 import { toH, dateOnly, hasDate, taskPlannedHoursByMemberOn, assigneeIds, shiftISO } from "./capacity.js";
 import { expandRecurrences, occurrenceLoadEntries, freeByMemberDay } from "./recurrence.js";
+import { kindOf, kindRank, prioBucket, isReviewTask } from "./kinds.js";
+
+// 後方互換の再export（既存の import 元を壊さない）
+export { prioBucket, isReviewTask };
 
 const round1 = (x) => Math.round(x * 10) / 10;
 const planEntriesFor = (plansByTask, id) =>
   plansByTask ? ((plansByTask.get ? plansByTask.get(id) : plansByTask[id]) || null) : null;
-
-// Vikunja priority(0–5) → 4段バケット: 4=最優先 / 3=高 / 2=中 / 1=低
-export function prioBucket(p) {
-  const n = p || 0;
-  if (n >= 4) return 4;
-  if (n === 3) return 3;
-  if (n === 2) return 2;
-  return 1;
-}
 
 // 前倒し: 本日に予定(plan)があり、かつ期日が本日より先。
 function isAdvanced(task, planEntries, isoDay) {
@@ -25,45 +21,43 @@ function isAdvanced(task, planEntries, isoDay) {
   return (planEntries || []).some((e) => dateOnly(e.plan_date) === isoDay);
 }
 
-export const REVIEW_LABEL = "レビュー";
-export const isReviewTask = (t) => (t.labels || []).some((l) => (l.title || "") === REVIEW_LABEL);
-const CRANK = { meeting: 0, recurring: 1, review: 2, planned: 3, adhoc: 3 };
-
 // data: { tasks, members, plansByTask, recurrences }
-// 返り値: Map<memberId, { member, items:[{taskId?,title,h,cat,prio,advanced}], usedH, freeH, overH, status }>
+// 返り値: Map<memberId, { member, items:[{taskId?,title,h,kind,prio,flags:{adhoc,advanced}}], usedH, freeH, overH, status }>
 export function todayItemsByMember(data, isoDay, capH = 8) {
   const { tasks = [], members = [], plansByTask = null, recurrences = [] } = data || {};
   const map = new Map(members.map((m) => [m.id, { member: m, items: [], usedH: 0 }]));
   const push = (mid, item) => { const r = map.get(mid); if (r) { r.items.push(item); r.usedH += item.h; } };
 
-  // 通常タスク（予定 or 見積り日割り）
+  // 通常タスク／レビュー（予定 or 見積り日割り）。kind=種別, flags=時間属性。
   for (const t of tasks) {
     const planEntries = planEntriesFor(plansByTask, t.id);
     const byMember = taskPlannedHoursByMemberOn(t, isoDay, planEntries);
     if (!byMember.size) continue;
-    const adhoc = hasDate(t.created) && dateOnly(t.created) === isoDay;
-    const advanced = isAdvanced(t, planEntries, isoDay);
-    const cat = isReviewTask(t) ? "review" : (adhoc ? "adhoc" : "planned");
+    const kind = kindOf(t); // 'review' | 'task'
+    const flags = {
+      adhoc: hasDate(t.created) && dateOnly(t.created) === isoDay,
+      advanced: isAdvanced(t, planEntries, isoDay),
+    };
     for (const [mid, h] of byMember) {
-      push(mid, { taskId: t.id, title: t.title, h: round1(h), cat, prio: prioBucket(t.priority), advanced });
+      push(mid, { taskId: t.id, title: t.title, h: round1(h), kind, prio: prioBucket(t.priority), flags });
     }
   }
 
-  // 会議/定例（本日に展開した occurrence）
+  // 会議/定例（本日に展開した occurrence）。優先度なし・時間属性なし。
   for (const { recurrence, dateISO } of expandRecurrences(recurrences, isoDay, isoDay)) {
     if (dateISO !== isoDay) continue;
     const h = round1(toH(recurrence.duration_seconds));
     if (h <= 0) continue;
-    const cat = recurrence.kind === "meeting" ? "meeting" : "recurring";
-    const title = recurrence.title || (cat === "meeting" ? "会議" : "定例");
+    const kind = recurrence.kind === "meeting" ? "meeting" : "recurring";
+    const title = recurrence.title || (kind === "meeting" ? "会議" : "定例");
     for (const uid of recurrence.assignee_ids || []) {
-      push(uid, { title, h, cat, prio: null, advanced: false });
+      push(uid, { title, h, kind, prio: null, flags: { adhoc: false, advanced: false } });
     }
   }
 
   // 並べ替え＋集計
   for (const r of map.values()) {
-    r.items.sort((a, b) => (CRANK[a.cat] - CRANK[b.cat]) || ((b.prio || 0) - (a.prio || 0)));
+    r.items.sort((a, b) => (kindRank(a.kind) - kindRank(b.kind)) || ((b.prio || 0) - (a.prio || 0)));
     r.usedH = round1(r.usedH);
     r.freeH = round1(Math.max(0, capH - r.usedH));
     r.overH = round1(Math.max(0, r.usedH - capH));

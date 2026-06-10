@@ -29,12 +29,12 @@ test("prioBucket: 0–5 → 4段", () => {
   assert.equal(prioBucket(undefined), 1);
 });
 
-test("todayItemsByMember: カテゴリ分類・並び・集計", () => {
+test("todayItemsByMember: 種別(kind)分類・並び・集計", () => {
   const map = todayItemsByMember(data, DAY, 8);
   const r = map.get(1);
   assert.equal(r.items.length, 4);
-  // 並び: 会議 → 定例 → 予定タスク(優先度desc)
-  assert.deepEqual(r.items.map((i) => i.cat), ["meeting", "recurring", "planned", "adhoc"]);
+  // 並び: 会議 → 定例 → レビュー → タスク(優先度desc)
+  assert.deepEqual(r.items.map((i) => i.kind), ["meeting", "recurring", "task", "task"]);
   assert.equal(r.items[0].title, "朝会");
   assert.equal(r.items[1].title, "棚卸し");
   // 集計: 0.5 + 1 + 3 + 1 = 5.5h
@@ -44,15 +44,32 @@ test("todayItemsByMember: カテゴリ分類・並び・集計", () => {
   assert.equal(r.status, "free");
 });
 
-test("todayItemsByMember: 前倒し・当日追加・優先度", () => {
+test("todayItemsByMember: 前倒し・当日追加(flags)・優先度", () => {
   const r = todayItemsByMember(data, DAY, 8).get(1);
   const api = r.items.find((i) => i.title === "API設計");
   const urgent = r.items.find((i) => i.title === "緊急修正");
-  assert.equal(api.cat, "planned");
-  assert.equal(api.advanced, true);       // 期日6/20が先 → 前倒し
-  assert.equal(api.prio, 4);              // priority5 → 最優先
-  assert.equal(urgent.cat, "adhoc");      // 本日作成
-  assert.equal(urgent.advanced, false);   // 期日が本日
+  assert.equal(api.kind, "task");
+  assert.equal(api.flags.advanced, true);  // 期日6/20が先 → 前倒し
+  assert.equal(api.flags.adhoc, false);    // 6/1作成
+  assert.equal(api.prio, 4);               // priority5 → 最優先
+  assert.equal(urgent.kind, "task");
+  assert.equal(urgent.flags.adhoc, true);  // 本日作成
+  assert.equal(urgent.flags.advanced, false); // 期日が本日
+});
+
+test("todayItemsByMember: レビュー×当日追加は kind=review かつ flags.adhoc=true（軸が併存）", () => {
+  const d = {
+    members: [{ id: 1, name: "A" }],
+    recurrences: [],
+    tasks: [{ id: 1, title: "X のレビュー", priority: 2, assignees: [{ id: 1 }],
+      due_date: "2026-06-08T00:00:00Z", created: "2026-06-08T09:00:00Z", time_estimate: 1800,
+      labels: [{ title: "レビュー" }] }],
+    plansByTask: new Map(),
+  };
+  const it = todayItemsByMember(d, DAY, 8).get(1).items[0];
+  assert.equal(it.kind, "review");      // 種別=レビュー
+  assert.equal(it.flags.adhoc, true);   // かつ 当日追加（旧モデルでは択一だった）
+  assert.equal(it.flags.advanced, false);
 });
 
 test("todayItemsByMember: 超過判定", () => {
