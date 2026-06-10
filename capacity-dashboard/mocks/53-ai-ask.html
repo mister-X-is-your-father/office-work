@@ -116,7 +116,7 @@
     </div>
     <div class="ctx">📁 新ダッシュボード機能 (v1.2)</div>
   </header>
-  <div class="note">※ モック（サンプルデータ）。本番は Vikunja API ＋ Claude で要約。</div>
+  <div class="note">※ モック（サンプルデータ）。本番は TaskStation API ＋ Claude で要約。</div>
 
   <div class="stream" id="stream">
     <div class="stream-inner" id="streamInner">
@@ -238,7 +238,7 @@ function ask(key, customQ){
       const t=document.getElementById('thinking'); if(t) t.remove();
       const el=document.createElement('div'); el.className='turn';
       el.innerHTML=`<div class="who"><span class="ava ai">C</span>Claude</div>
-        <div class="bubble-ai"><p>（モック）この質問は本番では Vikunja のタスク・進捗データを Claude が集計して回答します。サンプルの定型質問はチップから試せます。</p></div>`;
+        <div class="bubble-ai"><p>（モック）この質問は本番では TaskStation のタスク・進捗データを Claude が集計して回答します。サンプルの定型質問はチップから試せます。</p></div>`;
       inner.appendChild(el); scrollDown();
     }
   }, 650);

@@ -148,7 +148,7 @@ test("taskRanges: times範囲とover/percentエッジ", () => {
 });
 
 test("dependencyEdges: precedes/follows正規化と重複除去", () => {
-  // Vikunja は precedes 作成時に逆 follows も自動付与 → 同一辺に畳む
+  // TaskStation は precedes 作成時に逆 follows も自動付与 → 同一辺に畳む
   const tasks = [
     { id: 3, related_tasks: { precedes: [{ id: 4 }] } },
     { id: 4, related_tasks: { follows: [{ id: 3 }], precedes: [{ id: 1 }] } },

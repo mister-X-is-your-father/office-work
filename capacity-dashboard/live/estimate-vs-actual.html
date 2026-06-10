@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>見積り vs 実績（実データ・Vikunja）</title>
+<title>見積り vs 実績（実データ・TaskStation）</title>
 <style>
   :root{
     --bg:#f6f7f9; --card:#fff; --ink:#1d2430; --muted:#6b7480; --line:#e6e9ee; --track:#eef1f5;
@@ -67,7 +67,7 @@
 <div class="wrap">
   <header>
     <h1>見積り vs 実績</h1>
-    <span class="sub">実データ・Vikunja API 接続版</span>
+    <span class="sub">実データ・TaskStation API 接続版</span>
   </header>
   <div class="src">データ源: <b id="apilabel">http://leo:7005/api/v1</b> ／ <code>tasks.time_estimate</code> と <code>SUM(task_time_entries.seconds)=time_spent</code>（フォークのネイティブ実績時間トラッキング）</div>
 
@@ -86,8 +86,8 @@ function token(){ return sessionStorage.getItem(TKEY) || ""; }
 function showLogin(msg){
   $("#view").innerHTML = `
     <div class="card login">
-      <h2>Vikunja に接続</h2>
-      <p>このダッシュボードは Vikunja の実データを読みます。ログインしてください。</p>
+      <h2>TaskStation に接続</h2>
+      <p>このダッシュボードは TaskStation の実データを読みます。ログインしてください。</p>
       <label>ユーザー名</label><input id="u" autocomplete="username" value="">
       <label>パスワード</label><input id="p" type="password" autocomplete="current-password">
       <button id="go">接続</button>

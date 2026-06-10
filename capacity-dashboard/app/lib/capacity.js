@@ -1,5 +1,5 @@
 // キャパ計算レイヤー（純関数・TDD対象）
-// 入力は Vikunja のタスク/メンバー。time_estimate(秒) と time_spent(秒, フォーク) を使う。
+// 入力は TaskStation のタスク/メンバー。time_estimate(秒) と time_spent(秒, フォーク) を使う。
 // 日別の負荷は「タスク見積りを [start,end] 日数で日割り、due のみなら due 日に全量」。
 // （フェーズ2で task_time_plans の明示的な日別予定に置換予定）
 

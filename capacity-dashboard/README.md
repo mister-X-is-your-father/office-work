@@ -2,9 +2,9 @@
 
 少人数チーム（2〜4名）向けの **「今日の空き容量さがし」を中心としたキャパ／タスク可視化ツール** のUIプロトタイプ。
 Instagantt の Workload ビュー相当を **OSS・自前ホスト（データ主権あり）** で実現することを狙い、
-タスクの箱には **Vikunja** を採用し、その上に自前の可視化レイヤーを載せる構成を検討している。
+タスクの箱には **TaskStation** を採用し、その上に自前の可視化レイヤーを載せる構成を検討している。
 
-> **状態: ① UIモック72案 → ② フォークしたVikunjaで時間管理(見積り/実績/予定)をDB実装・本番稼働 → ③ 実データ統合SPA(中核＋日別予定まで動作)**
+> **状態: ① UIモック72案 → ② フォークしたTaskStationで時間管理(見積り/実績/予定)をDB実装・本番稼働 → ③ 実データ統合SPA(中核＋日別予定まで動作)**
 >
 > 🤝 **引き継ぎ・全体像・runbook は [HANDOFF.md](HANDOFF.md) を最初に読む。**
 
@@ -14,11 +14,11 @@ Instagantt の Workload ビュー相当を **OSS・自前ホスト（データ�
 
 | 方法 | URL |
 |---|---|
-| **🟢 実データSPA（leo稼働時）** | http://leo:7010/app/ — Vikunja実データ。ホーム/空き探し/週/トリアージ/見積りvs実績 |
+| **🟢 実データSPA（leo稼働時）** | http://leo:7010/app/ — TaskStation実データ。ホーム/空き探し/週/トリアージ/見積りvs実績 |
 | 切り口別ギャラリー（モック72案） | http://leo:7010/ ／ Pages: https://mister-x-is-your-father.github.io/office-work/capacity-dashboard/ |
 
 `app/` が **実データ統合SPA**（`lib/vikunja.js` API client＋`lib/capacity.js` 純関数＋ハッシュルータ）。
-Vikunja は fork 済み（`tasks.time_estimate` / `task_time_entries` / `time_spent`、[docs/05](docs/05-time-tracking-fork.md)）。
+TaskStation は fork 済み（`tasks.time_estimate` / `task_time_entries` / `time_spent`、[docs/05](docs/05-time-tracking-fork.md)）。
 `index.html` は **切り口別ギャラリー**（全72案・ライブサムネ）。main に push すると Pages は自動更新。
 
 ローカル配信:
@@ -33,12 +33,12 @@ python3 -m http.server 7010 --bind 0.0.0.0   # → http://leo:7010/
 
 | ドキュメント | 内容 |
 |---|---|
-| **[docs/00-design-philosophy.md](docs/00-design-philosophy.md)** | なぜ作るか／要件 v0.1／5つの切り口／Instagantt と Vikunja の関係／アーキテクチャ |
-| **[docs/01-decisions.md](docs/01-decisions.md)** | ADR（採用しなかった選択肢つき）— Vikunja採用・自前レイヤー・見積り時間の持ち方 等 |
+| **[docs/00-design-philosophy.md](docs/00-design-philosophy.md)** | なぜ作るか／要件 v0.1／5つの切り口／Instagantt と TaskStation の関係／アーキテクチャ |
+| **[docs/01-decisions.md](docs/01-decisions.md)** | ADR（採用しなかった選択肢つき）— TaskStation採用・自前レイヤー・見積り時間の持ち方 等 |
 | **[docs/02-screens.md](docs/02-screens.md)** | 全72モックの一覧（切り口別）と、統合プロトタイプへの採用候補 |
 | **[docs/03-integration-plan.md](docs/03-integration-plan.md)** | 統合プロトタイプの設計（アプリ構成・画面遷移・段階的な作り方） |
-| **[docs/04-feasibility.md](docs/04-feasibility.md)** | 実現可能性スクリーニング — 全72案を Vikunja データモデルに照合（🔴別系統必須／🟠履歴要／🟡軽微／✅標準） |
-| **[docs/05-time-tracking-fork.md](docs/05-time-tracking-fork.md)** | 実績時間トラッキング — Vikunja を fork して DB に実装（スキーマ/API/ビルド）。コード雛形は [`vikunja-patch/`](vikunja-patch/) |
+| **[docs/04-feasibility.md](docs/04-feasibility.md)** | 実現可能性スクリーニング — 全72案を TaskStation データモデルに照合（🔴別系統必須／🟠履歴要／🟡軽微／✅標準） |
+| **[docs/05-time-tracking-fork.md](docs/05-time-tracking-fork.md)** | 実績時間トラッキング — TaskStation を fork して DB に実装（スキーマ/API/ビルド）。コード雛形は [`backend-patch/`](backend-patch/) |
 
 ---
 
@@ -58,8 +58,8 @@ capacity-dashboard/
 
 - **主目的**: 空き容量さがし＝「今日、誰に新しい仕事を振れるか」を即断
 - **時間軸**: 今日（日次）中心
-- **工数の出どころ**: タスクの見積り時間（Vikunja ラベル `est:4h` 等）
+- **工数の出どころ**: タスクの見積り時間（TaskStation ラベル `est:4h` 等）
 - **キャパ**: まず全員一律 8h/日
-- **データ源**: Vikunja API（＋一部 Claude で自然文要約）
+- **データ源**: TaskStation API（＋一部 Claude で自然文要約）
 
 詳細・背景は [docs/00-design-philosophy.md](docs/00-design-philosophy.md) を参照。

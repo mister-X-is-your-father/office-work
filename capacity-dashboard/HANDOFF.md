@@ -1,18 +1,18 @@
 # ハンドオフ — Capacity Board
 
-> status: **稼働中**（2026-06-10）。モック72案 → Vikunjaフォークで時間管理をDB実装（本番） → 実データSPA（中核＋予実ガント） → **基盤固め完了**（#1-#4,#7,#9）→ **定期/会議＋祝日＋休暇→月次空き完了**（ADR-011）。本番イメージ **`leo-vikunja:0.24.6-timetracking-fix4`**。
+> status: **稼働中**（2026-06-10）。モック72案 → TaskStationフォークで時間管理をDB実装（本番） → 実データSPA（中核＋予実ガント） → **基盤固め完了**（#1-#4,#7,#9）→ **定期/会議＋祝日＋休暇→月次空き完了**（ADR-011）→ **UI全面TaskStationブランド化**（フォーク由来表記の排除・新ロゴ/favicon・frontend再ビルド）。本番イメージ **`leo-taskstation:0.24.6-fix5`**。
 > 次の人がコンテキスト無しで読む前提。まず本書 → 要件 [`docs/06-requirements.md`](docs/06-requirements.md) → ADR [`docs/01-decisions.md`](docs/01-decisions.md)（**ADR-006〜011 が現行設計**）→ `docs/00,05`。
 > **確定（2026-06-10）**: 容量は当面 **全員 8h/平日 固定で十分**（時刻帯の空き・半日休暇・人別可変キャパ＝時短 は保留。詳細は §8）。
 
 ## 0. これは何 / なぜ
-少人数チーム(2〜4名)向け **「今日/週/月の空き容量さがし」＋「予定×実績」キャパ可視化**。狙いは **Instagantt の Workload 相当を OSS・自前ホスト（データ主権）** で。タスクの箱は **Vikunja**。素では「時間」概念ゼロ → **Vikunja を fork して時間管理・定期・祝日・休暇を DB ネイティブに足した**（ここが土台）。背景は [`docs/00`](docs/00-design-philosophy.md)、判断は [`docs/01`](docs/01-decisions.md)。
+少人数チーム(2〜4名)向け **「今日/週/月の空き容量さがし」＋「予定×実績」キャパ可視化**。狙いは **Instagantt の Workload 相当を OSS・自前ホスト（データ主権）** で。タスクの箱は **TaskStation**。素では「時間」概念ゼロ → **TaskStation を fork して時間管理・定期・祝日・休暇を DB ネイティブに足した**（ここが土台）。背景は [`docs/00`](docs/00-design-philosophy.md)、判断は [`docs/01`](docs/01-decisions.md)。
 
 ## 1. どこで動いてる / 見る
 | 物 | 場所 |
 |---|---|
 | **実データSPA** | http://leo:7010/app/ （capdemo / CapDemoPass123） |
 | モックギャラリー(72案) | http://leo:7010/ ／ Pages: https://mister-x-is-your-father.github.io/office-work/capacity-dashboard/ |
-| **Vikunja（フォーク本番）** | http://leo:7005 （image **`leo-vikunja:0.24.6-timetracking-fix4`**） |
+| **TaskStation（フォーク本番）** | http://leo:7005 （image **`leo-taskstation:0.24.6-fix5`**） |
 | GitHub | https://github.com/mister-x-is-your-father/office-work → `capacity-dashboard/` |
 
 配信は `capacity-dashboard/` で `python3 -m http.server 7010 --bind 0.0.0.0`（leo:7010）。落ちてたら再起動。
@@ -28,19 +28,19 @@ office-work/capacity-dashboard/
 │   ├── lib/capacity.test.mjs (21) / recurrence.test.mjs (8)   # node --test
 │   └── views/ home today week planner freefinder triage estactual gantt .js
 ├── docs/ 00..06（06=要件・進捗の正本）
-└── vikunja-patch/                       # ★フォーク差分の再現一式＋apply.md＋seed-*.py
-/home/neo/vikunja-fork/vikunja/          # ← Vikunja v0.24.6 clone＋パッチ適用済（ビルド元）
-/home/neo/pm-trials/vikunja/docker-compose.yml  # ← 本番compose(image=fix4)
+└── backend-patch/                       # ★フォーク差分の再現一式＋apply.md＋seed-*.py
+/home/neo/vikunja-fork/vikunja/          # ← TaskStation v0.24.6 clone＋パッチ適用済（ビルド元）
+/home/neo/pm-trials/vikunja/docker-compose.yml  # ← 本番compose(image=leo-taskstation:...fix5)
 ```
 
 ## 3. アーキテクチャ（3層）＝ 昇格モデル S1孵化(fork)→S2検証(隔離)→S3製品(SPA)（[ADR-007](docs/01-decisions.md)）
-**1. データ（Vikunjaフォーク）= 土台。** 自前テーブルは soft delete(deleted_at)・created_by 帰属・bigint・snake_case 準拠。
+**1. データ（TaskStationフォーク）= 土台。** 自前テーブルは soft delete(deleted_at)・created_by 帰属・bigint・snake_case 準拠。
 | 持ち物 | テーブル/カラム | API |
 |---|---|---|
 | 見積り | `tasks.time_estimate`(秒) | `POST /tasks/:id`（**updateTask 経由**, §7） |
 | 実績 | `task_time_entries`(logged_on,seconds,user_id=対象者,created_by) ＋ computed `time_spent` | `PUT/GET/POST/DELETE /tasks/:task/times` |
 | 予定 | `task_time_plans`(plan_date,seconds,user_id,created_by) ＋ computed `time_planned` | `…/plans` |
-| スケジュール/依存 | tasks.start_date/end_date/due_date / related_tasks | Vikunja標準 |
+| スケジュール/依存 | tasks.start_date/end_date/due_date / related_tasks | TaskStation標準 |
 | **定期/会議** | `recurrences`(rrule[RFC5545文字列・dumb storage], dtstart, duration_seconds, kind['task'\|'meeting'], assignee_ids[JSON], project_id) | `PUT/GET/POST/DELETE /recurrences` |
 | **祝日** | `holidays`(date, name) | `/holidays` |
 | **個人休暇** | `member_unavailability`(user_id, start_date, end_date, reason) | `/unavailability` |
@@ -60,21 +60,24 @@ office-work/capacity-dashboard/
 
 **残り**（§8 の到達点マップ参照。多くは“UIだけ”）
 - **入力UI**: 定期/祝日/休暇を**ブラウザから登録・編集**（今は seed/API のみ）。#3 対象者選択UI（planner フォーム）。
-- 残ビュー: かんばん(59・Vikunja bucket流用可)/一覧(60)/**設定(17)**。設定が入ると 8h/対象PJ のハードコード解消。
+- 残ビュー: かんばん(59・TaskStation bucket流用可)/一覧(60)/**設定(17)**。設定が入ると 8h/対象PJ のハードコード解消。
 - ガント作り込み（窓送り・締切ダイヤ・**ドラッグ編集=updateTask**）。
 - AI Q&A(53)＝別API、保留。
 
 ## 5. 運用 runbook
-### フォークを直して再デプロイ（fix4 系の作り方）
-ホストに Go 無し。**xgo不使用**＝docker golang:1.22 でネイティブビルド。frontend は `frontend/dist` 既ビルド済（go:embed）。
+### フォークを直して再デプロイ（fix5 系の作り方）
+ホストに Go 無し。**xgo不使用**＝docker golang:1.22 でネイティブビルド。frontend は `frontend/dist`（go:embed）。
+**ブランド化はソース側**（`frontend/src` の大文字"Vikunja"→"TaskStation"・`src/assets/logo*.svg`/`public/favicon.*`・`src/urls.ts`）→ frontend再ビルドで dist に反映。
 ```bash
 cd /home/neo/vikunja-fork/vikunja
+# (ブランディング変更時のみ) frontend再ビルド: pnpm build → dist再生成 → 下のgo buildでembed
+#   ※dist/が過去のdocker由来でroot所有なら先に: docker run --rm -v "$PWD/frontend":/w -w /w alpine rm -rf dist stats.html
 docker run --rm -v "$PWD":/app -v vikunja-gocache:/go -w /app -e CGO_ENABLED=1 \
   golang:1.22 sh -c 'go build -buildvcs=false -ldflags "-s -w" -o vikunja .'
-docker build -f Dockerfile.deploy -t leo-vikunja:0.24.6-timetracking-fix5 .   # 次は fix5
+docker build -f Dockerfile.deploy -t leo-taskstation:0.24.6-fix6 .   # 次は fix6
 # 本番反映（必ず backup → image差し替え → recreate。migrationは起動時自動）
 docker run --rm -v vikunja_vikunja-db:/from -v vikunja_vikunja-db-backup-fixN:/to alpine sh -c 'cp -a /from/. /to/'
-# pm-trials/vikunja/docker-compose.yml の image: を fix5 に編集
+# pm-trials/vikunja/docker-compose.yml の image: を fix6 に編集
 cd /home/neo/pm-trials/vikunja && docker compose up -d --force-recreate
 ```
 ### テスト
@@ -100,14 +103,14 @@ cd capacity-dashboard/app/lib/vendor && docker run --rm -v "$PWD":/out node:20-a
 - **capdemo / CapDemoPass123**（SPAログイン・id=1）。メンバー **morita(2)/tanaka(3)/satou(4)/suzuki(5)**（各 TeamPass123）。
 - CORS は compose で許可済（別オリジンSPA用）。`VIKUNJA_SERVICE_ENABLEREGISTRATION` は隔離検証時のみ true。
 - seed（冪等・`/tmp/cap_token` に capdemo トークンを置いて実行）:
-  - `vikunja-patch/seed-gantt-demo.py` … タスクの start/end/依存/担当（**⚠️ POST はスカラ全置換なので assignees も再適用、§7**）。
-  - `vikunja-patch/seed-recurrence-demo.py` … 定期(毎週月会議/毎月第2火/隔週水)・祝日(6/22)・morita休暇(6/29-7/1)。
+  - `backend-patch/seed-gantt-demo.py` … タスクの start/end/依存/担当（**⚠️ POST はスカラ全置換なので assignees も再適用、§7**）。
+  - `backend-patch/seed-recurrence-demo.py` … 定期(毎週月会議/毎月第2火/隔週水)・祝日(6/22)・morita休暇(6/29-7/1)。
 
 ## 7. gotcha（現行・重要）
 - **書き込みの非破壊（2系統）**:
   - 関連(assignees/reminders): **fork で根治済**（#1/ADR-008。`Task.Update` を nil ガード。不在/null=維持・[]=クリア）。
-  - **スカラ(start/end/due/priority/percent_done等)は Vikunja が意図的に全置換**（payload に無い=クリア。upstream仕様）。→ **SPA は必ず `vikunja.js updateTask(taskId, patch)`**（GET→全スカラ保持→patch→POST）。生POSTで部分更新するとスカラが消える（#9）。将来のガント・ドラッグ編集も updateTask 必須。
-- **フォークに新エンティティを足す時**（time系/recurrence系が手本・`vikunja-patch/apply.md` §3-5/フェーズ5）:
+  - **スカラ(start/end/due/priority/percent_done等)は TaskStation が意図的に全置換**（payload に無い=クリア。upstream仕様）。→ **SPA は必ず `vikunja.js updateTask(taskId, patch)`**（GET→全スカラ保持→patch→POST）。生POSTで部分更新するとスカラが消える（#9）。将来のガント・ドラッグ編集も updateTask 必須。
+- **フォークに新エンティティを足す時**（time系/recurrence系が手本・`backend-patch/apply.md` §3-5/フェーズ5）:
   - 4箇所登録: `models.go GetTables` ＋ `unit_tests.go InitTestFixtures` ＋ `pkg/db/fixtures/<table>.yml`(空[]) ＋ `routes.go`。
   - soft delete: `DeletedAt time.Time xorm:"deleted_at deleted"`。**SUM等の生SQL集計は `Where("deleted_at IS NULL")` 必須**（structクエリは自動除外）。
   - **GonicMapper の列名ズレ**: `DTStart→d_t_start`/`RRule→r_rule`/`AssigneeIDs→assignee_i_ds`。連続大文字や複数形は **`xorm:"... 'dtstart'"` で列名を明示**（model と migration の両方）。`UserID/ProjectID/CreatedBy` は正しく user_id/… になる。
@@ -115,8 +118,8 @@ cd capacity-dashboard/app/lib/vendor && docker run --rm -v "$PWD":/out node:20-a
   - error code は未使用帯（15001=times,15002=plans,15003=recurrence,15004=holiday,15005=unavailability）。次は 15006〜。
   - グローバル設定エンティティの権限は `label_rights.go` 流（LinkSharing 以外 true）。
 - **定期は仮想 occurrence**: `recurrences` は RRULE 文字列を保存するだけ。展開・空き計算は **SPA(recurrence.js/rrule.js)**。実タスク/plans は生成しない＝計画用（実績追跡は将来 materialize）。
-- **ガント**: 予定バー範囲は plans→start/end→due の階層(`taskRanges`)。依存は Vikunja が precedes 作成時に逆 follows も自動付与→`dependencyEdges` で前向き正規化＋重複除去。
-- Vikunja: username≥3文字 / 共有の `user_id` は文字列(ユーザー名)。bash の `UID` は予約変数。
+- **ガント**: 予定バー範囲は plans→start/end→due の階層(`taskRanges`)。依存は TaskStation が precedes 作成時に逆 follows も自動付与→`dependencyEdges` で前向き正規化＋重複除去。
+- TaskStation: username≥3文字 / 共有の `user_id` は文字列(ユーザー名)。bash の `UID` は予約変数。
 
 ## 8. データ構造の到達点（“UIだけ” vs “schema変更が要る”）
 **今のデータ構造で実現可能（＝UI/計算の結線だけ）**: 月次まで空き / 予実・ガント / **負荷ヒストリー・バーンダウン**(time_entries.logged_on) / **見積り精度**(estimate vs spent) / **PJ別配分**(project_id×時間) / **依存考慮の並び**(related_tasks) / **かんばん**(bucket)・**WBS**(subtask) / 代理入力の監査(created_by) / 定期・祝日・休暇の**登録UI**・対象者指定入力・ガントのドラッグ編集（書き込みは安全）。

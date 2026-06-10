@@ -1,6 +1,6 @@
 // 週プランナー（フェーズ2: 日別の予定×実績）。task_time_plans を読み書き。
 import { load, invalidate } from "../lib/store.js";
-import * as vik from "../lib/vikunja.js";
+import * as vik from "../lib/api.js";
 import { sumByMemberDay, toH, dateOnly } from "../lib/capacity.js";
 import { C, fmtH, esc, todayISO } from "../lib/ui.js";
 

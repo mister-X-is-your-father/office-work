@@ -1,5 +1,5 @@
 // SPA シェル: ログイン / サイドナビ / ハッシュルータ
-import * as vik from "./lib/vikunja.js";
+import * as vik from "./lib/api.js";
 import * as store from "./lib/store.js";
 
 const ROUTES = {
@@ -23,7 +23,7 @@ function showLogin(msg = "") {
   app.innerHTML = `
     <div class="login">
       <h2>Capacity Board</h2>
-      <p>実データ版。Vikunja にログインしてください。</p>
+      <p>実データ版。TaskStation にログインしてください。</p>
       <label>ユーザー名</label><input id="u" autocomplete="username">
       <label>パスワード</label><input id="p" type="password" autocomplete="current-password">
       <button id="go">接続</button>
@@ -51,7 +51,7 @@ function shell() {
   app.innerHTML = `
     <div class="shell">
       <aside class="sidebar">
-        <div class="brand">Capacity Board<small>Vikunja 実データ</small></div>
+        <div class="brand">Capacity Board<small>TaskStation 実データ</small></div>
         <nav class="nav" id="nav">${nav}</nav>
       </aside>
       <div class="main">

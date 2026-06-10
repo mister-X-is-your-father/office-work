@@ -1,7 +1,7 @@
 // 予実ガント（フェーズ3）。予定バー×実績バーを時間軸に重ね、依存矢印・今日線・進捗・超過を描く。
 // タスク行モード(mock29型) / 人別レーンモード(mock30型) をトグル切替。取得はフロントN+1（planner.js踏襲）。
 import { load } from "../lib/store.js";
-import * as vik from "../lib/vikunja.js";
+import * as vik from "../lib/api.js";
 import { taskRanges, dependencyEdges, dayScale, toMemberDayEntries, sumByMemberDay, shiftISO } from "../lib/capacity.js";
 import { C, member_color, fmtH, esc, todayISO } from "../lib/ui.js";
 

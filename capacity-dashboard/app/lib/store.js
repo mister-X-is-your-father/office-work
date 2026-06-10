@@ -1,5 +1,5 @@
 // セッション中のデータキャッシュ（タスク/プロジェクト/メンバー/定期/祝日/休暇）
-import * as vik from "./vikunja.js";
+import * as vik from "./api.js";
 import { dateOnly } from "./capacity.js";
 
 let cache = null;

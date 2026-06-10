@@ -1,10 +1,10 @@
-# 実現可能性スクリーニング（Vikunja データモデル照合）
+# 実現可能性スクリーニング（TaskStation データモデル照合）
 
-> 全72モックを、Vikunja の実データモデル（`leo:7005` の `/api/v1/docs.json` で実機確認）に照らして判定。
+> 全72モックを、TaskStation の実データモデル（`leo:7005` の `/api/v1/docs.json` で実機確認）に照らして判定。
 > 「DB構成上できないもの／ちょっとの改造では足りないもの」を洗い出す。
 > status: 確定（v0.1 のスコープ判断材料）。
 
-## Vikunja が持つ / 持たないもの（実機確認）
+## TaskStation が持つ / 持たないもの（実機確認）
 
 `models.Task` の実フィールド:
 `assignees, attachments, bucket_id, created, created_by, description, done, done_at,
@@ -25,10 +25,10 @@ repeat_mode, start_date, subscription, title, updated`
 
 | 記号 | 意味 |
 |---|---|
-| ✅ | **標準でいける** — Vikunja のフィールド/APIをそのまま読むだけ |
+| ✅ | **標準でいける** — TaskStation のフィールド/APIをそのまま読むだけ |
 | 🟡 | **軽微な改造で可能** — ラベル `est:4h` ＋ 自前の計算レイヤー（容量・空き・着地）。**要件 v0.1 で織り込み済みの想定内** |
 | 🟠 | **中程度** — 自前で「日次スナップショット」を貯める or 近似に留まる（追加の仕組みが要る） |
-| 🔴 | **別系統が必要** — Vikunja に概念が無く、外部システム/別の記録手段が必須 |
+| 🔴 | **別系統が必要** — TaskStation に概念が無く、外部システム/別の記録手段が必須 |
 
 > 大多数は 🟡。これは「est ラベル＋自前キャパ計算」という本ツールの前提そのものなので想定内。
 > **本当に注意すべきは 🟠 と 🔴**（下の「結論」参照）。
@@ -38,11 +38,11 @@ repeat_mode, start_date, subscription, title, updated`
 ## 結論（先に要点）
 
 ### ✅ 解決済み（fork で DB に実装する方針に変更）— 旧🔴
-- **23 見積りvs実績 / 24 見積り精度 / 42 工数消化** — 当初は「Vikunja に実績時間が無い」ため 🔴 としたが、**Vikunja を fork して `task_time_entries` テーブル＋`tasks.time_estimate` カラムをネイティブ追加する**方針に決定（[ADR-006](01-decisions.md) / [05-time-tracking-fork](05-time-tracking-fork.md)）。→ **ネイティブに成立（✅）**。
+- **23 見積りvs実績 / 24 見積り精度 / 42 工数消化** — 当初は「TaskStation に実績時間が無い」ため 🔴 としたが、**TaskStation を fork して `task_time_entries` テーブル＋`tasks.time_estimate` カラムをネイティブ追加する**方針に決定（[ADR-006](01-decisions.md) / [05-time-tracking-fork](05-time-tracking-fork.md)）。→ **ネイティブに成立（✅）**。
   - ※ コメント解析方式は脆弱なので却下。
 
 ### 🔴 別系統が要る（外部連携）
-- **66 レビューキュー** — 「PR #142」等は GitHub 等の外部。Vikunja にレビュー/PR概念なし。※ラベル `review待ち` での簡易版なら 🟡。
+- **66 レビューキュー** — 「PR #142」等は GitHub 等の外部。TaskStation にレビュー/PR概念なし。※ラベル `review待ち` での簡易版なら 🟡。
 
 ### 🟠 「日次スナップショット」を貯める仕組みが要る
 - **37 バーンダウン / 38 バーンアップ / 25 過負荷ヒストリー**
@@ -74,7 +74,7 @@ repeat_mode, start_date, subscription, title, updated`
 | 06 円ゲージ / 07 ロードメーター | 🟡 | 同上 |
 | 03 空きランキング / 04 残容量カード / 05 振れる枠 / 58 1行 | 🟡 | 空き＝容量−Σest（自前） |
 | 08 ヒートマップ | 🟡 | 人×PJ の est 集計 |
-| 09 1日タイムライン / 10 空きスロット | 🟡 | est を並べる。※Vikunja はタスクの「時刻」を持たないので時間帯配置は便宜的 |
+| 09 1日タイムライン / 10 空きスロット | 🟡 | est を並べる。※TaskStation はタスクの「時刻」を持たないので時間帯配置は便宜的 |
 | 11 オペ盤 | 🟡 | 未アサイン件数=✅、空き=est |
 
 ### ① 振る（アサイン）
@@ -95,7 +95,7 @@ repeat_mode, start_date, subscription, title, updated`
 ### ガント
 | # | 画面 | 判定 | 根拠 |
 |---|---|---|---|
-| 29 ガント(タスク) | ✅ | start/end/done/priority/依存 すべて標準。Vikunja にガントビューもある |
+| 29 ガント(タスク) | ✅ | start/end/done/priority/依存 すべて標準。TaskStation にガントビューもある |
 | 30 ガント(担当別) | ✅/🟡 | ガント自体✅、各人の負荷併記は est(🟡) |
 
 ### プロジェクト状況
@@ -106,7 +106,7 @@ repeat_mode, start_date, subscription, title, updated`
 | 39 ステータス内訳 | ✅ | done/percent/bucket で分類、Blocked=relation |
 | 45 ポートフォリオ | 🟡 | 複数PJ=✅、進捗=done比✅、残工数=Σest |
 | 43 ブロッカー/リスク | 🟡 | Blocked relation=✅、理由=description/comment、滞留=updated |
-| 40 マイルストーン | 🟠 | **Vikunja に milestone 概念なし** → ラベル/特殊タスク/期日タスクで代替 |
+| 40 マイルストーン | 🟠 | **TaskStation に milestone 概念なし** → ラベル/特殊タスク/期日タスクで代替 |
 | 37 バーンダウン | 🟠 | 残作業の**時系列に履歴スナップショットが要る** |
 | 38 バーンアップ | 🟠 | 完了=done_atで近似可、スコープ増減履歴=要スナップショット |
 | 42 工数バジェット | ✅ | **fork後**: 見積り=`tasks.time_estimate`、消化=`SUM(task_time_entries.seconds)`（[ADR-006](01-decisions.md)） |
@@ -117,7 +117,7 @@ repeat_mode, start_date, subscription, title, updated`
 |---|---|---|---|
 | 46 三分類 / 47 優先順 / 48 アイゼンハワー / 49 段取り / 50 slack | 🟡 | 緊急=due(✅)、重要=priority(✅)、slack=due−今日(✅)、工数=est。判定ロジックは自前 |
 | 69 優先度バックログ | 🟡 | priority(✅)・position(✅)、MoSCoW区分=ラベル |
-| 70 MoSCoW | 🟡 | Vikunja に区分無し → ラベル `moscow:must` 等 |
+| 70 MoSCoW | 🟡 | TaskStation に区分無し → ラベル `moscow:must` 等 |
 | 71 RICEスコア | 🟡 | R/I/C/Effort はラベルで保持、算出は自前（数値ラベル管理がやや煩雑） |
 
 ### 構造化
@@ -135,10 +135,10 @@ repeat_mode, start_date, subscription, title, updated`
 | 64 期限カレンダー | ✅ | due_date |
 | 65 依存グラフ | ✅ | relations。クリティカルパス計算は自前 |
 | 51 タスク詳細 | ✅ | 全フィールド+comment+relation+attachment |
-| 52 検索パレット | ✅ | Vikunja 検索API |
+| 52 検索パレット | ✅ | TaskStation 検索API |
 | 62 アクティビティ | 🟡 | コメント=✅、状態変更履歴は監査ログが薄い→通知/最近更新で近似 |
 | 63 アラートセンター | 🟡 | 締切=✅・ブロック=✅・通知=✅、過負荷=est |
-| 66 レビューキュー | 🔴 | **PR は GitHub 等外部**。Vikunja内の簡易版ならラベルで🟡 |
+| 66 レビューキュー | 🔴 | **PR は GitHub 等外部**。TaskStation内の簡易版ならラベルで🟡 |
 
 ### 深掘り・検索・AI
 | # | 画面 | 判定 | 根拠 |
@@ -165,15 +165,15 @@ repeat_mode, start_date, subscription, title, updated`
 
 | 課題 | 対処案 |
 |---|---|
-| **実績時間（23,24,42消化）** | ✅ **採用**: Vikunja を fork し `task_time_entries` テーブル＋`tasks.time_estimate` カラムをネイティブ追加（[ADR-006](01-decisions.md) / [05](05-time-tracking-fork.md) / [`../vikunja-patch/`](../vikunja-patch/)）。〔却下案: コメント解析=脆弱、外部Supabaseストア=分断〕 |
+| **実績時間（23,24,42消化）** | ✅ **採用**: TaskStation を fork し `task_time_entries` テーブル＋`tasks.time_estimate` カラムをネイティブ追加（[ADR-006](01-decisions.md) / [05](05-time-tracking-fork.md) / [`../backend-patch/`](../backend-patch/)）。〔却下案: コメント解析=脆弱、外部Supabaseストア=分断〕 |
 | **履歴スナップショット（25,37,38）** | 日次の cron で「全タスクの残est・done状況」を Supabase にスナップショット。数テーブルで済む。P2以降に追加。 |
 | **マイルストーン（40）** | `milestone:M2` ラベル or 専用プロジェクト、達成判定は配下タスクの done 集計。 |
-| **レビュー/PR（66）** | GitHub webhook 連携（将来）。当面は Vikunja ラベル `review待ち` の簡易キュー。 |
+| **レビュー/PR（66）** | GitHub webhook 連携（将来）。当面は TaskStation ラベル `review待ち` の簡易キュー。 |
 
 ## まとめ
 
 - **統合プロト P1（静的・サンプル）には影響なし** — 全画面そのまま組める。
-- **実績系（23,24,42）は Vikunja fork で解決**（[ADR-006](01-decisions.md)）。残る別系統は **PR連携（66）** のみ。
+- **実績系（23,24,42）は TaskStation fork で解決**（[ADR-006](01-decisions.md)）。残る別系統は **PR連携（66）** のみ。
 - **履歴系（25,37,38）** はスナップショット導入が前提（実績側は fork の `task_time_entries` が裏付ける）。
 - それ以外は **見積りカラム/ラベル＋自前キャパ計算** で素直に出せる。
 
