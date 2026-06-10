@@ -3,7 +3,7 @@
 import { todayItemsByMember, suggestDays } from "../lib/today_items.js";
 import { fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 import { dateOnly, hasDate, shiftISO } from "../lib/capacity.js";
-import { deletePlan, logPlan, updateTask } from "../lib/api.js";
+import { deletePlan, logPlan, updateTask, requestReview } from "../lib/api.js";
 import { invalidate } from "../lib/store.js";
 
 const CAP = 8;
@@ -13,6 +13,7 @@ const FREECOL = "#e7ebf0";   // 空き=薄グレー
 const CATS = [
   { key: "meeting", label: "会議", pat: "meeting" },
   { key: "recurring", label: "定例", pat: "routine" },
+  { key: "review", label: "レビュー", pat: "review" },
   { key: "planned", label: "予定タスク", pat: "task" },
   { key: "adhoc", label: "当日追加", pat: "adhoc" },
 ];
@@ -37,6 +38,10 @@ function seg(r, f0, f1, color, pat, width) {
   if (pat === "adhoc") {
     const a = -Math.PI / 2 + ((f0 + f1) / 2) * 2 * Math.PI;
     s += `<circle cx="${(CX + r * Math.cos(a)).toFixed(1)}" cy="${(CY + r * Math.sin(a)).toFixed(1)}" r="3.6" fill="#fff" stroke="${color}" stroke-width="1.8"/>`;
+  }
+  if (pat === "review") { // 中空の白リングマーカー
+    const a = -Math.PI / 2 + ((f0 + f1) / 2) * 2 * Math.PI;
+    s += `<circle cx="${(CX + r * Math.cos(a)).toFixed(1)}" cy="${(CY + r * Math.sin(a)).toFixed(1)}" r="4" fill="none" stroke="#fff" stroke-width="1.8"/>`;
   }
   return s;
 }
@@ -134,6 +139,7 @@ function legend() {
       <span class="it"><i class="sw"></i>タスク</span>
       <span class="it"><i class="sw hatch"></i>会議</span>
       <span class="it"><i class="sw dots"></i>定例</span>
+      <span class="it"><i class="sw review"></i>レビュー</span>
       <span class="it"><i class="sw adhoc"></i>当日追加</span></span>
     <span class="sep"></span>
     <span class="grp">
@@ -157,7 +163,7 @@ export function renderClock(container, data, day, rerender) {
     <div class="ck-grid">${states.map((m, i) => cardHTML(m, i)).join("")}</div>
     ${states.length ? legend() : `<div class="ck-empty">本日のメンバー負荷がありません。</div>`}
     <div class="ck-modal" id="ck-modal" hidden><div class="ck-modal-bg"></div><div class="ck-modal-card" id="ck-modal-card"></div></div>`;
-  wireInteractions(container, data, day, rerender);
+  wireInteractions(container, data, day, rerender, states);
   return container;
 }
 
@@ -170,53 +176,79 @@ const todayPlans = (data, taskId, memberId, day, aids = []) =>
   plansOf(data, taskId).filter((p) => dateOnly(p.plan_date) === day && (p.user_id === memberId || !p.user_id || !aids.includes(p.user_id)));
 const aidsOf = (data, taskId) => ((data.tasks.find((x) => x.id === taskId) || {}).assignees || []).map((a) => a.id);
 
-function wireInteractions(container, data, day, rerender) {
+function wireInteractions(container, data, day, rerender, states) {
   const modal = container.querySelector("#ck-modal");
   const card = container.querySelector("#ck-modal-card");
   const close = () => { modal.hidden = true; card.innerHTML = ""; };
   modal.querySelector(".ck-modal-bg").onclick = close;
+  const freeBy = new Map((states || []).map((s) => [s.member.id, s.freeH]));
+  const head = (title, sub) => `<div class="ck-mh"><b>${esc(title)}</b>${sub ? `<span class="ck-msub">${esc(sub)}</span>` : ""}</div>`;
 
-  const move = async (taskId, memberId, neededH, targetDay) => {
-    const todays = todayPlans(data, taskId, memberId, day, aidsOf(data, taskId));
+  // --- 書き込みアクション ---
+  const move = async (ctx, targetDay) => {
+    const todays = todayPlans(data, ctx.taskId, ctx.memberId, day, ctx.aids);
     if (todays.length) {
-      const secs = todays.reduce((s, p) => s + (p.seconds || 0), 0) || Math.round(neededH * 3600);
-      for (const p of todays) await deletePlan(taskId, p.id);
-      await logPlan(taskId, secs, targetDay, "", memberId);
+      const secs = todays.reduce((s, p) => s + (p.seconds || 0), 0) || Math.round(ctx.neededH * 3600);
+      for (const p of todays) await deletePlan(ctx.taskId, p.id);
+      await logPlan(ctx.taskId, secs, targetDay, "", ctx.memberId);
     } else {
-      await updateTask(taskId, { due_date: targetDay + "T00:00:00Z" }); // 見積り/期日ベース → 期日を移動
+      await updateTask(ctx.taskId, { due_date: targetDay + "T00:00:00Z" }); // 見積り/期日ベース → 期日を移動
     }
     invalidate(); close(); await rerender();
   };
-  const dropToday = async (taskId, memberId) => {
-    for (const p of todayPlans(data, taskId, memberId, day, aidsOf(data, taskId))) await deletePlan(taskId, p.id);
+  const dropToday = async (ctx) => {
+    for (const p of todayPlans(data, ctx.taskId, ctx.memberId, day, ctx.aids)) await deletePlan(ctx.taskId, p.id);
     invalidate(); close(); await rerender();
   };
+  const review = async (ctx, reviewerId) => {
+    const proj = ctx.t.project_id || (data.projects[0] || {}).id;
+    await requestReview({ ...ctx.t, project_id: proj }, reviewerId, day);
+    invalidate(); close(); await rerender();
+  };
+
+  // --- パネル（メニュー → 各操作） ---
+  function menu(ctx) {
+    const planBased = todayPlans(data, ctx.taskId, ctx.memberId, day, ctx.aids).length > 0;
+    card.innerHTML = head(ctx.title, fmtH(ctx.neededH)) + `
+      <div class="ck-menu">
+        <button data-a="move">📅 別日へ移す</button>
+        <button data-a="review">👀 レビュー依頼</button>
+        ${planBased ? `<button data-a="drop" class="danger">本日から外す</button>` : ""}
+      </div>
+      <div class="ck-macts"><button class="ck-cancel">キャンセル</button></div>`;
+    card.querySelector('[data-a="move"]').onclick = () => panelMove(ctx);
+    card.querySelector('[data-a="review"]').onclick = () => panelReview(ctx);
+    const d = card.querySelector('[data-a="drop"]'); if (d) d.onclick = () => dropToday(ctx);
+    card.querySelector(".ck-cancel").onclick = close;
+    modal.hidden = false;
+  }
+  function panelMove(ctx) {
+    const tomorrow = shiftISO(day, 1);
+    let toISO = shiftISO(day, 14), overDue = false, dueLabel = "";
+    if (hasDate(ctx.t.due_date)) { const due = dateOnly(ctx.t.due_date); dueLabel = `期日 ${mdw(due)}`; if (due >= tomorrow) toISO = due; else overDue = true; }
+    const sugg = suggestDays(data, ctx.memberId, tomorrow, toISO, ctx.neededH, CAP);
+    const list = sugg.length
+      ? sugg.slice(0, 8).map((s) => `<button class="ck-day ${s.fits ? "fit" : "part"}" data-day="${s.day}">${mdw(s.day)}<span class="fh">空き ${fmtH(s.freeH)}${s.fits ? "" : "（部分）"}</span></button>`).join("")
+      : `<div class="ck-none">${overDue ? "期日を過ぎています。" : ""}候補の空き日がありません。</div>`;
+    card.innerHTML = head(ctx.title, dueLabel) + `<div class="ck-mlbl">別日へ移す（${overDue ? "直近14日" : "期日まで"}・収まる日優先）</div><div class="ck-days">${list}</div><div class="ck-macts"><button class="ck-back">← 戻る</button></div>`;
+    card.querySelectorAll(".ck-day").forEach((d) => { d.onclick = () => move(ctx, d.dataset.day); });
+    card.querySelector(".ck-back").onclick = () => menu(ctx);
+  }
+  function panelReview(ctx) {
+    const others = data.members.filter((m) => m.id !== ctx.memberId).sort((a, b) => (freeBy.get(b.id) || 0) - (freeBy.get(a.id) || 0));
+    const list = others.length
+      ? others.map((m, i) => `<button class="ck-day" data-rev="${m.id}"><span class="ck-pwho"><i class="ck-pav" style="background:${member_color(i)}">${esc((m.name || m.username || "?")[0])}</i>${esc(m.name || m.username)}</span><span class="fh">空き ${fmtH(freeBy.get(m.id) || 0)}</span></button>`).join("")
+      : `<div class="ck-none">他のメンバーがいません。</div>`;
+    card.innerHTML = head(`「${ctx.title}」のレビュー依頼`, "依頼先を選択") + `<div class="ck-mlbl">レビュアー（空き多い順）・本日の当日追加に出ます</div><div class="ck-days">${list}</div><div class="ck-macts"><button class="ck-back">← 戻る</button></div>`;
+    card.querySelectorAll("[data-rev]").forEach((b) => { b.onclick = () => review(ctx, +b.dataset.rev); });
+    card.querySelector(".ck-back").onclick = () => menu(ctx);
+  }
 
   container.querySelectorAll(".ck-more").forEach((btn) => {
     btn.onclick = (e) => {
       e.stopPropagation();
-      const taskId = +btn.dataset.task, memberId = +btn.dataset.member, neededH = +btn.dataset.h;
-      const t = data.tasks.find((x) => x.id === taskId) || {};
-      const tomorrow = shiftISO(day, 1);
-      let toISO = shiftISO(day, 14), overDue = false, dueLabel = "";
-      if (hasDate(t.due_date)) {
-        const due = dateOnly(t.due_date); dueLabel = `期日 ${mdw(due)}`;
-        if (due >= tomorrow) toISO = due; else { overDue = true; }
-      }
-      const sugg = suggestDays(data, memberId, tomorrow, toISO, neededH, CAP);
-      const planBased = todayPlans(data, taskId, memberId, day, (t.assignees || []).map((a) => a.id)).length > 0;
-      const list = sugg.length
-        ? sugg.slice(0, 8).map((s) => `<button class="ck-day ${s.fits ? "fit" : "part"}" data-day="${s.day}">${mdw(s.day)}<span class="fh">空き ${fmtH(s.freeH)}${s.fits ? "" : "（部分）"}</span></button>`).join("")
-        : `<div class="ck-none">${overDue ? "期日を過ぎています。" : ""}候補の空き日がありません。</div>`;
-      card.innerHTML = `
-        <div class="ck-mh"><b>${esc(btn.dataset.title)}</b><span class="ck-msub">${fmtH(neededH)}${dueLabel ? " ・ " + dueLabel : ""}</span></div>
-        <div class="ck-mlbl">別日へ移す（${overDue ? "直近14日" : "期日まで"}・収まる日優先）</div>
-        <div class="ck-days">${list}</div>
-        <div class="ck-macts">${planBased ? `<button class="ck-drop">本日から外す（予定削除）</button>` : ""}<button class="ck-cancel">キャンセル</button></div>`;
-      card.querySelectorAll(".ck-day").forEach((d) => { d.onclick = () => move(taskId, memberId, neededH, d.dataset.day); });
-      const drop = card.querySelector(".ck-drop"); if (drop) drop.onclick = () => dropToday(taskId, memberId);
-      card.querySelector(".ck-cancel").onclick = close;
-      modal.hidden = false;
+      const taskId = +btn.dataset.task, t = data.tasks.find((x) => x.id === taskId) || {};
+      menu({ taskId, memberId: +btn.dataset.member, neededH: +btn.dataset.h, title: btn.dataset.title, t, aids: (t.assignees || []).map((a) => a.id) });
     };
   });
 }
@@ -254,6 +286,7 @@ function css() {
   .ck-kic.meeting,.ck-dot.meeting{background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.85) 0 1.4px,transparent 1.4px 3px)}
   .ck-kic.routine,.ck-dot.routine{background-image:radial-gradient(rgba(255,255,255,.9) .9px,transparent 1.1px);background-size:3px 3px}
   .ck-kic.adhoc,.ck-dot.adhoc{box-shadow:inset 0 0 0 1.4px #fff}
+  .ck-kic.review,.ck-dot.review{background-image:radial-gradient(#fff 0 1.6px,transparent 1.9px)}
   .ck-cnt{color:#6b7480;font-weight:600}
   .ck-n{margin-left:auto;font-weight:700;color:#54606e;font-variant-numeric:tabular-nums}
   .ck-row{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:3px 4px 3px 12px}
@@ -273,6 +306,7 @@ function css() {
   .ck-legend .sw.hatch{background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.85) 0 1.6px,transparent 1.6px 3.4px)}
   .ck-legend .sw.dots{background-image:radial-gradient(rgba(255,255,255,.85) 1px,transparent 1.3px);background-size:4px 4px}
   .ck-legend .sw.adhoc{box-shadow:inset 0 0 0 1.6px #fff}
+  .ck-legend .sw.review{background-image:radial-gradient(#fff 0 1.8px,transparent 2.1px)}
   .ck-legend .sep{width:1px;height:14px;background:#e6e9ee}
   .ck-modal{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center}
   .ck-modal[hidden]{display:none}
@@ -289,7 +323,13 @@ function css() {
   .ck-none{font-size:12px;color:#6b7480;padding:8px 2px}
   .ck-macts{display:flex;gap:8px;margin-top:14px;justify-content:flex-end}
   .ck-macts button{border:1px solid #e6e9ee;background:#fff;border-radius:8px;padding:7px 12px;font:inherit;font-size:12.5px;cursor:pointer}
-  .ck-drop{color:#e5484d;border-color:#f3c9cb!important}
-  .ck-drop:hover{background:#fdecec}
-  .ck-cancel:hover{background:#f3f5f8}`;
+  .ck-drop,.ck-menu button.danger{color:#e5484d;border-color:#f3c9cb!important}
+  .ck-drop:hover,.ck-menu button.danger:hover{background:#fdecec}
+  .ck-cancel:hover,.ck-back:hover{background:#f3f5f8}
+  .ck-menu{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+  .ck-menu button{border:1px solid #e6e9ee;background:#fff;border-radius:9px;padding:10px 12px;font:inherit;font-size:13px;font-weight:600;text-align:left;cursor:pointer}
+  .ck-menu button:hover{border-color:#cfe0ff;background:#f3f8ff}
+  .ck-pwho{display:inline-flex;align-items:center;gap:8px}
+  .ck-pav{width:22px;height:22px;border-radius:50%;display:inline-grid;place-items:center;color:#fff;font-size:11px;font-weight:700}
+  .ck-back{border:1px solid #e6e9ee;background:#fff;border-radius:8px;padding:7px 12px;font:inherit;font-size:12.5px;cursor:pointer}`;
 }

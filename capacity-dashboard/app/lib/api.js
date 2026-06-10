@@ -85,3 +85,30 @@ export async function deleteHoliday(id) { return req(`/holidays/${id}`, { method
 export async function getUnavailability() { return req("/unavailability"); }
 export async function createUnavailability(body) { return req("/unavailability", { method: "PUT", body }); }
 export async function deleteUnavailability(id) { return req(`/unavailability/${id}`, { method: "DELETE" }); }
+
+// レビュー依頼（ネイティブ機能のみ・スキーマ変更なし）: タスク作成＋ラベル＋担当＋関連リンク。
+export async function createTaskInProject(projectId, body) { return req(`/projects/${projectId}/tasks`, { method: "PUT", body }); }
+export async function getLabels() { return req("/labels"); }
+export async function createLabel(title) { return req("/labels", { method: "PUT", body: { title } }); }
+export async function addTaskLabel(taskId, labelId) { return req(`/tasks/${taskId}/labels`, { method: "PUT", body: { label_id: labelId } }); }
+export async function addAssignee(taskId, userId) { return req(`/tasks/${taskId}/assignees`, { method: "PUT", body: { user_id: userId } }); }
+export async function addRelation(taskId, otherTaskId, kind = "related") { return req(`/tasks/${taskId}/relations`, { method: "PUT", body: { other_task_id: otherTaskId, relation_kind: kind } }); }
+
+export const REVIEW_LABEL = "レビュー";
+let _reviewLabelId = null;
+export async function ensureReviewLabel() {
+  if (_reviewLabelId) return _reviewLabelId;
+  const labels = await getLabels();
+  const found = (labels || []).find((l) => l.title === REVIEW_LABEL);
+  _reviewLabelId = found ? found.id : (await createLabel(REVIEW_LABEL)).id;
+  return _reviewLabelId;
+}
+// 元タスクのレビュータスクを生成（レビュアー割当・レビューラベル・関連・期日）。生成した新タスクを返す。
+export async function requestReview(srcTask, reviewerId, dueISO, estimateSeconds = 1800) {
+  const labelId = await ensureReviewLabel();
+  const task = await createTaskInProject(srcTask.project_id, { title: `${srcTask.title} のレビュー`, due_date: dueISO + "T00:00:00Z", time_estimate: estimateSeconds });
+  await addAssignee(task.id, reviewerId);
+  await addTaskLabel(task.id, labelId);
+  await addRelation(task.id, srcTask.id, "related");
+  return task;
+}

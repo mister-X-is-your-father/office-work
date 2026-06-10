@@ -25,7 +25,9 @@ function isAdvanced(task, planEntries, isoDay) {
   return (planEntries || []).some((e) => dateOnly(e.plan_date) === isoDay);
 }
 
-const CRANK = { meeting: 0, recurring: 1, planned: 2, adhoc: 2 };
+const REVIEW_LABEL = "レビュー";
+const isReviewTask = (t) => (t.labels || []).some((l) => (l.title || "") === REVIEW_LABEL);
+const CRANK = { meeting: 0, recurring: 1, review: 2, planned: 3, adhoc: 3 };
 
 // data: { tasks, members, plansByTask, recurrences }
 // 返り値: Map<memberId, { member, items:[{taskId?,title,h,cat,prio,advanced}], usedH, freeH, overH, status }>
@@ -41,9 +43,9 @@ export function todayItemsByMember(data, isoDay, capH = 8) {
     if (!byMember.size) continue;
     const adhoc = hasDate(t.created) && dateOnly(t.created) === isoDay;
     const advanced = isAdvanced(t, planEntries, isoDay);
+    const cat = isReviewTask(t) ? "review" : (adhoc ? "adhoc" : "planned");
     for (const [mid, h] of byMember) {
-      push(mid, { taskId: t.id, title: t.title, h: round1(h),
-        cat: adhoc ? "adhoc" : "planned", prio: prioBucket(t.priority), advanced });
+      push(mid, { taskId: t.id, title: t.title, h: round1(h), cat, prio: prioBucket(t.priority), advanced });
     }
   }
 
