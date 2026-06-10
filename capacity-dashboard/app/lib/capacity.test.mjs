@@ -4,8 +4,20 @@ import {
   toH, dateOnly, hasDate, isActiveOn, taskHoursOn,
   loadByMember, weekLoadByMember, estimateVsActual, triage, sumByMemberDay,
   shiftISO, taskRanges, dependencyEdges, dayScale, toMemberDayEntries, taskPlannedHoursByMemberOn,
-  buildTaskTree,
+  buildTaskTree, depLayers,
 } from "./capacity.js";
+
+test("depLayers: 段組み＋クリティカルパス(最長鎖)", () => {
+  // 1→2→4, 1→3, 3→4  : 最長鎖は 1→2→4 もしくは 1→3→4(同長3)
+  const ids = [1, 2, 3, 4];
+  const edges = [{ from: 1, to: 2 }, { from: 2, to: 4 }, { from: 1, to: 3 }, { from: 3, to: 4 }];
+  const { level, critical } = depLayers(ids, edges);
+  assert.equal(level.get(1), 0);
+  assert.equal(level.get(4), 2); // 1→2→4 = level2
+  assert.equal(critical.has(1), true);
+  assert.equal(critical.has(4), true);
+  assert.equal(critical.size, 3); // 3ノードの鎖
+});
 
 test("buildTaskTree: subtask 親子フォレスト", () => {
   const tasks = [

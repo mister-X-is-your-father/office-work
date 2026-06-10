@@ -226,6 +226,34 @@ export function buildTaskTree(tasks) {
   return list.filter((t) => !childIds.has(t.id)).map(node);
 }
 
+// 依存グラフの段組み（level=最長の前段数）＋クリティカルパス（最長ノード鎖）。
+// ids: ノードID配列, edges: [{from,to}]（前→後）。返り値: {level:Map, critical:Set, order:[]}。
+export function depLayers(ids, edges) {
+  const idset = new Set(ids);
+  const adj = new Map(ids.map((id) => [id, []]));
+  const indeg = new Map(ids.map((id) => [id, 0]));
+  for (const e of edges || []) {
+    if (!idset.has(e.from) || !idset.has(e.to) || e.from === e.to) continue;
+    adj.get(e.from).push(e.to); indeg.set(e.to, indeg.get(e.to) + 1);
+  }
+  const ind = new Map(indeg);
+  const q = ids.filter((id) => ind.get(id) === 0);
+  const order = [];
+  while (q.length) { const n = q.shift(); order.push(n); for (const m of adj.get(n)) { ind.set(m, ind.get(m) - 1); if (ind.get(m) === 0) q.push(m); } }
+  const level = new Map(ids.map((id) => [id, 0]));
+  const dist = new Map(ids.map((id) => [id, 1]));
+  const back = new Map();
+  for (const n of order) for (const m of adj.get(n)) {
+    level.set(m, Math.max(level.get(m), level.get(n) + 1));
+    if (dist.get(n) + 1 > dist.get(m)) { dist.set(m, dist.get(n) + 1); back.set(m, n); }
+  }
+  let end = ids[0], best = -1;
+  for (const id of ids) if (dist.get(id) > best) { best = dist.get(id); end = id; }
+  const critical = new Set();
+  for (let cur = end; cur != null; cur = back.get(cur)) critical.add(cur);
+  return { level, critical, order };
+}
+
 // 日付軸スケール器。startISO から days 日の窓。列index と範囲→span を返す。
 export function dayScale(startISO, days) {
   const axis = [];
