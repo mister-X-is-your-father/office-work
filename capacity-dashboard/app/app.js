@@ -69,7 +69,7 @@ function shell() {
   app.innerHTML = `
     <div class="shell">
       <aside class="sidebar">
-        <div class="brand">TaskStation<small>キャパ可視化・実データ</small></div>
+        <div class="brand">TaskStation<small>キャパ可視化</small></div>
         <nav class="nav" id="nav">${nav}</nav>
       </aside>
       <div class="main">

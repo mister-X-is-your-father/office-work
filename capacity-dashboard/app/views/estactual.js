@@ -10,7 +10,7 @@ export async function render(root) {
   const maxH = Math.max(...r.rows.flatMap(x => [x.estH, x.actH]), 1);
 
   root.innerHTML = `
-    <h1 class="vtitle">見積り vs 実績 <small>実データ</small></h1>
+    <h1 class="vtitle">見積り vs 実績</h1>
     <div class="kpis">
       <div class="kpi"><div class="l">見積り合計</div><div class="v">${fmtH(r.totEst)}</div></div>
       <div class="kpi"><div class="l">実績合計</div><div class="v">${fmtH(r.totAct)}</div></div>

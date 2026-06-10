@@ -52,13 +52,14 @@ function clockSVG(m) {
   if (m.freeH > 0) out.push(`<path d="${arc(R, m.usedH / CAP, 1)}" fill="none" stroke="${FREECOL}" stroke-width="${STROKE}" stroke-linecap="butt"/>`);
   const capInner = R - STROKE / 2 - 6, capOuter = (m.overH > 0 ? 99 : R + STROKE / 2 + 5);
   out.push(`<line x1="${CX}" y1="${(CY - capInner).toFixed(1)}" x2="${CX}" y2="${(CY - capOuter).toFixed(1)}" stroke="#9aa3af" stroke-width="2"/>`);
-  const big = m.overH > 0 ? `+${fmtH(m.overH)}` : (m.freeH > 0 ? fmtH(m.freeH) : "満");
-  const bigcol = m.overH > 0 ? "#e5484d" : (m.freeH > 0 ? "#2fa66b" : "#8a93a0");
-  const sub = m.overH > 0 ? "超過" : (m.freeH > 0 ? "空き" : "ちょうど");
-  return `<svg class="ck-dial" width="200" height="200" viewBox="0 0 200 200" role="img" aria-label="${esc(m.member.name || "")} ${sub} ${big}">
+  // 中央の大きい数字＝本日の稼働予定(used)。空き/超過はサブに（予定ゼロ＝大きく0h・サブ「空き8h」）。
+  const big = fmtH(m.usedH);
+  const bigcol = m.overH > 0 ? "#e5484d" : (m.usedH > 1e-6 ? "#1d2430" : "#9aa3af");
+  const sub = m.overH > 0 ? `超過 +${fmtH(m.overH)}` : (m.freeH > 0 ? `空き ${fmtH(m.freeH)}` : "満稼働");
+  return `<svg class="ck-dial" width="200" height="200" viewBox="0 0 200 200" role="img" aria-label="${esc(m.member.name || "")} 予定${big} ${sub}">
     ${out.join("\n    ")}
-    <text x="${CX}" y="${CY - 3}" text-anchor="middle" class="ck-cn" fill="${bigcol}" style="font-variant-numeric:tabular-nums">${big}</text>
-    <text x="${CX}" y="${CY + 14}" text-anchor="middle" class="ck-cl" fill="#6b7480">${sub} · ${fmtH(m.usedH)}/${CAP}h</text>
+    <text x="${CX}" y="${CY - 1}" text-anchor="middle" class="ck-cn" fill="${bigcol}" style="font-variant-numeric:tabular-nums">${big}</text>
+    <text x="${CX}" y="${CY + 15}" text-anchor="middle" class="ck-cl" fill="#6b7480">${sub}</text>
   </svg>`;
 }
 
