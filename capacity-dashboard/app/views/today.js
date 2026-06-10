@@ -2,16 +2,28 @@
 import { load } from "../lib/store.js";
 import { loadByMember } from "../lib/capacity.js";
 import { projectName } from "../lib/store.js";
+import { whoami } from "../lib/api.js";
 import { C, fmtH, esc, todayISO } from "../lib/ui.js";
 import { renderClock } from "./clock.js";
 
 const CAP = 8;
 const PJPAL = ["#3a86ff", "#2fa66b", "#b657d6", "#e5772d", "#0ea5e9", "#f5a623", "#ef476f", "#14b8a6"];
-let MODE = "clock"; // 'clock' | 'stacked'（セッション内保持）
+// 表示モードは個人ごとに localStorage で永続化（設定表が無いため・HANDOFF §8）。
+// 既定は「積み上げ」。ログインユーザー id ごとにキーを分け、共用ブラウザでも個人別に保持。
+const DEFAULT_MODE = "stacked"; // 'clock' | 'stacked'
+const modeKey = (uid) => `ts.today.mode.${uid ?? "anon"}`;
+let MODE = null;     // 未確定=null。初回 render で localStorage から確定
+let MODE_UID = null; // モード保存先のユーザー id
 
 export async function render(root) {
   const data = await load();
   const day = todayISO();
+  if (MODE === null) {
+    try { MODE_UID = (await whoami())?.id ?? null; } catch { MODE_UID = null; }
+    let saved = null;
+    try { saved = localStorage.getItem(modeKey(MODE_UID)); } catch {}
+    MODE = saved === "clock" || saved === "stacked" ? saved : DEFAULT_MODE;
+  }
   root.innerHTML = `
     <style>.t-seg{display:inline-flex;background:#fff;border:1px solid ${C.line};border-radius:10px;padding:3px;margin:0 0 16px;box-shadow:0 1px 2px rgba(20,30,50,.04)}
     .t-seg button{border:0;background:transparent;color:${C.muted};font:inherit;font-size:13px;font-weight:600;padding:5px 14px;border-radius:8px;cursor:pointer}
@@ -22,7 +34,13 @@ export async function render(root) {
       <button data-m="stacked" class="${MODE === "stacked" ? "on" : ""}">積み上げ</button>
     </div>
     <div id="t-body"></div>`;
-  root.querySelectorAll(".t-seg button").forEach((b) => { b.onclick = () => { MODE = b.dataset.m; render(root); }; });
+  root.querySelectorAll(".t-seg button").forEach((b) => {
+    b.onclick = () => {
+      MODE = b.dataset.m;
+      try { localStorage.setItem(modeKey(MODE_UID), MODE); } catch {}
+      render(root);
+    };
+  });
   const body = root.querySelector("#t-body");
   if (MODE === "clock") renderClock(body, data, day, () => render(root));
   else renderStacked(body, data, day);

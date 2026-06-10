@@ -69,7 +69,8 @@ function shell() {
   app.innerHTML = `
     <div class="shell">
       <aside class="sidebar">
-        <div class="brand">TaskStation<small>キャパ可視化</small></div>
+        <div class="brand">TaskStation</div>
+        <button class="addbtn" id="addtask">タスク追加</button>
         <nav class="nav" id="nav">${nav}</nav>
       </aside>
       <div class="main">
@@ -82,6 +83,10 @@ function shell() {
       </div>
     </div>`;
   document.getElementById("refresh").onclick = async () => { store.invalidate(); route(); };
+  document.getElementById("addtask").onclick = async () => {
+    const { openTaskForm } = await import("./views/taskform.js");
+    openTaskForm({ onSaved: route });
+  };
   document.getElementById("logout").onclick = () => { vik.clearToken(); showLogin(); };
   vik.whoami().then(u => { document.getElementById("who").textContent = u ? (u.name || u.username) : ""; }).catch(() => {});
 }

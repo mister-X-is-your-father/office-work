@@ -257,7 +257,7 @@ function shell(projects, members, memberIdx) {
         <button data-mode="task" class="on">タスク行</button>
         <button data-mode="member">人別レーン</button>
       </div>
-      <div class="tbg"><span class="tbl">プロジェクト</span><div class="chips">${projChips}</div></div>
+      <div class="tbg"><span class="tbl">ワークスペース</span><div class="chips">${projChips}</div></div>
       <div class="tbg"><span class="tbl">担当者</span><div class="chips">${memChips}</div></div>
       <label class="tbg chk"><input type="checkbox" id="gv-hidedone"> 完了を隠す</label>
     </div>

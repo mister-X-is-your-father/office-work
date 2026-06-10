@@ -1,4 +1,5 @@
-// セッション中のデータキャッシュ（タスク/プロジェクト/メンバー/定期/祝日/休暇）
+// セッション中のデータキャッシュ（タスク/ワークスペース/メンバー/定期/祝日/休暇）
+// ※UI呼称=ワークスペース。API/データモデル上のエンティティは Vikunja の project（project_id 等の識別子はそのまま）。
 import * as vik from "./api.js";
 import { dateOnly } from "./capacity.js";
 

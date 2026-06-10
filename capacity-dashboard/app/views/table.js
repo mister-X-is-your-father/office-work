@@ -2,6 +2,7 @@
 import { load, projectName } from "../lib/store.js";
 import { PRIO, prioBucket, kindOf, isReviewTask } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
+import { openTaskForm } from "./taskform.js";
 
 const HOUR = 3600;
 let SORT = { key: "due", dir: 1 };       // key, dir(1=asc,-1=desc)
@@ -34,13 +35,14 @@ export async function render(root) {
   }[SORT.key] || (() => 0);
   rows.sort((a, b) => cmp(a, b) * SORT.dir);
 
-  const projOpts = `<option value="">全プロジェクト</option>` +
+  const projOpts = `<option value="">全ワークスペース</option>` +
     (projects || []).map((p) => `<option value="${p.id}"${String(p.id) === FILTER.proj ? " selected" : ""}>${esc(p.title)}</option>`).join("");
 
   root.innerHTML = `
     <style>${css()}</style>
     <h1 class="vtitle">タスク一覧 <small>${rows.length}件 ・ 列クリックでソート</small></h1>
     <div class="tb-tools">
+      <button id="tb-add" class="tb-add">タスク追加</button>
       <select id="tb-proj">${projOpts}</select>
       <label class="tb-chk"><input type="checkbox" id="tb-hd" ${FILTER.hideDone ? "checked" : ""}> 完了を隠す</label>
     </div>
@@ -51,8 +53,12 @@ export async function render(root) {
 
   root.querySelector("#tb-proj").onchange = (e) => { FILTER.proj = e.target.value; render(root); };
   root.querySelector("#tb-hd").onchange = (e) => { FILTER.hideDone = e.target.checked; render(root); };
+  root.querySelector("#tb-add").onclick = () => openTaskForm({ onSaved: () => render(root) });
   root.querySelectorAll("th[data-k]").forEach((h) => {
     h.onclick = () => { const k = h.dataset.k; if (SORT.key === k) SORT.dir *= -1; else SORT = { key: k, dir: 1 }; render(root); };
+  });
+  root.querySelectorAll("tr[data-id]").forEach((tr) => {
+    tr.onclick = () => openTaskForm({ taskId: +tr.dataset.id, onSaved: () => render(root) });
   });
 }
 
@@ -73,7 +79,7 @@ function rowHtml(r, members, i) {
   const prio = `<span class="tb-prio"><i style="background:${pc.c}"></i>${pc.n}</span>`;
   const dueCls = r.due && r.due < todayISO() && !r.done ? "over" : "";
   const st = `<span class="tb-st ${r.done ? "done" : (r.pct > 0 ? "doing" : "todo")}">${r.state}</span>`;
-  return `<tr>
+  return `<tr data-id="${r.t.id}">
     <td class="tb-title">${esc(r.title)}<div class="tb-sub">${esc(r.proj)}</div></td>
     <td>${ava}${esc(wn)}</td>
     <td>${kind}</td>
@@ -89,9 +95,13 @@ function css() {
   return `
   .tb-tools{display:flex;gap:12px;align-items:center;margin:0 0 14px}
   .tb-tools select{font:inherit;font-size:13px;padding:6px 10px;border:1px solid ${C.line};border-radius:8px;background:#fff}
+  .tb-add{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:13px;font-weight:600;padding:6px 13px;border:1px solid ${C.line};border-radius:8px;background:#fff;color:${C.ink};cursor:pointer;transition:background .12s,border-color .12s}
+  .tb-add::before{content:"+";font-size:15px;color:${C.fill};line-height:1}
+  .tb-add:hover{background:${C.track};border-color:#d7dde6}
   .tb-chk{font-size:13px;color:${C.muted};display:flex;align-items:center;gap:6px}
   .tb-wrap{overflow-x:auto}
   table.tb{width:100%;border-collapse:collapse;font-size:13px}
+  .tb tbody tr[data-id]{cursor:pointer}
   .tb th{font-size:11px;color:${C.muted};font-weight:600;text-align:left;padding:10px 12px;border-bottom:1px solid ${C.line};white-space:nowrap;background:#fafbfc}
   .tb th.sortable{cursor:pointer;user-select:none}.tb th.sortable:hover{color:${C.ink}}
   .tb td{padding:10px 12px;border-bottom:1px solid ${C.line};vertical-align:middle}
