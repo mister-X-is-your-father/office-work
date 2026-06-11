@@ -35,10 +35,9 @@ function showAuth(mode = "login", msg = "") {
   app.innerHTML = `
     <div class="login">
       <h2>TaskStation</h2>
-      <p>${isReg ? "アカウントを作成" : "ログイン"}</p>
-      <label>ユーザー名</label><input id="u" autocomplete="username" placeholder="ユーザー名">
-      ${isReg ? `<label>メールアドレス</label><input id="em" type="email" autocomplete="email" placeholder="you@example.com">` : ""}
-      <label>パスワード</label><input id="p" type="password" autocomplete="${isReg ? "new-password" : "current-password"}" placeholder="パスワード">
+      <input id="u" autocomplete="username" placeholder="ユーザー名" aria-label="ユーザー名">
+      ${isReg ? `<input id="em" type="email" autocomplete="email" placeholder="メールアドレス" aria-label="メールアドレス">` : ""}
+      <input id="p" type="password" autocomplete="${isReg ? "new-password" : "current-password"}" placeholder="パスワード" aria-label="パスワード">
       <button id="go">${isReg ? "アカウントを作成" : "ログイン"}</button>
       <div class="err" id="err">${msg}</div>
       <div style="margin-top:14px;font-size:13px;color:var(--muted)">${sw}</div>
