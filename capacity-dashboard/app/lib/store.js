@@ -13,12 +13,23 @@ export async function load(force = false) {
     vik.getHolidays().catch(() => []),
     vik.getUnavailability().catch(() => []),
   ]);
+  // ID→ユーザー名の名簿（全ワークスペースの projectusers ∪）。assignees に出ない人の名前解決用（P2 #5）。
+  const dir = new Map();
+  const dirLists = await Promise.all(
+    (projects || []).map((p) => vik.getProjectMembers(p.id).catch(() => []))
+  );
+  for (const list of dirLists) for (const u of list || []) {
+    if (!dir.has(u.id)) dir.set(u.id, { id: u.id, username: u.username, name: u.name || u.username });
+  }
   // メンバー = タスク assignees ∪ 定期 assignee_ids ∪ 休暇対象者（仕事/予定/休みを持つ人）。
   const mmap = new Map();
   for (const t of tasks || []) for (const a of t.assignees || []) {
     if (!mmap.has(a.id)) mmap.set(a.id, { id: a.id, username: a.username, name: a.name || a.username });
   }
-  const addId = (id) => { if (id && !mmap.has(id)) mmap.set(id, { id, username: `user${id}`, name: `user${id}` }); };
+  const addId = (id) => {
+    if (!id || mmap.has(id)) return;
+    mmap.set(id, dir.get(id) || { id, username: `user${id}`, name: `user${id}` });
+  };
   for (const r of recurrences || []) for (const id of r.assignee_ids || []) addId(id);
   for (const u of unavailability || []) addId(u.user_id);
 
