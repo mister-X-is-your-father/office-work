@@ -30,8 +30,8 @@ export async function render(root) {
     .t-seg button.on{background:${C.fill};color:#fff}</style>
     <h1 class="vtitle">本日の稼働予定 <small>${day}</small></h1>
     <div class="t-seg">
-      <button data-m="clock" class="${MODE === "clock" ? "on" : ""}">円時計</button>
       <button data-m="stacked" class="${MODE === "stacked" ? "on" : ""}">積み上げ</button>
+      <button data-m="clock" class="${MODE === "clock" ? "on" : ""}">円時計</button>
     </div>
     <div id="t-body"></div>`;
   root.querySelectorAll(".t-seg button").forEach((b) => {
