@@ -111,7 +111,8 @@ cd capacity-dashboard/app/lib/vendor && docker run --rm -v "$PWD":/out node:20-a
 `app/` を編集 → leo:7010 は作業ツリー直配信＝即反映、push で Pages 更新。**ブラウザはESモジュールをキャッシュ**するので強制リロード（Playwright は about:blank 経由で再ナビ）。
 
 ## 6. 認証・デモデータ
-- **capdemo / CapDemoPass123**（SPAログイン・id=1）。メンバー **morita(2)/tanaka(3)/satou(4)/suzuki(5)**（各 TeamPass123）。
+- **capdemo / CapDemoPass123**（SPAログイン・id=1）。メンバー **morita(2)/tanaka(3)/satou(4)/suzuki(5)**（各 TeamPass123）。**森田(7)**=ユーザー本人が新規作成画面から登録した実アカウント（チーム作業・実績デモを共有済み）。
+- **新規アカウントは作成だけではワークスペースが見えない**（タスク0件・メンバー名が user{ID} 表示になる）。本体(7005)かAPIで `PUT /projects/:id/users {"user_id":"<ユーザー名>","right":1}` の共有が必須。SPAに共有UIは未実装。
 - CORS は compose で許可済（別オリジンSPA用）。**`VIKUNJA_SERVICE_ENABLEREGISTRATION: "true"`**（本番compose・SPAのアカウント作成画面用）。SPAログイン画面は ログイン⇔新規作成 を相互遷移（`app.js showAuth`、登録は `api.register`→`/register`）。
 - seed（冪等・`/tmp/cap_token` に capdemo トークンを置いて実行）:
   - `backend-patch/seed-gantt-demo.py` … タスクの start/end/依存/担当（**⚠️ POST はスカラ全置換なので assignees も再適用、§7**）。
@@ -151,5 +152,5 @@ cd capacity-dashboard/app/lib/vendor && docker run --rm -v "$PWD":/out node:20-a
 2. **#3 SPA配線**（planner の対象者選択＋logTime/logPlan の user_id 送信）。
 3. **負荷ヒストリー/バーンダウン or PJ別配分**（データ即可・新ビュー）。
 4. かんばん(bucket)/一覧。ガント作り込み（updateTask 使用）。
-5. P2清掃: #5 members×projectusers / #6 est:Nh ラベル掃除 / #8 日別バッチ取得(N+1)。
+5. P2清掃: #6 est:Nh ラベル掃除 / #8 日別バッチ取得(N+1)。（#5 members×projectusers は 2026-06-12 消化済み＝store.js が全WSの projectusers で ID→名前を解決）
 6. AI Q&A(53) を別API化するか判断。
