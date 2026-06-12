@@ -2,7 +2,7 @@
 // 直列キュー（これが終わったらこれ）・▶実行・ライブコンソール・スクリプトのワンポチ起動。
 // スクリプトとAIを同じキューに並べれば「スクリプト→AI→スクリプト」の協業になる。
 import { load } from "../lib/store.js";
-import { execMe, getQueue, getScripts, runAi, runScript, cancelJob, streamUrl } from "../lib/exec.js";
+import { execMe, getQueue, getScripts, runAi, runScript, cancelJob, streamUrl, loadRunOpts, saveRunOpts } from "../lib/exec.js";
 import { C, esc } from "../lib/ui.js";
 
 let _root, _es = null, _timer = null, _watching = null;
@@ -26,6 +26,19 @@ export async function render(root) {
     <h1 class="vtitle">🤖 Fable <small>直列キュー ・ Claude Code（MAXプラン）で実行</small></h1>
     <div class="fb-grid">
       <div>
+        <div class="card fb-card">
+          <div class="fb-h">実行オプション <span class="fb-hint">（▶に適用・保存される）</span></div>
+          <div class="fb-opts">
+            <label>モデル
+              <select id="fb-opt-model" class="fb-sel">
+                <option value="sonnet">標準（Sonnet）</option>
+                <option value="opus">高品質（Opus）</option>
+              </select></label>
+            <label><input type="checkbox" id="fb-opt-browser"> ブラウザ操作</label>
+            <label><input type="checkbox" id="fb-opt-web"> Web検索・閲覧</label>
+          </div>
+          <input id="fb-opt-extra" class="fb-extra" type="text" placeholder="追加指示（任意・毎回プロンプトに添付）">
+        </div>
         <div class="card fb-card">
           <div class="fb-h">Fable担当のタスク <span class="fb-hint">（▶でキューに追加）</span></div>
           ${fableTasks.length ? fableTasks.map((t) => `
@@ -89,8 +102,26 @@ export async function render(root) {
     _es.addEventListener("end", () => { _es.close(); _es = null; refresh(); });
   };
 
+  // 実行オプション: 表示時に復元、変更で保存。▶はこのオプションで実行。
+  const opts = loadRunOpts();
+  const optEls = {
+    model: _root.querySelector("#fb-opt-model"),
+    browser: _root.querySelector("#fb-opt-browser"),
+    web: _root.querySelector("#fb-opt-web"),
+    extra: _root.querySelector("#fb-opt-extra"),
+  };
+  optEls.model.value = opts.model;
+  optEls.browser.checked = !!opts.browser;
+  optEls.web.checked = !!opts.web;
+  optEls.extra.value = opts.extra || "";
+  const saveOpts = () => saveRunOpts({
+    model: optEls.model.value, browser: optEls.browser.checked,
+    web: optEls.web.checked, extra: optEls.extra.value.trim(),
+  });
+  Object.values(optEls).forEach((el) => { el.onchange = saveOpts; });
+
   _root.querySelectorAll("[data-run-task]").forEach((b) => {
-    b.onclick = async () => { const j = await runAi(+b.dataset.runTask, b.dataset.title); refresh(); watch(j.job.id, j.job.title); };
+    b.onclick = async () => { saveOpts(); const j = await runAi(+b.dataset.runTask, b.dataset.title); refresh(); watch(j.job.id, j.job.title); };
   });
   _root.querySelectorAll("[data-run-script]").forEach((b) => {
     b.onclick = async () => { const j = await runScript(b.dataset.runScript); refresh(); watch(j.job.id, j.job.title); };
@@ -123,6 +154,11 @@ function css() {
   .fb-x{border:0;background:transparent;color:${C.muted};cursor:pointer;font-size:14px}
   .fb-x:hover{color:${C.over}}
   .fb-empty{font-size:12px;color:${C.muted};padding:6px 0}
+  .fb-opts{display:flex;gap:16px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:${C.ink}}
+  .fb-opts label{display:inline-flex;align-items:center;gap:5px;cursor:pointer}
+  .fb-sel{font:inherit;font-size:12.5px;padding:5px 8px;border:1px solid ${C.line};border-radius:7px;background:#fff}
+  .fb-extra{width:100%;margin-top:8px;font:inherit;font-size:12.5px;padding:7px 10px;border:1px solid ${C.line};border-radius:8px;box-sizing:border-box}
+  .fb-extra:focus{outline:none;border-color:${C.fill}}
   .fb-console-card{position:sticky;top:12px}
   .fb-console{background:#101418;color:#cfe3cf;border-radius:10px;padding:12px;font-size:11.5px;line-height:1.5;height:480px;overflow:auto;white-space:pre-wrap;word-break:break-word;margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}`;
 }

@@ -21,7 +21,14 @@ export async function execMe() {
 }
 export function getQueue() { return req("/queue"); }
 export function getScripts() { return req("/scripts"); }
-export function runAi(taskId, title) { return req("/run", { method: "POST", body: { kind: "ai", task_id: taskId, title } }); }
+export function runAi(taskId, title, options = null) { return req("/run", { method: "POST", body: { kind: "ai", task_id: taskId, title, options: options || loadRunOpts() } }); }
+// 実行オプション（モデル/ブラウザ操作/Web検索/追加指示）。localStorage に保存し ▶ 全箇所で共有。
+const OPTS_KEY = "ts.fable.runopts";
+export function loadRunOpts() {
+  try { return { model: "sonnet", browser: false, web: false, extra: "", ...(JSON.parse(localStorage.getItem(OPTS_KEY)) || {}) }; }
+  catch { return { model: "sonnet", browser: false, web: false, extra: "" }; }
+}
+export function saveRunOpts(o) { try { localStorage.setItem(OPTS_KEY, JSON.stringify(o)); } catch { /* noop */ } }
 export function runScript(script, taskId = null) { return req("/run", { method: "POST", body: { kind: "script", script, task_id: taskId } }); }
 export function cancelJob(id) { return req(`/queue/${id}`, { method: "DELETE" }); }
 // SSE は EventSource がヘッダを送れないため token をクエリで渡す
