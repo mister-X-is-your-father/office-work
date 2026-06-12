@@ -24,14 +24,16 @@ let _mounted = false;
 
 // taskId 省略=新規 / 指定=編集。保存後 onSaved() を呼ぶ。
 export async function openTaskForm({ taskId = null, onSaved } = {}) {
-  const { projects, members, tasks, templates = [], templateProject = null, holidaysByDate = null, aiMembers = [] } = await load();
+  const { projects, members, tasks, templates = [], templateProject = null, holidaysByDate = null, aiMembers = [], me = null } = await load();
   const task = taskId ? await getTask(taskId) : null;
   const isEdit = !!task;
   const curAssignees = (task && task.assignees) || [];
-  // 主担当=人間の先頭 / 副担当=AI(優先) or 2人目の人間
+  // AI担当（fable）は隠し要素: タスク作成者本人にしか見えない・触れない
+  const isCreator = !task || (((task.created_by || {}).id || 0) === ((me && me.id) || -1));
   const aiIds = new Set((aiMembers || []).map((m) => m.id));
+  // 主担当=人間の先頭 / 副担当=AI(優先・作成者のみ可視) or 2人目の人間
   const curHumans = curAssignees.filter((a) => !aiIds.has(a.id));
-  const curAi = curAssignees.find((a) => aiIds.has(a.id)) || null;
+  const curAi = (isCreator && curAssignees.find((a) => aiIds.has(a.id))) || null;
   const curAssigneeId = curHumans.length ? curHumans[0].id : "";
   const curSubId = curAi ? curAi.id : (curHumans[1] ? curHumans[1].id : "");
   // 現在の親タスク（編集時）= related_tasks.parenttask の先頭
@@ -85,7 +87,10 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
   wrap.innerHTML = `
     <div class="tf-bg"></div>
     <div class="tf-card" role="dialog" aria-modal="true">
-      <div class="tf-h"><b>${isEdit ? "タスクを編集" : "タスクを追加"}</b><button type="button" class="tf-x" id="tf-x" aria-label="閉じる">×</button></div>
+      <div class="tf-h"><b>${isEdit ? "タスクを編集" : "タスクを追加"}</b>
+        <span style="flex:1"></span>
+        ${isEdit && curAi ? `<button type="button" class="tf-fable-run" id="tf-fable-run" title="Fableに実行させる（キューに追加・Fable画面でコンソール表示）">▶ Fable</button>` : ""}
+        <button type="button" class="tf-x" id="tf-x" aria-label="閉じる">×</button></div>
       ${!isEdit ? `
       <div class="tf-tabs" id="tf-tabs">
         <button type="button" data-tab="task" class="on">タスク</button>
@@ -267,7 +272,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
       const main = +($("#tf-asg").value || 0);
       const humans = (members || []).filter((m) => m.id !== main &&
         (!ql || (m.name || m.username || "").toLowerCase().includes(ql)));
-      const ais = ql ? (aiMembers || []).filter((m) =>
+      const ais = ql && isCreator ? (aiMembers || []).filter((m) =>
         (m.username || "").toLowerCase().startsWith(ql) || (m.name || "").toLowerCase().startsWith(ql)) : [];
       return [...humans.map((m) => ({ title: m.name || m.username, _id: m.id })),
               ...ais.map((m) => ({ title: aiLabel(m), _id: m.id }))];
@@ -278,6 +283,23 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     },
   });
   subEl.addEventListener("blur", () => { if (!subEl.value.trim()) { subSel = null; subSelLabel = ""; } });
+
+  // ▶ Fable 実行（作成者のみ・編集時・Fable副担当タスク）: 実行サービスのキューに追加
+  const fableBtn = $("#tf-fable-run");
+  if (fableBtn) fableBtn.onclick = async () => {
+    const err = $("#tf-err");
+    fableBtn.disabled = true;
+    try {
+      const { runAi } = await import("../lib/exec.js");
+      const j = await runAi(task.id, task.title);
+      err.className = "tf-err ok";
+      err.textContent = `✓ Fableのキューに追加しました（#${j.job.id}）。コンソールは 🤖 Fable 画面で。`;
+    } catch (e) {
+      err.className = "tf-err";
+      err.textContent = "× 実行サービスに接続できません: " + e.message;
+    }
+    fableBtn.disabled = false;
+  };
   $("#tf-asg").onchange = () => {
     const has = !!$("#tf-asg").value;
     subRow.hidden = !has;
@@ -402,9 +424,14 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
         };
         await updateTask(task.id, patch);
         childId = task.id;
-        // 担当 diff（主担当＋副担当。副担当はAI=fable も可）
+        // 担当 diff（主担当＋副担当。副担当はAI=fable も可）。
+        // 非作成者にはAI担当が見えていないため、知らずに剥がさないよう保護する。
         const curIds = new Set(curAssignees.map((a) => a.id));
-        for (const a of curAssignees) if (!wantAsg.includes(a.id)) await removeAssignee(task.id, a.id);
+        for (const a of curAssignees) {
+          if (wantAsg.includes(a.id)) continue;
+          if (aiIds.has(a.id) && !isCreator) continue; // 隠しAI担当は維持
+          await removeAssignee(task.id, a.id);
+        }
         for (const id of wantAsg) if (!curIds.has(id)) await addAssignee(task.id, id);
       }
 
@@ -481,6 +508,9 @@ function ensureStyle() {
   .tf-bg{position:absolute;inset:0;background:rgba(20,30,50,.38)}
   .tf-card{position:relative;width:min(780px,94vw);max-height:90vh;overflow:auto;background:${C.card};border:1px solid ${C.line};border-radius:16px;box-shadow:0 18px 50px rgba(20,30,50,.28)}
   .tf-h{display:flex;align-items:center;justify-content:space-between;padding:14px 14px 4px 22px;font-size:16px;cursor:move;user-select:none}.tf-h b{font-size:16px}
+  .tf-fable-run{border:1px solid ${C.fill};background:#fff;color:${C.fill};font:inherit;font-size:12px;font-weight:700;padding:5px 12px;border-radius:16px;cursor:pointer;margin-right:6px}
+  .tf-fable-run:hover{background:${C.fill};color:#fff}
+  .tf-fable-run:disabled{opacity:.5}
   .tf-x{border:0;background:transparent;color:${C.muted};font-size:20px;line-height:1;padding:4px 9px;border-radius:8px;cursor:pointer}
   .tf-x:hover{background:#f1f4f8;color:${C.ink}}
   .tf-body{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:0 26px;padding:8px 22px 4px;align-items:start}

@@ -1,5 +1,5 @@
 // タスク一覧（表・mock60 相当）。全タスクをソート/絞り込み可能な表で。
-import { load, projectName } from "../lib/store.js";
+import { load, projectName, isAiUser } from "../lib/store.js";
 import { PRIO, prioBucket, kindOf, isReviewTask } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
@@ -15,7 +15,7 @@ export async function render(root) {
   const { tasks, projects, members } = await load();
   const today = todayISO();
   let rows = (tasks || []).map((t) => ({
-    t, title: t.title, who: (t.assignees || [])[0],
+    t, title: t.title, who: (t.assignees || []).find((a) => !isAiUser(a)) || null, // AI担当(隠し要素)は一覧に出さない
     proj: projectName(projects, t.project_id), pid: t.project_id,
     review: isReviewTask(t), prio: prioBucket(t.priority),
     due: dueISO(t), est: (t.time_estimate || 0) / HOUR, pct: t.percent_done || 0,

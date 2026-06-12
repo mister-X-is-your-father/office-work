@@ -1,6 +1,6 @@
 # ハンドオフ — Capacity Board
 
-> status: **稼働中**（2026-06-10）。モック72案 → TaskStationフォークで時間管理をDB実装（本番） → 実データSPA（中核＋予実ガント） → **基盤固め完了**（#1-#4,#7,#9）→ **定期/会議＋祝日＋休暇→月次空き完了**（ADR-011）→ **UI全面TaskStationブランド化**（新ロゴ/favicon）→ **本日の稼働予定(円時計)＋リスケ＋レビュー依頼/キュー**（ADR-012 種別2軸）→ **切り口別ビュー群**（一覧/残容量/週日別/アウトライン/依存グラフ）→ **時刻カレンダー**（ADR-013 `start_minute`・ドラッグ配置）→ **種別タブ＋定期入力UI**（タスク/MTG/定例MTG/定期タスク・**持ち回り=recurrences.rotation**）。本番イメージ **`leo-taskstation:0.24.6-fix8`**。
+> status: **稼働中**（2026-06-10）。モック72案 → TaskStationフォークで時間管理をDB実装（本番） → 実データSPA（中核＋予実ガント） → **基盤固め完了**（#1-#4,#7,#9）→ **定期/会議＋祝日＋休暇→月次空き完了**（ADR-011）→ **UI全面TaskStationブランド化**（新ロゴ/favicon）→ **本日の稼働予定(円時計)＋リスケ＋レビュー依頼/キュー**（ADR-012 種別2軸）→ **切り口別ビュー群**（一覧/残容量/週日別/アウトライン/依存グラフ）→ **時刻カレンダー**（ADR-013 `start_minute`・ドラッグ配置）→ **種別タブ＋定期入力UI**（タスク/MTG/定例MTG/定期タスク・**持ち回り=recurrences.rotation**）→ **繰り返しUI再設計＋この回だけ変更**（Googleカレンダー型「N単位ごと」・**例外=recurrences.overrides**）。本番イメージ **`leo-taskstation:0.24.6-fix9`**。
 > 次の人がコンテキスト無しで読む前提。まず本書 → 要件 [`docs/06-requirements.md`](docs/06-requirements.md) → ADR [`docs/01-decisions.md`](docs/01-decisions.md)（**ADR-006〜013 が現行設計**。012=種別kind×時間属性flagsの2軸／013=plan.start_minuteで時刻配置）→ `docs/00,05`。
 > **確定（2026-06-10）**: 容量は当面 **全員 8h/平日 固定で十分**（時刻帯の空き・半日休暇・人別可変キャパ＝時短 は保留。詳細は §8）。
 
@@ -12,10 +12,10 @@
 |---|---|
 | **実データSPA** | http://leo:7010/app/ （capdemo / CapDemoPass123） |
 | モックギャラリー(72案) | http://leo:7010/ ／ Pages: https://mister-x-is-your-father.github.io/office-work/capacity-dashboard/ |
-| **TaskStation（フォーク本番）** | http://leo:7005 （image **`leo-taskstation:0.24.6-fix8`**） |
+| **TaskStation（フォーク本番）** | http://leo:7005 （image **`leo-taskstation:0.24.6-fix9`**） |
 | GitHub | https://github.com/mister-x-is-your-father/office-work → `capacity-dashboard/` |
 
-配信は systemd user service **`taskstation-spa.service`**（`~/.local/bin/taskstation-spa-serve.py` を実行。ThreadingHTTPServer・no-storeヘッダ付きで `capacity-dashboard/` を 7010 で配信。enable済み＝ブート自動起動・落ちたら自動再起動）。状態確認は `systemctl --user status taskstation-spa`。
+配信は systemd user service **`taskstation-spa.service`**（`~/.local/bin/taskstation-spa-serve.py` を実行。ThreadingHTTPServer・no-storeヘッダ付きで `capacity-dashboard/` を 7010 で配信。enable済み＝ブート自動起動・落ちたら自動再起動）。状態確認は `systemctl --user status taskstation-spa`。AI副担当の実行系は `systemctl --user list-timers taskstation-fable.timer`／`systemctl --user status taskstation-exec`（▶実行・port7020）／ログは `journalctl --user -u taskstation-fable` / `-u taskstation-exec`。
 
 ## 2. ディレクトリ
 ```
@@ -32,7 +32,7 @@ office-work/capacity-dashboard/
 ├── docs/ 00..06（06=要件・進捗の正本）
 └── backend-patch/                       # ★フォーク差分の再現一式＋apply.md＋seed-*.py
 /home/neo/vikunja-fork/vikunja/          # ← TaskStation v0.24.6 clone＋パッチ適用済（ビルド元）
-/home/neo/pm-trials/vikunja/docker-compose.yml  # ← 本番compose(image=leo-taskstation:...fix8)
+/home/neo/pm-trials/vikunja/docker-compose.yml  # ← 本番compose(image=leo-taskstation:...fix9)
 ```
 
 ## 3. アーキテクチャ（3層）＝ 昇格モデル S1孵化(fork)→S2検証(隔離)→S3製品(SPA)（[ADR-007](docs/01-decisions.md)）
@@ -69,7 +69,10 @@ office-work/capacity-dashboard/
 - 本日(稼働予定): 既定=**積み上げ**、円時計/積み上げの選択は**個人ごとに localStorage 永続化**(ユーザーidキー・`today.js`)。
 - **タスクテンプレート**（2026-06-12）: 雛形は専用WS **「テンプレート」** に保存（分類=同WS内の親タスク・subtask機構流用）。taskform に「テンプレートから作成」コンボボックス（新規時・選択でタイトル/優先度/見積り/説明を反映）＋「テンプレートとして保存」ボタン（プロジェクト欄=分類名）。**store.load がテンプレートWSを tasks から分離**（負荷・空き・一覧に混ざらない。`cache.templates`/`templateProject`、WS名定数=`store.js TEMPLATE_WS`）。テンプレートWSは全メンバー共有済み・taskform のWS選択からは除外。
 - **種別タブ＋定期入力UI**（2026-06-12・fix8）: タスク追加モーダルにタブ **タスク/MTG/定例MTG/定期タスク**（新規時のみ・`views/recurrenceform.js`、タブ切替でも高さ固定）。MTG=単発（RRULE `FREQ=DAILY;COUNT=1`）/定例MTG・定期タスク=毎週(曜日)・隔週・毎月第N曜・毎月同日・毎日（`buildRRule`、曜日既定=開始日に追従）。**持ち回り(rotation)**=定期タスクで「毎回1名が順番に担当」: fork に `recurrences.rotation` 列追加（migration 20260612220000・S1→S2→fix8 デプロイ済）、順番=assignee_ids 配列順（↑↓で並べ替えUI）、巡回の解釈は `recurrence.js expandRecurrences`（occurrence に `assignees` を解決・dtstartからの通し番号%人数。本日/月次空き両対応）。再現は backend-patch/apply.md フェーズ6。
+- **繰り返しUI再設計＋「この回だけ変更」**（2026-06-13・fix9）: 繰り返しは Googleカレンダー型 **「[N] [週間/か月/日]ごと」**（隔週=2週間ごと）＋単位別の詳細のみ表示（週=曜日トグル/月=「N日 or 第N曜日(最終可)」ラジオ・明示選択）＋**プレビュー文**（🔁 毎月 第1火曜日）＋**開始時刻**（dtstart に時刻が乗る→時刻カレンダーに表示）＋**終了日(UNTIL)**。**この回だけ変更**=Googleカレンダーの「この予定のみ」相当: fork に `recurrences.overrides` JSON列追加（migration 20260613000000・S2→fix9 デプロイ済）。`overrides[元の日付]={skip:true | date/start_minute/duration_seconds}`（差分のみ保存・解釈は `recurrence.js expandRecurrences`、移動が窓をまたぐ場合に備え±31日パディング展開→最終日付でフィルタ。**持ち回りの巡回番号は元の日基準＝休止/移動で順番が崩れない**）。UI=時刻カレンダーの会議ブロックをクリック→日付/開始時刻/所要の変更・この回を休止・例外を解除（例外中ブロックは ✱＋破線枠）。
 - **祝日の自動同期**（2026-06-12）: 内閣府公式CSV→`/holidays` を冪等更新する `backend-patch/sync-holidays-jp.py`（追加のみ・過去/既存は触らない）。systemd user timer **`taskstation-holiday-sync.timer`**（毎週月 6:30・Persistent）で自走、認証は `~/.config/taskstation/holiday-sync.env`(600)。**止まった検知はSPA側**: `recurrence.js holidayDataStatus`（登録最終日が today+90日 に届かなければ stale）→ ホームのアラートに「祝日カレンダーが更新されていません」を表示。2026-06-12 に実行済み（実祝日25件投入・デモ用テスト祝日6/22は削除）。
+- **AI副担当 Fable**（2026-06-13）: TaskStation に AI ユーザー **fable(id=8)**（WS共有済・資格情報=`~/.config/taskstation/fable.env`）。taskform は **主担当（人間のみ）→選ぶと副担当欄が出現**。副担当は検索式で、人間は普通に候補表示・**AI(fable) は隠しコマンド＝名前を打ったときだけ候補に出る**（`store.js AI_USERNAMES`）。**AIは人間のキャパ計算から除外**（members から分離・`cache.aiMembers`）。実行系=**`taskstation-fable.timer`**（systemd user・15分おき）: fable 担当の未完了タスクを巡回し、**ローカル Claude Code CLI（MAXサブスク・API課金なし）** で段取り/注意点/たたき台を生成して**タスクコメントに投稿**（重複防止=自コメント有無、1回の実行で最大3件、`~/.local/bin/taskstation-fable-runner.py`）。コメントは本体(7005)のタスク画面で閲覧（SPAコメント表示は未実装）。
+- **Fable ▶実行・直列キュー・スクリプト**（2026-06-13・Phase1）: 実行サービス **`taskstation-exec.service`**（`~/.local/bin/taskstation-exec.py`・**leo:7020**・systemd常駐）。認証=TaskStation JWT を `/user` で検証し **`~/.config/taskstation/exec.json` の allowed_user_ids のみ**（現在 capdemo=1・森田=7）＝**隠し要素**: 許可者だけ SPA サイドバーに **🤖 Fable** が出現（`app.js` が exec `/me` を probe・ルートは ORDER 外）。ビュー=`views/fable.js`: Fable担当タスクの **▶**（AI実行をキューへ）・**スクリプト一覧の▶ワンポチ起動**（`~/.config/taskstation/scripts/*.sh|*.py`・`TS_TASK_ID` 環境変数）・**直列キュー**（これが終わったらこれ。スクリプト→AI→スクリプトの協業も並べるだけ）・**ライブコンソール**（SSE `/stream/:id`・claude は stream-json をパースして逐次表示）。AI実行=`claude -p`（sonnet・MAXサブスク）→ 結果をタスクコメントに投稿。タスク編集モーダルにも **▶ Fable** ボタン（作成者のみ）。**可視性**: AI担当は作成者(created_by)本人にしか見えない＝taskform は非作成者に副担当を出さず保存時も剥がさない・一覧の担当は先頭の人間を表示・副担当検索の fable 出現も作成者のみ。
 - 基盤固め: #1 書き込み破壊性根治(ADR-008) / #2 soft delete / #3 帰属(ADR-009) / #4 負荷の単一真実(ADR-010) / #7 回帰網 / #9 スカラ更新安全化(client updateTask)。
 
 **残り**
@@ -80,7 +83,7 @@ office-work/capacity-dashboard/
 - 据え置き(ADRで明記): 「本日=plan」完全一本化(due/範囲の暫定表示廃止・ADR-012)/定期occurrenceのmaterialize(ADR-011)/人別可変キャパ(時短)/AI Q&A(53)。
 
 ## 5. 運用 runbook
-### フォークを直して再デプロイ（fix8 系の作り方）
+### フォークを直して再デプロイ（fixN 系の作り方）
 ホストに Go 無し。**xgo不使用**＝docker golang:1.22 でネイティブビルド。frontend は `frontend/dist`（go:embed）。
 **ブランド化はソース側**（`frontend/src` の大文字"Vikunja"→"TaskStation"・`src/assets/logo*.svg`/`public/favicon.*`・`src/urls.ts`）→ frontend再ビルドで dist に反映。
 ```bash
@@ -89,10 +92,10 @@ cd /home/neo/vikunja-fork/vikunja
 #   ※dist/が過去のdocker由来でroot所有なら先に: docker run --rm -v "$PWD/frontend":/w -w /w alpine rm -rf dist stats.html
 docker run --rm -v "$PWD":/app -v vikunja-gocache:/go -w /app -e CGO_ENABLED=1 \
   golang:1.22 sh -c 'go build -buildvcs=false -ldflags "-s -w" -o vikunja .'
-docker build -f Dockerfile.deploy -t leo-taskstation:0.24.6-fix9 .   # 次は fix9
+docker build -f Dockerfile.deploy -t leo-taskstation:0.24.6-fixN .   # 次は fix10
 # 本番反映（必ず backup → image差し替え → recreate。migrationは起動時自動）
 docker run --rm -v vikunja_vikunja-db:/from -v vikunja_vikunja-db-backup-fixN:/to alpine sh -c 'cp -a /from/. /to/'
-# pm-trials/vikunja/docker-compose.yml の image: を fix8 に編集
+# pm-trials/vikunja/docker-compose.yml の image: を新タグに編集
 cd /home/neo/pm-trials/vikunja && docker compose up -d --force-recreate
 ```
 ### テスト

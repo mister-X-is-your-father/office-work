@@ -15,11 +15,12 @@ let cache = null;
 
 export async function load(force = false) {
   if (cache && !force) return cache;
-  const [tasksAll, projects, recurrences, holidays, unavailability] = await Promise.all([
+  const [tasksAll, projects, recurrences, holidays, unavailability, me] = await Promise.all([
     vik.getTasks(), vik.getProjects(),
     vik.getRecurrences().catch(() => []),
     vik.getHolidays().catch(() => []),
     vik.getUnavailability().catch(() => []),
+    vik.whoami().catch(() => null),
   ]);
   // テンプレートWS（タスク雛形の置き場）は通常タスクから分離 — 負荷・空き・一覧に混ぜない
   const templateProject = (projects || []).find((p) => p.title === TEMPLATE_WS) || null;
@@ -65,7 +66,7 @@ export async function load(force = false) {
     plannedTasks.map((t) => vik.getPlans(t.id).then((p) => [t.id, p || []]).catch(() => [t.id, []]))
   );
   cache = {
-    tasks: tasks || [], projects: projects || [], members: [...mmap.values()], aiMembers,
+    tasks: tasks || [], projects: projects || [], members: [...mmap.values()], aiMembers, me,
     templates, templateProject,
     plansByTask: new Map(planPairs),
     recurrences: recurrences || [], holidaysSet, holidaysByDate, unavailabilityByMember,

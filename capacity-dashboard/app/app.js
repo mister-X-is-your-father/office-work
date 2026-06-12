@@ -20,6 +20,8 @@ const ROUTES = {
   depgraph: { label: "依存グラフ",    grp: "仕事",   mod: "./views/depgraph.js" },
   gantt:    { label: "予実ガント",    grp: "仕事",   mod: "./views/gantt.js" },
   settings: { label: "設定",          grp: "その他", soon: true },
+  // 隠しルート: ORDER に載せない＝通常ユーザーのナビには出ない。許可者のみ shell() がリンクを追加。
+  fable:    { label: "🤖 Fable",      grp: "AI",     mod: "./views/fable.js" },
 };
 const ORDER = ["home", "today", "triage", "review", "availability", "calendar", "week", "planner", "freefinder", "weekstack", "estactual", "kanban", "list", "outline", "depgraph", "gantt", "settings"];
 
@@ -88,6 +90,13 @@ function shell() {
   };
   document.getElementById("logout").onclick = () => { vik.clearToken(); showLogin(); };
   vik.whoami().then(u => { document.getElementById("who").textContent = u ? (u.name || u.username) : ""; }).catch(() => {});
+  // Fable（隠し要素）: 実行サービスが許可したユーザーのときだけナビに出現
+  import("./lib/exec.js").then(({ execMe }) => execMe()).then((uid) => {
+    if (!uid) return;
+    const nav = document.getElementById("nav");
+    if (nav) nav.insertAdjacentHTML("beforeend",
+      `<div class="navgrp">AI</div><a href="#/fable" data-k="fable">${ROUTES.fable.label}</a>`);
+  }).catch(() => {});
 }
 
 async function route() {
