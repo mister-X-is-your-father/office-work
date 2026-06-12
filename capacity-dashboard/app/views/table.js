@@ -12,10 +12,15 @@ const stateOf = (t) => (t.done ? "完了" : ((t.percent_done || 0) > 0 ? "進行
 const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(0, 10) : "");
 
 export async function render(root) {
-  const { tasks, projects, members } = await load();
+  const { tasks, projects, members, me = null } = await load();
   const today = todayISO();
+  // Fable ▶（隠し要素）: 実行サービスの許可ユーザーだけ判定が立つ（未許可は probe が null）
+  let execOk = false;
+  try { const ex = await import("../lib/exec.js"); execOk = !!(await ex.execMe()); } catch { /* noop */ }
   let rows = (tasks || []).map((t) => ({
     t, title: t.title, who: (t.assignees || []).find((a) => !isAiUser(a)) || null, // AI担当(隠し要素)は一覧に出さない
+    fable: execOk && !t.done && (t.assignees || []).some((a) => isAiUser(a))
+      && ((t.created_by || {}).id || 0) === ((me && me.id) || -1), // 作成者本人のみ▶表示
     proj: projectName(projects, t.project_id), pid: t.project_id,
     review: isReviewTask(t), prio: prioBucket(t.priority),
     due: dueISO(t), est: (t.time_estimate || 0) / HOUR, pct: t.percent_done || 0,
@@ -60,6 +65,19 @@ export async function render(root) {
   root.querySelectorAll("tr[data-id]").forEach((tr) => {
     tr.onclick = () => openTaskForm({ taskId: +tr.dataset.id, onSaved: () => render(root) });
   });
+  // ▶ Fable 実行（行クリックの編集モーダルとは独立）
+  root.querySelectorAll(".tb-fable").forEach((b) => {
+    b.onclick = async (e) => {
+      e.stopPropagation();
+      b.disabled = true;
+      try {
+        const { runAi } = await import("../lib/exec.js");
+        const j = await runAi(+b.dataset.fable, b.dataset.title);
+        b.textContent = "⏵…";
+        b.title = `キュー #${j.job.id} に追加済み（🤖 Fable 画面でコンソール）`;
+      } catch { b.disabled = false; }
+    };
+  });
 }
 
 const cols = () => [
@@ -80,7 +98,7 @@ function rowHtml(r, members, i) {
   const dueCls = r.due && r.due < todayISO() && !r.done ? "over" : "";
   const st = `<span class="tb-st ${r.done ? "done" : (r.pct > 0 ? "doing" : "todo")}">${r.state}</span>`;
   return `<tr data-id="${r.t.id}">
-    <td class="tb-title">${esc(r.title)}<div class="tb-sub">${esc(r.proj)}</div></td>
+    <td class="tb-title">${esc(r.title)}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${r.t.id}" data-title="${esc(r.title)}" title="Fableに実行させる">▶</button>` : ""}<div class="tb-sub">${esc(r.proj)}</div></td>
     <td>${ava}${esc(wn)}</td>
     <td>${kind}</td>
     <td>${prio}</td>
@@ -102,6 +120,9 @@ function css() {
   .tb-wrap{overflow-x:auto}
   table.tb{width:100%;border-collapse:collapse;font-size:13px}
   .tb tbody tr[data-id]{cursor:pointer}
+  .tb-fable{width:22px;height:22px;border-radius:50%;border:1px solid ${C.fill};background:#fff;color:${C.fill};cursor:pointer;font-size:9px;padding:0;vertical-align:1px;margin-left:4px}
+  .tb-fable:hover{background:${C.fill};color:#fff}
+  .tb-fable:disabled{opacity:.5;cursor:default}
   .tb th{font-size:11px;color:${C.muted};font-weight:600;text-align:left;padding:10px 12px;border-bottom:1px solid ${C.line};white-space:nowrap;background:#fafbfc}
   .tb th.sortable{cursor:pointer;user-select:none}.tb th.sortable:hover{color:${C.ink}}
   .tb td{padding:10px 12px;border-bottom:1px solid ${C.line};vertical-align:middle}
