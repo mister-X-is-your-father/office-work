@@ -145,10 +145,10 @@ test("overrides: duration_seconds の例外が負荷に反映される", () => {
 });
 
 test("overrides: rotation の巡回番号は元の日基準（移動・休止でも順番が崩れない）", () => {
-  // 毎週月 A→B→A→B…。6/15 を休止しても 6/22 は「3番目」= A のまま。
+  // 毎週月 A→B→A→B…。6/15(3番目=A) を休止しても 6/22 は通し4番目= B のまま（繰り上がらない）。
   const r = rec({ rrule: "FREQ=WEEKLY;BYDAY=MO", rotation: true, assignee_ids: [1, 2],
     overrides: { "2026-06-15": { skip: true } } });
   const occ = expandRecurrences([r], "2026-06-01", "2026-06-22");
   assert.deepEqual(occ.map((o) => [o.dateISO, o.assignees[0]]),
-    [["2026-06-01", 1], ["2026-06-08", 2], ["2026-06-22", 1]]);
+    [["2026-06-01", 1], ["2026-06-08", 2], ["2026-06-22", 2]]);
 });

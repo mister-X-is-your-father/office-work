@@ -281,3 +281,17 @@ pkg/migration/20260612220000.go rotation 列追加（Sync・additive）
 ```
 v0.24.6 で S1(models+integrations green)→S2(隔離7011: rotation 往復/update)→本番 `leo-taskstation:0.24.6-fix8`（migration 自動・既存行は rotation=false）確認済み。
 入力UI: タスク追加モーダルの種別タブ（[recurrenceform.js](../app/views/recurrenceform.js)・MTG=COUNT=1/定例MTG/定期タスク=持ち回り順序UI）。
+
+---
+
+## フェーズ7: recurrences.overrides（この回だけの例外）
+
+Googleカレンダーの「この予定のみ変更」相当。**キー=元 occurrence の日付 "YYYY-MM-DD"**、値は差分のみ:
+`{"skip":true}`（休止）/ `{"date":"YYYY-MM-DD","start_minute":840,"duration_seconds":1800}`（移動/時刻/所要・部分指定可）。
+解釈は SPA([recurrence.js](../app/lib/recurrence.js) `expandRecurrences`): ±31日パディングで展開→override 適用→最終日付で窓フィルタ（窓またぎの移動も正しく拾う）。**持ち回りの巡回番号は元の日基準**＝休止/移動しても順番が崩れない。fork は保持のみ（JSON列・dumb storage）。
+```
+pkg/models/recurrence.go        Overrides map[string]interface{} `xorm:"json null 'overrides'"` 追加＋Update Cols に "overrides"
+pkg/migration/20260613000000.go overrides 列追加（Sync・additive）
+```
+v0.24.6 で S1(models+integrations green)→S2(隔離7011: overrides 作成/更新の往復)→本番 `leo-taskstation:0.24.6-fix9`（migration 自動・既存行は overrides=null）確認済み。
+入力UI: 時刻カレンダー([calendar.js](../app/views/calendar.js))の会議/定例ブロックをクリック→「この回だけ変更」モーダル（日付/開始時刻/所要・この回を休止・例外を解除。例外中は ✱＋破線枠）。

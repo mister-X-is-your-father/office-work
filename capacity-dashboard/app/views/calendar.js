@@ -7,7 +7,7 @@ import { todayItemsByMember } from "../lib/today_items.js";
 import { expandRecurrences } from "../lib/recurrence.js";
 import { PRIO, NEUTRAL, KINDS } from "../lib/kinds.js";
 import { dateOnly } from "../lib/capacity.js";
-import { deletePlan, logPlan } from "../lib/api.js";
+import { deletePlan, logPlan, updateRecurrence } from "../lib/api.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 import { splitMeta } from "../lib/form.js"; // note の "[資料] URL" 行を抽出
 
@@ -59,19 +59,22 @@ function buildModel() {
       tray.push({ taskId: it.taskId, memberId: m.id, mins: Math.round(it.h * 60), title: it.title, kind: it.kind, prio: it.prio });
     }
   }
-  // 会議/定例の固定ブロック（dtstart の時刻 ≠ 00:00 のみ。00:00=時刻なし→従来どおり積み上げ側だけ）
+  // 会議/定例の固定ブロック（時刻 ≠ 00:00 のみ。00:00=時刻なし→従来どおり積み上げ側だけ）。
+  // この回だけの例外(overrides: 移動/時刻/所要/休止)は expandRecurrences が適用済み。クリックで例外編集。
   const meetings = [];
-  for (const { recurrence: rec, dateISO, assignees } of expandRecurrences(_data.recurrences || [], _day, _day)) {
+  for (const { recurrence: rec, dateISO, origISO, assignees, override } of expandRecurrences(_data.recurrences || [], _day, _day)) {
     if (dateISO !== _day) continue;
     const d = new Date(rec.dtstart);
-    const startMin = d.getUTCHours() * 60 + d.getUTCMinutes();
+    const baseMin = d.getUTCHours() * 60 + d.getUTCMinutes();
+    const startMin = override && override.start_minute != null ? override.start_minute : baseMin;
     if (!startMin) continue;
-    const mins = Math.max(15, Math.round((rec.duration_seconds || 0) / 60));
+    const durSec = (override && override.duration_seconds) || rec.duration_seconds || 0;
+    const mins = Math.max(15, Math.round(durSec / 60));
     const kind = rec.kind === "meeting" ? "meeting" : "recurring";
     const links = splitMeta(rec.note || "").links; // MTG資料（note 埋め込み）
     for (const uid of assignees || rec.assignee_ids || []) {
       if (!memberIds.has(uid)) continue;
-      meetings.push({ memberId: uid, startMin, mins, title: rec.title || "会議", kind, prio: null, fixed: true, links });
+      meetings.push({ memberId: uid, startMin, mins, title: rec.title || "会議", kind, prio: null, fixed: true, links, recId: rec.id, origISO, hasOverride: !!override });
     }
   }
   return { members, placed, tray, meetings };
@@ -128,12 +131,13 @@ function blockHtml(b) {
   const hatch = pat === "meeting" ? "cal-hatch" : (pat === "routine" ? "cal-dots" : "");
   const timeLabel = `${hhmm(b.startMin)}–${hhmm(b.startMin + b.mins)} ・ ${fmtH(b.mins / 60)}`;
   if (b.fixed) {
-    // 会議/定例: 移動・リサイズ不可の固定枠。資料リンク（note の [資料] 行）は 📎 で開ける。
+    // 会議/定例: ドラッグ移動・リサイズ不可。クリックで「この回だけ変更」。資料リンクは 📎 で開ける。
     const links = (b.links || []).map((u) => /^https?:\/\//i.test(u)
       ? `<a href="${esc(u)}" target="_blank" rel="noopener" title="${esc(u)}" style="color:#fff;text-decoration:none">📎</a>`
       : `<span title="${esc(u)}">📎</span>`).join(" ");
-    return `<div class="cal-block cal-fixed ${hatch}" style="top:${top}px;height:${h}px;background:${itemColor(b)}" title="${esc(b.title)}（${KINDS[b.kind] ? KINDS[b.kind].label : "会議"}・固定）">
-      <div class="cal-bt">${esc(b.title)}${links ? " " + links : ""}</div><div class="cal-bh">${timeLabel}</div>
+    return `<div class="cal-block cal-fixed ${hatch}${b.hasOverride ? " cal-ovr" : ""}" data-rec="${b.recId}" data-orig="${b.origISO}"
+        style="top:${top}px;height:${h}px;background:${itemColor(b)}" title="${esc(b.title)}（${KINDS[b.kind] ? KINDS[b.kind].label : "会議"}・クリックでこの回だけ変更）">
+      <div class="cal-bt">${b.hasOverride ? "✱ " : ""}${esc(b.title)}${links ? " " + links : ""}</div><div class="cal-bh">${timeLabel}</div>
     </div>`;
   }
   return `<div class="cal-block ${hatch}" draggable="true" data-task="${b.taskId}" data-member="${b.memberId}" data-mins="${b.mins}" data-start="${b.startMin}" data-plan="${b.planId}"
@@ -149,7 +153,10 @@ function wireDnD() {
   _root.querySelectorAll(".cal-chip, .cal-block:not(.cal-fixed)").forEach((el) => {
     el.addEventListener("dragstart", (e) => {
       if (resizing) { e.preventDefault(); return; }
-      drag = { taskId: +el.dataset.task, fromMember: +el.dataset.member, mins: +el.dataset.mins, planId: el.dataset.plan ? +el.dataset.plan : null };
+      // grabY=ブロック上端からの掴み位置。drop で差し引いて「ゴーストの見た目どおり」に着地させる
+      // （これが無いと カーソル位置=開始時刻 になり、掴んだ場所の分だけ下にズレる）。トレイのチップは 0。
+      const grabY = el.classList.contains("cal-block") ? e.clientY - el.getBoundingClientRect().top : 0;
+      drag = { taskId: +el.dataset.task, fromMember: +el.dataset.member, mins: +el.dataset.mins, planId: el.dataset.plan ? +el.dataset.plan : null, grabY };
       e.dataTransfer.effectAllowed = "move";
       try { e.dataTransfer.setData("text/plain", String(drag.taskId)); } catch { /* noop */ }
     });
@@ -180,6 +187,13 @@ function wireDnD() {
       document.addEventListener("mouseup", up);
     });
   });
+  // 会議/定例: クリックで「この回だけ変更」（📎リンクは除く）
+  _root.querySelectorAll(".cal-block.cal-fixed").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      if (e.target.closest("a")) return;
+      openOccurrenceEditor(+el.dataset.rec, el.dataset.orig);
+    });
+  });
   _root.querySelectorAll(".cal-colbody").forEach((col) => {
     col.addEventListener("dragover", (e) => { e.preventDefault(); col.classList.add("over"); });
     col.addEventListener("dragleave", () => col.classList.remove("over"));
@@ -187,7 +201,7 @@ function wireDnD() {
       e.preventDefault(); col.classList.remove("over");
       if (!drag) return;
       const rect = col.getBoundingClientRect();
-      const y = e.clientY - rect.top;
+      const y = e.clientY - rect.top - (drag.grabY || 0);
       let startMin = H0 * 60 + Math.round((y / HOURH) * 60 / SNAP) * SNAP;
       startMin = Math.max(H0 * 60, Math.min(H1 * 60 - drag.mins, startMin));
       const toMember = +col.dataset.member;
@@ -195,6 +209,85 @@ function wireDnD() {
       drag = null;
     });
   });
+}
+
+// 「この回だけ変更」（Googleカレンダーの「この予定のみ」相当）。
+// recurrences.overrides[origISO] に {date, start_minute, duration_seconds} or {skip:true} を保存。
+// 基準値と同じ項目は保存しない（差分のみ）。全部基準値どおりなら例外を解除。
+function openOccurrenceEditor(recId, origISO) {
+  const rec = (_data.recurrences || []).find((r) => r.id === recId);
+  if (!rec) return;
+  const ov = (rec.overrides || {})[origISO] || {};
+  const d = new Date(rec.dtstart);
+  const baseMin = d.getUTCHours() * 60 + d.getUTCMinutes();
+  const curDate = ov.date || origISO;
+  const curMin = ov.start_minute != null ? ov.start_minute : baseMin;
+  const curDur = Math.round(((ov.duration_seconds || rec.duration_seconds || 0) / 3600) * 100) / 100;
+
+  const wrap = document.createElement("div");
+  wrap.className = "cal-ovm";
+  wrap.innerHTML = `
+    <div class="cal-ovm-bg"></div>
+    <div class="cal-ovm-card">
+      <div class="cal-ovm-h"><b>${esc(rec.title)}</b><span>この回だけ変更（${origISO.replace(/-/g, "/")} の回）</span></div>
+      <label class="cal-ovm-l">日付</label>
+      <input id="ov-date" class="cal-ovm-in" type="text" inputmode="numeric" autocomplete="off" value="${curDate.replace(/-/g, "/")}">
+      <div class="cal-ovm-row">
+        <div><label class="cal-ovm-l">開始時刻</label>
+          <input id="ov-time" class="cal-ovm-in" type="text" inputmode="numeric" autocomplete="off" value="${hhmm(curMin)}"></div>
+        <div><label class="cal-ovm-l">所要(h)</label>
+          <input id="ov-dur" class="cal-ovm-in" type="text" inputmode="decimal" autocomplete="off" value="${curDur}"></div>
+      </div>
+      <div class="cal-ovm-err" id="ov-err"></div>
+      <div class="cal-ovm-acts">
+        <button id="ov-skip" class="cal-ovm-ghost">この回を休止</button>
+        ${(rec.overrides || {})[origISO] ? `<button id="ov-reset" class="cal-ovm-ghost">例外を解除</button>` : ""}
+        <span style="flex:1"></span>
+        <button id="ov-cancel" class="cal-ovm-ghost">キャンセル</button>
+        <button id="ov-save" class="cal-ovm-save">この回を変更</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  const $ = (s) => wrap.querySelector(s);
+  const close = () => wrap.remove();
+  wrap.querySelector(".cal-ovm-bg").onclick = close;
+  $("#ov-cancel").onclick = close;
+
+  const saveOverrides = async (newOv) => {
+    const overrides = { ...(rec.overrides || {}) };
+    if (newOv) overrides[origISO] = newOv; else delete overrides[origISO];
+    await updateRecurrence(rec.id, {
+      title: rec.title, kind: rec.kind, rrule: rec.rrule, dtstart: rec.dtstart,
+      duration_seconds: rec.duration_seconds, project_id: rec.project_id,
+      assignee_ids: rec.assignee_ids, rotation: !!rec.rotation, note: rec.note || "",
+      overrides,
+    });
+    invalidate();
+    _data = await load();
+    close();
+    paint();
+  };
+
+  $("#ov-skip").onclick = () => saveOverrides({ skip: true });
+  const reset = $("#ov-reset");
+  if (reset) reset.onclick = () => saveOverrides(null);
+  $("#ov-save").onclick = async () => {
+    const err = $("#ov-err");
+    const dm = $("#ov-date").value.trim().match(/^(\d{4})\D(\d{1,2})\D(\d{1,2})$/);
+    const dateISO = dm ? `${dm[1]}-${String(+dm[2]).padStart(2, "0")}-${String(+dm[3]).padStart(2, "0")}` : null;
+    if (!dateISO) { err.textContent = "日付の形式が不正です（例: 2026/06/17）。"; return; }
+    const tm = $("#ov-time").value.trim().match(/^(\d{1,2})[:：]?(\d{2})$/);
+    const min = tm && +tm[1] < 24 && +tm[2] < 60 ? (+tm[1]) * 60 + (+tm[2]) : null;
+    if (min == null) { err.textContent = "開始時刻の形式が不正です（例: 10:00）。"; return; }
+    const durNum = parseFloat($("#ov-dur").value.trim().replace(/^\./, "0."));
+    if (!isFinite(durNum) || durNum <= 0) { err.textContent = "所要(h)は0より大きい数値で。"; return; }
+    const newOv = {};
+    if (dateISO !== origISO) newOv.date = dateISO;
+    if (min !== baseMin) newOv.start_minute = min;
+    const durSec = Math.round(durNum * 3600);
+    if (durSec !== rec.duration_seconds) newOv.duration_seconds = durSec;
+    await saveOverrides(Object.keys(newOv).length ? newOv : null);
+  };
 }
 
 // リサイズ確定: 同じ時刻・担当のまま所要だけ変更（plans に更新APIが無いため delete→create）
@@ -255,7 +348,24 @@ function css() {
   .cal-block.cal-dots{background-image:radial-gradient(rgba(255,255,255,.9) .9px,transparent 1.1px);background-size:3px 3px}
   .cal-bt{font-size:11.5px;font-weight:600;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .cal-bh{font-size:10px;opacity:.92;margin-top:1px;white-space:nowrap}
-  .cal-block.cal-fixed{cursor:default;opacity:.88;z-index:1}
+  .cal-block.cal-fixed{cursor:pointer;opacity:.88;z-index:1}
+  .cal-block.cal-fixed:hover{opacity:1}
+  .cal-block.cal-ovr{outline:2px dashed rgba(255,255,255,.8);outline-offset:-2px}
   .cal-rs{position:absolute;left:0;right:0;bottom:0;height:7px;cursor:ns-resize}
-  .cal-rs::after{content:"";position:absolute;left:50%;bottom:2px;width:22px;height:3px;margin-left:-11px;border-radius:2px;background:rgba(255,255,255,.65)}`;
+  .cal-rs::after{content:"";position:absolute;left:50%;bottom:2px;width:22px;height:3px;margin-left:-11px;border-radius:2px;background:rgba(255,255,255,.65)}
+  .cal-ovm{position:fixed;inset:0;z-index:70;display:flex;align-items:center;justify-content:center}
+  .cal-ovm-bg{position:absolute;inset:0;background:rgba(20,30,50,.38)}
+  .cal-ovm-card{position:relative;width:min(360px,92vw);background:#fff;border:1px solid ${C.line};border-radius:14px;box-shadow:0 18px 50px rgba(20,30,50,.28);padding:18px 20px}
+  .cal-ovm-h b{font-size:14.5px;display:block}
+  .cal-ovm-h span{font-size:11.5px;color:${C.muted}}
+  .cal-ovm-l{display:block;font-size:11.5px;color:${C.muted};font-weight:600;margin:12px 0 4px}
+  .cal-ovm-in{width:100%;font:inherit;font-size:13.5px;padding:8px 10px;border:1px solid ${C.line};border-radius:8px;box-sizing:border-box}
+  .cal-ovm-in:focus{outline:none;border-color:${C.fill};box-shadow:0 0 0 3px rgba(58,134,255,.12)}
+  .cal-ovm-row{display:flex;gap:10px}.cal-ovm-row>div{flex:1}
+  .cal-ovm-err{color:${C.over};font-size:12px;min-height:16px;margin-top:8px;font-weight:600}
+  .cal-ovm-acts{display:flex;gap:8px;margin-top:10px;align-items:center}
+  .cal-ovm-ghost{font:inherit;font-size:12.5px;padding:7px 12px;border-radius:8px;border:1px solid ${C.line};background:#fff;color:${C.muted};cursor:pointer}
+  .cal-ovm-ghost:hover{color:${C.ink}}
+  .cal-ovm-save{font:inherit;font-size:12.5px;font-weight:700;padding:7px 14px;border-radius:8px;border:1px solid ${C.fill};background:${C.fill};color:#fff;cursor:pointer}
+  .cal-ovm-save:hover{filter:brightness(1.05)}`;
 }

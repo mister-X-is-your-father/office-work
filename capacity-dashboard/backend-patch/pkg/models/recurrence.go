@@ -32,6 +32,11 @@ type Recurrence struct {
 	// 持ち回り。true なら各 occurrence の担当は assignee_ids を順番に巡回（順序=配列順）。
 	// 巡回の割当・負荷計算は SPA(recurrence.js) 側（サーバは保持のみ）。
 	Rotation bool `xorm:"not null default false" json:"rotation"`
+	// 例外（この回だけの変更・Googleカレンダーの「この予定のみ」相当）。
+	// キー=元 occurrence の日付 "YYYY-MM-DD"。値は部分指定可:
+	//   {"skip":true} / {"date":"YYYY-MM-DD","start_minute":600,"duration_seconds":1800}
+	// 解釈は SPA(recurrence.js)。サーバは保持のみ（dumb storage・JSON列）。
+	Overrides map[string]interface{} `xorm:"json null 'overrides'" json:"overrides"`
 	// メモ
 	Note string `xorm:"text null" json:"note"`
 
@@ -92,7 +97,7 @@ func (r *Recurrence) ReadAll(s *xorm.Session, _ web.Auth, _ string, page int, pe
 // Update は編集可能フィールドを更新する。created_by は不変。
 func (r *Recurrence) Update(s *xorm.Session, _ web.Auth) (err error) {
 	_, err = s.ID(r.ID).
-		Cols("title", "kind", "rrule", "dtstart", "duration_seconds", "project_id", "assignee_ids", "rotation", "note").
+		Cols("title", "kind", "rrule", "dtstart", "duration_seconds", "project_id", "assignee_ids", "rotation", "overrides", "note").
 		Update(r)
 	return
 }
