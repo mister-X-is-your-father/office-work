@@ -114,11 +114,11 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
         </div>
         <div class="tf-row">
           <div class="tf-col">
-            <label class="tf-l">開始日 <span class="tf-hint">（ガント開始）</span></label>
+            <label class="tf-l">開始予定日 <span class="tf-hint">（ガント開始）</span></label>
             <input id="tf-start" class="tf-in" type="text" inputmode="numeric" autocomplete="off" value="${fieldDisplay(task, "start_date")}" placeholder="例: 1112">
           </div>
           <div class="tf-col">
-            <label class="tf-l">終了日 <span class="tf-hint">（ガント終了）</span></label>
+            <label class="tf-l">終了予定日 <span class="tf-hint">（ガント終了）</span></label>
             <input id="tf-end" class="tf-in" type="text" inputmode="numeric" autocomplete="off" value="${fieldDisplay(task, "end_date")}" placeholder="例: 1120">
           </div>
           <div class="tf-col">
@@ -214,11 +214,11 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
       if (!iso) { err.textContent = `${label}の形式が不正です（例: 1112 → 11/12）。`; return { iso: null, ok: false }; }
       return { iso, ok: true };
     };
-    const startF = parseField("#tf-start", "開始日"); if (!startF.ok) return;
-    const endF = parseField("#tf-end", "終了日"); if (!endF.ok) return;
+    const startF = parseField("#tf-start", "開始予定日"); if (!startF.ok) return;
+    const endF = parseField("#tf-end", "終了予定日"); if (!endF.ok) return;
     const dueF = parseField("#tf-due", "期日"); if (!dueF.ok) return;
     const startISO = startF.iso, endISO = endF.iso, dueISO = dueF.iso;
-    if (startISO && endISO && endISO < startISO) { err.textContent = "終了日は開始日以降にしてください。"; return; }
+    if (startISO && endISO && endISO < startISO) { err.textContent = "終了予定日は開始予定日以降にしてください。"; return; }
     const pid = +$("#tf-proj").value;
     const asg = $("#tf-asg").value ? +$("#tf-asg").value : null;
     const prio = +$("#tf-prio").value;
