@@ -352,7 +352,7 @@ function ensureStyle() {
   .tf-cbx-it{padding:8px 10px;font-size:13px;border-radius:7px;cursor:pointer;color:${C.ink};white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .tf-cbx-it.on{background:#eef4ff}
   .tf-cbx-new{color:${C.fill};font-weight:600}
-  .tf-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
+  .tf-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;min-height:26px} /* チップ1行分を予約（追加時のモーダル急伸防止） */
   .tf-chip{display:inline-flex;align-items:center;gap:4px;background:#eef2f7;border:1px solid ${C.line};border-radius:20px;padding:3px 5px 3px 11px;font-size:12px;color:${C.ink}}
   .tf-chip-x{border:0;background:transparent;color:${C.muted};cursor:pointer;font-size:14px;line-height:1;padding:0 3px}
   .tf-chip-x:hover{color:${C.over}}
