@@ -90,6 +90,10 @@ function shell() {
   };
   document.getElementById("logout").onclick = () => { vik.clearToken(); showLogin(); };
   vik.whoami().then(u => { document.getElementById("who").textContent = u ? (u.name || u.username) : ""; }).catch(() => {});
+  // クイック追加バー（1行自然言語 → 即タスク化。既定の投入先=インボックスWS）
+  import("./views/quickadd.js").then(({ mountQuickAdd }) => {
+    mountQuickAdd(document.querySelector(".topbar"), { onCreated: route });
+  }).catch(() => {});
   // Fable（隠し要素）: 実行サービスが許可したユーザーのときだけナビに出現
   import("./lib/exec.js").then(({ execMe }) => execMe()).then((uid) => {
     if (!uid) return;
