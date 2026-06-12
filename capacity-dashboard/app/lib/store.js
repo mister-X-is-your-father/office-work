@@ -3,16 +3,23 @@
 import * as vik from "./api.js";
 import { dateOnly } from "./capacity.js";
 
+// タスク雛形を保存する専用ワークスペース名（taskform のテンプレート機能が使用）
+export const TEMPLATE_WS = "テンプレート";
+
 let cache = null;
 
 export async function load(force = false) {
   if (cache && !force) return cache;
-  const [tasks, projects, recurrences, holidays, unavailability] = await Promise.all([
+  const [tasksAll, projects, recurrences, holidays, unavailability] = await Promise.all([
     vik.getTasks(), vik.getProjects(),
     vik.getRecurrences().catch(() => []),
     vik.getHolidays().catch(() => []),
     vik.getUnavailability().catch(() => []),
   ]);
+  // テンプレートWS（タスク雛形の置き場）は通常タスクから分離 — 負荷・空き・一覧に混ぜない
+  const templateProject = (projects || []).find((p) => p.title === TEMPLATE_WS) || null;
+  const tasks = templateProject ? (tasksAll || []).filter((t) => t.project_id !== templateProject.id) : (tasksAll || []);
+  const templates = templateProject ? (tasksAll || []).filter((t) => t.project_id === templateProject.id) : [];
   // ID→ユーザー名の名簿（全ワークスペースの projectusers ∪）。assignees に出ない人の名前解決用（P2 #5）。
   const dir = new Map();
   const dirLists = await Promise.all(
@@ -49,6 +56,7 @@ export async function load(force = false) {
   );
   cache = {
     tasks: tasks || [], projects: projects || [], members: [...mmap.values()],
+    templates, templateProject,
     plansByTask: new Map(planPairs),
     recurrences: recurrences || [], holidaysSet, unavailabilityByMember,
   };

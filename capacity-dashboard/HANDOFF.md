@@ -67,6 +67,7 @@ office-work/capacity-dashboard/
 - SPAクローム: 名称=**TaskStation**(タブtitle/ログイン/ブランド・「実データ」表記は排除)。ログイン画面は一般的な体裁＋**ログイン⇔新規作成**(本番で登録有効)。円時計の中央=**稼働予定(used)**を大表示・空き/超過はサブ(予定ゼロ=大きく0h)。サイドバーに常設「タスク追加」ボタン。
 - **タスク追加・編集UI**（2026-06-11・`views/taskform.js` 再利用モーダル）: サイドバー常設ボタン＋一覧の行クリックで起動。項目=タイトル/ワークスペース(所属グループ)/担当(単一)/**プロジェクト**(=親タスク)/優先度/**開始日・終了日**(start/end・ガント期間バー)/期日/見積り(h)/**先行タスク**(依存・複数チップ)/説明/完了。**依存**=related_tasks.follows でこのタスクの先行を指定（`addRelation(t,p,"follows")`・編集時diff・capacity.js dependencyEdges/依存グラフ/ガント依存線と整合）。開始/終了/期日は数字スマート入力共通。**UI呼称の階層=ワークスペース(=API project)＞プロジェクト(=親タスク)＞タスク**。作成=`createTaskInProject`、更新=`updateTask`(#9非破壊)、担当=`add|removeAssignee`(差し替えdiff)。**プロジェクト(親タスク)**=datalistで既存選択 or 名前入力で同WSに親を新規作成→親側に `subtask` 関連を張る(`add|removeRelation`・編集時は現親とdiff、`related_tasks.parenttask` で現親判定。capacity.js buildTaskTree/アウトラインと整合)。期日は**数字スマート入力**(`62`→6/2・`612`→6/12・`1112`→11/12・年は当年自動、`2026-11-12`等は年も解釈)。フロントのみ・スキーマ変更なし。
 - 本日(稼働予定): 既定=**積み上げ**、円時計/積み上げの選択は**個人ごとに localStorage 永続化**(ユーザーidキー・`today.js`)。
+- **タスクテンプレート**（2026-06-12）: 雛形は専用WS **「テンプレート」** に保存（分類=同WS内の親タスク・subtask機構流用）。taskform に「テンプレートから作成」コンボボックス（新規時・選択でタイトル/優先度/見積り/説明を反映）＋「テンプレートとして保存」ボタン（プロジェクト欄=分類名）。**store.load がテンプレートWSを tasks から分離**（負荷・空き・一覧に混ざらない。`cache.templates`/`templateProject`、WS名定数=`store.js TEMPLATE_WS`）。テンプレートWSは全メンバー共有済み・taskform のWS選択からは除外。
 - 基盤固め: #1 書き込み破壊性根治(ADR-008) / #2 soft delete / #3 帰属(ADR-009) / #4 負荷の単一真実(ADR-010) / #7 回帰網 / #9 スカラ更新安全化(client updateTask)。
 
 **残り**

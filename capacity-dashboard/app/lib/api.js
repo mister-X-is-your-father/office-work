@@ -35,6 +35,7 @@ export async function register(username, email, password) {
 export async function getTasks() { return req("/tasks/all?per_page=250"); }
 export async function getTask(id) { return req(`/tasks/${id}`); }
 export async function getProjects() { return req("/projects"); }
+export async function createProject(title) { return req("/projects", { method: "PUT", body: { title } }); }
 export async function getProjectMembers(projectId) { return req(`/projects/${projectId}/projectusers`); }
 export async function whoami() { return req("/user"); }
 

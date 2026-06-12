@@ -3,8 +3,8 @@
 // 作成=createTaskInProject / 更新=updateTask(#9 非破壊) / 担当=add|removeAssignee /
 // プロジェクト(UI呼称)=親タスク。related_tasks.subtask（親に subtask 関連を張る・名前入力で親を新規作成も可）。
 // 階層: ワークスペース(=API project) ＞ プロジェクト(=親タスク) ＞ タスク。
-import { load, invalidate } from "../lib/store.js";
-import { getTask, createTaskInProject, updateTask, addAssignee, removeAssignee, addRelation, removeRelation } from "../lib/api.js";
+import { load, invalidate, TEMPLATE_WS } from "../lib/store.js";
+import { getTask, createTaskInProject, createProject, updateTask, addAssignee, removeAssignee, addRelation, removeRelation } from "../lib/api.js";
 import { C, esc } from "../lib/ui.js";
 
 const ZERO_DATE = "0001-01-01T00:00:00Z"; // Vikunja の「未設定」センチネル
@@ -44,7 +44,7 @@ let _mounted = false;
 
 // taskId 省略=新規 / 指定=編集。保存後 onSaved() を呼ぶ。
 export async function openTaskForm({ taskId = null, onSaved } = {}) {
-  const { projects, members, tasks } = await load();
+  const { projects, members, tasks, templates = [], templateProject = null } = await load();
   const task = taskId ? await getTask(taskId) : null;
   const isEdit = !!task;
   const curAssignees = (task && task.assignees) || [];
@@ -56,7 +56,8 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
   ensureStyle();
   const wrap = document.createElement("div");
   wrap.className = "tf-modal";
-  const projOpts = (projects || []).map((p) =>
+  // ワークスペース選択からテンプレートWSは除外（雛形置き場であって作業場所ではない）
+  const projOpts = (projects || []).filter((p) => !templateProject || p.id !== templateProject.id).map((p) =>
     `<option value="${p.id}"${task && task.project_id === p.id ? " selected" : ""}>${esc(p.title)}</option>`).join("");
   const memOpts = `<option value="">（なし）</option>` + (members || []).map((m) =>
     `<option value="${m.id}"${m.id === curAssigneeId ? " selected" : ""}>${esc(m.name || m.username)}</option>`).join("");
@@ -74,11 +75,26 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
   for (const p of curPreds) if (!taskById.has(p.id)) taskById.set(p.id, p);
   const predSet = new Set(curPreds.map((p) => p.id)); // 編集中の作業セット（id）
 
+  // テンプレート: テンプレートWS内のタスク。分類=同WS内の親タスク（subtask 子持ち=分類、それ以外=雛形）。
+  const tplLeafs = (templates || []).filter((t) => !(((t.related_tasks || {}).subtask) || []).length);
+  const tplLabel = (t) => {
+    const cat = (((t.related_tasks || {}).parenttask) || [])[0];
+    return cat ? `${cat.title} › ${t.title}` : t.title;
+  };
+  const tplItems = tplLeafs.map((t) => ({ title: tplLabel(t), tpl: t }))
+    .sort((a, b) => a.title.localeCompare(b.title, "ja"));
+
   wrap.innerHTML = `
     <div class="tf-bg"></div>
     <div class="tf-card" role="dialog" aria-modal="true">
       <div class="tf-h"><b>${isEdit ? "タスクを編集" : "タスクを追加"}</b></div>
       <div class="tf-body">
+        ${!isEdit ? `
+        <label class="tf-l">テンプレートから作成 <span class="tf-hint">（任意・選ぶと下の項目に反映）</span></label>
+        <div class="tf-cbx">
+          <input id="tf-tpl" class="tf-in" autocomplete="off" placeholder="テンプレートを検索 / 選択">
+          <div class="tf-cbx-dd" hidden></div>
+        </div>` : ""}
         <label class="tf-l">タイトル <span class="tf-req">*</span></label>
         <input id="tf-title" class="tf-in" type="text" value="${esc(task ? task.title : "")}" placeholder="やること">
         <div class="tf-row">
@@ -138,6 +154,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
         <div class="tf-err" id="tf-err"></div>
       </div>
       <div class="tf-acts">
+        <button class="tf-tpl-save" id="tf-tpl-save" title="タイトル/優先度/見積り/説明を雛形として保存（プロジェクト欄=分類）">テンプレートとして保存</button>
         <button class="tf-cancel" id="tf-cancel">キャンセル</button>
         <button class="tf-save" id="tf-save">${isEdit ? "保存" : "追加"}</button>
       </div>
@@ -191,6 +208,53 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     onPick: (item) => { if (item) { predSet.add(item.id); renderChips(); } depEl.value = ""; },
   });
 
+  // テンプレートから作成: 選ぶとタイトル/優先度/見積り/説明をフォームに反映（日付・担当は対象外）
+  const tplEl = $("#tf-tpl");
+  if (tplEl) attachCombobox(tplEl, {
+    items: (q) => {
+      const ql = q.toLowerCase();
+      return ql ? tplItems.filter((e) => e.title.toLowerCase().includes(ql)) : tplItems;
+    },
+    onPick: (item) => {
+      if (!item) return;
+      const t = item.tpl;
+      tplEl.value = item.title;
+      $("#tf-title").value = t.title;
+      $("#tf-prio").value = String(t.priority || 0);
+      $("#tf-est").value = t.time_estimate ? String(Math.round((t.time_estimate / 3600) * 100) / 100) : "";
+      $("#tf-desc").value = t.description || "";
+    },
+  });
+
+  // テンプレートとして保存: 雛形(タイトル/優先度/見積り/説明)をテンプレートWSに保存。プロジェクト欄=分類。
+  $("#tf-tpl-save").onclick = async () => {
+    const err = $("#tf-err");
+    err.className = "tf-err";
+    const title = $("#tf-title").value.trim();
+    if (!title) { err.textContent = "タイトルを入力してください。"; return; }
+    const estRaw = $("#tf-est").value.trim().replace(/^\./, "0.");
+    const estNum = estRaw ? parseFloat(estRaw) : 0;
+    const btn = $("#tf-tpl-save");
+    btn.disabled = true; err.textContent = "";
+    try {
+      const tplWs = templateProject || await createProject(TEMPLATE_WS);
+      const created = await createTaskInProject(tplWs.id, {
+        title, description: $("#tf-desc").value, priority: +$("#tf-prio").value,
+        time_estimate: isFinite(estNum) && estNum > 0 ? Math.round(estNum * 3600) : 0,
+      });
+      const catRaw = $("#tf-parent").value.trim();
+      if (catRaw) {
+        const cat = (templates || []).find((t) => t.title === catRaw)
+          || await createTaskInProject(tplWs.id, { title: catRaw });
+        await addRelation(cat.id, created.id, "subtask");
+      }
+      invalidate();
+      err.className = "tf-err ok";
+      err.textContent = `✓ テンプレートに保存しました${catRaw ? `（分類: ${catRaw}）` : ""}`;
+    } catch (e) { err.textContent = "× " + e.message; }
+    btn.disabled = false;
+  };
+
   // プロジェクト: 空入力=既存プロジェクト一覧（無ければ全タスク）、入力=全タスク検索（プロジェクト優先）、未一致=新規作成を提示
   const parentEl = $("#tf-parent");
   attachCombobox(parentEl, {
@@ -205,6 +269,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
 
   $("#tf-save").onclick = async () => {
     const err = $("#tf-err");
+    err.className = "tf-err";
     const title = $("#tf-title").value.trim();
     if (!title) { err.textContent = "タイトルを入力してください。"; return; }
     const parseField = (sel, label) => {
@@ -293,11 +358,11 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
 // 矢印キーで選択・Enter確定・Esc/フォーカス外で閉じる。
 function attachCombobox(input, { items, createText, onPick }) {
   const dd = input.parentElement.querySelector(".tf-cbx-dd");
-  let list = [], idx = -1;
+  let list = [], idx = -1, typed = false; // typed=このフォーカス中に入力したか。選択済み文言での再フォーカスは全候補を出す（選び直し可能に）
   const close = () => { dd.hidden = true; idx = -1; };
   const paint = () => dd.querySelectorAll(".tf-cbx-it").forEach((el, i) => el.classList.toggle("on", i === idx));
   const open = () => {
-    const q = input.value.trim();
+    const q = typed ? input.value.trim() : "";
     const hits = items(q);
     list = hits.slice(0, 8).map((t) => ({ item: t }));
     if (createText && q && !hits.some((t) => t.title === q)) list.push({ create: q });
@@ -312,8 +377,8 @@ function attachCombobox(input, { items, createText, onPick }) {
     });
   };
   const pick = (i) => { const e = list[i]; if (!e) return; onPick(e.item || null, e.create || null); close(); input.blur(); };
-  input.onfocus = open;
-  input.oninput = open;
+  input.onfocus = () => { typed = false; open(); };
+  input.oninput = () => { typed = true; open(); };
   input.onblur = () => setTimeout(close, 120);
   input.onkeydown = (ev) => {
     if (ev.key === "Escape") return close();
@@ -357,7 +422,11 @@ function ensureStyle() {
   .tf-chip-x{border:0;background:transparent;color:${C.muted};cursor:pointer;font-size:14px;line-height:1;padding:0 3px}
   .tf-chip-x:hover{color:${C.over}}
   .tf-err{color:${C.over};font-size:12.5px;min-height:18px;margin:8px 0 2px;font-weight:600}
+  .tf-err.ok{color:${C.free}}
   .tf-acts{display:flex;justify-content:flex-end;gap:10px;padding:6px 22px 20px}
+  .tf-acts .tf-tpl-save{margin-right:auto;background:#fff;color:${C.muted}}
+  .tf-acts .tf-tpl-save:hover{color:${C.ink}}
+  .tf-acts .tf-tpl-save:disabled{opacity:.6;cursor:default}
   .tf-acts button{font:inherit;font-size:13.5px;font-weight:600;padding:9px 18px;border-radius:9px;cursor:pointer;border:1px solid ${C.line}}
   .tf-cancel{background:#fff;color:${C.muted}}.tf-cancel:hover{color:${C.ink}}
   .tf-save{background:${C.fill};color:#fff;border-color:${C.fill}}.tf-save:hover{filter:brightness(1.05)}
