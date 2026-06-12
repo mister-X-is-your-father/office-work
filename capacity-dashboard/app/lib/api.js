@@ -71,6 +71,8 @@ export async function logTime(taskId, seconds, note = "", loggedOn = null) {
   return req(`/tasks/${taskId}/times`, { method: "PUT", body });
 }
 export async function getTimes(taskId) { return req(`/tasks/${taskId}/times`); }
+export async function deleteTime(taskId, entryId) { return req(`/tasks/${taskId}/times/${entryId}`, { method: "DELETE" }); }
+export async function deleteTask(taskId) { return req(`/tasks/${taskId}`, { method: "DELETE" }); } // soft delete（フォークは deleted_at）
 
 // 日別の予定（フェーズ2: task_time_plans）
 export async function getPlans(taskId) { return req(`/tasks/${taskId}/plans`); }

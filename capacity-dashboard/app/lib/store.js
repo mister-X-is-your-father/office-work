@@ -3,6 +3,7 @@
 import * as vik from "./api.js";
 import { dateOnly } from "./capacity.js";
 import { getSettings } from "./exec.js";
+import { HABIT_WS } from "./habits.js";
 
 // チーム設定（実行サービスが落ちていても既定値で動く）
 const SETTINGS_DEFAULT = { capH: 8, calStart: 8, calEnd: 20, excludedWs: [] };
@@ -36,12 +37,16 @@ export async function load(force = false) {
     excludedWs: st.excluded_project_ids || [],
     canEdit: !!(settingsRaw && settingsRaw.can_edit),
   };
-  // テンプレートWS（雛形置き場）＋設定で除外されたWSは通常タスクから分離 — 負荷・空き・一覧に混ぜない
+  // テンプレートWS（雛形置き場）＋習慣WS（習慣トラッカー）＋設定で除外されたWSは通常タスクから分離
+  // — 負荷・空き・一覧に混ぜない
   const templateProject = (projects || []).find((p) => p.title === TEMPLATE_WS) || null;
+  const habitProject = (projects || []).find((p) => p.title === HABIT_WS) || null;
   const excluded = new Set(settings.excludedWs);
   if (templateProject) excluded.add(templateProject.id);
+  if (habitProject) excluded.add(habitProject.id);
   const tasks = (tasksAll || []).filter((t) => !excluded.has(t.project_id));
   const templates = templateProject ? (tasksAll || []).filter((t) => t.project_id === templateProject.id) : [];
+  const habitTasks = habitProject ? (tasksAll || []).filter((t) => t.project_id === habitProject.id && !t.done) : [];
   // ID→ユーザー名の名簿（全ワークスペースの projectusers ∪）。assignees に出ない人の名前解決用（P2 #5）。
   const dir = new Map();
   const dirLists = await Promise.all(
@@ -85,6 +90,7 @@ export async function load(force = false) {
     tasks: tasks || [], projects: projects || [], members: [...mmap.values()], aiMembers, me, settings,
     labels: labels || [],
     templates, templateProject,
+    habitTasks, habitProject,
     plansByTask: new Map(planPairs),
     recurrences: recurrences || [], holidaysSet, holidaysByDate, unavailabilityByMember,
   };
