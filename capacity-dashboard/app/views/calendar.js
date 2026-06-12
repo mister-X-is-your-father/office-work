@@ -117,16 +117,48 @@ function paint() {
         <span class="cal-chip-t">${esc(it.title)}</span><span class="cal-chip-h">${fmtH(it.mins / 60)}</span></div>`).join("")
     : `<div class="cal-tray-empty">未配置のタスクはありません</div>`;
 
+  // タスク一覧プール: 本日の負荷を持たない未完了タスクも直接ドラッグして配置できる
+  // （所要=見積り・無ければ1h。ドロップで本日の plan＋時刻が付く。配置後はリサイズで調整可）
+  const usedIds = new Set([...placed.map((b) => b.taskId), ...tray.map((it) => it.taskId)]);
+  const dayMins = (H1 - H0) * 60;
+  const pool = (_data.tasks || [])
+    .filter((t) => !t.done && !usedIds.has(t.id))
+    .sort((a, b) => (b.priority || 0) - (a.priority || 0) || a.title.localeCompare(b.title, "ja"));
+  const poolHtml = pool.length ? pool.map((t) => {
+    const estMin = Math.round((t.time_estimate || 0) / 60);
+    const mins = Math.max(SNAP, Math.min(dayMins, estMin || 60)); // 見積り無し=1h
+    const asg = (t.assignees || [])[0];
+    return `<div class="cal-chip cal-pool-chip" draggable="true" data-task="${t.id}" data-mins="${mins}"
+        title="${esc(t.title)}${asg ? `（担当: ${esc(asg.name || asg.username)}）` : ""}">
+      <span class="cal-chip-t">${esc(t.title)}</span><span class="cal-chip-h">${fmtH(mins / 60)}</span></div>`;
+  }).join("") : `<div class="cal-tray-empty">配置できる未完了タスクはありません</div>`;
+
   _root.innerHTML = `
     <style>${css()}</style>
     <h1 class="vtitle">本日の時刻カレンダー <small>${_day} ・ ドラッグで時刻・担当を配置</small></h1>
     <div class="cal-tray"><div class="cal-tray-h">未配置（${tray.length}）</div><div class="cal-tray-list" id="cal-tray">${trayHtml}</div></div>
+    <div class="cal-pool">
+      <div class="cal-pool-hd">
+        <div class="cal-tray-h">タスク一覧から配置（${pool.length}件・ドラッグでカレンダーへ）</div>
+        <input id="cal-pool-q" class="cal-pool-q" placeholder="タスク名で絞り込み" autocomplete="off">
+      </div>
+      <div class="cal-tray-list cal-pool-list" id="cal-pool">${poolHtml}</div>
+    </div>
     <div class="card cal-card"><div class="cal-scroll">
       <div class="cal-grid" style="height:${GRIDH + 30}px">
         <div class="cal-gutter" style="height:${GRIDH}px">${hours.join("")}</div>
         <div class="cal-cols">${grid.join("")}${nowLine}${cols}</div>
       </div>
     </div></div>`;
+
+  // プールの絞り込み（タイトル＋担当名でマッチ・再描画なし）
+  const q = _root.querySelector("#cal-pool-q");
+  if (q) q.oninput = () => {
+    const v = q.value.trim().toLowerCase();
+    _root.querySelectorAll(".cal-pool-chip").forEach((c) => {
+      c.style.display = !v || (c.title || "").toLowerCase().includes(v) ? "" : "none";
+    });
+  };
 
   wireDnD();
 }
@@ -360,6 +392,13 @@ function css() {
   .cal-chip-t{font-weight:600;max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .cal-chip-h{color:${C.muted};font-variant-numeric:tabular-nums}
   .cal-tray-empty{font-size:12px;color:${C.muted};padding:4px}
+  .cal-pool{margin:0 0 14px}
+  .cal-pool-hd{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
+  .cal-pool-hd .cal-tray-h{margin-bottom:0}
+  .cal-pool-q{font:inherit;font-size:12.5px;padding:6px 10px;border:1px solid ${C.line};border-radius:8px;background:#fff;width:220px}
+  .cal-pool-q:focus{outline:none;border-color:${C.fill};box-shadow:0 0 0 3px rgba(58,134,255,.12)}
+  .cal-pool-list{max-height:104px;overflow:auto}
+  .cal-pool-chip{border-left-color:${C.fill}}
   .cal-card{padding:0}.cal-scroll{overflow:auto;padding:8px 12px 12px}
   .cal-grid{display:flex;position:relative;min-width:560px}
   .cal-gutter{position:relative;width:46px;flex:none;margin-top:30px}
