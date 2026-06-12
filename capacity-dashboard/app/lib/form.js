@@ -36,23 +36,42 @@ export const DOW_JA = ["日", "月", "火", "水", "木", "金", "土"];
 // 入力欄の表示用: 曜日サフィックス付き "2026/06/15（月）"（parseSmartDate はこの形式を読み戻せる）
 export const fmtDisplayDow = (iso) => `${fmtDisplay(iso)}（${DOW_JA[new Date(iso + "T00:00:00Z").getUTCDay()]}）`;
 
-// ── "[資料]"/"[ゴール]" 埋め込み規約（description/note は本フォーム群のみが読み書き） ──
+// ── "[資料]"/"[ゴール]"/"[チェック]" 埋め込み規約（description/note は本フォーム群のみが読み書き） ──
+// [チェック] ブロックは "- [ ] 項目" / "- [x] 項目" の行列（TickTickのチェックリスト相当。
+// プレーンテキストのまま本体UIでも読める）。ブロックは次のマーカーまで。
 const DOC_LINE_RE = /^\[資料\]\s*(.+)$/;
+const CHECK_LINE_RE = /^- \[( |x)\]\s?(.*)$/;
 const GOAL_MARK = "[ゴール]";
+const CHECK_MARK = "[チェック]";
 export function splitMeta(desc) {
   const links = [], lines = [];
   for (const line of String(desc || "").split("\n")) {
     const m = line.match(DOC_LINE_RE);
     if (m) links.push(m[1].trim()); else lines.push(line);
   }
+  const isMark = (l) => l.trim() === GOAL_MARK || l.trim() === CHECK_MARK;
   const gi = lines.findIndex((l) => l.trim() === GOAL_MARK);
-  const text = (gi >= 0 ? lines.slice(0, gi) : lines).join("\n").replace(/\n+$/, "");
-  const goal = gi >= 0 ? lines.slice(gi + 1).join("\n").trim() : "";
-  return { text, goal, links };
+  const ci = lines.findIndex((l) => l.trim() === CHECK_MARK);
+  const firstMark = [gi, ci].filter((i) => i >= 0).sort((a, b) => a - b)[0];
+  const until = (from) => { // from の次行から次のマーカー直前まで
+    const end = lines.findIndex((l, i) => i > from && isMark(l));
+    return lines.slice(from + 1, end < 0 ? lines.length : end);
+  };
+  const text = (firstMark != null ? lines.slice(0, firstMark) : lines).join("\n").replace(/\n+$/, "");
+  const goal = gi >= 0 ? until(gi).join("\n").trim() : "";
+  const checks = [];
+  if (ci >= 0) for (const l of until(ci)) {
+    const m = l.match(CHECK_LINE_RE);
+    if (m) checks.push({ text: m[2], done: m[1] === "x" });
+    else if (l.trim()) checks.push({ text: l.trim(), done: false }); // 手書き行も拾う（消失防止）
+  }
+  return { text, goal, links, checks };
 }
-export function joinMeta(text, goal, links) {
+export function joinMeta(text, goal, links, checks = []) {
   let out = String(text || "").replace(/\s+$/, "");
   if (goal && goal.trim()) out += (out ? "\n\n" : "") + GOAL_MARK + "\n" + goal.trim();
+  if (checks.length) out += (out ? "\n\n" : "") + CHECK_MARK + "\n" +
+    checks.map((c) => `- [${c.done ? "x" : " "}] ${c.text}`).join("\n");
   if (links.length) out += (out ? "\n\n" : "") + links.map((u) => `[資料] ${u}`).join("\n");
   return out;
 }
@@ -200,6 +219,40 @@ function ensureDatePickerStyle() {
   .tf-dp-d i{position:absolute;left:50%;bottom:1px;transform:translateX(-50%);width:4px;height:4px;border-radius:50%;background:#e5484d}
   .tf-dp-d.sel i{background:#fff}`;
   document.head.appendChild(s);
+}
+
+// ── チェックリスト編集（checks 配列 [{text,done}] を直接編集する） ─────────
+// スタイル(.tf-checks 等)は taskform の ensureStyle が注入する前提（docChips と同様）。
+export function checksHtml(id, { placeholder = "項目を入力して Enter" } = {}) {
+  return `<div class="tf-checks" id="${id}-list"></div>
+    <input id="${id}" class="tf-in" autocomplete="off" placeholder="${esc(placeholder)}">`;
+}
+export function wireChecks(root, id, checks, { onChange = () => {} } = {}) {
+  const input = root.querySelector("#" + id);
+  const box = root.querySelector(`#${id}-list`);
+  const render = () => {
+    box.innerHTML = checks.map((c, i) => `
+      <label class="tf-check${c.done ? " done" : ""}">
+        <input type="checkbox" data-i="${i}"${c.done ? " checked" : ""}>
+        <span>${esc(c.text)}</span>
+        <button type="button" class="tf-chip-x" data-i="${i}" aria-label="削除">×</button>
+      </label>`).join("");
+    box.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+      cb.onchange = () => { checks[+cb.dataset.i].done = cb.checked; render(); };
+    });
+    box.querySelectorAll(".tf-chip-x").forEach((b) => {
+      b.onclick = (ev) => { ev.preventDefault(); checks.splice(+b.dataset.i, 1); render(); };
+    });
+    onChange(checks.filter((c) => c.done).length, checks.length);
+  };
+  const add = () => {
+    const v = input.value.trim();
+    if (v) { checks.push({ text: v, done: false }); input.value = ""; render(); }
+  };
+  input.onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); add(); } };
+  input.onblur = add; // 入力したまま保存を押しても拾う
+  render();
+  return { render, add };
 }
 
 // ── 資料リンクのチップ入力（links 配列を直接編集する） ─────────────────

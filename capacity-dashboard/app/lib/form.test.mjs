@@ -54,11 +54,30 @@ test("splitMeta/joinMeta: [資料]・[ゴール] の往復", () => {
 });
 
 test("splitMeta: 空・資料のみ・本文のみ", () => {
-  assert.deepEqual(splitMeta(""), { text: "", goal: "", links: [] });
+  assert.deepEqual(splitMeta(""), { text: "", goal: "", links: [], checks: [] });
   const onlyDocs = splitMeta("[資料] https://a.example\n[資料] https://b.example");
   assert.equal(onlyDocs.text, "");
   assert.deepEqual(onlyDocs.links, ["https://a.example", "https://b.example"]);
-  assert.deepEqual(splitMeta("メモだけ"), { text: "メモだけ", goal: "", links: [] });
+  assert.deepEqual(splitMeta("メモだけ"), { text: "メモだけ", goal: "", links: [], checks: [] });
   // links 無しの joinMeta は本文そのまま
   assert.equal(joinMeta("メモだけ", "", []), "メモだけ");
+});
+
+test("splitMeta/joinMeta: [チェック] の往復（ゴール/資料と共存・順序不問）", () => {
+  const checks = [{ text: "設計レビュー", done: true }, { text: "テスト追加", done: false }];
+  const desc = joinMeta("本文", "完了条件", ["https://a.example"], checks);
+  const r = splitMeta(desc);
+  assert.equal(r.text, "本文");
+  assert.equal(r.goal, "完了条件");
+  assert.deepEqual(r.links, ["https://a.example"]);
+  assert.deepEqual(r.checks, checks);
+  // マーカー順が逆でも読める（チェック→ゴール）
+  const rev = splitMeta("[チェック]\n- [x] a\n[ゴール]\nゴール文");
+  assert.deepEqual(rev.checks, [{ text: "a", done: true }]);
+  assert.equal(rev.goal, "ゴール文");
+});
+
+test("splitMeta: [チェック] 内の手書き行は未完項目として拾う（消失防止）", () => {
+  const r = splitMeta("[チェック]\n- [ ] 正規\n手書きの行");
+  assert.deepEqual(r.checks, [{ text: "正規", done: false }, { text: "手書きの行", done: false }]);
 });

@@ -8,7 +8,7 @@ import { getTask, createTaskInProject, createProject, updateTask, addAssignee, r
 import { categoryLabels, REVIEW_LABEL } from "../lib/kinds.js";
 import { C, esc } from "../lib/ui.js";
 // 共有フォーム部品（スマート日付/[資料][ゴール]規約/時間ステッパー/資料チップ）は lib/form.js に集約
-import { parseSmartDate, fmtDisplay, fmtDisplayDow, splitMeta, joinMeta, hourInputHtml, wireHourInput, docChipsHtml, wireDocChips, attachDatePicker } from "../lib/form.js";
+import { parseSmartDate, fmtDisplay, fmtDisplayDow, splitMeta, joinMeta, hourInputHtml, wireHourInput, docChipsHtml, wireDocChips, checksHtml, wireChecks, attachDatePicker } from "../lib/form.js";
 import { renderRecurrencePanel, ensureRecurrenceStyle } from "./recurrenceform.js";
 // 互換 re-export（既存の import 元を壊さない）
 export { parseSmartDate, fmtDisplay, splitMeta, joinMeta };
@@ -79,6 +79,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
   // 資料リンク（説明から分離して編集、保存時に再結合）
   const docInit = splitMeta(task ? task.description : "");
   const docLinks = [...docInit.links];
+  const docChecks = docInit.checks.map((c) => ({ ...c })); // チェックリスト（[チェック]規約・保存時に再結合）
 
   // テンプレート: テンプレートWS内のタスク。分類=同WS内の親タスク（subtask 子持ち=分類、それ以外=雛形）。
   const tplLeafs = (templates || []).filter((t) => !(((t.related_tasks || {}).subtask) || []).length);
@@ -124,6 +125,8 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
           <textarea id="tf-desc" class="tf-in tf-ta" rows="4" placeholder="任意">${esc(docInit.text)}</textarea>
           <label class="tf-l">ゴール <span class="tf-hint">（どうなったら完了か）</span></label>
           <textarea id="tf-goal" class="tf-in tf-ta" rows="3" placeholder="例: レビュー承認済み・本番で動作確認済み">${esc(docInit.goal)}</textarea>
+          <label class="tf-l">チェックリスト <span class="tf-hint" id="tf-check-cnt">（小項目・Enterで追加）</span></label>
+          ${checksHtml("tf-check")}
           <label class="tf-l">資料 <span class="tf-hint">（URLやパス・Enterで追加・複数可）</span></label>
           ${docChipsHtml("tf-doc")}
         </div>
@@ -260,6 +263,10 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
 
   // 資料リンク: 共有部品（Enter/blurで追加・×で除去・httpはリンク）
   const docChips = wireDocChips(wrap, "tf-doc", docLinks);
+  // チェックリスト: 共有部品（チェックで完了トグル・×で除去・見出しに進捗カウント）
+  const checksUi = wireChecks(wrap, "tf-check", docChecks, {
+    onChange: (d, n) => { $("#tf-check-cnt").textContent = n ? `（${d}/${n} 完了）` : "（小項目・Enterで追加）"; },
+  });
 
   const depEl = $("#tf-dep");
   attachCombobox(depEl, {
@@ -351,6 +358,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
       $("#tf-desc").value = d.text;
       $("#tf-goal").value = d.goal;
       docLinks.length = 0; docLinks.push(...d.links); docChips.render();
+      docChecks.length = 0; docChecks.push(...d.checks.map((c) => ({ ...c, done: false }))); checksUi.render(); // 雛形からは未完で開始
     },
   });
 
@@ -367,7 +375,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     try {
       const tplWs = templateProject || await createProject(TEMPLATE_WS);
       const created = await createTaskInProject(tplWs.id, {
-        title, description: joinMeta($("#tf-desc").value, $("#tf-goal").value, docLinks), priority: +$("#tf-prio").value,
+        title, description: joinMeta($("#tf-desc").value, $("#tf-goal").value, docLinks, docChecks), priority: +$("#tf-prio").value,
         time_estimate: isFinite(estNum) && estNum > 0 ? Math.round(estNum * 3600) : 0,
       });
       const catRaw = $("#tf-parent").value.trim();
@@ -434,7 +442,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     const estNum = estVal ? parseFloat(estVal) : 0;
     if (estVal && (!isFinite(estNum) || estNum < 0)) { err.textContent = "見積りは0以上の数値(h)で入力してください。"; return; }
     const estSec = estVal ? Math.round(estNum * 3600) : 0;
-    const desc = joinMeta($("#tf-desc").value, $("#tf-goal").value, docLinks);
+    const desc = joinMeta($("#tf-desc").value, $("#tf-goal").value, docLinks, docChecks);
 
     const parentRaw = $("#tf-parent").value.trim();
 
@@ -593,6 +601,14 @@ function ensureStyle() {
   .tf-cbx-it{padding:8px 10px;font-size:13px;border-radius:7px;cursor:pointer;color:${C.ink};white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .tf-cbx-it.on{background:#eef4ff}
   .tf-cbx-new{color:${C.fill};font-weight:600}
+  .tf-checks{display:flex;flex-direction:column;gap:2px;margin:2px 0 6px}
+  .tf-checks:empty{margin:0}
+  .tf-check{display:flex;align-items:center;gap:8px;font-size:13px;padding:3px 4px;border-radius:7px;cursor:pointer}
+  .tf-check:hover{background:#f5f8fc}
+  .tf-check input{accent-color:${C.fill};cursor:pointer}
+  .tf-check span{flex:1;min-width:0;overflow-wrap:anywhere}
+  .tf-check.done span{color:${C.muted};text-decoration:line-through}
+  .tf-check .tf-chip-x{opacity:0}.tf-check:hover .tf-chip-x{opacity:1}
   .tf-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;min-height:26px} /* チップ1行分を予約（追加時のモーダル急伸防止） */
   .tf-chip{display:inline-flex;align-items:center;gap:4px;background:#eef2f7;border:1px solid ${C.line};border-radius:20px;padding:3px 5px 3px 11px;font-size:12px;color:${C.ink}}
   .tf-chip a{color:${C.fill};text-decoration:none}
