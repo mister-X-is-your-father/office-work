@@ -1,0 +1,10 @@
+[Unit]
+Description=TaskStation SPA static server (capacity-dashboard, port 7010)
+
+[Service]
+ExecStart=/usr/bin/python3 /home/neo/.local/bin/taskstation-spa-serve.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

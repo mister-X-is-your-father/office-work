@@ -1,0 +1,10 @@
+[Unit]
+Description=TaskStation exec service (Fable run queue / scripts / live console, port 7020)
+
+[Service]
+ExecStart=/usr/bin/python3 /home/neo/.local/bin/taskstation-exec.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

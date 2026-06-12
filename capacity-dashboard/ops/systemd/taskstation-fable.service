@@ -1,0 +1,7 @@
+[Unit]
+Description=TaskStation Fable AI co-assignee runner (Claude Code / MAX plan)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /home/neo/.local/bin/taskstation-fable-runner.py
+TimeoutStartSec=2400
