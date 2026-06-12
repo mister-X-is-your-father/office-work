@@ -79,6 +79,7 @@ office-work/capacity-dashboard/
 - **Fable: モデル3択＋成果物ブラウザ**（2026-06-13）: モデル=Sonnet/Opus/**Fable**（`claude --model fable` 動作確認済み）。AI実行の cwd は **`work/task-<id>/`**（タスク別整理）。Fable画面に**成果物カード**（exec `GET /files`=作業dir走査・`GET /file/<rel>`=配信。パストラバーサル拒否・許可ユーザーのみ）→ クリックでブラウザ閲覧。成果物の確認動線=①AIコメント欄（テキスト報告）②コンソール（ログ）③成果物カード（ファイル）。
 - **設定ビュー**（2026-06-13・`views/settings.js`・ROUTES有効化）: **チーム共有設定**＝容量(h/日)・時刻カレンダーの営業時間・**集計対象WS**（除外WSのタスクは負荷/空き/一覧から外れる・テンプレートWSは常に除外）。保存先= taskstation-exec `GET/POST /settings`（`~/.config/taskstation/settings.json`・**読み取り=全ログインユーザー/書き込み=許可ユーザーのみ**＝管理者）。SPAは store.load が settings を取得し全ビューに配線（today/clock/availability/weekstack/home/week/freefinder/calendar の 8h と H0/H1 ハードコード解消。exec停止時は既定値で劣化動作）。
 - **かんばんビュー**（2026-06-13・`views/kanban.js`・ROUTES有効化）: Vikunja 0.24 の**プロジェクトビュー＋バケット**をそのまま使用（API: `GET /projects/:p`(views)→kanban view id→`GET/PUT/POST/DELETE /projects/:p/views/:v/buckets[...]`・移動=`POST .../buckets/:b/tasks {task_id}`）。WS選択(localStorage記憶)・列=バケット（Enterで追加/タイトルクリックで名前変更/空なら×削除）・カード=タスク（優先度ドット/担当アバター[AI非表示]/期日[超過赤]/見積り/完了タグ・**ドラッグで列移動・クリックで編集モーダル**）。
+- **タスクの分類**（2026-06-13）: 分類=ユーザー定義ラベル（`kinds.js categoryLabels`。「レビュー」ラベルは kind 軸の予約語として分類から除外＝**レビュー×分類が共存**）。taskform に分類コンボボックス（選択/新規作成/空=なし・単一運用・保存はdiff付け替え）、一覧に分類列＋フィルタ。初期分類=エンジニア依頼/定常業務。
 - 基盤固め: #1 書き込み破壊性根治(ADR-008) / #2 soft delete / #3 帰属(ADR-009) / #4 負荷の単一真実(ADR-010) / #7 回帰網 / #9 スカラ更新安全化(client updateTask)。
 
 **残り**
@@ -166,5 +167,5 @@ cd capacity-dashboard/app/lib/vendor && docker run --rm -v "$PWD":/out node:20-a
 2. **#3 SPA配線**（planner の対象者選択＋logTime/logPlan の user_id 送信）。
 3. **負荷ヒストリー/バーンダウン or PJ別配分**（データ即可・新ビュー）。
 4. かんばん(bucket)/一覧。ガント作り込み（updateTask 使用）。
-5. P2清掃: #6 est:Nh ラベル掃除 / #8 日別バッチ取得(N+1)。（#5 members×projectusers は 2026-06-12 消化済み＝store.js が全WSの projectusers で ID→名前を解決）
+5. P2清掃: #8 日別バッチ取得(N+1)。（#5 members×projectusers・#6 est:Nh ラベル掃除 は 2026-06-12/13 消化済み）
 6. AI Q&A(53) を別API化するか判断。
