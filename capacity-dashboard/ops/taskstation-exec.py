@@ -174,13 +174,14 @@ def run_ai(job):
     task = ts_req(f"/tasks/{job.task_id}", token)
     opt = job.options
     plan_mode = bool(opt.get("plan"))
-    model = opt.get("model") if opt.get("model") in ("sonnet", "opus") else "sonnet"
+    model = opt.get("model") if opt.get("model") in ("sonnet", "opus", "fable") else "sonnet"
     browser = bool(opt.get("browser"))
     web = bool(opt.get("web"))
     extra = str(opt.get("extra") or "").strip()[:2000]
     job.emit(f"{'📝 計画モード' if plan_mode else '▶ AI実行'}開始: #{job.task_id} {task.get('title', '')}")
     job.emit(f"  オプション: model={model}" + (" +ブラウザ操作" if browser else "") + (" +Web検索" if web else ""))
-    os.makedirs(WORK_DIR, exist_ok=True)
+    job_dir = f"{WORK_DIR}/task-{job.task_id}"
+    os.makedirs(job_dir, exist_ok=True)
 
     # MCP構成: taskstation 常設＋ブラウザ操作時は playwright(headless) を追加
     mcp_cfg = json.load(open(MCP_CONFIG))
@@ -191,7 +192,7 @@ def run_ai(job):
         allowed += ",mcp__playwright"
     if web:
         allowed += ",WebSearch,WebFetch"
-    cfg_path = f"{WORK_DIR}/.mcp-{job.id}.json"
+    cfg_path = f"{job_dir}/.mcp-{job.id}.json"
     with open(cfg_path, "w") as f:
         json.dump(mcp_cfg, f)
 
@@ -221,7 +222,7 @@ def run_ai(job):
            "--output-format", "stream-json", "--verbose"]
     if plan_mode:
         cmd += ["--permission-mode", "plan"]
-    proc = subprocess.Popen(cmd, cwd=WORK_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    proc = subprocess.Popen(cmd, cwd=job_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     final = []
     result_text = None
     start = time.time()
@@ -382,6 +383,41 @@ class H(BaseHTTPRequestHandler):
             except FileNotFoundError:
                 names = []
             return self._json(200, {"scripts": names})
+        if self.path.startswith("/files"):
+            out = []
+            for root, dirs, fs in os.walk(WORK_DIR):
+                dirs[:] = [d for d in dirs if not d.startswith(".")]
+                for fn in fs:
+                    if fn.startswith(".mcp-"):
+                        continue
+                    full = os.path.join(root, fn)
+                    rel = os.path.relpath(full, WORK_DIR)
+                    st = os.stat(full)
+                    out.append({"path": rel, "size": st.st_size, "mtime": int(st.st_mtime)})
+                    if len(out) >= 500:
+                        break
+            out.sort(key=lambda x: -x["mtime"])
+            return self._json(200, {"files": out})
+        mf = re.match(r"^/file/(.+?)(?:\?|$)", self.path)
+        if mf:
+            import urllib.parse
+            rel = urllib.parse.unquote(mf.group(1))
+            full = os.path.realpath(os.path.join(WORK_DIR, rel))
+            if not full.startswith(os.path.realpath(WORK_DIR) + os.sep) or not os.path.isfile(full):
+                return self._json(404, {"error": "not found"})
+            import mimetypes
+            ctype = mimetypes.guess_type(full)[0] or "text/plain"
+            if ctype.startswith("text/") or ctype in ("application/json",):
+                ctype += "; charset=utf-8"
+            data = open(full, "rb").read()
+            self.send_response(200)
+            self._cors()
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Disposition", "inline")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         mn = re.match(r"^/notes/(\d+)", self.path)
         if mn:
             return self._json(200, {"notes": notes.list_for(int(mn.group(1)))})

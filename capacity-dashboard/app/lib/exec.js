@@ -26,6 +26,9 @@ export function runAi(taskId, title, options = null) { return req("/run", { meth
 export function planAi(taskId, title) { return req("/run", { method: "POST", body: { kind: "ai", task_id: taskId, title: `計画: ${title}`, options: { ...loadRunOpts(), plan: true } } }); }
 // AIコメント（隠しノート・許可ユーザーのみ）
 export function getNotes(taskId) { return req(`/notes/${taskId}`); }
+// 成果物（Fable作業ディレクトリのファイル）
+export function getFiles() { return req("/files"); }
+export function fileUrl(relPath) { return `${EXEC_BASE}/file/${encodeURIComponent(relPath)}?token=${encodeURIComponent(token())}`; }
 // 実行オプション（モデル/ブラウザ操作/Web検索/追加指示）。localStorage に保存し ▶ 全箇所で共有。
 const OPTS_KEY = "ts.fable.runopts";
 export function loadRunOpts() {

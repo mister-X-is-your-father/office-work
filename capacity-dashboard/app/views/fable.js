@@ -2,7 +2,7 @@
 // 直列キュー（これが終わったらこれ）・▶実行・ライブコンソール・スクリプトのワンポチ起動。
 // スクリプトとAIを同じキューに並べれば「スクリプト→AI→スクリプト」の協業になる。
 import { load } from "../lib/store.js";
-import { execMe, getQueue, getScripts, runAi, planAi, runScript, cancelJob, streamUrl, loadRunOpts, saveRunOpts } from "../lib/exec.js";
+import { execMe, getQueue, getScripts, runAi, planAi, runScript, cancelJob, streamUrl, loadRunOpts, saveRunOpts, getFiles, fileUrl } from "../lib/exec.js";
 import { C, esc } from "../lib/ui.js";
 
 let _root, _es = null, _timer = null, _watching = null;
@@ -33,6 +33,7 @@ export async function render(root) {
               <select id="fb-opt-model" class="fb-sel">
                 <option value="sonnet">標準（Sonnet）</option>
                 <option value="opus">高品質（Opus）</option>
+                <option value="fable">最高品質（Fable）</option>
               </select></label>
             <label><input type="checkbox" id="fb-opt-browser"> ブラウザ操作</label>
             <label><input type="checkbox" id="fb-opt-web"> Web検索・閲覧</label>
@@ -59,6 +60,10 @@ export async function render(root) {
           <div class="fb-h">キュー <span class="fb-hint">（上から順に実行）</span></div>
           <div id="fb-queue"></div>
         </div>
+        <div class="card fb-card">
+          <div class="fb-h">成果物 <span class="fb-hint">（Fableが作ったファイル・クリックで開く）</span></div>
+          <div id="fb-files"></div>
+        </div>
       </div>
       <div class="card fb-card fb-console-card">
         <div class="fb-h">コンソール <span class="fb-hint" id="fb-con-t">（実行するとここにライブ表示）</span></div>
@@ -70,8 +75,23 @@ export async function render(root) {
     let qq;
     try { qq = await getQueue(); } catch { return; }
     paintQueue(qq);
+    paintFiles().catch(() => {});
     // 実行中ジョブのコンソールを自動で追尾
     if (qq.running && _watching !== qq.running.id) watch(qq.running.id, qq.running.title);
+  };
+  const fmtSize = (b) => (b > 1048576 ? `${(b / 1048576).toFixed(1)}MB` : b > 1024 ? `${Math.round(b / 1024)}KB` : `${b}B`);
+  const paintFiles = async () => {
+    const el = _root.querySelector("#fb-files");
+    if (!el) return;
+    const { files } = await getFiles();
+    el.innerHTML = (files || []).length ? files.slice(0, 30).map((f) => {
+      const d = new Date(f.mtime * 1000);
+      const when = `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+      return `<div class="fb-row">
+        <a class="fb-t fb-file" href="${fileUrl(f.path)}" target="_blank" rel="noopener">📄 ${esc(f.path)}</a>
+        <span class="fb-meta">${fmtSize(f.size)} ・ ${when}</span>
+      </div>`;
+    }).join("") : `<div class="fb-empty">まだありません（▶実行でファイルが作られるとここに出ます）</div>`;
   };
   const paintQueue = (qq) => {
     const el = _root.querySelector("#fb-queue");
@@ -160,6 +180,9 @@ function css() {
   .fb-x{border:0;background:transparent;color:${C.muted};cursor:pointer;font-size:14px}
   .fb-x:hover{color:${C.over}}
   .fb-empty{font-size:12px;color:${C.muted};padding:6px 0}
+  .fb-file{color:${C.ink};text-decoration:none}
+  .fb-file:hover{color:${C.fill};text-decoration:underline}
+  .fb-meta{font-size:11px;color:${C.muted};flex:none}
   .fb-opts{display:flex;gap:16px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:${C.ink}}
   .fb-opts label{display:inline-flex;align-items:center;gap:5px;cursor:pointer}
   .fb-sel{font:inherit;font-size:12.5px;padding:5px 8px;border:1px solid ${C.line};border-radius:7px;background:#fff}
