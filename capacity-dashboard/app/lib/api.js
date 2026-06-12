@@ -98,6 +98,27 @@ export async function getUnavailability() { return req("/unavailability"); }
 export async function createUnavailability(body) { return req("/unavailability", { method: "PUT", body }); }
 export async function deleteUnavailability(id) { return req(`/unavailability/${id}`, { method: "DELETE" }); }
 
+// 添付ファイル（ネイティブ機能）。アップロードは multipart のため req() を使わず専用 fetch。
+// ダウンロードも Authorization ヘッダが要る（<a href> 直リンク不可）→ blob を返し呼び出し側で保存。
+export async function getAttachments(taskId) { return req(`/tasks/${taskId}/attachments`); }
+export async function deleteAttachment(taskId, attId) { return req(`/tasks/${taskId}/attachments/${attId}`, { method: "DELETE" }); }
+export async function uploadAttachments(taskId, files) {
+  const fd = new FormData();
+  for (const f of files) fd.append("files", f);
+  const r = await fetch(`${API}/tasks/${taskId}/attachments`, {
+    method: "PUT", headers: { Authorization: "Bearer " + token() }, body: fd,
+  });
+  if (!r.ok) throw new Error(`アップロード失敗 (HTTP ${r.status})`);
+  return r.json();
+}
+export async function fetchAttachmentBlob(taskId, attId) {
+  const r = await fetch(`${API}/tasks/${taskId}/attachments/${attId}`, {
+    headers: { Authorization: "Bearer " + token() },
+  });
+  if (!r.ok) throw new Error(`ダウンロード失敗 (HTTP ${r.status})`);
+  return r.blob();
+}
+
 // レビュー依頼（ネイティブ機能のみ・スキーマ変更なし）: タスク作成＋ラベル＋担当＋関連リンク。
 export async function createTaskInProject(projectId, body) { return req(`/projects/${projectId}/tasks`, { method: "PUT", body }); }
 export async function getLabels() { return req("/labels"); }

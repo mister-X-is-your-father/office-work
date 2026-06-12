@@ -4,7 +4,7 @@
 // プロジェクト(UI呼称)=親タスク。related_tasks.subtask（親に subtask 関連を張る・名前入力で親を新規作成も可）。
 // 階層: ワークスペース(=API project) ＞ プロジェクト(=親タスク) ＞ タスク。
 import { load, invalidate, TEMPLATE_WS } from "../lib/store.js";
-import { getTask, createTaskInProject, createProject, updateTask, addAssignee, removeAssignee, addRelation, removeRelation, createLabel, addTaskLabel, removeTaskLabel } from "../lib/api.js";
+import { getTask, createTaskInProject, createProject, updateTask, addAssignee, removeAssignee, addRelation, removeRelation, createLabel, addTaskLabel, removeTaskLabel, getAttachments, uploadAttachments, deleteAttachment, fetchAttachmentBlob } from "../lib/api.js";
 import { categoryLabels, REVIEW_LABEL } from "../lib/kinds.js";
 import { C, esc } from "../lib/ui.js";
 // 共有フォーム部品（スマート日付/[資料][ゴール]規約/時間ステッパー/資料チップ）は lib/form.js に集約
@@ -129,6 +129,11 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
           ${checksHtml("tf-check")}
           <label class="tf-l">資料 <span class="tf-hint">（URLやパス・Enterで追加・複数可）</span></label>
           ${docChipsHtml("tf-doc")}
+          ${isEdit ? `
+          <label class="tf-l">添付ファイル <span class="tf-hint">（クリックでダウンロード）</span></label>
+          <div class="tf-chips tf-atts" id="tf-atts"></div>
+          <label class="tf-att-add">＋ ファイルを添付<input type="file" id="tf-att-in" multiple hidden></label>
+          <span class="tf-hint" id="tf-att-msg"></span>` : ""}
         </div>
         <div class="tf-side">
           <div${wsSingle ? " hidden" : ""}>
@@ -267,6 +272,47 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
   const checksUi = wireChecks(wrap, "tf-check", docChecks, {
     onChange: (d, n) => { $("#tf-check-cnt").textContent = n ? `（${d}/${n} 完了）` : "（小項目・Enterで追加）"; },
   });
+
+  // 添付ファイル（編集時のみ・ネイティブ添付API）: 一覧/追加/削除/ダウンロード（要Authヘッダ→blob保存）
+  if (isEdit) {
+    const attBox = $("#tf-atts"), attMsg = $("#tf-att-msg");
+    const fmtSize = (n) => n > 1048576 ? `${(n / 1048576).toFixed(1)}MB` : n > 1024 ? `${Math.round(n / 1024)}KB` : `${n}B`;
+    const paintAtts = async () => {
+      let list = [];
+      try { list = (await getAttachments(task.id)) || []; } catch { /* 添付なし */ }
+      attBox.innerHTML = list.map((a) => `
+        <span class="tf-chip" title="${esc(a.file.name)}（${fmtSize(a.file.size)}）">
+          <a href="#" data-dl="${a.id}" data-name="${esc(a.file.name)}">${esc(a.file.name.length > 30 ? a.file.name.slice(0, 28) + "…" : a.file.name)}</a>
+          <button type="button" class="tf-chip-x" data-del="${a.id}">×</button>
+        </span>`).join("") || `<span class="tf-hint">なし</span>`;
+      attBox.querySelectorAll("[data-dl]").forEach((el) => {
+        el.onclick = async (ev) => {
+          ev.preventDefault();
+          try {
+            const blob = await fetchAttachmentBlob(task.id, +el.dataset.dl);
+            const url = URL.createObjectURL(blob);
+            const aEl = document.createElement("a");
+            aEl.href = url; aEl.download = el.dataset.name; aEl.click();
+            setTimeout(() => URL.revokeObjectURL(url), 30000);
+          } catch (e) { attMsg.textContent = "× " + e.message; }
+        };
+      });
+      attBox.querySelectorAll("[data-del]").forEach((b) => {
+        b.onclick = async () => {
+          try { await deleteAttachment(task.id, +b.dataset.del); paintAtts(); }
+          catch (e) { attMsg.textContent = "× " + e.message; }
+        };
+      });
+    };
+    paintAtts();
+    $("#tf-att-in").onchange = async (ev) => {
+      if (!ev.target.files.length) return;
+      attMsg.textContent = "アップロード中…";
+      try { await uploadAttachments(task.id, ev.target.files); attMsg.textContent = ""; paintAtts(); }
+      catch (e) { attMsg.textContent = "× " + e.message; }
+      ev.target.value = "";
+    };
+  }
 
   const depEl = $("#tf-dep");
   attachCombobox(depEl, {
@@ -601,6 +647,10 @@ function ensureStyle() {
   .tf-cbx-it{padding:8px 10px;font-size:13px;border-radius:7px;cursor:pointer;color:${C.ink};white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .tf-cbx-it.on{background:#eef4ff}
   .tf-cbx-new{color:${C.fill};font-weight:600}
+  .tf-atts{min-height:0;margin-bottom:6px}
+  .tf-atts a{color:${C.fill};text-decoration:none}.tf-atts a:hover{text-decoration:underline}
+  .tf-att-add{display:inline-block;font-size:12px;color:${C.fill};border:1px dashed #b9d4ff;border-radius:8px;padding:5px 12px;cursor:pointer}
+  .tf-att-add:hover{background:#f3f8ff}
   .tf-checks{display:flex;flex-direction:column;gap:2px;margin:2px 0 6px}
   .tf-checks:empty{margin:0}
   .tf-check{display:flex;align-items:center;gap:8px;font-size:13px;padding:3px 4px;border-radius:7px;cursor:pointer}
