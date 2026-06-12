@@ -41,21 +41,27 @@ const fmtDisplay = (iso) => { const [y, mo, da] = iso.split("-"); return `${y}/$
 // task の日付フィールド（due_date/start_date/end_date）を YYYY/MM/DD 表示に（未設定=空）
 const fieldDisplay = (t, f) => (t && t[f] && !t[f].startsWith("0001") ? fmtDisplay(t[f].slice(0, 10)) : "");
 
-// 資料リンク: スキーマ変更を避け、説明の末尾に "[資料] URL" 行として埋め込んで保存する。
+// 資料リンク/ゴール: スキーマ変更を避け、説明に埋め込んで保存する。
+//   資料 = "[資料] URL" 行（複数可・位置不問） / ゴール = "[ゴール]" 行以降のテキストブロック。
 // description の読み書きは本フォームのみ（他ビュー不使用）なので衝突しない。
 const DOC_LINE_RE = /^\[資料\]\s*(.+)$/;
-function splitDocLinks(desc) {
-  const links = [], rest = [];
+const GOAL_MARK = "[ゴール]";
+function splitMeta(desc) {
+  const links = [], lines = [];
   for (const line of String(desc || "").split("\n")) {
     const m = line.match(DOC_LINE_RE);
-    if (m) links.push(m[1].trim()); else rest.push(line);
+    if (m) links.push(m[1].trim()); else lines.push(line);
   }
-  return { text: rest.join("\n").replace(/\n+$/, ""), links };
+  const gi = lines.findIndex((l) => l.trim() === GOAL_MARK);
+  const text = (gi >= 0 ? lines.slice(0, gi) : lines).join("\n").replace(/\n+$/, "");
+  const goal = gi >= 0 ? lines.slice(gi + 1).join("\n").trim() : "";
+  return { text, goal, links };
 }
-function joinDocLinks(text, links) {
-  const t = String(text || "").replace(/\s+$/, "");
-  if (!links.length) return t;
-  return (t ? t + "\n\n" : "") + links.map((u) => `[資料] ${u}`).join("\n");
+function joinMeta(text, goal, links) {
+  let out = String(text || "").replace(/\s+$/, "");
+  if (goal && goal.trim()) out += (out ? "\n\n" : "") + GOAL_MARK + "\n" + goal.trim();
+  if (links.length) out += (out ? "\n\n" : "") + links.map((u) => `[資料] ${u}`).join("\n");
+  return out;
 }
 
 let _mounted = false;
@@ -99,7 +105,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
   for (const p of curPreds) if (!taskById.has(p.id)) taskById.set(p.id, p);
   const predSet = new Set(curPreds.map((p) => p.id)); // 編集中の作業セット（id）
   // 資料リンク（説明から分離して編集、保存時に再結合）
-  const docInit = splitDocLinks(task ? task.description : "");
+  const docInit = splitMeta(task ? task.description : "");
   const docLinks = [...docInit.links];
 
   // テンプレート: テンプレートWS内のタスク。分類=同WS内の親タスク（subtask 子持ち=分類、それ以外=雛形）。
@@ -125,10 +131,17 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
               <div class="tf-cbx-dd" hidden></div>
             </div>
           </div>` : ""}
+          <label class="tf-l">プロジェクト <span class="tf-hint">（無い名前は新規作成）</span></label>
+          <div class="tf-cbx">
+            <input id="tf-parent" class="tf-in" autocomplete="off" value="${esc(curParentTitle)}" placeholder="選択 / 名前を入力">
+            <div class="tf-cbx-dd" hidden></div>
+          </div>
           <label class="tf-l">タイトル <span class="tf-req">*</span></label>
           <input id="tf-title" class="tf-in" type="text" value="${esc(task ? task.title : "")}" placeholder="やること">
           <label class="tf-l">説明</label>
-          <textarea id="tf-desc" class="tf-in tf-ta" rows="${isEdit ? 7 : 5}" placeholder="任意">${esc(docInit.text)}</textarea>
+          <textarea id="tf-desc" class="tf-in tf-ta" rows="4" placeholder="任意">${esc(docInit.text)}</textarea>
+          <label class="tf-l">ゴール <span class="tf-hint">（どうなったら完了か）</span></label>
+          <textarea id="tf-goal" class="tf-in tf-ta" rows="3" placeholder="例: レビュー承認済み・本番で動作確認済み">${esc(docInit.goal)}</textarea>
           <label class="tf-l">資料 <span class="tf-hint">（URLやパス・Enterで追加・複数可）</span></label>
           <input id="tf-doc" class="tf-in" autocomplete="off" placeholder="https://… を入力して Enter">
           <div class="tf-chips" id="tf-doc-chips"></div>
@@ -137,11 +150,6 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
           <div${wsSingle ? " hidden" : ""}>
             <label class="tf-l">ワークスペース</label>
             <select id="tf-proj" class="tf-in"${isEdit ? " disabled" : ""}>${projOpts}</select>
-          </div>
-          <label class="tf-l">プロジェクト <span class="tf-hint">（無い名前は新規作成）</span></label>
-          <div class="tf-cbx">
-            <input id="tf-parent" class="tf-in" autocomplete="off" value="${esc(curParentTitle)}" placeholder="選択 / 名前を入力">
-            <div class="tf-cbx-dd" hidden></div>
           </div>
           <div class="tf-row">
             <div class="tf-col">
@@ -292,8 +300,9 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
       $("#tf-title").value = t.title;
       $("#tf-prio").value = String(t.priority || 0);
       $("#tf-est").value = t.time_estimate ? String(Math.round((t.time_estimate / 3600) * 100) / 100) : "";
-      const d = splitDocLinks(t.description);
+      const d = splitMeta(t.description);
       $("#tf-desc").value = d.text;
+      $("#tf-goal").value = d.goal;
       docLinks.length = 0; docLinks.push(...d.links); renderDocChips();
     },
   });
@@ -311,7 +320,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     try {
       const tplWs = templateProject || await createProject(TEMPLATE_WS);
       const created = await createTaskInProject(tplWs.id, {
-        title, description: joinDocLinks($("#tf-desc").value, docLinks), priority: +$("#tf-prio").value,
+        title, description: joinMeta($("#tf-desc").value, $("#tf-goal").value, docLinks), priority: +$("#tf-prio").value,
         time_estimate: isFinite(estNum) && estNum > 0 ? Math.round(estNum * 3600) : 0,
       });
       const catRaw = $("#tf-parent").value.trim();
@@ -364,7 +373,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     const estNum = estVal ? parseFloat(estVal) : 0;
     if (estVal && (!isFinite(estNum) || estNum < 0)) { err.textContent = "見積りは0以上の数値(h)で入力してください。"; return; }
     const estSec = estVal ? Math.round(estNum * 3600) : 0;
-    const desc = joinDocLinks($("#tf-desc").value, docLinks);
+    const desc = joinMeta($("#tf-desc").value, $("#tf-goal").value, docLinks);
 
     const parentRaw = $("#tf-parent").value.trim();
 
