@@ -6,6 +6,8 @@
 import { load, invalidate, TEMPLATE_WS } from "../lib/store.js";
 import { getTask, createTaskInProject, createProject, updateTask, addAssignee, removeAssignee, addRelation, removeRelation } from "../lib/api.js";
 import { C, esc } from "../lib/ui.js";
+// 相互import（recurrenceform は本ファイルの parseSmartDate/fmtDisplay を関数内でのみ参照）なので安全
+import { renderRecurrencePanel, ensureRecurrenceStyle } from "./recurrenceform.js";
 
 const ZERO_DATE = "0001-01-01T00:00:00Z"; // Vikunja の「未設定」センチネル
 const WS_KEY = "ts.taskform.ws"; // 前回タスクを作ったワークスペース（選択UIの既定値）
@@ -21,7 +23,7 @@ function mkDate(y, mo, da) {
   if (mo < 1 || mo > 12 || da < 1 || da > 31) return null;
   return `${y}-${pad2(mo)}-${pad2(da)}`;
 }
-function parseSmartDate(raw) {
+export function parseSmartDate(raw) {
   if (raw == null) return null;
   const s = String(raw).trim();
   if (!s) return null;
@@ -37,7 +39,7 @@ function parseSmartDate(raw) {
   if (d.length === 2) return mkDate(Y, +d.slice(0, 1), +d.slice(1, 2)); // 62 → 6/2
   return null;
 }
-const fmtDisplay = (iso) => { const [y, mo, da] = iso.split("-"); return `${y}/${mo}/${da}`; };
+export const fmtDisplay = (iso) => { const [y, mo, da] = iso.split("-"); return `${y}/${mo}/${da}`; };
 // task の日付フィールド（due_date/start_date/end_date）を YYYY/MM/DD 表示に（未設定=空）
 const fieldDisplay = (t, f) => (t && t[f] && !t[f].startsWith("0001") ? fmtDisplay(t[f].slice(0, 10)) : "");
 
@@ -121,6 +123,13 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     <div class="tf-bg"></div>
     <div class="tf-card" role="dialog" aria-modal="true">
       <div class="tf-h"><b>${isEdit ? "タスクを編集" : "タスクを追加"}</b><button type="button" class="tf-x" id="tf-x" aria-label="閉じる">×</button></div>
+      ${!isEdit ? `
+      <div class="tf-tabs" id="tf-tabs">
+        <button type="button" data-tab="task" class="on">タスク</button>
+        <button type="button" data-tab="mtg">MTG</button>
+        <button type="button" data-tab="rmtg">定例MTG</button>
+        <button type="button" data-tab="rtask">定期タスク</button>
+      </div>` : ""}
       <div class="tf-body">
         <div class="tf-main">
           ${!isEdit ? `
@@ -191,6 +200,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
         </div>
         <div class="tf-err" id="tf-err"></div>
       </div>
+      <div class="tf-body tf-alt" id="tf-alt" hidden></div>
       <div class="tf-acts">
         <button class="tf-tpl-save" id="tf-tpl-save" title="タイトル/優先度/見積り/説明を雛形として保存（プロジェクト欄=分類）">テンプレートとして保存</button>
         <button class="tf-cancel" id="tf-cancel">キャンセル</button>
@@ -205,6 +215,31 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
   $("#tf-x").onclick = close;
   $("#tf-cancel").onclick = close;
   $("#tf-title").focus();
+
+  // 種別タブ（新規時のみ）: タスク=本フォーム / MTG・定例MTG・定期タスク=recurrenceform のパネル
+  const tabs = $("#tf-tabs");
+  if (tabs) {
+    ensureRecurrenceStyle();
+    const paneTask = wrap.querySelector(".tf-body:not(.tf-alt)");
+    const paneAlt = $("#tf-alt");
+    const acts = wrap.querySelector(".tf-acts");
+    // タブ切替でモーダルの高さが変わらないよう、初期（タスクタブ）の高さを最低高に固定
+    requestAnimationFrame(() => {
+      const c = wrap.querySelector(".tf-card");
+      if (c.offsetHeight) c.style.minHeight = c.offsetHeight + "px";
+    });
+    tabs.querySelectorAll("button").forEach((b) => {
+      b.onclick = () => {
+        tabs.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+        const mode = b.dataset.tab, isTask = mode === "task";
+        paneTask.hidden = !isTask;
+        acts.hidden = !isTask;
+        paneAlt.hidden = isTask;
+        if (!isTask) renderRecurrencePanel(paneAlt, mode, { members, onSaved, close });
+        else $("#tf-title").focus();
+      };
+    });
+  }
 
   // ヘッダー掴みでモーダルをドラッグ移動（初回ドラッグで fixed 化、画面外に出ない範囲でクランプ）
   const card = wrap.querySelector(".tf-card");

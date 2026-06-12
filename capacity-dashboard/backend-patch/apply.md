@@ -268,3 +268,16 @@ pkg/db/fixtures/{recurrences,holidays,member_unavailability}.yml (空[])
 - soft delete(#2)/created_by(#3) 踏襲。グローバル設定なので親委譲なし。occurrence は仮想。
 - API: `PUT /recurrences {title,kind,rrule,dtstart,duration_seconds,assignee_ids,...}`、`/holidays {date,name}`、`/unavailability {user_id,start_date,end_date,reason}`。
 v0.24.6 で S1(models+integrations green)→S2(隔離7011: migration3表＋JSON往復＋soft delete)→本番 `leo-vikunja:0.24.6-timetracking-fix4`→seed(`seed-recurrence-demo.py`)→Playwright(freefinder で定期/祝日/休暇 反映・console0) 確認済み。
+
+---
+
+## フェーズ6: recurrences.rotation（持ち回り）
+
+定期タスクの担当を「毎回1名が順番に巡回」させるためのフラグ。**順番=assignee_ids の配列順**。巡回の割当・負荷計算は SPA([recurrence.js](../app/lib/recurrence.js) `expandRecurrences` が occurrence ごとに `assignees` を解決、dtstart からの通し番号 % 人数)。fork は保持のみ。
+```
+pkg/models/recurrence.go        Rotation bool `xorm:"not null default false" json:"rotation"` 追加＋Update Cols に "rotation"
+pkg/models/recurrence_test.go   rotation 往復/default false/update で倒せる テスト追加
+pkg/migration/20260612220000.go rotation 列追加（Sync・additive）
+```
+v0.24.6 で S1(models+integrations green)→S2(隔離7011: rotation 往復/update)→本番 `leo-taskstation:0.24.6-fix8`（migration 自動・既存行は rotation=false）確認済み。
+入力UI: タスク追加モーダルの種別タブ（[recurrenceform.js](../app/views/recurrenceform.js)・MTG=COUNT=1/定例MTG/定期タスク=持ち回り順序UI）。

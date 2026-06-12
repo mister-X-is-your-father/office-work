@@ -39,6 +39,35 @@ test("expandRecurrences: UNTIL / COUNT / 境界inclusive", () => {
   assert.deepEqual(edge.map((o) => o.dateISO), ["2026-06-08"]);
 });
 
+test("rotation: 持ち回りは assignee_ids を出現順に巡回（1名ずつ）", () => {
+  // dtstart=6/1(月)・毎週月・担当 [1,2,3] 持ち回り → 6/1=1, 6/8=2, 6/15=3, 6/22=1
+  const r = rec({ rrule: "FREQ=WEEKLY;BYDAY=MO", assignee_ids: [1, 2, 3], rotation: true });
+  const occ = expandRecurrences([r], "2026-06-01", "2026-06-22");
+  assert.deepEqual(occ.map((o) => [o.dateISO, ...o.assignees]),
+    [["2026-06-01", 1], ["2026-06-08", 2], ["2026-06-15", 3], ["2026-06-22", 1]]);
+});
+
+test("rotation: ウィンドウが dtstart より後でも通し番号で巡回が続く", () => {
+  // 6/15 は dtstart=6/1 から3回目（index 2）→ 担当3
+  const r = rec({ rrule: "FREQ=WEEKLY;BYDAY=MO", assignee_ids: [1, 2, 3], rotation: true });
+  const occ = expandRecurrences([r], "2026-06-15", "2026-06-29");
+  assert.deepEqual(occ.map((o) => [o.dateISO, ...o.assignees]),
+    [["2026-06-15", 3], ["2026-06-22", 1], ["2026-06-29", 2]]);
+});
+
+test("rotation: 負荷はその回の担当1名のみ・非rotationは全員のまま", () => {
+  const rot = rec({ rrule: "FREQ=WEEKLY;BYDAY=MO", duration_seconds: 7200, assignee_ids: [1, 2], rotation: true });
+  const entries = occurrenceLoadEntries(expandRecurrences([rot], "2026-06-01", "2026-06-08"));
+  assert.deepEqual(entries, [
+    { memberId: 1, day: "2026-06-01", h: 2 },
+    { memberId: 2, day: "2026-06-08", h: 2 },
+  ]);
+  // rotation=false は従来通り全員フル
+  const all = rec({ rrule: "FREQ=WEEKLY;BYDAY=MO", duration_seconds: 3600, assignee_ids: [1, 2], rotation: false });
+  const entries2 = occurrenceLoadEntries(expandRecurrences([all], "2026-06-01", "2026-06-01"));
+  assert.equal(entries2.length, 2);
+});
+
 test("occurrenceLoadEntries: 多担当=全員フル", () => {
   const occ = expandRecurrences([rec({ rrule: "FREQ=WEEKLY;BYDAY=MO", duration_seconds: 3600, assignee_ids: [1, 2] })], "2026-06-08", "2026-06-08");
   const entries = occurrenceLoadEntries(occ);

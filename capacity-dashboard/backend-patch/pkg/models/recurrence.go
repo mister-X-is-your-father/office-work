@@ -1,4 +1,4 @@
-// TaskStation フォーク用パッチ: 定期タスク/会議の定義（RRULE）。capacity-dashboard 用。
+// Vikunja フォーク用パッチ: 定期タスク/会議の定義（RRULE）。capacity-dashboard 用。
 // occurrence は SPA(rrule.js) がウィンドウ展開する仮想インスタンス。サーバは RRULE 文字列を
 // そのまま保持する dumb storage（Go で展開しない）。task_time_entry.go の作法を踏襲。
 package models
@@ -29,6 +29,9 @@ type Recurrence struct {
 	// 参加者（対象者）の user_id 集合。多担当=全員フル（ADR-010）。JSON列（4つ目の表を回避）。
 	// AssigneeIDs→assignee_i_ds 回避で列名を明示。
 	AssigneeIDs []int64 `xorm:"json not null 'assignee_ids'" json:"assignee_ids"`
+	// 持ち回り。true なら各 occurrence の担当は assignee_ids を順番に巡回（順序=配列順）。
+	// 巡回の割当・負荷計算は SPA(recurrence.js) 側（サーバは保持のみ）。
+	Rotation bool `xorm:"not null default false" json:"rotation"`
 	// メモ
 	Note string `xorm:"text null" json:"note"`
 
@@ -89,7 +92,7 @@ func (r *Recurrence) ReadAll(s *xorm.Session, _ web.Auth, _ string, page int, pe
 // Update は編集可能フィールドを更新する。created_by は不変。
 func (r *Recurrence) Update(s *xorm.Session, _ web.Auth) (err error) {
 	_, err = s.ID(r.ID).
-		Cols("title", "kind", "rrule", "dtstart", "duration_seconds", "project_id", "assignee_ids", "note").
+		Cols("title", "kind", "rrule", "dtstart", "duration_seconds", "project_id", "assignee_ids", "rotation", "note").
 		Update(r)
 	return
 }

@@ -1,4 +1,4 @@
-// TaskStation フォーク用パッチ: 定期定義モデルのユニットテスト（TDD）
+// Vikunja フォーク用パッチ: 定期定義モデルのユニットテスト（TDD）
 package models
 
 import (
@@ -40,6 +40,30 @@ func TestRecurrence_CRUD(t *testing.T) {
 		assert.Equal(t, "meeting", got.Kind)
 		assert.Equal(t, []int64{1, 2}, got.AssigneeIDs, "JSON列が往復する")
 		assert.Equal(t, int64(3600), got.DurationSeconds)
+	})
+
+	t.Run("rotation roundtrips and defaults to false", func(t *testing.T) {
+		db.LoadAndAssertFixtures(t)
+		s := db.NewSession()
+		defer s.Close()
+		// 既定 false
+		r := &Recurrence{Title: "毎日掃除", RRule: "FREQ=DAILY", DTStart: recDate("2026-06-08"), DurationSeconds: 900, AssigneeIDs: []int64{1, 2, 3}}
+		require.NoError(t, r.Create(s, u))
+		got := &Recurrence{ID: r.ID}
+		require.NoError(t, got.ReadOne(s, u))
+		assert.False(t, got.Rotation)
+		// true で作成→往復、update で false へ戻せる
+		r2 := &Recurrence{Title: "持ち回り当番", RRule: "FREQ=WEEKLY;BYDAY=MO", DTStart: recDate("2026-06-08"), DurationSeconds: 1800, AssigneeIDs: []int64{2, 3, 4}, Rotation: true}
+		require.NoError(t, r2.Create(s, u))
+		require.NoError(t, s.Commit())
+		got2 := &Recurrence{ID: r2.ID}
+		require.NoError(t, got2.ReadOne(s, u))
+		assert.True(t, got2.Rotation, "rotation が往復する")
+		upd := &Recurrence{ID: r2.ID, Title: r2.Title, Kind: "task", RRule: r2.RRule, DTStart: r2.DTStart, DurationSeconds: r2.DurationSeconds, AssigneeIDs: r2.AssigneeIDs, Rotation: false}
+		require.NoError(t, upd.Update(s, u))
+		got3 := &Recurrence{ID: r2.ID}
+		require.NoError(t, got3.ReadOne(s, u))
+		assert.False(t, got3.Rotation, "update で rotation を倒せる")
 	})
 
 	t.Run("kind defaults to task", func(t *testing.T) {

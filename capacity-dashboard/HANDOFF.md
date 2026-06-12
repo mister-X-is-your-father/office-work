@@ -1,6 +1,6 @@
 # ハンドオフ — Capacity Board
 
-> status: **稼働中**（2026-06-10）。モック72案 → TaskStationフォークで時間管理をDB実装（本番） → 実データSPA（中核＋予実ガント） → **基盤固め完了**（#1-#4,#7,#9）→ **定期/会議＋祝日＋休暇→月次空き完了**（ADR-011）→ **UI全面TaskStationブランド化**（新ロゴ/favicon）→ **本日の稼働予定(円時計)＋リスケ＋レビュー依頼/キュー**（ADR-012 種別2軸）→ **切り口別ビュー群**（一覧/残容量/週日別/アウトライン/依存グラフ）→ **時刻カレンダー**（ADR-013 `start_minute`・ドラッグ配置）。本番イメージ **`leo-taskstation:0.24.6-fix7`**。
+> status: **稼働中**（2026-06-10）。モック72案 → TaskStationフォークで時間管理をDB実装（本番） → 実データSPA（中核＋予実ガント） → **基盤固め完了**（#1-#4,#7,#9）→ **定期/会議＋祝日＋休暇→月次空き完了**（ADR-011）→ **UI全面TaskStationブランド化**（新ロゴ/favicon）→ **本日の稼働予定(円時計)＋リスケ＋レビュー依頼/キュー**（ADR-012 種別2軸）→ **切り口別ビュー群**（一覧/残容量/週日別/アウトライン/依存グラフ）→ **時刻カレンダー**（ADR-013 `start_minute`・ドラッグ配置）→ **種別タブ＋定期入力UI**（タスク/MTG/定例MTG/定期タスク・**持ち回り=recurrences.rotation**）。本番イメージ **`leo-taskstation:0.24.6-fix8`**。
 > 次の人がコンテキスト無しで読む前提。まず本書 → 要件 [`docs/06-requirements.md`](docs/06-requirements.md) → ADR [`docs/01-decisions.md`](docs/01-decisions.md)（**ADR-006〜013 が現行設計**。012=種別kind×時間属性flagsの2軸／013=plan.start_minuteで時刻配置）→ `docs/00,05`。
 > **確定（2026-06-10）**: 容量は当面 **全員 8h/平日 固定で十分**（時刻帯の空き・半日休暇・人別可変キャパ＝時短 は保留。詳細は §8）。
 
@@ -12,7 +12,7 @@
 |---|---|
 | **実データSPA** | http://leo:7010/app/ （capdemo / CapDemoPass123） |
 | モックギャラリー(72案) | http://leo:7010/ ／ Pages: https://mister-x-is-your-father.github.io/office-work/capacity-dashboard/ |
-| **TaskStation（フォーク本番）** | http://leo:7005 （image **`leo-taskstation:0.24.6-fix7`**） |
+| **TaskStation（フォーク本番）** | http://leo:7005 （image **`leo-taskstation:0.24.6-fix8`**） |
 | GitHub | https://github.com/mister-x-is-your-father/office-work → `capacity-dashboard/` |
 
 配信は systemd user service **`taskstation-spa.service`**（`~/.local/bin/taskstation-spa-serve.py` を実行。ThreadingHTTPServer・no-storeヘッダ付きで `capacity-dashboard/` を 7010 で配信。enable済み＝ブート自動起動・落ちたら自動再起動）。状態確認は `systemctl --user status taskstation-spa`。
@@ -26,13 +26,13 @@ office-work/capacity-dashboard/
 │   ├── lib/ api.js(旧vikunja.js) capacity.js recurrence.js store.js ui.js
 │   │        kinds.js(種別/色/模様の単一定義・ADR-012) today_items.js(本日WorkItem整形)
 │   ├── lib/vendor/rrule.mjs             # rrule.js を自己完結ESMにベンダリング（#ADR-011）
-│   ├── lib/*.test.mjs                    # node --test 計37件(capacity/recurrence/today_items)
+│   ├── lib/*.test.mjs                    # node --test 計40件(capacity/recurrence/today_items)
 │   └── views/ home today(円時計/積み上げ) triage review availability calendar week planner
 │              freefinder weekstack estactual gantt list(table) outline depgraph .js
 ├── docs/ 00..06（06=要件・進捗の正本）
 └── backend-patch/                       # ★フォーク差分の再現一式＋apply.md＋seed-*.py
 /home/neo/vikunja-fork/vikunja/          # ← TaskStation v0.24.6 clone＋パッチ適用済（ビルド元）
-/home/neo/pm-trials/vikunja/docker-compose.yml  # ← 本番compose(image=leo-taskstation:...fix7)
+/home/neo/pm-trials/vikunja/docker-compose.yml  # ← 本番compose(image=leo-taskstation:...fix8)
 ```
 
 ## 3. アーキテクチャ（3層）＝ 昇格モデル S1孵化(fork)→S2検証(隔離)→S3製品(SPA)（[ADR-007](docs/01-decisions.md)）
@@ -44,11 +44,11 @@ office-work/capacity-dashboard/
 | 予定 | `task_time_plans`(plan_date,seconds,user_id,created_by, **start_minute**=時刻配置/null可 ADR-013) ＋ computed `time_planned` | `…/plans` |
 | スケジュール/依存/サブ | tasks.start_date/end_date/due_date / related_tasks(precedes/follows/subtask) | TaskStation標準 |
 | 種別ラベル | `labels`（「レビュー」=レビュー種別。kind判定に使用 ADR-012） | `/tasks/:id/labels`, `/tasks/:id/relations` |
-| **定期/会議** | `recurrences`(rrule[RFC5545文字列・dumb storage], dtstart, duration_seconds, kind['task'\|'meeting'], assignee_ids[JSON], project_id) | `PUT/GET/POST/DELETE /recurrences` |
+| **定期/会議** | `recurrences`(rrule[RFC5545文字列・dumb storage], dtstart, duration_seconds, kind['task'\|'meeting'], assignee_ids[JSON], **rotation**=持ち回り[順番=配列順・解釈はSPA], project_id) | `PUT/GET/POST/DELETE /recurrences` |
 | **祝日** | `holidays`(date, name) | `/holidays` |
 | **個人休暇** | `member_unavailability`(user_id, start_date, end_date, reason) | `/unavailability` |
 
-**2. 計算（純関数・TDD・計37テスト）.** `capacity.js`(空き/負荷/予実/ガント/トリアージ/`buildTaskTree`/`depLayers`) ＋ `recurrence.js`(RRULE展開・空き) ＋ `today_items.js`(本日WorkItem) ＋ `kinds.js`(種別定義)。
+**2. 計算（純関数・TDD・計40テスト）.** `capacity.js`(空き/負荷/予実/ガント/トリアージ/`buildTaskTree`/`depLayers`) ＋ `recurrence.js`(RRULE展開・空き) ＋ `today_items.js`(本日WorkItem) ＋ `kinds.js`(種別定義)。
 - 負荷の**単一真実**（[ADR-010](docs/01-decisions.md)/#4）: タスクは **plansあれば plans、無ければ見積り日割り**。**多担当=全員にフル**（按分しない。会議も同様）。`user_id`(対象者)が信頼できれば その1人にフル。
 - 月次空き（[ADR-011](docs/01-decisions.md)）: `expandRecurrences`(rrule.js)＋`occurrenceLoadEntries`(全員フル)＋`capacityOn`(週末/祝日/休暇=0)＋`freeByMemberDay`。
 - 本日WorkItem（[ADR-012](docs/01-decisions.md)）: `todayItemsByMember` が `{kind, prio, flags:{adhoc,advanced}}` を返す。**kind=種別**(会議/定例/レビュー/タスク=`recurrences.kind`＋ラベル)、**flags=時間属性**(当日追加=created当日/前倒し=plan当日かつ期日先)。表示トークンは `kinds.js`。
@@ -68,16 +68,17 @@ office-work/capacity-dashboard/
 - **タスク追加・編集UI**（2026-06-11・`views/taskform.js` 再利用モーダル）: サイドバー常設ボタン＋一覧の行クリックで起動。項目=タイトル/ワークスペース(所属グループ)/担当(単一)/**プロジェクト**(=親タスク)/優先度/**開始日・終了日**(start/end・ガント期間バー)/期日/見積り(h)/**先行タスク**(依存・複数チップ)/説明/完了。**依存**=related_tasks.follows でこのタスクの先行を指定（`addRelation(t,p,"follows")`・編集時diff・capacity.js dependencyEdges/依存グラフ/ガント依存線と整合）。開始/終了/期日は数字スマート入力共通。**UI呼称の階層=ワークスペース(=API project)＞プロジェクト(=親タスク)＞タスク**。作成=`createTaskInProject`、更新=`updateTask`(#9非破壊)、担当=`add|removeAssignee`(差し替えdiff)。**プロジェクト(親タスク)**=datalistで既存選択 or 名前入力で同WSに親を新規作成→親側に `subtask` 関連を張る(`add|removeRelation`・編集時は現親とdiff、`related_tasks.parenttask` で現親判定。capacity.js buildTaskTree/アウトラインと整合)。期日は**数字スマート入力**(`62`→6/2・`612`→6/12・`1112`→11/12・年は当年自動、`2026-11-12`等は年も解釈)。フロントのみ・スキーマ変更なし。
 - 本日(稼働予定): 既定=**積み上げ**、円時計/積み上げの選択は**個人ごとに localStorage 永続化**(ユーザーidキー・`today.js`)。
 - **タスクテンプレート**（2026-06-12）: 雛形は専用WS **「テンプレート」** に保存（分類=同WS内の親タスク・subtask機構流用）。taskform に「テンプレートから作成」コンボボックス（新規時・選択でタイトル/優先度/見積り/説明を反映）＋「テンプレートとして保存」ボタン（プロジェクト欄=分類名）。**store.load がテンプレートWSを tasks から分離**（負荷・空き・一覧に混ざらない。`cache.templates`/`templateProject`、WS名定数=`store.js TEMPLATE_WS`）。テンプレートWSは全メンバー共有済み・taskform のWS選択からは除外。
+- **種別タブ＋定期入力UI**（2026-06-12・fix8）: タスク追加モーダルにタブ **タスク/MTG/定例MTG/定期タスク**（新規時のみ・`views/recurrenceform.js`、タブ切替でも高さ固定）。MTG=単発（RRULE `FREQ=DAILY;COUNT=1`）/定例MTG・定期タスク=毎週(曜日)・隔週・毎月第N曜・毎月同日・毎日（`buildRRule`、曜日既定=開始日に追従）。**持ち回り(rotation)**=定期タスクで「毎回1名が順番に担当」: fork に `recurrences.rotation` 列追加（migration 20260612220000・S1→S2→fix8 デプロイ済）、順番=assignee_ids 配列順（↑↓で並べ替えUI）、巡回の解釈は `recurrence.js expandRecurrences`（occurrence に `assignees` を解決・dtstartからの通し番号%人数。本日/月次空き両対応）。再現は backend-patch/apply.md フェーズ6。
 - 基盤固め: #1 書き込み破壊性根治(ADR-008) / #2 soft delete / #3 帰属(ADR-009) / #4 負荷の単一真実(ADR-010) / #7 回帰網 / #9 スカラ更新安全化(client updateTask)。
 
 **残り**
-- **入力UI(残)**: 定期/祝日/休暇を**ブラウザから登録・編集**（今は seed/API のみ）。#3 対象者選択UI（planner フォーム）。※タスク本体の追加・編集は完了（上記）。
+- **入力UI(残)**: **祝日/休暇**の登録・編集（今は seed/API のみ）と**定期の編集・削除**（登録はタブUIで可能に。編集/削除は API のみ）。#3 対象者選択UI（planner フォーム）。※タスク本体・定期/MTG の追加は完了（上記）。
 - 残ビュー: かんばん(59・bucket流用可)/**設定(17)**。設定が入ると 8h/対象PJ のハードコード解消。
 - カレンダー作り込み(残): 営業時間/容量の可変化・複数日（週タイムライン）。※リサイズ・会議/定例の時刻ブロック表示は 2026-06-12 完了。
 - 据え置き(ADRで明記): 「本日=plan」完全一本化(due/範囲の暫定表示廃止・ADR-012)/定期occurrenceのmaterialize(ADR-011)/人別可変キャパ(時短)/AI Q&A(53)。
 
 ## 5. 運用 runbook
-### フォークを直して再デプロイ（fix7 系の作り方）
+### フォークを直して再デプロイ（fix8 系の作り方）
 ホストに Go 無し。**xgo不使用**＝docker golang:1.22 でネイティブビルド。frontend は `frontend/dist`（go:embed）。
 **ブランド化はソース側**（`frontend/src` の大文字"Vikunja"→"TaskStation"・`src/assets/logo*.svg`/`public/favicon.*`・`src/urls.ts`）→ frontend再ビルドで dist に反映。
 ```bash
@@ -86,7 +87,7 @@ cd /home/neo/vikunja-fork/vikunja
 #   ※dist/が過去のdocker由来でroot所有なら先に: docker run --rm -v "$PWD/frontend":/w -w /w alpine rm -rf dist stats.html
 docker run --rm -v "$PWD":/app -v vikunja-gocache:/go -w /app -e CGO_ENABLED=1 \
   golang:1.22 sh -c 'go build -buildvcs=false -ldflags "-s -w" -o vikunja .'
-docker build -f Dockerfile.deploy -t leo-taskstation:0.24.6-fix8 .   # 次は fix8
+docker build -f Dockerfile.deploy -t leo-taskstation:0.24.6-fix9 .   # 次は fix9
 # 本番反映（必ず backup → image差し替え → recreate。migrationは起動時自動）
 docker run --rm -v vikunja_vikunja-db:/from -v vikunja_vikunja-db-backup-fixN:/to alpine sh -c 'cp -a /from/. /to/'
 # pm-trials/vikunja/docker-compose.yml の image: を fix8 に編集

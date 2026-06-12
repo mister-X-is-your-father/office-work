@@ -44,13 +44,14 @@ export function todayItemsByMember(data, isoDay, capH = 8) {
   }
 
   // 会議/定例（本日に展開した occurrence）。優先度なし・時間属性なし。
-  for (const { recurrence, dateISO } of expandRecurrences(recurrences, isoDay, isoDay)) {
+  // 持ち回りは expandRecurrences が assignees をその回の担当1名に解決済み。
+  for (const { recurrence, dateISO, assignees } of expandRecurrences(recurrences, isoDay, isoDay)) {
     if (dateISO !== isoDay) continue;
     const h = round1(toH(recurrence.duration_seconds));
     if (h <= 0) continue;
     const kind = recurrence.kind === "meeting" ? "meeting" : "recurring";
     const title = recurrence.title || (kind === "meeting" ? "会議" : "定例");
-    for (const uid of recurrence.assignee_ids || []) {
+    for (const uid of assignees || recurrence.assignee_ids || []) {
       push(uid, { title, h, kind, prio: null, flags: { adhoc: false, advanced: false } });
     }
   }
