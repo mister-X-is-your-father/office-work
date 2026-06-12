@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { rrulestr } from "./vendor/rrule.mjs";
-import { expandRecurrences, occurrenceLoadEntries, capacityOn, freeByMemberDay } from "./recurrence.js";
+import { expandRecurrences, occurrenceLoadEntries, capacityOn, freeByMemberDay, holidayDataStatus } from "./recurrence.js";
 
 const rec = (o) => ({ dtstart: "2026-06-01T00:00:00Z", duration_seconds: 3600, assignee_ids: [1], ...o });
 const days = (from, n) => Array.from({ length: n }, (_, i) => {
@@ -77,6 +77,20 @@ test("occurrenceLoadEntries: 多担当=全員フル", () => {
   ]);
 });
 
+test("holidayDataStatus: 最終登録日が90日先に届かなければ stale", () => {
+  // 十分先まで登録あり → 健全
+  const ok = holidayDataStatus(new Set(["2026-07-20", "2027-01-01"]), "2026-06-12");
+  assert.equal(ok.stale, false);
+  assert.equal(ok.latest, "2027-01-01");
+  // 90日以内で途切れている → stale
+  const old = holidayDataStatus(new Set(["2026-06-22"]), "2026-06-12");
+  assert.equal(old.stale, true);
+  // 未登録 → stale（latest=null）
+  const none = holidayDataStatus(new Set(), "2026-06-12");
+  assert.equal(none.stale, true);
+  assert.equal(none.latest, null);
+});
+
 test("capacityOn: 週末/祝日/休暇=0、平日=capH", () => {
   const A = { id: 1 };
   const holidays = new Set(["2026-06-15"]);
@@ -105,4 +119,36 @@ test("freeByMemberDay: 合算・status・祝日衝突=over", () => {
   assert.equal(a.get("2026-06-13").status, "off");                                          // 土: 予定なし
   assert.equal(a.get("2026-06-15").status, "over");                                         // 祝日に会議1h=衝突
   assert.equal(b.get("2026-06-09").loadH, 0);                                               // B は火に予定なし
+});
+
+test("overrides: skip=休止・date=移動（origISO保持）・窓またぎの移動も拾う", () => {
+  // 毎週月（6/8, 6/15, 6/22）に例外: 6/8=休止、6/15→6/17 へ移動
+  const r = rec({ rrule: "FREQ=WEEKLY;BYDAY=MO",
+    overrides: { "2026-06-08": { skip: true }, "2026-06-15": { date: "2026-06-17" } } });
+  const occ = expandRecurrences([r], "2026-06-08", "2026-06-22");
+  assert.deepEqual(occ.map((o) => o.dateISO), ["2026-06-17", "2026-06-22"]);
+  assert.equal(occ[0].origISO, "2026-06-15");           // 移動しても元の日を保持
+  assert.equal(occ[1].override, null);                   // 例外なしの回は override=null
+  // 窓の外(6/29)から窓内(6/24)へ移動した回も拾う
+  const r2 = rec({ rrule: "FREQ=WEEKLY;BYDAY=MO", overrides: { "2026-06-29": { date: "2026-06-24" } } });
+  const occ2 = expandRecurrences([r2], "2026-06-23", "2026-06-26");
+  assert.deepEqual(occ2.map((o) => o.dateISO), ["2026-06-24"]);
+});
+
+test("overrides: duration_seconds の例外が負荷に反映される", () => {
+  const r = rec({ rrule: "FREQ=WEEKLY;BYDAY=MO", duration_seconds: 3600, assignee_ids: [1, 2],
+    overrides: { "2026-06-15": { duration_seconds: 7200 } } });
+  const load = occurrenceLoadEntries(expandRecurrences([r], "2026-06-08", "2026-06-15"));
+  const byDay = (d) => load.filter((e) => e.day === d).map((e) => e.h);
+  assert.deepEqual(byDay("2026-06-08"), [1, 1]);  // 通常回 1h
+  assert.deepEqual(byDay("2026-06-15"), [2, 2]);  // 例外回 2h
+});
+
+test("overrides: rotation の巡回番号は元の日基準（移動・休止でも順番が崩れない）", () => {
+  // 毎週月 A→B→A→B…。6/15 を休止しても 6/22 は「3番目」= A のまま。
+  const r = rec({ rrule: "FREQ=WEEKLY;BYDAY=MO", rotation: true, assignee_ids: [1, 2],
+    overrides: { "2026-06-15": { skip: true } } });
+  const occ = expandRecurrences([r], "2026-06-01", "2026-06-22");
+  assert.deepEqual(occ.map((o) => [o.dateISO, o.assignees[0]]),
+    [["2026-06-01", 1], ["2026-06-08", 2], ["2026-06-22", 1]]);
 });

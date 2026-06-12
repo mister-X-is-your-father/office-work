@@ -1,10 +1,11 @@
 // 総合ホーム（mock 27 相当・実データ。今日の空き＋アラート）
 import { load } from "../lib/store.js";
 import { loadByMember, estimateVsActual, triage } from "../lib/capacity.js";
+import { holidayDataStatus } from "../lib/recurrence.js";
 import { C, fmtH, esc, capacityBar, todayISO } from "../lib/ui.js";
 
 export async function render(root) {
-  const { tasks, members, plansByTask } = await load();
+  const { tasks, members, plansByTask, holidaysSet } = await load();
   const day = todayISO();
   const rows = loadByMember(tasks, members, day, 8, plansByTask).sort((a, b) => b.freeH - a.freeH);
   const ev = estimateVsActual(tasks);
@@ -19,6 +20,11 @@ export async function render(root) {
   over.forEach(r => alerts.push([C.over, `${esc(r.name)} が過負荷（+${fmtH(r.overH)}）`]));
   must.slice(0, 4).forEach(t => alerts.push([C.amber, `本日必須: ${esc(t.title)}`]));
   if (ev.totEst && ev.ratio > 1.1) alerts.push([C.over, `見積り超過 全体 +${Math.round((ev.ratio - 1) * 100)}%`]);
+  // 祝日カレンダーの鮮度（同期ジョブ taskstation-holiday-sync が止まると stale になる）
+  const hs = holidayDataStatus(holidaysSet, day);
+  if (hs.stale) alerts.push([C.amber, hs.latest
+    ? `祝日カレンダーが更新されていません（登録は ${esc(hs.latest)} まで）。同期ジョブ taskstation-holiday-sync を確認してください`
+    : "祝日カレンダーが未登録です。同期ジョブ taskstation-holiday-sync を実行してください"]);
   if (!alerts.length) alerts.push([C.free, "過負荷・必須タスクはありません。"]);
 
   root.innerHTML = `

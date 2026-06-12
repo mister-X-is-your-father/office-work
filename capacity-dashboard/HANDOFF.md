@@ -69,12 +69,14 @@ office-work/capacity-dashboard/
 - 本日(稼働予定): 既定=**積み上げ**、円時計/積み上げの選択は**個人ごとに localStorage 永続化**(ユーザーidキー・`today.js`)。
 - **タスクテンプレート**（2026-06-12）: 雛形は専用WS **「テンプレート」** に保存（分類=同WS内の親タスク・subtask機構流用）。taskform に「テンプレートから作成」コンボボックス（新規時・選択でタイトル/優先度/見積り/説明を反映）＋「テンプレートとして保存」ボタン（プロジェクト欄=分類名）。**store.load がテンプレートWSを tasks から分離**（負荷・空き・一覧に混ざらない。`cache.templates`/`templateProject`、WS名定数=`store.js TEMPLATE_WS`）。テンプレートWSは全メンバー共有済み・taskform のWS選択からは除外。
 - **種別タブ＋定期入力UI**（2026-06-12・fix8）: タスク追加モーダルにタブ **タスク/MTG/定例MTG/定期タスク**（新規時のみ・`views/recurrenceform.js`、タブ切替でも高さ固定）。MTG=単発（RRULE `FREQ=DAILY;COUNT=1`）/定例MTG・定期タスク=毎週(曜日)・隔週・毎月第N曜・毎月同日・毎日（`buildRRule`、曜日既定=開始日に追従）。**持ち回り(rotation)**=定期タスクで「毎回1名が順番に担当」: fork に `recurrences.rotation` 列追加（migration 20260612220000・S1→S2→fix8 デプロイ済）、順番=assignee_ids 配列順（↑↓で並べ替えUI）、巡回の解釈は `recurrence.js expandRecurrences`（occurrence に `assignees` を解決・dtstartからの通し番号%人数。本日/月次空き両対応）。再現は backend-patch/apply.md フェーズ6。
+- **祝日の自動同期**（2026-06-12）: 内閣府公式CSV→`/holidays` を冪等更新する `backend-patch/sync-holidays-jp.py`（追加のみ・過去/既存は触らない）。systemd user timer **`taskstation-holiday-sync.timer`**（毎週月 6:30・Persistent）で自走、認証は `~/.config/taskstation/holiday-sync.env`(600)。**止まった検知はSPA側**: `recurrence.js holidayDataStatus`（登録最終日が today+90日 に届かなければ stale）→ ホームのアラートに「祝日カレンダーが更新されていません」を表示。2026-06-12 に実行済み（実祝日25件投入・デモ用テスト祝日6/22は削除）。
 - 基盤固め: #1 書き込み破壊性根治(ADR-008) / #2 soft delete / #3 帰属(ADR-009) / #4 負荷の単一真実(ADR-010) / #7 回帰網 / #9 スカラ更新安全化(client updateTask)。
 
 **残り**
 - **入力UI(残)**: **祝日/休暇**の登録・編集（今は seed/API のみ）と**定期の編集・削除**（登録はタブUIで可能に。編集/削除は API のみ）。#3 対象者選択UI（planner フォーム）。※タスク本体・定期/MTG の追加は完了（上記）。
 - 残ビュー: かんばん(59・bucket流用可)/**設定(17)**。設定が入ると 8h/対象PJ のハードコード解消。
 - カレンダー作り込み(残): 営業時間/容量の可変化・複数日（週タイムライン）。※リサイズ・会議/定例の時刻ブロック表示は 2026-06-12 完了。
+- **土日祝の考慮ギャップ**（2026-06-12 監査）: ①見積りの**日割りが暦日割り**（`capacity.js taskHoursOn` が土日祝込みの inclusiveDays で割る→週末に負荷が落ち平日が薄まる。営業日割りにすべき）②**本日系ビュー（today/home KPI）の capH=8 固定**（祝日・週末でも空き8hと表示。`capacityOn` 未使用）。月次空き/リスケ提案/週次freeWindow は `capacityOn` 経由で正しい。
 - 据え置き(ADRで明記): 「本日=plan」完全一本化(due/範囲の暫定表示廃止・ADR-012)/定期occurrenceのmaterialize(ADR-011)/人別可変キャパ(時短)/AI Q&A(53)。
 
 ## 5. 運用 runbook

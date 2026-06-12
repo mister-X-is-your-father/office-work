@@ -4,35 +4,53 @@
 import { createRecurrence } from "../lib/api.js";
 import { invalidate } from "../lib/store.js";
 import { C, esc } from "../lib/ui.js";
-import { parseSmartDate, fmtDisplay } from "./taskform.js";
+import { parseSmartDate, fmtDisplay, joinMeta, hourInputHtml, wireHourInput, docChipsHtml, wireDocChips } from "../lib/form.js";
 
 const BYDAY = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"]; // getUTCDay() の並び
 const DOW_JA = ["日", "月", "火", "水", "木", "金", "土"];
 
-// 開始日(anchor)と頻度から RRULE 文字列を組み立てる。weekdays=[0..6](日..土)。
-export function buildRRule({ freq, anchorISO, weekdays = [] }) {
-  const d = new Date(anchorISO + "T00:00:00Z");
-  const dow = d.getUTCDay();
-  const days = (weekdays.length ? weekdays : [dow]).map((i) => BYDAY[i]).join(",");
+// RRULE 組み立て（Googleカレンダー型: 「N 単位ごと」×単位別の詳細）。
+//   unit: "weekly"|"monthly"|"daily" ＋ interval(1..99)
+//   weekly → weekdays=[0..6]（日..土・複数可）
+//   monthly → monthlyMode "same"(mday=1..31) | "nth"(nth=1..4/-1=最終, nthDow=0..6)
+//   untilISO（任意）= 終了日（その日を含む）
+//   freq:"once" は MTG タブ用の単発。
+export function buildRRule({ freq = null, unit, interval = 1, weekdays = [], monthlyMode = "same", mday = 1, nth = 1, nthDow = 1, untilISO = null } = {}) {
   if (freq === "once") return "FREQ=DAILY;COUNT=1";
-  if (freq === "daily") return "FREQ=DAILY";
-  if (freq === "weekly") return `FREQ=WEEKLY;BYDAY=${days}`;
-  if (freq === "biweekly") return `FREQ=WEEKLY;INTERVAL=2;BYDAY=${days}`;
-  if (freq === "monthly_nth") {
-    const nth = Math.ceil(d.getUTCDate() / 7); // 第N（anchor の日から導出）
-    return `FREQ=MONTHLY;BYDAY=${nth}${BYDAY[dow]}`;
-  }
-  return "FREQ=MONTHLY"; // monthly_same: 毎月同じ日（dtstart の日）
+  const iv = interval > 1 ? `;INTERVAL=${interval}` : "";
+  const until = untilISO ? `;UNTIL=${untilISO.replace(/-/g, "")}T235959Z` : "";
+  if (unit === "daily") return `FREQ=DAILY${iv}${until}`;
+  if (unit === "weekly") return `FREQ=WEEKLY${iv};BYDAY=${weekdays.map((i) => BYDAY[i]).join(",")}${until}`;
+  if (monthlyMode === "nth") return `FREQ=MONTHLY${iv};BYDAY=${nth}${BYDAY[nthDow]}${until}`;
+  return `FREQ=MONTHLY${iv};BYMONTHDAY=${mday}${until}`;
 }
 
-// 頻度の選択肢（mode により絞る）
-const FREQ_OPTS = [
-  ["weekly", "毎週（曜日指定）"],
-  ["biweekly", "隔週（曜日指定）"],
-  ["monthly_nth", "毎月 第N曜日（開始日から）"],
-  ["monthly_same", "毎月 同じ日"],
-  ["daily", "毎日"],
-];
+const UNIT_OPTS = [["weekly", "週間ごと"], ["monthly", "か月ごと"], ["daily", "日ごと"]];
+const NTH_OPTS = [[1, "第1"], [2, "第2"], [3, "第3"], [4, "第4"], [-1, "最終"]];
+const NTH_LABEL = { 1: "第1", 2: "第2", 3: "第3", 4: "第4", "-1": "最終" };
+
+// 人間が読める繰り返し文（プレビュー）
+export function rruleText({ unit, interval, weekdays, monthlyMode, mday, nth, nthDow }) {
+  if (unit === "daily") return interval > 1 ? `${interval}日ごと` : "毎日";
+  if (unit === "weekly") {
+    const pre = interval === 1 ? "毎週" : interval === 2 ? "隔週" : `${interval}週間ごと`;
+    const days = weekdays.length ? weekdays.map((i) => DOW_JA[i]).join("・") : "—";
+    return `${pre} ${days}曜日`;
+  }
+  const pre = interval === 1 ? "毎月" : `${interval}か月ごと`;
+  return monthlyMode === "nth" ? `${pre} ${NTH_LABEL[nth]}${DOW_JA[nthDow]}曜日` : `${pre} ${mday}日`;
+}
+
+// "10:00"・"1000"・"930" → 0:00 からの分（不正は null。空は -1=時刻なし）
+export function parseTimeOfDay(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return -1;
+  const m = s.match(/^(\d{1,2})[:：]?(\d{2})$/);
+  if (!m) return null;
+  const h = +m[1], mi = +m[2];
+  if (h > 23 || mi > 59) return null;
+  return h * 60 + mi;
+}
 
 // パネル描画。mode: "mtg"(単発会議) | "rmtg"(定例MTG) | "rtask"(定期タスク)
 // ctx: { members, onSaved, close, $err } — $err は親モーダルのエラー表示要素。
@@ -47,24 +65,49 @@ export function renderRecurrencePanel(el, mode, { members, onSaved, close }) {
     <label class="tf-l">タイトル <span class="tf-req">*</span></label>
     <input id="rf-title" class="tf-in" type="text" placeholder="${isMtg ? "例: 顧客定例キックオフ" : isTask ? "例: 週次バックアップ確認" : "例: チーム定例"}">
     ${isMtg ? `
-    <label class="tf-l">日付 <span class="tf-req">*</span></label>
-    <input id="rf-date" class="tf-in" type="text" inputmode="numeric" autocomplete="off" value="${fmtDisplay(todayISO)}" placeholder="例: 1112">
-    ` : `
     <div class="tf-row">
       <div class="tf-col">
-        <label class="tf-l">繰り返し</label>
-        <select id="rf-freq" class="tf-in">${FREQ_OPTS.map(([v, n]) => `<option value="${v}">${n}</option>`).join("")}</select>
+        <label class="tf-l">日付 <span class="tf-req">*</span></label>
+        <input id="rf-date" class="tf-in" type="text" inputmode="numeric" autocomplete="off" value="${fmtDisplay(todayISO)}" placeholder="例: 1112">
       </div>
+      <div class="tf-col">
+        <label class="tf-l">開始時刻 <span class="tf-hint">（任意・時刻カレンダーに表示）</span></label>
+        <input id="rf-time" class="tf-in" type="text" inputmode="numeric" autocomplete="off" placeholder="例: 10:00">
+      </div>
+    </div>
+    ` : `
+    <label class="tf-l">繰り返し</label>
+    <div class="rf-iv">
+      <input id="rf-int" class="tf-in rf-int" type="text" inputmode="numeric" autocomplete="off" value="1">
+      <select id="rf-unit" class="tf-in rf-unit">${UNIT_OPTS.map(([v, n]) => `<option value="${v}">${n}</option>`).join("")}</select>
+      <div id="rf-dows" class="rf-dows">${DOW_JA.map((n, i) =>
+        `<button type="button" class="rf-dowbtn" data-dow="${i}">${n}</button>`).join("")}</div>
+      <div id="rf-monthly" class="rf-monthly" hidden>
+        <label class="rf-radio"><input type="radio" name="rf-mm" value="same" checked>
+          <select id="rf-mday" class="tf-in rf-mini">${Array.from({ length: 31 }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join("")}</select> 日</label>
+        <label class="rf-radio"><input type="radio" name="rf-mm" value="nth">
+          <select id="rf-nth-n" class="tf-in rf-mini">${NTH_OPTS.map(([v, n]) => `<option value="${v}">${n}</option>`).join("")}</select>
+          <select id="rf-nth-dow" class="tf-in rf-mini">${DOW_JA.map((n, i) => `<option value="${i}">${n}曜日</option>`).join("")}</select></label>
+      </div>
+    </div>
+    <div class="rf-prev" id="rf-prev"></div>
+    <div class="tf-row">
       <div class="tf-col">
         <label class="tf-l">開始日 <span class="tf-hint">（起点）</span></label>
         <input id="rf-date" class="tf-in" type="text" inputmode="numeric" autocomplete="off" value="${fmtDisplay(todayISO)}" placeholder="例: 1112">
       </div>
+      <div class="tf-col">
+        <label class="tf-l">開始時刻 <span class="tf-hint">（任意）</span></label>
+        <input id="rf-time" class="tf-in" type="text" inputmode="numeric" autocomplete="off" placeholder="例: 10:00">
+      </div>
+      <div class="tf-col">
+        <label class="tf-l">終了日 <span class="tf-hint">（任意・空=ずっと）</span></label>
+        <input id="rf-until" class="tf-in" type="text" inputmode="numeric" autocomplete="off" placeholder="例: 1231">
+      </div>
     </div>
-    <div id="rf-dows" class="rf-dows">${DOW_JA.map((n, i) =>
-      `<label class="rf-dow"><input type="checkbox" data-dow="${i}"> ${n}</label>`).join("")}</div>
     `}
     <label class="tf-l">所要(h) <span class="tf-hint">（1回あたり・0.25刻み）</span></label>
-    <input id="rf-dur" class="tf-in" type="text" inputmode="decimal" autocomplete="off" value="${isTask ? "0.5" : "1"}" placeholder="例: 0.5">
+    ${hourInputHtml("rf-dur", { value: isTask ? "0.5" : "1", placeholder: "例: 0.5" })}
     <label class="tf-l">${isTask ? "担当" : "参加者"} <span class="tf-req">*</span>${isTask ? ` <span class="tf-hint">（持ち回り時はこの順番で巡回）</span>` : ""}</label>
     <div id="rf-members" class="rf-members">${(members || []).map((m) =>
       `<label class="rf-mem"><input type="checkbox" data-mid="${m.id}"> ${esc(m.name || m.username)}</label>`).join("")}</div>
@@ -72,6 +115,8 @@ export function renderRecurrencePanel(el, mode, { members, onSaved, close }) {
     <label class="tf-chk"><input id="rf-rot" type="checkbox"> 持ち回り <span class="tf-hint">（毎回1名が順番に担当。オフ=毎回全員）</span></label>
     <div id="rf-order" class="rf-order" hidden></div>
     ` : ""}
+    <label class="tf-l">資料 <span class="tf-hint">（${isMtg || !isTask ? "MTG資料・アジェンダ等の" : ""}URLやパス・Enterで追加・複数可）</span></label>
+    ${docChipsHtml("rf-doc")}
     <label class="tf-l">メモ</label>
     <input id="rf-note" class="tf-in" type="text" placeholder="任意">
     <div class="tf-err" id="rf-err"></div>
@@ -81,33 +126,74 @@ export function renderRecurrencePanel(el, mode, { members, onSaved, close }) {
 
   const $ = (s) => el.querySelector(s);
 
-  // 開始日: blur で整形。曜日チェックの既定=開始日の曜日（ユーザーが触るまでは日付変更に追従）。
+  // ===== 繰り返し設定（Googleカレンダー型）=====
+  // 単位に応じた詳細だけを表示: 週→曜日トグル / 月→「N日 or 第N曜日」ラジオ / 日→なし。
+  // 既定値は開始日から提案し（曜日・日にち・第N曜）、ユーザーが触ったら追従を止める。
   const dateEl = $("#rf-date");
-  let autoDow = null; // 自動チェックした曜日 index（ユーザーが手で触ったら null=追従停止）
-  const syncDefaultDow = () => {
-    const boxes = [...el.querySelectorAll("#rf-dows input")];
-    if (!boxes.length) return;
-    const iso = parseSmartDate(dateEl.value);
+  const unitEl = $("#rf-unit"), intEl = $("#rf-int");
+  const dowBtns = [...el.querySelectorAll(".rf-dowbtn")];
+  let touchedDow = false, touchedMonthly = false;
+
+  const startISO = () => parseSmartDate(dateEl.value);
+  const readState = () => ({
+    unit: unitEl ? unitEl.value : "weekly",
+    interval: Math.max(1, Math.min(99, parseInt(intEl && intEl.value, 10) || 1)),
+    weekdays: dowBtns.filter((b) => b.classList.contains("on")).map((b) => +b.dataset.dow),
+    monthlyMode: el.querySelector('input[name="rf-mm"]:checked') ? el.querySelector('input[name="rf-mm"]:checked').value : "same",
+    mday: +($("#rf-mday") && $("#rf-mday").value || 1),
+    nth: +($("#rf-nth-n") && $("#rf-nth-n").value || 1),
+    nthDow: +($("#rf-nth-dow") && $("#rf-nth-dow").value || 1),
+  });
+
+  const syncDefaults = () => {
+    const iso = startISO();
     if (!iso) return;
-    const dow = new Date(iso + "T00:00:00Z").getUTCDay();
-    const checked = boxes.filter((b) => b.checked);
-    if (!checked.length || (autoDow != null && checked.length === 1 && checked[0] === boxes[autoDow])) {
-      boxes.forEach((b, i) => { b.checked = i === dow; });
-      autoDow = dow;
+    const d = new Date(iso + "T00:00:00Z");
+    if (!touchedDow) {
+      dowBtns.forEach((b) => b.classList.toggle("on", +b.dataset.dow === d.getUTCDay()));
+    }
+    if (!touchedMonthly && $("#rf-mday")) {
+      $("#rf-mday").value = String(d.getUTCDate());
+      $("#rf-nth-n").value = String(Math.min(4, Math.ceil(d.getUTCDate() / 7)));
+      $("#rf-nth-dow").value = String(d.getUTCDay());
     }
   };
-  el.querySelectorAll("#rf-dows input").forEach((b) => {
-    b.addEventListener("change", () => { autoDow = null; }); // 手動変更で追従停止
-  });
-  dateEl.onblur = () => { const iso = parseSmartDate(dateEl.value); if (iso) dateEl.value = fmtDisplay(iso); syncDefaultDow(); };
 
-  // 曜日チェックは 毎週/隔週 のときだけ表示
-  const freqEl = $("#rf-freq");
-  const syncDows = () => {
-    const dows = $("#rf-dows");
-    if (dows) dows.hidden = !(freqEl && (freqEl.value === "weekly" || freqEl.value === "biweekly"));
+  const syncFreqUI = () => {
+    if (!unitEl) return;
+    const st = readState();
+    $("#rf-dows").hidden = st.unit !== "weekly";
+    $("#rf-monthly").hidden = st.unit !== "monthly";
+    const prev = $("#rf-prev");
+    if (prev) prev.textContent = "🔁 " + rruleText(st);
   };
-  if (freqEl) { freqEl.onchange = syncDows; syncDows(); syncDefaultDow(); }
+
+  if (unitEl) {
+    unitEl.onchange = syncFreqUI;
+    intEl.oninput = syncFreqUI;
+    dowBtns.forEach((b) => { b.onclick = () => { touchedDow = true; b.classList.toggle("on"); syncFreqUI(); }; });
+    el.querySelectorAll('input[name="rf-mm"]').forEach((r) => { r.onchange = () => { touchedMonthly = true; syncFreqUI(); }; });
+    ["#rf-mday", "#rf-nth-n", "#rf-nth-dow"].forEach((s) => {
+      const x = $(s);
+      if (x) x.onchange = () => {
+        touchedMonthly = true;
+        // セレクタを触ったら対応するラジオも選択（同じ日系 or 第N曜系）
+        const radio = el.querySelector(`input[name="rf-mm"][value="${s === "#rf-mday" ? "same" : "nth"}"]`);
+        if (radio) radio.checked = true;
+        syncFreqUI();
+      };
+    });
+    syncDefaults();
+    syncFreqUI();
+  }
+  dateEl.onblur = () => {
+    const iso = parseSmartDate(dateEl.value);
+    if (iso) dateEl.value = fmtDisplay(iso);
+    syncDefaults();
+    syncFreqUI();
+  };
+  const untilEl = $("#rf-until");
+  if (untilEl) untilEl.onblur = () => { const iso = parseSmartDate(untilEl.value); if (iso) untilEl.value = fmtDisplay(iso); };
 
   // メンバー選択: チェック順 = sel の順序 = 持ち回りの順番
   const orderBox = $("#rf-order");
@@ -142,6 +228,12 @@ export function renderRecurrencePanel(el, mode, { members, onSaved, close }) {
   const rotEl = $("#rf-rot");
   if (rotEl) rotEl.onchange = renderOrder;
 
+  // 資料リンク: 共有部品。taskform と同じ規約（note に "[資料] URL" 行として保存）。
+  const docLinks = [];
+  wireDocChips(el, "rf-doc", docLinks);
+  // 所要(h): 共有部品（".25"補完・↑↓キー/▲▼ボタンで0.25刻み）
+  wireHourInput(el, "rf-dur");
+
   $("#rf-save").onclick = async () => {
     const err = $("#rf-err");
     err.textContent = "";
@@ -153,22 +245,30 @@ export function renderRecurrencePanel(el, mode, { members, onSaved, close }) {
     const durNum = parseFloat(durRaw);
     if (!durRaw || !isFinite(durNum) || durNum <= 0) { err.textContent = "所要(h)は0より大きい数値で入力してください。"; return; }
     if (!sel.length) { err.textContent = `${isTask ? "担当" : "参加者"}を選んでください。`; return; }
-    const weekdays = [...el.querySelectorAll("#rf-dows input")].filter((b) => b.checked).map((b) => +b.dataset.dow);
-    const freq = isMtg ? "once" : freqEl.value;
-    if ((freq === "weekly" || freq === "biweekly") && !weekdays.length) { err.textContent = "曜日を選んでください。"; return; }
+    const timeMin = parseTimeOfDay($("#rf-time") ? $("#rf-time").value : "");
+    if (timeMin == null) { err.textContent = "開始時刻の形式が不正です（例: 10:00）。"; return; }
+    const st = unitEl ? readState() : null;
+    if (st && st.unit === "weekly" && !st.weekdays.length) { err.textContent = "曜日を選んでください。"; return; }
+    let untilISO = null;
+    if (untilEl && untilEl.value.trim()) {
+      untilISO = parseSmartDate(untilEl.value);
+      if (!untilISO) { err.textContent = "終了日の形式が不正です（例: 1231）。"; return; }
+      if (untilISO < iso) { err.textContent = "終了日は開始日以降にしてください。"; return; }
+    }
     const rotation = !!(rotEl && rotEl.checked);
 
     const btn = $("#rf-save");
     btn.disabled = true;
     try {
+      const hh = timeMin >= 0 ? `${String(Math.floor(timeMin / 60)).padStart(2, "0")}:${String(timeMin % 60).padStart(2, "0")}:00` : "00:00:00";
       await createRecurrence({
         title, kind,
-        rrule: buildRRule({ freq, anchorISO: iso, weekdays }),
-        dtstart: iso + "T00:00:00Z",
+        rrule: isMtg ? buildRRule({ freq: "once" }) : buildRRule({ ...st, untilISO }),
+        dtstart: `${iso}T${hh}Z`,
         duration_seconds: Math.round(durNum * 3600),
         assignee_ids: sel,
         rotation,
-        note: $("#rf-note").value.trim(),
+        note: joinMeta($("#rf-note").value.trim(), "", docLinks),
       });
       invalidate();
       close();
@@ -192,8 +292,18 @@ export function ensureRecurrenceStyle() {
   .tf-tabs button:hover:not(.on){color:${C.ink}}
   .tf-body[hidden],.tf-acts[hidden]{display:none}
   .tf-alt{display:block;padding-bottom:16px}
-  .rf-dows{display:flex;gap:10px;margin-top:8px;flex-wrap:wrap}
-  .rf-dow{font-size:13px;color:${C.ink};display:inline-flex;align-items:center;gap:4px;cursor:pointer}
+  .rf-iv{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .rf-int{width:56px;text-align:center}
+  .rf-unit{width:auto}
+  .rf-dows{display:flex;gap:5px}
+  .rf-dows[hidden],.rf-monthly[hidden]{display:none}
+  .rf-dowbtn{width:30px;height:30px;border-radius:50%;border:1px solid ${C.line};background:#fff;color:${C.muted};font:inherit;font-size:12px;cursor:pointer;padding:0}
+  .rf-dowbtn.on{background:${C.fill};border-color:${C.fill};color:#fff;font-weight:700}
+  .rf-dowbtn:hover:not(.on){border-color:${C.fill};color:${C.fill}}
+  .rf-monthly{display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+  .rf-radio{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:${C.ink};cursor:pointer}
+  .rf-mini{width:auto;padding:7px 8px}
+  .rf-prev{margin-top:8px;font-size:12.5px;color:${C.fill};font-weight:600}
   .rf-members{display:flex;gap:14px;margin-top:6px;flex-wrap:wrap}
   .rf-mem{font-size:13px;color:${C.ink};display:inline-flex;align-items:center;gap:5px;cursor:pointer}
   .rf-order{margin-top:8px;border:1px solid ${C.line};border-radius:10px;padding:8px 10px;background:#fafbfc}

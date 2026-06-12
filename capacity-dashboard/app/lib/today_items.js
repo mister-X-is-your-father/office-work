@@ -45,9 +45,9 @@ export function todayItemsByMember(data, isoDay, capH = 8) {
 
   // 会議/定例（本日に展開した occurrence）。優先度なし・時間属性なし。
   // 持ち回りは expandRecurrences が assignees をその回の担当1名に解決済み。
-  for (const { recurrence, dateISO, assignees } of expandRecurrences(recurrences, isoDay, isoDay)) {
+  for (const { recurrence, dateISO, assignees, override } of expandRecurrences(recurrences, isoDay, isoDay)) {
     if (dateISO !== isoDay) continue;
-    const h = round1(toH(recurrence.duration_seconds));
+    const h = round1(toH((override && override.duration_seconds) || recurrence.duration_seconds));
     if (h <= 0) continue;
     const kind = recurrence.kind === "meeting" ? "meeting" : "recurring";
     const title = recurrence.title || (kind === "meeting" ? "会議" : "定例");

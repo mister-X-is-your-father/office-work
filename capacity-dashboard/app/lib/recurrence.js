@@ -12,13 +12,18 @@ function dtstartLine(iso) {
 }
 
 // recurrences をウィンドウ [fromISO, toISO]（両端 inclusive）に展開。
-// 返り値: [{ recurrence, dateISO, assignees }]
+// 返り値: [{ recurrence, dateISO, origISO, assignees, override }]
 //   assignees = その occurrence の対象者。通常は assignee_ids 全員、
 //   持ち回り(rotation)は dtstart からの通し番号で assignee_ids を巡回した1名（順序=配列順）。
+//   override = recurrences.overrides[origISO]（この回だけの例外: skip/date/start_minute/duration_seconds）。
+//     skip=休止（出力しない）/ date=別日へ移動（dateISO が変わる・origISO は元の日のまま）。
+//     移動が窓をまたぐケースを拾うため、展開は±31日広げて最終的な dateISO でフィルタする。
+//     持ち回りの巡回番号は「元の日」基準＝1回ずらしても順番は崩れない。
 export function expandRecurrences(recurrences, fromISO, toISO) {
-  const after = new Date(fromISO + "T00:00:00Z");
+  const PAD_MS = 31 * 86400000; // 例外の移動は最大±31日想定
+  const after = new Date(new Date(fromISO + "T00:00:00Z").getTime() - PAD_MS);
   // 日単位 inclusive: dtstart が時刻を持つ occurrence（例 11:00）も toISO 当日分まで含める
-  const before = new Date(toISO + "T23:59:59Z");
+  const before = new Date(new Date(toISO + "T23:59:59Z").getTime() + PAD_MS);
   const out = [];
   for (const rec of recurrences || []) {
     if (!rec.rrule || !rec.dtstart) continue;
@@ -40,24 +45,42 @@ export function expandRecurrences(recurrences, fromISO, toISO) {
         base = rule.between(start, after, true).filter((d) => d.getTime() < after.getTime()).length;
       }
     }
+    const overrides = rec.overrides || {};
     occs.forEach((d, i) => {
+      const origISO = d.toISOString().slice(0, 10);
+      const ov = overrides[origISO] || null;
+      if (ov && ov.skip) return;
+      const dateISO = (ov && ov.date) || origISO;
+      if (dateISO < fromISO || dateISO > toISO) return; // 窓外（パディング分や窓外へ移動した回）
       const assignees = rotating ? [ids[(base + i) % ids.length]] : ids;
-      out.push({ recurrence: rec, dateISO: d.toISOString().slice(0, 10), assignees });
+      out.push({ recurrence: rec, dateISO, origISO, assignees, override: ov });
     });
   }
   return out;
 }
 
 // occurrence → 負荷源 [{memberId, day, h}]。対象者全員にフル（ADR-010・按分しない）。
-// 持ち回りは expandRecurrences が assignees を1名に解決済み。
+// 持ち回りは expandRecurrences が assignees を1名に解決済み。所要は例外(override)があればその値。
 export function occurrenceLoadEntries(occurrences) {
   const out = [];
-  for (const { recurrence, dateISO, assignees } of occurrences || []) {
-    const h = toH(recurrence.duration_seconds);
+  for (const { recurrence, dateISO, assignees, override } of occurrences || []) {
+    const h = toH((override && override.duration_seconds) || recurrence.duration_seconds);
     if (h <= 0) continue;
     for (const uid of assignees || recurrence.assignee_ids || []) out.push({ memberId: uid, day: dateISO, h });
   }
   return out;
+}
+
+// 祝日データの鮮度: 登録済み祝日の最終日が today+horizonDays に届いていなければ stale。
+// 同期ジョブ（systemd taskstation-holiday-sync）が止まった検知用（ホームのアラートが表示）。
+// 健全なら内閣府CSVは常に「来年末」まで供給する＝最終日は約10ヶ月以上先にあるため、90日で安全に検知できる。
+export function holidayDataStatus(holidaysSet, todayISO, horizonDays = 90) {
+  let latest = null;
+  for (const d of holidaysSet || []) if (!latest || d > latest) latest = d;
+  const h = new Date(todayISO + "T00:00:00Z");
+  h.setUTCDate(h.getUTCDate() + horizonDays);
+  const horizon = h.toISOString().slice(0, 10);
+  return { latest, stale: !latest || latest < horizon };
 }
 
 // その日のメンバー容量。週末/祝日/休暇=0、それ以外=capH。
