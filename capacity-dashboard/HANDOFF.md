@@ -73,7 +73,7 @@ office-work/capacity-dashboard/
 **残り**
 - **入力UI(残)**: 定期/祝日/休暇を**ブラウザから登録・編集**（今は seed/API のみ）。#3 対象者選択UI（planner フォーム）。※タスク本体の追加・編集は完了（上記）。
 - 残ビュー: かんばん(59・bucket流用可)/**設定(17)**。設定が入ると 8h/対象PJ のハードコード解消。
-- カレンダー作り込み: ブロックの**リサイズ(所要変更)**・営業時間/容量の可変化・複数日。
+- カレンダー作り込み(残): 営業時間/容量の可変化・複数日（週タイムライン）。※リサイズ・会議/定例の時刻ブロック表示は 2026-06-12 完了。
 - 据え置き(ADRで明記): 「本日=plan」完全一本化(due/範囲の暫定表示廃止・ADR-012)/定期occurrenceのmaterialize(ADR-011)/人別可変キャパ(時短)/AI Q&A(53)。
 
 ## 5. 運用 runbook
@@ -131,6 +131,7 @@ cd capacity-dashboard/app/lib/vendor && docker run --rm -v "$PWD":/out node:20-a
   - error code は未使用帯（15001=times,15002=plans,15003=recurrence,15004=holiday,15005=unavailability）。次は 15006〜。
   - グローバル設定エンティティの権限は `label_rights.go` 流（LinkSharing 以外 true）。
 - **定期は仮想 occurrence**: `recurrences` は RRULE 文字列を保存するだけ。展開・空き計算は **SPA(recurrence.js/rrule.js)**。実タスク/plans は生成しない＝計画用（実績追跡は将来 materialize）。
+- **定期の開催時刻＝dtstart の時刻**（2026-06-12 規約化）: UTC文字列の HH:MM をそのまま壁時計として扱う（TZ変換しない・`00:00`=時刻なし）。時刻カレンダーが固定ブロック表示に使用。`expandRecurrences` の窓は日単位 inclusive（`toISO T23:59:59Z`）— `T00:00` 締めだと時刻付き occurrence が落ちる。
 - **ガント**: 予定バー範囲は plans→start/end→due の階層(`taskRanges`)。依存は TaskStation が precedes 作成時に逆 follows も自動付与→`dependencyEdges` で前向き正規化＋重複除去。
 - TaskStation: username≥3文字 / 共有の `user_id` は文字列(ユーザー名)。bash の `UID` は予約変数。
 

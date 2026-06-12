@@ -12,10 +12,13 @@ function dtstartLine(iso) {
 }
 
 // recurrences をウィンドウ [fromISO, toISO]（両端 inclusive）に展開。
-// 返り値: [{ recurrence, dateISO }]
+// 返り値: [{ recurrence, dateISO, assignees }]
+//   assignees = その occurrence の対象者。通常は assignee_ids 全員、
+//   持ち回り(rotation)は dtstart からの通し番号で assignee_ids を巡回した1名（順序=配列順）。
 export function expandRecurrences(recurrences, fromISO, toISO) {
   const after = new Date(fromISO + "T00:00:00Z");
-  const before = new Date(toISO + "T00:00:00Z");
+  // 日単位 inclusive: dtstart が時刻を持つ occurrence（例 11:00）も toISO 当日分まで含める
+  const before = new Date(toISO + "T23:59:59Z");
   const out = [];
   for (const rec of recurrences || []) {
     if (!rec.rrule || !rec.dtstart) continue;
@@ -25,20 +28,34 @@ export function expandRecurrences(recurrences, fromISO, toISO) {
     } catch {
       continue; // 不正RRULEはスキップ（落とさない）
     }
-    for (const d of rule.between(after, before, true)) {
-      out.push({ recurrence: rec, dateISO: d.toISOString().slice(0, 10) });
+    const occs = rule.between(after, before, true);
+    if (!occs.length) continue;
+    const ids = rec.assignee_ids || [];
+    const rotating = !!rec.rotation && ids.length > 0;
+    // 持ち回りの通し番号: ウィンドウ内の最初の occurrence が dtstart から数えて何番目か
+    let base = 0;
+    if (rotating) {
+      const start = new Date(rec.dtstart);
+      if (start.getTime() < after.getTime()) {
+        base = rule.between(start, after, true).filter((d) => d.getTime() < after.getTime()).length;
+      }
     }
+    occs.forEach((d, i) => {
+      const assignees = rotating ? [ids[(base + i) % ids.length]] : ids;
+      out.push({ recurrence: rec, dateISO: d.toISOString().slice(0, 10), assignees });
+    });
   }
   return out;
 }
 
-// occurrence → 負荷源 [{memberId, day, h}]。assignee 全員にフル（ADR-010・按分しない）。
+// occurrence → 負荷源 [{memberId, day, h}]。対象者全員にフル（ADR-010・按分しない）。
+// 持ち回りは expandRecurrences が assignees を1名に解決済み。
 export function occurrenceLoadEntries(occurrences) {
   const out = [];
-  for (const { recurrence, dateISO } of occurrences || []) {
+  for (const { recurrence, dateISO, assignees } of occurrences || []) {
     const h = toH(recurrence.duration_seconds);
     if (h <= 0) continue;
-    for (const uid of recurrence.assignee_ids || []) out.push({ memberId: uid, day: dateISO, h });
+    for (const uid of assignees || recurrence.assignee_ids || []) out.push({ memberId: uid, day: dateISO, h });
   }
   return out;
 }

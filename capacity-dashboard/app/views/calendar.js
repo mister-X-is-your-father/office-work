@@ -1,7 +1,10 @@
 // 本日の時刻カレンダー（mock49 相当・実データ／ADR-013）。資源タイムライン＋未配置トレイ＋ドラッグ配置。
 // task_time_plans.start_minute（時刻）で配置。未配置タスクをドラッグして時刻と担当を確定。
+// 会議/定例は recurrences.dtstart の時刻（UTC文字列の HH:MM=壁時計・00:00=時刻なし）で固定ブロック表示。
+// ブロック下端のハンドルをドラッグで所要時間を変更（リサイズ）。
 import { load, invalidate } from "../lib/store.js";
 import { todayItemsByMember } from "../lib/today_items.js";
+import { expandRecurrences } from "../lib/recurrence.js";
 import { PRIO, NEUTRAL, KINDS } from "../lib/kinds.js";
 import { dateOnly } from "../lib/capacity.js";
 import { deletePlan, logPlan } from "../lib/api.js";
@@ -55,7 +58,21 @@ function buildModel() {
       tray.push({ taskId: it.taskId, memberId: m.id, mins: Math.round(it.h * 60), title: it.title, kind: it.kind, prio: it.prio });
     }
   }
-  return { members, placed, tray };
+  // 会議/定例の固定ブロック（dtstart の時刻 ≠ 00:00 のみ。00:00=時刻なし→従来どおり積み上げ側だけ）
+  const meetings = [];
+  for (const { recurrence: rec, dateISO, assignees } of expandRecurrences(_data.recurrences || [], _day, _day)) {
+    if (dateISO !== _day) continue;
+    const d = new Date(rec.dtstart);
+    const startMin = d.getUTCHours() * 60 + d.getUTCMinutes();
+    if (!startMin) continue;
+    const mins = Math.max(15, Math.round((rec.duration_seconds || 0) / 60));
+    const kind = rec.kind === "meeting" ? "meeting" : "recurring";
+    for (const uid of assignees || rec.assignee_ids || []) {
+      if (!memberIds.has(uid)) continue;
+      meetings.push({ memberId: uid, startMin, mins, title: rec.title || "会議", kind, prio: null, fixed: true });
+    }
+  }
+  return { members, placed, tray, meetings };
 }
 function bucketFromItem(itemMap, mid, taskId) {
   const st = itemMap.get(mid);
@@ -64,7 +81,7 @@ function bucketFromItem(itemMap, mid, taskId) {
 }
 
 function paint() {
-  const { members, placed, tray } = buildModel();
+  const { members, placed, tray, meetings } = buildModel();
   const nowMin = nowMinutes();
 
   const hours = [];
@@ -73,7 +90,8 @@ function paint() {
   for (let h = H0; h < H1; h++) grid.push(`<div class="cal-line" style="top:${(h - H0) * HOURH}px"></div>`);
 
   const cols = members.map((m, i) => {
-    const blocks = placed.filter((b) => b.memberId === m.id).map((b) => blockHtml(b)).join("");
+    const blocks = meetings.filter((b) => b.memberId === m.id).map((b) => blockHtml(b)).join("")
+      + placed.filter((b) => b.memberId === m.id).map((b) => blockHtml(b)).join("");
     return `<div class="cal-col" data-member="${m.id}">
       <div class="cal-colh"><span class="cal-ava" style="background:${member_color(i)}">${esc((m.name || m.username || "?")[0])}</span>${esc(m.name || m.username)}</div>
       <div class="cal-colbody" data-member="${m.id}" style="height:${GRIDH}px">${blocks}</div>
@@ -106,19 +124,55 @@ function blockHtml(b) {
   const top = min2top(b.startMin), h = Math.max(18, (b.mins / 60) * HOURH);
   const pat = KINDS[b.kind] ? KINDS[b.kind].pattern : "task";
   const hatch = pat === "meeting" ? "cal-hatch" : (pat === "routine" ? "cal-dots" : "");
-  return `<div class="cal-block ${hatch}" draggable="true" data-task="${b.taskId}" data-member="${b.memberId}" data-mins="${b.mins}" data-plan="${b.planId}"
+  const timeLabel = `${hhmm(b.startMin)}–${hhmm(b.startMin + b.mins)} ・ ${fmtH(b.mins / 60)}`;
+  if (b.fixed) {
+    // 会議/定例: 移動・リサイズ不可の固定枠
+    return `<div class="cal-block cal-fixed ${hatch}" style="top:${top}px;height:${h}px;background:${itemColor(b)}" title="${esc(b.title)}（${KINDS[b.kind] ? KINDS[b.kind].label : "会議"}・固定）">
+      <div class="cal-bt">${esc(b.title)}</div><div class="cal-bh">${timeLabel}</div>
+    </div>`;
+  }
+  return `<div class="cal-block ${hatch}" draggable="true" data-task="${b.taskId}" data-member="${b.memberId}" data-mins="${b.mins}" data-start="${b.startMin}" data-plan="${b.planId}"
       style="top:${top}px;height:${h}px;background:${itemColor(b)}">
-    <div class="cal-bt">${esc(b.title)}</div><div class="cal-bh">${hhmm(b.startMin)}–${hhmm(b.startMin + b.mins)} ・ ${fmtH(b.mins / 60)}</div>
+    <div class="cal-bt">${esc(b.title)}</div><div class="cal-bh">${timeLabel}</div>
+    <div class="cal-rs" draggable="false" title="ドラッグで所要時間を変更"></div>
   </div>`;
 }
 
 function wireDnD() {
   let drag = null;
-  _root.querySelectorAll(".cal-chip, .cal-block").forEach((el) => {
+  let resizing = false;
+  _root.querySelectorAll(".cal-chip, .cal-block:not(.cal-fixed)").forEach((el) => {
     el.addEventListener("dragstart", (e) => {
+      if (resizing) { e.preventDefault(); return; }
       drag = { taskId: +el.dataset.task, fromMember: +el.dataset.member, mins: +el.dataset.mins, planId: el.dataset.plan ? +el.dataset.plan : null };
       e.dataTransfer.effectAllowed = "move";
       try { e.dataTransfer.setData("text/plain", String(drag.taskId)); } catch { /* noop */ }
+    });
+  });
+  // リサイズ: 下端ハンドルをドラッグ → plan の所要(seconds)を更新
+  _root.querySelectorAll(".cal-rs").forEach((handle) => {
+    handle.addEventListener("mousedown", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      resizing = true;
+      const blk = handle.parentElement;
+      const startY = e.clientY, origMins = +blk.dataset.mins, startMin = +blk.dataset.start;
+      const maxMins = H1 * 60 - startMin;
+      let mins = origMins;
+      const move = (ev) => {
+        const dm = Math.round(((ev.clientY - startY) / HOURH) * 60 / SNAP) * SNAP;
+        mins = Math.max(SNAP, Math.min(maxMins, origMins + dm));
+        blk.style.height = Math.max(18, (mins / 60) * HOURH) + "px";
+        blk.querySelector(".cal-bh").textContent = `${hhmm(startMin)}–${hhmm(startMin + mins)} ・ ${fmtH(mins / 60)}`;
+      };
+      const up = async () => {
+        document.removeEventListener("mousemove", move);
+        document.removeEventListener("mouseup", up);
+        setTimeout(() => { resizing = false; }, 0);
+        if (mins === origMins) return;
+        await resizePlan(+blk.dataset.task, +blk.dataset.plan, +blk.dataset.member, startMin, mins);
+      };
+      document.addEventListener("mousemove", move);
+      document.addEventListener("mouseup", up);
     });
   });
   _root.querySelectorAll(".cal-colbody").forEach((col) => {
@@ -136,6 +190,15 @@ function wireDnD() {
       drag = null;
     });
   });
+}
+
+// リサイズ確定: 同じ時刻・担当のまま所要だけ変更（plans に更新APIが無いため delete→create）
+async function resizePlan(taskId, planId, memberId, startMin, mins) {
+  await deletePlan(taskId, planId);
+  await logPlan(taskId, mins * 60, _day, "", memberId, startMin);
+  invalidate();
+  _data = await load();
+  paint();
 }
 
 async function place(drag, toMember, startMin) {
@@ -186,5 +249,8 @@ function css() {
   .cal-block.cal-hatch{background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.85) 0 1.4px,transparent 1.4px 3px)}
   .cal-block.cal-dots{background-image:radial-gradient(rgba(255,255,255,.9) .9px,transparent 1.1px);background-size:3px 3px}
   .cal-bt{font-size:11.5px;font-weight:600;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .cal-bh{font-size:10px;opacity:.92;margin-top:1px;white-space:nowrap}`;
+  .cal-bh{font-size:10px;opacity:.92;margin-top:1px;white-space:nowrap}
+  .cal-block.cal-fixed{cursor:default;opacity:.88;z-index:1}
+  .cal-rs{position:absolute;left:0;right:0;bottom:0;height:7px;cursor:ns-resize}
+  .cal-rs::after{content:"";position:absolute;left:50%;bottom:2px;width:22px;height:3px;margin-left:-11px;border-radius:2px;background:rgba(255,255,255,.65)}`;
 }

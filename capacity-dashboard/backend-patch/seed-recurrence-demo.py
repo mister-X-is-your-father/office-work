@@ -24,13 +24,14 @@ for ep, key in [("/recurrences", "recurrence"), ("/holidays", "holiday"), ("/una
     for x in (cur or []):
         req(f"{ep}/{x['id']}", "DELETE")
 
+# dtstart の時刻 = 開催時刻（UTC文字列の HH:MM をそのまま壁時計として扱う規約。00:00=時刻なし）
 RECS = [
     {"title": "毎週月の定例会議", "kind": "meeting", "rrule": "FREQ=WEEKLY;BYDAY=MO",
-     "dtstart": "2026-06-01T00:00:00Z", "duration_seconds": 3600, "assignee_ids": [2, 3]},
+     "dtstart": "2026-06-01T10:00:00Z", "duration_seconds": 3600, "assignee_ids": [2, 3]},
     {"title": "毎月第2火レビュー", "kind": "meeting", "rrule": "FREQ=MONTHLY;BYDAY=2TU",
-     "dtstart": "2026-06-01T00:00:00Z", "duration_seconds": 3600, "assignee_ids": [4]},
+     "dtstart": "2026-06-01T14:00:00Z", "duration_seconds": 3600, "assignee_ids": [4]},
     {"title": "隔週水の棚卸し", "kind": "task", "rrule": "FREQ=WEEKLY;INTERVAL=2;BYDAY=WE",
-     "dtstart": "2026-06-03T00:00:00Z", "duration_seconds": 7200, "assignee_ids": [5]},
+     "dtstart": "2026-06-03T15:00:00Z", "duration_seconds": 7200, "assignee_ids": [5]},
 ]
 for r in RECS:
     print("recurrence", r["title"], req("/recurrences", "PUT", r)[0])
