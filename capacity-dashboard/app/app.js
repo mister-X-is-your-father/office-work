@@ -14,7 +14,7 @@ const ROUTES = {
   freefinder:{ label: "月次空き",     grp: "計画",   mod: "./views/freefinder.js" },
   weekstack:{ label: "週日別負荷",    grp: "計画",   mod: "./views/weekstack.js" },
   estactual:{ label: "見積りvs実績",  grp: "実績",   mod: "./views/estactual.js" },
-  kanban:   { label: "かんばん",      grp: "仕事",   soon: true },
+  kanban:   { label: "かんばん",      grp: "仕事",   mod: "./views/kanban.js" },
   list:     { label: "一覧",          grp: "仕事",   mod: "./views/table.js" },
   outline:  { label: "アウトライン",  grp: "仕事",   mod: "./views/outline.js" },
   depgraph: { label: "依存グラフ",    grp: "仕事",   mod: "./views/depgraph.js" },

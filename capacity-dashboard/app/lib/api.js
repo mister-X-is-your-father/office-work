@@ -37,6 +37,13 @@ export async function getTask(id) { return req(`/tasks/${id}`); }
 export async function getProjects() { return req("/projects"); }
 export async function createProject(title) { return req("/projects", { method: "PUT", body: { title } }); }
 export async function getProjectMembers(projectId) { return req(`/projects/${projectId}/projectusers`); }
+// かんばん（0.24 のプロジェクトビュー＋バケット構造）
+export async function getProjectDetail(id) { return req(`/projects/${id}`); }                       // views[] を含む
+export async function getViewTasks(pid, vid) { return req(`/projects/${pid}/views/${vid}/tasks`); } // kanban=バケット配列(tasks入り)
+export async function createBucket(pid, vid, title) { return req(`/projects/${pid}/views/${vid}/buckets`, { method: "PUT", body: { title } }); }
+export async function renameBucket(pid, vid, bid, title) { return req(`/projects/${pid}/views/${vid}/buckets/${bid}`, { method: "POST", body: { title } }); }
+export async function deleteBucket(pid, vid, bid) { return req(`/projects/${pid}/views/${vid}/buckets/${bid}`, { method: "DELETE" }); }
+export async function moveTaskToBucket(pid, vid, bid, taskId) { return req(`/projects/${pid}/views/${vid}/buckets/${bid}/tasks`, { method: "POST", body: { task_id: taskId } }); }
 export async function whoami() { return req("/user"); }
 
 // 書き込み（任意・P3寄り）

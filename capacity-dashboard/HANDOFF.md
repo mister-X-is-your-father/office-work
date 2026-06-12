@@ -78,11 +78,12 @@ office-work/capacity-dashboard/
 - **Fable: 計画モード＋AIコメントの完全秘匿**（2026-06-13）: **📝計画ボタン**=`--permission-mode plan`（読み取り専用・変更系は物理的に不可）で実行計画だけ生成→人間がレビュー→**▶実行時に直近の計画を「承認済み計画」としてプロンプトへ自動添付**（管理ゲート）。**FableのテキストはTaskStationコメントに一切書かない**: 全て隠しストア `~/.local/share/taskstation-fable/notes.json`（`taskstation_notes.py`・exec/MCP/runner共用・MCPツールは add_comment→**add_note** に変更）。閲覧は exec `GET /notes/<task_id>`（許可ユーザーのみ）→ タスク編集モーダルの **「AIコメント（自分のみ）」欄**（作成者＋Fable副担当時のみ表示）。サブタスク・進捗率はチームに見える通常データのまま（AI由来とは判らない）。
 - **Fable: モデル3択＋成果物ブラウザ**（2026-06-13）: モデル=Sonnet/Opus/**Fable**（`claude --model fable` 動作確認済み）。AI実行の cwd は **`work/task-<id>/`**（タスク別整理）。Fable画面に**成果物カード**（exec `GET /files`=作業dir走査・`GET /file/<rel>`=配信。パストラバーサル拒否・許可ユーザーのみ）→ クリックでブラウザ閲覧。成果物の確認動線=①AIコメント欄（テキスト報告）②コンソール（ログ）③成果物カード（ファイル）。
 - **設定ビュー**（2026-06-13・`views/settings.js`・ROUTES有効化）: **チーム共有設定**＝容量(h/日)・時刻カレンダーの営業時間・**集計対象WS**（除外WSのタスクは負荷/空き/一覧から外れる・テンプレートWSは常に除外）。保存先= taskstation-exec `GET/POST /settings`（`~/.config/taskstation/settings.json`・**読み取り=全ログインユーザー/書き込み=許可ユーザーのみ**＝管理者）。SPAは store.load が settings を取得し全ビューに配線（today/clock/availability/weekstack/home/week/freefinder/calendar の 8h と H0/H1 ハードコード解消。exec停止時は既定値で劣化動作）。
+- **かんばんビュー**（2026-06-13・`views/kanban.js`・ROUTES有効化）: Vikunja 0.24 の**プロジェクトビュー＋バケット**をそのまま使用（API: `GET /projects/:p`(views)→kanban view id→`GET/PUT/POST/DELETE /projects/:p/views/:v/buckets[...]`・移動=`POST .../buckets/:b/tasks {task_id}`）。WS選択(localStorage記憶)・列=バケット（Enterで追加/タイトルクリックで名前変更/空なら×削除）・カード=タスク（優先度ドット/担当アバター[AI非表示]/期日[超過赤]/見積り/完了タグ・**ドラッグで列移動・クリックで編集モーダル**）。
 - 基盤固め: #1 書き込み破壊性根治(ADR-008) / #2 soft delete / #3 帰属(ADR-009) / #4 負荷の単一真実(ADR-010) / #7 回帰網 / #9 スカラ更新安全化(client updateTask)。
 
 **残り**
 - **入力UI(残)**: **祝日/休暇**の登録・編集（今は seed/API のみ）と**定期の編集・削除**（登録はタブUIで可能に。編集/削除は API のみ）。#3 対象者選択UI（planner フォーム）。※タスク本体・定期/MTG の追加は完了（上記）。
-- 残ビュー: かんばん(59・bucket流用可)。※設定(17)は 2026-06-13 実装済み（下記）。
+- 残ビュー: なし（かんばん・設定とも 2026-06-13 実装済み＝全16ルート稼働）。
 - カレンダー作り込み(残): 営業時間/容量の可変化・複数日（週タイムライン）。※リサイズ・会議/定例の時刻ブロック表示は 2026-06-12 完了。
 - **土日祝の考慮ギャップ**（2026-06-12 監査）: ①見積りの**日割りが暦日割り**（`capacity.js taskHoursOn` が土日祝込みの inclusiveDays で割る→週末に負荷が落ち平日が薄まる。営業日割りにすべき）②**本日系ビュー（today/home KPI）の capH=8 固定**（祝日・週末でも空き8hと表示。`capacityOn` 未使用）。月次空き/リスケ提案/週次freeWindow は `capacityOn` 経由で正しい。
 - 据え置き(ADRで明記): 「本日=plan」完全一本化(due/範囲の暫定表示廃止・ADR-012)/定期occurrenceのmaterialize(ADR-011)/人別可変キャパ(時短)/AI Q&A(53)。
