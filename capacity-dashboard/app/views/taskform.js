@@ -6,7 +6,7 @@
 import { load, invalidate, TEMPLATE_WS } from "../lib/store.js";
 import { getTask, createTaskInProject, createProject, updateTask, addAssignee, removeAssignee, addRelation, removeRelation, createLabel, addTaskLabel, removeTaskLabel, getAttachments, uploadAttachments, deleteAttachment, fetchAttachmentBlob } from "../lib/api.js";
 import { categoryLabels, REVIEW_LABEL } from "../lib/kinds.js";
-import { C, esc } from "../lib/ui.js";
+import { C, esc, fmtH } from "../lib/ui.js";
 // 共有フォーム部品（スマート日付/[資料][ゴール]規約/時間ステッパー/資料チップ）は lib/form.js に集約
 import { parseSmartDate, fmtDisplay, fmtDisplayDow, splitMeta, joinMeta, hourInputHtml, wireHourInput, docChipsHtml, wireDocChips, checksHtml, wireChecks, attachDatePicker } from "../lib/form.js";
 import { renderRecurrencePanel, ensureRecurrenceStyle } from "./recurrenceform.js";
@@ -162,7 +162,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
               <div class="tf-cbx-dd" hidden></div>
             </div>
           </div>
-          <label class="tf-l">見積り(h) <span class="tf-hint">（0.25刻み）</span></label>
+          <label class="tf-l">見積り(h) <span class="tf-hint">（0.25刻み）</span>${isEdit && (task.time_spent || 0) > 0 ? `<span class="tf-spent">実績 ${task.time_spent < 900 ? Math.max(1, Math.round(task.time_spent / 60)) + "分" : fmtH(task.time_spent / 3600)}</span>` : ""}</label>
           ${hourInputHtml("tf-est", { value: estH })}
           <div class="tf-row">
             <div class="tf-col">
@@ -647,6 +647,7 @@ function ensureStyle() {
   .tf-cbx-it{padding:8px 10px;font-size:13px;border-radius:7px;cursor:pointer;color:${C.ink};white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .tf-cbx-it.on{background:#eef4ff}
   .tf-cbx-new{color:${C.fill};font-weight:600}
+  .tf-spent{float:right;font-size:11px;font-weight:700;color:${C.fill};background:#eaf2ff;border-radius:6px;padding:1px 8px}
   .tf-atts{min-height:0;margin-bottom:6px}
   .tf-atts a{color:${C.fill};text-decoration:none}.tf-atts a:hover{text-decoration:underline}
   .tf-att-add{display:inline-block;font-size:12px;color:${C.fill};border:1px dashed #b9d4ff;border-radius:8px;padding:5px 12px;cursor:pointer}
