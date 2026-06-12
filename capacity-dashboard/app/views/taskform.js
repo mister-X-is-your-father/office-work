@@ -62,14 +62,14 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     `<option value="${m.id}"${m.id === curAssigneeId ? " selected" : ""}>${esc(m.name || m.username)}</option>`).join("");
   const prioOpts = PRIO_OPTS.map(([v, n]) =>
     `<option value="${v}"${(task ? (task.priority || 0) : 0) === v ? " selected" : ""}>${n}</option>`).join("");
-  const estH = task && task.time_estimate ? Math.round((task.time_estimate / 3600) * 10) / 10 : "";
-  // 親タスク候補（自分自身は除外）＝既存タイトルの候補リスト
+  const estH = task && task.time_estimate ? Math.round((task.time_estimate / 3600) * 100) / 100 : "";
+  // 親タスク候補（自分自身は除外）。既存プロジェクト=subtask 子を持つタスク を優先候補に。
   const candidates = (tasks || []).filter((t) => !task || t.id !== task.id);
-  const parentOpts = candidates.map((t) => `<option value="${esc(t.title)}"></option>`).join("");
+  const parentCands = candidates.filter((t) => ((((t.related_tasks || {}).subtask) || []).length > 0));
+  const parentIds = new Set(parentCands.map((t) => t.id));
   const curParentTitle = curParent ? curParent.title : "";
   // 先行タスク（依存元）= related_tasks.follows（このタスクが follows する＝その前に完了が必要）
   const curPreds = (task && task.related_tasks && (task.related_tasks.follows || [])) || [];
-  const depOpts = candidates.map((t) => `<option value="${esc(t.title)}"></option>`).join("");
   const taskById = new Map((tasks || []).map((t) => [t.id, t]));
   for (const p of curPreds) if (!taskById.has(p.id)) taskById.set(p.id, p);
   const predSet = new Set(curPreds.map((p) => p.id)); // 編集中の作業セット（id）
@@ -91,17 +91,25 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
             <select id="tf-asg" class="tf-in">${memOpts}</select>
           </div>
         </div>
-        <label class="tf-l">プロジェクト <span class="tf-hint">（任意・新しい名前を入れると新規作成）</span></label>
-        <input id="tf-parent" class="tf-in" list="tf-parent-list" autocomplete="off" value="${esc(curParentTitle)}" placeholder="既存のプロジェクトを選ぶ / 新しいプロジェクト名を入力">
-        <datalist id="tf-parent-list">${parentOpts}</datalist>
+        <label class="tf-l">プロジェクト <span class="tf-hint">（任意・入力で検索、無い名前は新規作成）</span></label>
+        <div class="tf-cbx">
+          <input id="tf-parent" class="tf-in" autocomplete="off" value="${esc(curParentTitle)}" placeholder="プロジェクトを選択 / 名前を入力">
+          <div class="tf-cbx-dd" hidden></div>
+        </div>
         <div class="tf-row">
           <div class="tf-col">
             <label class="tf-l">優先度</label>
             <select id="tf-prio" class="tf-in">${prioOpts}</select>
           </div>
           <div class="tf-col">
-            <label class="tf-l">見積り(h)</label>
-            <input id="tf-est" class="tf-in" type="number" min="0" step="0.5" value="${estH}" placeholder="—">
+            <label class="tf-l">見積り(h) <span class="tf-hint">（0.25刻み可）</span></label>
+            <div class="tf-step">
+              <input id="tf-est" class="tf-in" type="text" inputmode="decimal" autocomplete="off" value="${estH}" placeholder="例: 0.25">
+              <div class="tf-step-btns">
+                <button type="button" id="tf-est-up" tabindex="-1" aria-label="0.25増やす">▲</button>
+                <button type="button" id="tf-est-dn" tabindex="-1" aria-label="0.25減らす">▼</button>
+              </div>
+            </div>
           </div>
         </div>
         <div class="tf-row">
@@ -119,8 +127,10 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
           </div>
         </div>
         <label class="tf-l">先行タスク <span class="tf-hint">（このタスクの前に完了が必要・複数可）</span></label>
-        <input id="tf-dep" class="tf-in" list="tf-dep-list" autocomplete="off" placeholder="先行タスクを選んで追加">
-        <datalist id="tf-dep-list">${depOpts}</datalist>
+        <div class="tf-cbx">
+          <input id="tf-dep" class="tf-in" autocomplete="off" placeholder="先行タスクを検索して追加">
+          <div class="tf-cbx-dd" hidden></div>
+        </div>
         <div class="tf-chips" id="tf-dep-chips"></div>
         <label class="tf-l">説明</label>
         <textarea id="tf-desc" class="tf-in tf-ta" rows="3" placeholder="任意">${esc(task ? (task.description || "") : "")}</textarea>
@@ -146,7 +156,23 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     el.onblur = () => { const iso = parseSmartDate(el.value); if (iso) el.value = fmtDisplay(iso); };
   }
 
-  // 先行タスク: datalist で選択→チップ追加、× で除去（作業セット predSet を更新）
+  // 見積り: ".25" はフォーカスを外したら "0.25" 表示に。↑↓キー/▲▼ボタンで0.25刻み増減。
+  const estEl = $("#tf-est");
+  estEl.onblur = () => { estEl.value = estEl.value.trim().replace(/^\./, "0."); };
+  const estStep = (delta) => {
+    const cur = parseFloat(estEl.value.trim().replace(/^\./, "0."));
+    const next = Math.max(0, (isFinite(cur) ? cur : 0) + delta);
+    estEl.value = next ? String(Math.round(next * 100) / 100) : "";
+    estEl.focus();
+  };
+  estEl.onkeydown = (ev) => {
+    if (ev.key === "ArrowUp") { ev.preventDefault(); estStep(0.25); }
+    else if (ev.key === "ArrowDown") { ev.preventDefault(); estStep(-0.25); }
+  };
+  $("#tf-est-up").onclick = () => estStep(0.25);
+  $("#tf-est-dn").onclick = () => estStep(-0.25);
+
+  // 先行タスク: コンボボックスで選択→チップ追加、× で除去（作業セット predSet を更新）
   const renderChips = () => {
     const el = $("#tf-dep-chips");
     el.innerHTML = [...predSet].map((id) => {
@@ -157,12 +183,25 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
   };
   renderChips();
   const depEl = $("#tf-dep");
-  depEl.onchange = () => {
-    const v = depEl.value.trim();
-    const t = candidates.find((x) => x.title === v);
-    if (t) { predSet.add(t.id); renderChips(); }
-    depEl.value = "";
-  };
+  attachCombobox(depEl, {
+    items: (q) => {
+      const ql = q.toLowerCase();
+      return candidates.filter((t) => !predSet.has(t.id) && (!ql || t.title.toLowerCase().includes(ql)));
+    },
+    onPick: (item) => { if (item) { predSet.add(item.id); renderChips(); } depEl.value = ""; },
+  });
+
+  // プロジェクト: 空入力=既存プロジェクト一覧（無ければ全タスク）、入力=全タスク検索（プロジェクト優先）、未一致=新規作成を提示
+  const parentEl = $("#tf-parent");
+  attachCombobox(parentEl, {
+    items: (q) => {
+      if (!q) return parentCands.length ? parentCands : candidates;
+      const ql = q.toLowerCase(), hit = (t) => t.title.toLowerCase().includes(ql);
+      return [...parentCands.filter(hit), ...candidates.filter((t) => !parentIds.has(t.id) && hit(t))];
+    },
+    createText: (q) => `＋ プロジェクト「${q}」を新規作成`,
+    onPick: (item, create) => { parentEl.value = item ? item.title : create; },
+  });
 
   $("#tf-save").onclick = async () => {
     const err = $("#tf-err");
@@ -183,8 +222,11 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     const pid = +$("#tf-proj").value;
     const asg = $("#tf-asg").value ? +$("#tf-asg").value : null;
     const prio = +$("#tf-prio").value;
-    const estVal = $("#tf-est").value;
-    const estSec = estVal ? Math.round(parseFloat(estVal) * 3600) : 0;
+    // 見積り: ".25"→0.25 の先頭ドット補完つき自前パース（0.25h=15分 刻みを許容）
+    const estVal = $("#tf-est").value.trim().replace(/^\./, "0.");
+    const estNum = estVal ? parseFloat(estVal) : 0;
+    if (estVal && (!isFinite(estNum) || estNum < 0)) { err.textContent = "見積りは0以上の数値(h)で入力してください。"; return; }
+    const estSec = estVal ? Math.round(estNum * 3600) : 0;
     const desc = $("#tf-desc").value;
 
     const parentRaw = $("#tf-parent").value.trim();
@@ -246,6 +288,42 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
   };
 }
 
+// 自前コンボボックス（datalist はブラウザ依存で挙動が独特なため自前描画）。
+// items(q)=候補配列 / createText(q)=未一致入力の「新規作成」行（省略=作成不可） / onPick(item, createTitle)。
+// 矢印キーで選択・Enter確定・Esc/フォーカス外で閉じる。
+function attachCombobox(input, { items, createText, onPick }) {
+  const dd = input.parentElement.querySelector(".tf-cbx-dd");
+  let list = [], idx = -1;
+  const close = () => { dd.hidden = true; idx = -1; };
+  const paint = () => dd.querySelectorAll(".tf-cbx-it").forEach((el, i) => el.classList.toggle("on", i === idx));
+  const open = () => {
+    const q = input.value.trim();
+    const hits = items(q);
+    list = hits.slice(0, 8).map((t) => ({ item: t }));
+    if (createText && q && !hits.some((t) => t.title === q)) list.push({ create: q });
+    if (!list.length) return close();
+    dd.innerHTML = list.map((e, i) => e.item
+      ? `<div class="tf-cbx-it" data-i="${i}">${esc(e.item.title)}</div>`
+      : `<div class="tf-cbx-it tf-cbx-new" data-i="${i}">${esc(createText(e.create))}</div>`).join("");
+    dd.hidden = false; paint();
+    dd.querySelectorAll(".tf-cbx-it").forEach((el) => {
+      el.onmousedown = (ev) => { ev.preventDefault(); pick(+el.dataset.i); }; // blurより先に確定
+      el.onmouseenter = () => { idx = +el.dataset.i; paint(); };
+    });
+  };
+  const pick = (i) => { const e = list[i]; if (!e) return; onPick(e.item || null, e.create || null); close(); input.blur(); };
+  input.onfocus = open;
+  input.oninput = open;
+  input.onblur = () => setTimeout(close, 120);
+  input.onkeydown = (ev) => {
+    if (ev.key === "Escape") return close();
+    if (dd.hidden) { if (ev.key === "ArrowDown") { ev.preventDefault(); open(); } return; }
+    if (ev.key === "ArrowDown") { ev.preventDefault(); idx = (idx + 1) % list.length; paint(); }
+    else if (ev.key === "ArrowUp") { ev.preventDefault(); idx = (idx - 1 + list.length) % list.length; paint(); }
+    else if (ev.key === "Enter") { ev.preventDefault(); pick(idx >= 0 ? idx : 0); }
+  };
+}
+
 function ensureStyle() {
   if (_mounted) return; _mounted = true;
   const s = document.createElement("style");
@@ -264,6 +342,16 @@ function ensureStyle() {
   .tf-ta{resize:vertical;line-height:1.45}
   .tf-row{display:flex;gap:12px}.tf-col{flex:1;min-width:0}
   .tf-chk{display:flex;align-items:center;gap:7px;font-size:13px;color:${C.ink};margin:14px 0 4px;cursor:pointer}
+  .tf-step{position:relative}
+  .tf-step .tf-in{padding-right:30px}
+  .tf-step-btns{position:absolute;top:1px;right:1px;bottom:1px;width:24px;display:flex;flex-direction:column;border-left:1px solid ${C.line};border-radius:0 8px 8px 0;overflow:hidden}
+  .tf-step-btns button{flex:1;border:0;background:#fff;color:${C.muted};cursor:pointer;font-size:8px;padding:0;line-height:1}
+  .tf-step-btns button:hover{background:#eef4ff;color:${C.fill}}
+  .tf-cbx{position:relative}
+  .tf-cbx-dd{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:5;background:#fff;border:1px solid ${C.line};border-radius:10px;box-shadow:0 10px 30px rgba(20,30,50,.16);max-height:228px;overflow:auto;padding:4px}
+  .tf-cbx-it{padding:8px 10px;font-size:13px;border-radius:7px;cursor:pointer;color:${C.ink};white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tf-cbx-it.on{background:#eef4ff}
+  .tf-cbx-new{color:${C.fill};font-weight:600}
   .tf-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
   .tf-chip{display:inline-flex;align-items:center;gap:4px;background:#eef2f7;border:1px solid ${C.line};border-radius:20px;padding:3px 5px 3px 11px;font-size:12px;color:${C.ink}}
   .tf-chip-x{border:0;background:transparent;color:${C.muted};cursor:pointer;font-size:14px;line-height:1;padding:0 3px}
