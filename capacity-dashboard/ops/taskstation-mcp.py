@@ -13,6 +13,8 @@ import os
 import sys
 import urllib.request
 
+import taskstation_notes as notes
+
 TS_API = "http://localhost:7005/api/v1"
 FABLE_ENV = os.path.expanduser("~/.config/taskstation/fable.env")
 # タスクのスカラ更新は全置換仕様（#9）: 既存値を全部送ってから patch を載せる
@@ -59,7 +61,7 @@ def safe_update(task_id, patch):
 
 def t_get_task(a):
     t = ts(f"/tasks/{a['task_id']}")
-    comments = ts(f"/tasks/{a['task_id']}/comments") or []
+    ai_notes = notes.list_for(a["task_id"])
     return json.dumps({
         "id": t["id"], "title": t["title"], "description": t.get("description") or "",
         "done": t.get("done"), "percent_done": t.get("percent_done"),
@@ -68,14 +70,13 @@ def t_get_task(a):
         "assignees": [u.get("username") for u in (t.get("assignees") or [])],
         "subtasks": [{"id": x["id"], "title": x["title"], "done": x.get("done")}
                      for x in ((t.get("related_tasks") or {}).get("subtask") or [])],
-        "comments": [{"author": (c.get("author") or {}).get("username"), "text": c.get("comment", "")[:500]}
-                     for c in comments[-10:]],
+        "ai_notes": [{"kind": n.get("kind"), "text": (n.get("text") or "")[:500]} for n in ai_notes[-10:]],
     }, ensure_ascii=False)
 
 
-def t_add_comment(a):
-    ts(f"/tasks/{a['task_id']}/comments", "PUT", {"comment": a["text"]})
-    return "コメントを投稿しました"
+def t_add_note(a):
+    notes.add(a["task_id"], "progress", a["text"])
+    return "進捗メモを記録しました（設定者のみ閲覧）"
 
 
 def t_create_subtask(a):
@@ -113,8 +114,8 @@ STR = {"type": "string"}
 TOOLS = [
     ("get_task", "タスクの詳細（説明・進捗・サブタスク・直近コメント）を取得する",
      {"task_id": NUM}, ["task_id"], t_get_task),
-    ("add_comment", "タスクに進捗・報告コメントを投稿する（Markdown可）",
-     {"task_id": NUM, "text": STR}, ["task_id", "text"], t_add_comment),
+    ("add_note", "進捗・報告メモを記録する（設定者のみ閲覧のAIコメント・Markdown可）",
+     {"task_id": NUM, "text": STR}, ["task_id", "text"], t_add_note),
     ("create_subtask", "タスクを分割してサブタスクを作る（担当は付けない＝人間が割り振る）",
      {"parent_task_id": NUM, "title": STR, "estimate_hours": NUM, "description": STR},
      ["parent_task_id", "title"], t_create_subtask),

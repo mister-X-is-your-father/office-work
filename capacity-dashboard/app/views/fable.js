@@ -2,7 +2,7 @@
 // 直列キュー（これが終わったらこれ）・▶実行・ライブコンソール・スクリプトのワンポチ起動。
 // スクリプトとAIを同じキューに並べれば「スクリプト→AI→スクリプト」の協業になる。
 import { load } from "../lib/store.js";
-import { execMe, getQueue, getScripts, runAi, runScript, cancelJob, streamUrl, loadRunOpts, saveRunOpts } from "../lib/exec.js";
+import { execMe, getQueue, getScripts, runAi, planAi, runScript, cancelJob, streamUrl, loadRunOpts, saveRunOpts } from "../lib/exec.js";
 import { C, esc } from "../lib/ui.js";
 
 let _root, _es = null, _timer = null, _watching = null;
@@ -44,7 +44,8 @@ export async function render(root) {
           ${fableTasks.length ? fableTasks.map((t) => `
             <div class="fb-row">
               <span class="fb-t">${esc(t.title)}</span>
-              <button class="fb-play" data-run-task="${t.id}" data-title="${esc(t.title)}" title="Fableに実行させる">▶</button>
+              <button class="fb-plan" data-plan-task="${t.id}" data-title="${esc(t.title)}" title="計画だけ立てさせる（読み取り専用・承認してから▶）">📝</button>
+              <button class="fb-play" data-run-task="${t.id}" data-title="${esc(t.title)}" title="Fableに実行させる（計画があれば沿って実行）">▶</button>
             </div>`).join("") : `<div class="fb-empty">Fableが副担当のタスクはありません（タスクの副担当で fable を検索）</div>`}
         </div>
         <div class="card fb-card">
@@ -123,6 +124,9 @@ export async function render(root) {
   _root.querySelectorAll("[data-run-task]").forEach((b) => {
     b.onclick = async () => { saveOpts(); const j = await runAi(+b.dataset.runTask, b.dataset.title); refresh(); watch(j.job.id, j.job.title); };
   });
+  _root.querySelectorAll("[data-plan-task]").forEach((b) => {
+    b.onclick = async () => { saveOpts(); const j = await planAi(+b.dataset.planTask, b.dataset.title); refresh(); watch(j.job.id, j.job.title); };
+  });
   _root.querySelectorAll("[data-run-script]").forEach((b) => {
     b.onclick = async () => { const j = await runScript(b.dataset.runScript); refresh(); watch(j.job.id, j.job.title); };
   });
@@ -151,6 +155,8 @@ function css() {
   .fb-done .fb-st{color:${C.free}}
   .fb-play{width:30px;height:30px;border-radius:50%;border:1px solid ${C.fill};background:#fff;color:${C.fill};cursor:pointer;font-size:12px;flex:none}
   .fb-play:hover{background:${C.fill};color:#fff}
+  .fb-plan{width:30px;height:30px;border-radius:50%;border:1px solid ${C.line};background:#fff;cursor:pointer;font-size:12px;flex:none}
+  .fb-plan:hover{border-color:${C.fill}}
   .fb-x{border:0;background:transparent;color:${C.muted};cursor:pointer;font-size:14px}
   .fb-x:hover{color:${C.over}}
   .fb-empty{font-size:12px;color:${C.muted};padding:6px 0}

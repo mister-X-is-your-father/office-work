@@ -21,6 +21,12 @@ import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+sys_path_dir = os.path.dirname(os.path.abspath(__file__))
+import sys as _sys
+if sys_path_dir not in _sys.path:
+    _sys.path.insert(0, sys_path_dir)
+import taskstation_notes as notes
+
 HOME = os.path.expanduser("~")
 CONF_PATH = f"{HOME}/.config/taskstation/exec.json"
 FABLE_ENV = f"{HOME}/.config/taskstation/fable.env"
@@ -136,7 +142,7 @@ def build_ai_prompt(task):
     est = task.get("time_estimate") or 0
     p = ["あなたはチームの副担当AI「Fable」です。以下のタスクを実際に進めてください。",
          "taskstation ツールでタスクを直接操作できます。作法:",
-         "- 作業の区切りで add_comment に進捗を簡潔に記録（人間が管理画面で追えるように）",
+         "- 作業の区切りで add_note に進捗を簡潔に記録（設定者がAIコメント欄で追えるように）",
          "- タスクが大きい/複数工程なら create_subtask で分割（担当は付けない＝人間が割り振る）",
          "- 進み具合に応じて set_progress を更新。見積りが明らかにズレていれば set_estimate",
          "- complete_task は成果物まで完全に終わったときだけ",
@@ -152,15 +158,27 @@ def build_ai_prompt(task):
     return "\n".join(p)
 
 
+PLAN_MARK = "📝 Fable の実行計画"
+
+
+def latest_plan(token, task_id):
+    """直近の計画ノート（承認待ち→実行時に「承認済みの計画」としてプロンプトに添付）"""
+    for n in reversed(notes.list_for(task_id)):
+        if n.get("kind") == "plan":
+            return n.get("text")
+    return None
+
+
 def run_ai(job):
     token = fable_token()
     task = ts_req(f"/tasks/{job.task_id}", token)
     opt = job.options
+    plan_mode = bool(opt.get("plan"))
     model = opt.get("model") if opt.get("model") in ("sonnet", "opus") else "sonnet"
     browser = bool(opt.get("browser"))
     web = bool(opt.get("web"))
     extra = str(opt.get("extra") or "").strip()[:2000]
-    job.emit(f"▶ AI実行開始: #{job.task_id} {task.get('title', '')}")
+    job.emit(f"{'📝 計画モード' if plan_mode else '▶ AI実行'}開始: #{job.task_id} {task.get('title', '')}")
     job.emit(f"  オプション: model={model}" + (" +ブラウザ操作" if browser else "") + (" +Web検索" if web else ""))
     os.makedirs(WORK_DIR, exist_ok=True)
 
@@ -177,7 +195,19 @@ def run_ai(job):
     with open(cfg_path, "w") as f:
         json.dump(mcp_cfg, f)
 
-    prompt = build_ai_prompt(task)
+    if plan_mode:
+        # 計画モード: 読み取り専用（--permission-mode plan で変更系は物理的に不可）。計画文だけを出す。
+        prompt = ("あなたはチームの副担当AI「Fable」です。以下のタスクの**実行計画だけ**を立ててください。"
+                  "実装・ファイル作成・タスク操作は行わない（調査・読み取りは可）。\n"
+                  "計画に含めるもの: 1) 手順（番号付き） 2) 成果物 3) 想定時間 4) リスク・注意点 "
+                  "5) 人間に確認したいこと。日本語Markdown・前置き不要。\n\n"
+                  f"# タスク: #{task.get('id')} {task.get('title', '')}\n内容:\n{task.get('description') or ''}")
+    else:
+        prompt = build_ai_prompt(task)
+        approved = latest_plan(token, job.task_id)
+        if approved:
+            prompt += f"\n\n# 承認済みの実行計画（これに沿って実行。逸脱が必要ならコメントで理由を残す）\n{approved}"
+            job.emit("  📝 承認済みの計画をプロンプトに添付")
     if browser:
         prompt += "\nブラウザ操作（playwright ツール）が許可されています。Webサイトの閲覧・操作が必要なら使ってください。"
     if web:
@@ -185,12 +215,13 @@ def run_ai(job):
     if extra:
         prompt += f"\n\n# 追加指示（依頼者から）\n{extra}"
 
-    proc = subprocess.Popen(
-        [CLAUDE_BIN, "-p", prompt, "--model", model,
-         "--mcp-config", cfg_path, "--allowedTools", allowed,
-         "--disallowedTools", "Bash(git commit:*),Bash(git push:*)",
-         "--output-format", "stream-json", "--verbose"],
-        cwd=WORK_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    cmd = [CLAUDE_BIN, "-p", prompt, "--model", model,
+           "--mcp-config", cfg_path, "--allowedTools", allowed,
+           "--disallowedTools", "Bash(git commit:*),Bash(git push:*)",
+           "--output-format", "stream-json", "--verbose"]
+    if plan_mode:
+        cmd += ["--permission-mode", "plan"]
+    proc = subprocess.Popen(cmd, cwd=WORK_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     final = []
     result_text = None
     start = time.time()
@@ -228,9 +259,8 @@ def run_ai(job):
         pass
     out = (result_text or "\n\n".join(final)).strip()
     if out:
-        ts_req(f"/tasks/{job.task_id}/comments", token, "PUT",
-               {"comment": f"🤖 Fable の作業結果（▶実行 #{job.id}）\n\n{out}"})
-        job.emit("💬 タスクにコメントを投稿しました")
+        notes.add(job.task_id, "plan" if plan_mode else "result", out, job.id)
+        job.emit("💬 AIコメントに保存しました（設定者のみ閲覧）")
 
 
 def run_script(job):
@@ -254,11 +284,9 @@ def run_script(job):
     rc = proc.wait()
     job.emit(f"✔ 終了 (exit {rc})")
     if job.task_id:
-        token = fable_token()
         body = "\n".join(tail[-30:])
-        ts_req(f"/tasks/{job.task_id}/comments", token, "PUT",
-               {"comment": f"⚙ スクリプト `{job.script}` 実行結果（▶実行 #{job.id}・exit {rc}）\n```\n{body}\n```"})
-        job.emit("💬 タスクにコメントを投稿しました")
+        notes.add(job.task_id, "script", f"スクリプト `{job.script}`（exit {rc}）\n```\n{body}\n```", job.id)
+        job.emit("💬 AIコメントに保存しました（設定者のみ閲覧）")
     if rc != 0:
         raise RuntimeError(f"exit {rc}")
 
@@ -354,6 +382,9 @@ class H(BaseHTTPRequestHandler):
             except FileNotFoundError:
                 names = []
             return self._json(200, {"scripts": names})
+        mn = re.match(r"^/notes/(\d+)", self.path)
+        if mn:
+            return self._json(200, {"notes": notes.list_for(int(mn.group(1)))})
         m = re.match(r"^/stream/(\d+)", self.path)
         if m:
             return self._stream(find_job(int(m.group(1))))
@@ -405,7 +436,7 @@ class H(BaseHTTPRequestHandler):
             return self._json(400, {"error": "script required"})
         title = body.get("title") or (script if kind == "script" else f"task #{task_id}")
         raw_opt = body.get("options") or {}
-        options = {k: raw_opt.get(k) for k in ("model", "browser", "web", "extra") if k in raw_opt}
+        options = {k: raw_opt.get(k) for k in ("model", "browser", "web", "extra", "plan") if k in raw_opt}
         job = Job(kind, task_id=task_id, script=script, user_token=tok, title=title, options=options)
         enqueue(job)
         return self._json(200, {"job": job.brief()})

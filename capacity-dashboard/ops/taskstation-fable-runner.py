@@ -15,6 +15,8 @@ import subprocess
 import sys
 import urllib.request
 
+import taskstation_notes as notes
+
 ENV_PATH = os.path.expanduser("~/.config/taskstation/fable.env")
 CLAUDE_BIN = os.path.expanduser("~/.local/bin/claude")  # systemd の PATH に依存しない
 MARKER = "🤖 Fable"
@@ -100,9 +102,8 @@ def main():
     for t in targets:
         if done_count >= MAX_TASKS_PER_RUN:
             break
-        comments = req(api, f"/tasks/{t['id']}/comments", token) or []
-        if any((c.get("author") or {}).get("id") == my_id for c in comments):
-            continue  # 提案済み
+        if notes.list_for(t["id"]):
+            continue  # 提案済み（AIノートあり）
         prompt = build_prompt(t)
         print(f"[fable] task #{t['id']} {t['title']!r} へ提案を生成中…", flush=True)
         try:
@@ -118,9 +119,8 @@ def main():
             continue
         if not out:
             continue
-        comment = f"{MARKER} の提案（副担当AI・自動生成）\n\n{out}"
-        req(api, f"/tasks/{t['id']}/comments", token, method="PUT", body={"comment": comment})
-        print(f"[fable] task #{t['id']}: コメント投稿済み", flush=True)
+        notes.add(t["id"], "proposal", out)
+        print(f"[fable] task #{t['id']}: AIノートに提案を保存", flush=True)
         done_count += 1
 
     print(f"[fable] 完了: 対象 {len(targets)} 件中 {done_count} 件に投稿", flush=True)

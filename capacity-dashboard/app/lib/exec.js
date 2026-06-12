@@ -22,6 +22,10 @@ export async function execMe() {
 export function getQueue() { return req("/queue"); }
 export function getScripts() { return req("/scripts"); }
 export function runAi(taskId, title, options = null) { return req("/run", { method: "POST", body: { kind: "ai", task_id: taskId, title, options: options || loadRunOpts() } }); }
+// 計画モード（--permission-mode plan・読み取り専用）。計画はAIコメント(kind=plan)に保存され、次の実行に自動添付される。
+export function planAi(taskId, title) { return req("/run", { method: "POST", body: { kind: "ai", task_id: taskId, title: `計画: ${title}`, options: { ...loadRunOpts(), plan: true } } }); }
+// AIコメント（隠しノート・許可ユーザーのみ）
+export function getNotes(taskId) { return req(`/notes/${taskId}`); }
 // 実行オプション（モデル/ブラウザ操作/Web検索/追加指示）。localStorage に保存し ▶ 全箇所で共有。
 const OPTS_KEY = "ts.fable.runopts";
 export function loadRunOpts() {

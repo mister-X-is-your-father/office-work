@@ -284,6 +284,23 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
   });
   subEl.addEventListener("blur", () => { if (!subEl.value.trim()) { subSel = null; subSelLabel = ""; } });
 
+  // AIコメント（隠しノート・作成者のみ）: Fable の計画/進捗/結果。説明の下に遅延ロードで表示。
+  if (isEdit && curAi) {
+    const KIND_JA = { plan: "📝 計画", progress: "進捗", result: "✔ 結果", script: "⚙ スクリプト", proposal: "💡 提案" };
+    const box = document.createElement("div");
+    box.innerHTML = `<label class="tf-l">AIコメント <span class="tf-hint">（自分のみ閲覧）</span></label><div class="tf-ainotes" id="tf-ainotes"><span class="tf-hint">読み込み中…</span></div>`;
+    wrap.querySelector(".tf-main").appendChild(box);
+    import("../lib/exec.js").then(({ getNotes }) => getNotes(task.id)).then((d) => {
+      const el = $("#tf-ainotes");
+      const list = (d && d.notes) || [];
+      el.innerHTML = list.length ? [...list].reverse().map((n) => {
+        const dt = new Date(n.ts * 1000);
+        const when = `${dt.getMonth() + 1}/${dt.getDate()} ${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}`;
+        return `<div class="tf-ainote"><div class="tf-ainote-h">${KIND_JA[n.kind] || n.kind} ・ ${when}</div><div class="tf-ainote-b">${esc(n.text)}</div></div>`;
+      }).join("") : `<span class="tf-hint">まだありません（📝計画 や ▶実行 で溜まります）</span>`;
+    }).catch(() => { const el = $("#tf-ainotes"); if (el) el.innerHTML = `<span class="tf-hint">実行サービスに接続できません</span>`; });
+  }
+
   // ▶ Fable 実行（作成者のみ・編集時・Fable副担当タスク）: 実行サービスのキューに追加
   const fableBtn = $("#tf-fable-run");
   if (fableBtn) fableBtn.onclick = async () => {
@@ -508,6 +525,11 @@ function ensureStyle() {
   .tf-bg{position:absolute;inset:0;background:rgba(20,30,50,.38)}
   .tf-card{position:relative;width:min(780px,94vw);max-height:90vh;overflow:auto;background:${C.card};border:1px solid ${C.line};border-radius:16px;box-shadow:0 18px 50px rgba(20,30,50,.28)}
   .tf-h{display:flex;align-items:center;justify-content:space-between;padding:14px 14px 4px 22px;font-size:16px;cursor:move;user-select:none}.tf-h b{font-size:16px}
+  .tf-ainotes{max-height:220px;overflow:auto;border:1px solid ${C.line};border-radius:10px;padding:4px 10px;background:#fafbfc}
+  .tf-ainote{padding:8px 0;border-top:1px solid ${C.track}}
+  .tf-ainote:first-child{border-top:0}
+  .tf-ainote-h{font-size:11px;color:${C.muted};font-weight:700;margin-bottom:3px}
+  .tf-ainote-b{font-size:12px;line-height:1.55;white-space:pre-wrap;word-break:break-word;color:${C.ink}}
   .tf-fable-run{border:1px solid ${C.fill};background:#fff;color:${C.fill};font:inherit;font-size:12px;font-weight:700;padding:5px 12px;border-radius:16px;cursor:pointer;margin-right:6px}
   .tf-fable-run:hover{background:${C.fill};color:#fff}
   .tf-fable-run:disabled{opacity:.5}
