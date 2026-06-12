@@ -12,10 +12,10 @@ function weekDates(iso) {
 }
 
 export async function render(root) {
-  const { tasks, members, plansByTask } = await load();
+  const { tasks, members, plansByTask, settings } = await load();
   const today = todayISO();
   const days = weekDates(today);
-  const rows = weekLoadByMember(tasks, members, days, 8, plansByTask);
+  const rows = weekLoadByMember(tasks, members, days, settings.capH, plansByTask);
 
   const head = `<th style="text-align:left">メンバー</th>` +
     days.map((d, i) => `<th style="${d === today ? "color:" + C.fill : ""}">${DOW[i]}<div style="font-size:10px;color:${C.muted}">${d.slice(5)}</div></th>`).join("") +

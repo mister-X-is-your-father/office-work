@@ -41,6 +41,16 @@ SCRIPT_TIMEOUT = 1800
 conf = json.load(open(CONF_PATH))
 ALLOWED = set(conf.get("allowed_user_ids", []))
 
+SETTINGS_PATH = f"{HOME}/.config/taskstation/settings.json"
+SETTINGS_DEFAULT = {"cap_hours": 8, "cal_start": 8, "cal_end": 20, "excluded_project_ids": []}
+
+
+def load_settings():
+    try:
+        return {**SETTINGS_DEFAULT, **json.load(open(SETTINGS_PATH))}
+    except (OSError, ValueError):
+        return dict(SETTINGS_DEFAULT)
+
 # ---- TaskStation API ----
 
 def ts_req(path, token, method="GET", body=None):
@@ -56,6 +66,17 @@ def ts_req(path, token, method="GET", body=None):
 
 
 _auth_cache = {}  # token -> (uid, expires)
+
+def auth_any(token):
+    """許可リストに関係なく、TaskStation の有効トークンなら uid を返す（設定の読み取り用）"""
+    if not token:
+        return None
+    try:
+        me = ts_req("/user", token)
+    except Exception:
+        return None
+    return me and me.get("id")
+
 
 def auth_user(token):
     if not token:
@@ -366,6 +387,11 @@ class H(BaseHTTPRequestHandler):
 
     def do_GET(self):
         uid, tok = self._auth()
+        if self.path.startswith("/settings"):
+            # チーム設定の読み取りは全ログインユーザー可（書き込みは許可ユーザーのみ）
+            if not uid and not auth_any(tok):
+                return self._json(401, {"error": "unauthorized"})
+            return self._json(200, {"settings": load_settings(), "can_edit": bool(uid)})
         if not uid:
             return self._json(401, {"error": "unauthorized"})
         if self.path.startswith("/me"):
@@ -457,6 +483,25 @@ class H(BaseHTTPRequestHandler):
         uid, tok = self._auth()
         if not uid:
             return self._json(401, {"error": "unauthorized"})
+        if self.path.startswith("/settings"):
+            try:
+                body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or 0) or b"{}")
+            except ValueError:
+                return self._json(400, {"error": "bad json"})
+            st = load_settings()
+            if "cap_hours" in body:
+                st["cap_hours"] = max(1, min(24, float(body["cap_hours"])))
+            if "cal_start" in body:
+                st["cal_start"] = max(0, min(23, int(body["cal_start"])))
+            if "cal_end" in body:
+                st["cal_end"] = max(1, min(24, int(body["cal_end"])))
+            if st["cal_end"] <= st["cal_start"]:
+                return self._json(400, {"error": "営業時間が不正です"})
+            if "excluded_project_ids" in body:
+                st["excluded_project_ids"] = [int(x) for x in (body["excluded_project_ids"] or [])][:50]
+            with open(SETTINGS_PATH, "w") as f:
+                json.dump(st, f, ensure_ascii=False)
+            return self._json(200, {"settings": st})
         if not self.path.startswith("/run"):
             return self._json(404, {"error": "not found"})
         try:

@@ -3,10 +3,11 @@ import { load } from "../lib/store.js";
 import { loadByMember } from "../lib/capacity.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 
-const CAP = 8;
+let CAP = 8; // 設定（容量 h/日）で上書き
 
 export async function render(root) {
-  const { tasks, members, plansByTask } = await load();
+  const { tasks, members, plansByTask, settings } = await load();
+  CAP = settings.capH;
   const day = todayISO();
   const rows = loadByMember(tasks, members, day, CAP, plansByTask)
     .sort((a, b) => b.freeH - a.freeH);

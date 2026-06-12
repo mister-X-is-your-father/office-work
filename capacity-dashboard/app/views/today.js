@@ -6,7 +6,7 @@ import { whoami } from "../lib/api.js";
 import { C, fmtH, esc, todayISO } from "../lib/ui.js";
 import { renderClock } from "./clock.js";
 
-const CAP = 8;
+let CAP = 8; // 設定（容量 h/日）で上書き
 const PJPAL = ["#3a86ff", "#2fa66b", "#b657d6", "#e5772d", "#0ea5e9", "#f5a623", "#ef476f", "#14b8a6"];
 // 表示モードは個人ごとに localStorage で永続化（設定表が無いため・HANDOFF §8）。
 // 既定は「積み上げ」。ログインユーザー id ごとにキーを分け、共用ブラウザでも個人別に保持。
@@ -17,6 +17,7 @@ let MODE_UID = null; // モード保存先のユーザー id
 
 export async function render(root) {
   const data = await load();
+  CAP = data.settings.capH;
   const day = todayISO();
   if (MODE === null) {
     try { MODE_UID = (await whoami())?.id ?? null; } catch { MODE_UID = null; }

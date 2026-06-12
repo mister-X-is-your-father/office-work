@@ -2,6 +2,10 @@
 // ※UI呼称=ワークスペース。API/データモデル上のエンティティは Vikunja の project（project_id 等の識別子はそのまま）。
 import * as vik from "./api.js";
 import { dateOnly } from "./capacity.js";
+import { getSettings } from "./exec.js";
+
+// チーム設定（実行サービスが落ちていても既定値で動く）
+const SETTINGS_DEFAULT = { capH: 8, calStart: 8, calEnd: 20, excludedWs: [] };
 
 // タスク雛形を保存する専用ワークスペース名（taskform のテンプレート機能が使用）
 export const TEMPLATE_WS = "テンプレート";
@@ -15,16 +19,27 @@ let cache = null;
 
 export async function load(force = false) {
   if (cache && !force) return cache;
-  const [tasksAll, projects, recurrences, holidays, unavailability, me] = await Promise.all([
+  const [tasksAll, projects, recurrences, holidays, unavailability, me, settingsRaw] = await Promise.all([
     vik.getTasks(), vik.getProjects(),
     vik.getRecurrences().catch(() => []),
     vik.getHolidays().catch(() => []),
     vik.getUnavailability().catch(() => []),
     vik.whoami().catch(() => null),
+    getSettings().catch(() => null),
   ]);
-  // テンプレートWS（タスク雛形の置き場）は通常タスクから分離 — 負荷・空き・一覧に混ぜない
+  const st = (settingsRaw && settingsRaw.settings) || {};
+  const settings = {
+    capH: st.cap_hours || SETTINGS_DEFAULT.capH,
+    calStart: st.cal_start ?? SETTINGS_DEFAULT.calStart,
+    calEnd: st.cal_end ?? SETTINGS_DEFAULT.calEnd,
+    excludedWs: st.excluded_project_ids || [],
+    canEdit: !!(settingsRaw && settingsRaw.can_edit),
+  };
+  // テンプレートWS（雛形置き場）＋設定で除外されたWSは通常タスクから分離 — 負荷・空き・一覧に混ぜない
   const templateProject = (projects || []).find((p) => p.title === TEMPLATE_WS) || null;
-  const tasks = templateProject ? (tasksAll || []).filter((t) => t.project_id !== templateProject.id) : (tasksAll || []);
+  const excluded = new Set(settings.excludedWs);
+  if (templateProject) excluded.add(templateProject.id);
+  const tasks = (tasksAll || []).filter((t) => !excluded.has(t.project_id));
   const templates = templateProject ? (tasksAll || []).filter((t) => t.project_id === templateProject.id) : [];
   // ID→ユーザー名の名簿（全ワークスペースの projectusers ∪）。assignees に出ない人の名前解決用（P2 #5）。
   const dir = new Map();
@@ -66,7 +81,7 @@ export async function load(force = false) {
     plannedTasks.map((t) => vik.getPlans(t.id).then((p) => [t.id, p || []]).catch(() => [t.id, []]))
   );
   cache = {
-    tasks: tasks || [], projects: projects || [], members: [...mmap.values()], aiMembers, me,
+    tasks: tasks || [], projects: projects || [], members: [...mmap.values()], aiMembers, me, settings,
     templates, templateProject,
     plansByTask: new Map(planPairs),
     recurrences: recurrences || [], holidaysSet, holidaysByDate, unavailabilityByMember,

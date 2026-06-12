@@ -10,11 +10,11 @@ const WINDOW_DAYS = 35; // ~5週間
 const DOW = ["日", "月", "火", "水", "木", "金", "土"];
 
 export async function render(root) {
-  const { tasks, members, plansByTask, recurrences, holidaysSet, unavailabilityByMember } = await load();
+  const { tasks, members, plansByTask, recurrences, holidaysSet, unavailabilityByMember, settings } = await load();
   const today = todayISO();
   const isoDays = Array.from({ length: WINDOW_DAYS }, (_, i) => shiftISO(today, i));
   const fromISO = isoDays[0], toISO = isoDays[WINDOW_DAYS - 1];
-  const availability = { holidays: holidaysSet, unavailabilityByMember, capH: 8 };
+  const availability = { holidays: holidaysSet, unavailabilityByMember, capH: settings.capH };
 
   // 負荷源1: 通常タスク（plans優先・見積りフォールバック・全員フル）
   const taskLoad = [];

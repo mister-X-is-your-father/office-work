@@ -5,9 +5,9 @@ import { holidayDataStatus } from "../lib/recurrence.js";
 import { C, fmtH, esc, capacityBar, todayISO } from "../lib/ui.js";
 
 export async function render(root) {
-  const { tasks, members, plansByTask, holidaysSet } = await load();
+  const { tasks, members, plansByTask, holidaysSet, settings } = await load();
   const day = todayISO();
-  const rows = loadByMember(tasks, members, day, 8, plansByTask).sort((a, b) => b.freeH - a.freeH);
+  const rows = loadByMember(tasks, members, day, settings.capH, plansByTask).sort((a, b) => b.freeH - a.freeH);
   const ev = estimateVsActual(tasks);
   const tri = triage(tasks, day);
 

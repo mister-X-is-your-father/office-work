@@ -26,6 +26,9 @@ export function runAi(taskId, title, options = null) { return req("/run", { meth
 export function planAi(taskId, title) { return req("/run", { method: "POST", body: { kind: "ai", task_id: taskId, title: `計画: ${title}`, options: { ...loadRunOpts(), plan: true } } }); }
 // AIコメント（隠しノート・許可ユーザーのみ）
 export function getNotes(taskId) { return req(`/notes/${taskId}`); }
+// チーム設定（読み取り=全ログインユーザー / 書き込み=許可ユーザーのみ）
+export function getSettings() { return req("/settings"); }
+export function saveSettings(s) { return req("/settings", { method: "POST", body: s }); }
 // 成果物（Fable作業ディレクトリのファイル）
 export function getFiles() { return req("/files"); }
 export function fileUrl(relPath) { return `${EXEC_BASE}/file/${encodeURIComponent(relPath)}?token=${encodeURIComponent(token())}`; }

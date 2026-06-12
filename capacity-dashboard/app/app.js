@@ -19,7 +19,7 @@ const ROUTES = {
   outline:  { label: "アウトライン",  grp: "仕事",   mod: "./views/outline.js" },
   depgraph: { label: "依存グラフ",    grp: "仕事",   mod: "./views/depgraph.js" },
   gantt:    { label: "予実ガント",    grp: "仕事",   mod: "./views/gantt.js" },
-  settings: { label: "設定",          grp: "その他", soon: true },
+  settings: { label: "設定",          grp: "その他", mod: "./views/settings.js" },
   // 隠しルート: ORDER に載せない＝通常ユーザーのナビには出ない。許可者のみ shell() がリンクを追加。
   fable:    { label: "🤖 Fable",      grp: "AI",     mod: "./views/fable.js" },
 };

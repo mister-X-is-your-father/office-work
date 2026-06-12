@@ -11,8 +11,9 @@ import { deletePlan, logPlan, updateRecurrence } from "../lib/api.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 import { splitMeta } from "../lib/form.js"; // note の "[資料] URL" 行を抽出
 
-const H0 = 8, H1 = 20, HOURH = 46;       // 8:00〜20:00
-const GRIDH = (H1 - H0) * HOURH;
+let H0 = 8, H1 = 20;                      // 営業時間（設定で上書き）
+const HOURH = 46;
+let GRIDH = (H1 - H0) * HOURH;
 const SNAP = 15;
 const itemColor = (it) => (it.prio ? PRIO[it.prio].c : NEUTRAL);
 const min2top = (m) => ((m - H0 * 60) / 60) * HOURH;
@@ -23,6 +24,8 @@ let _root, _data, _day;
 export async function render(root) {
   _root = root;
   _data = await load();
+  H0 = _data.settings.calStart; H1 = _data.settings.calEnd;
+  GRIDH = (H1 - H0) * HOURH;
   _day = todayISO();
   paint();
 }
@@ -31,7 +34,7 @@ function buildModel() {
   const { tasks, members, plansByTask } = _data;
   const memberIds = new Set(members.map((m) => m.id));
   const byTask = new Map((tasks || []).map((t) => [t.id, t]));
-  const itemMap = todayItemsByMember(_data, _day, 8);
+  const itemMap = todayItemsByMember(_data, _day, _data.settings.capH);
 
   // 配置済みブロック（start_minute あり・本日）
   const placed = [];

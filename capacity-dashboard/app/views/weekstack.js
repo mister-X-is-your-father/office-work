@@ -3,7 +3,7 @@ import { load } from "../lib/store.js";
 import { weekLoadByMember, shiftISO } from "../lib/capacity.js";
 import { C, fmtH, esc, member_color } from "../lib/ui.js";
 
-const CAP = 8;
+let CAP = 8; // 設定（容量 h/日）で上書き
 const WD = ["日", "月", "火", "水", "木", "金", "土"];
 let MODE = "member"; // 'member'(担当者別積み) | 'total'(合算)
 
@@ -15,7 +15,8 @@ function weekDays() {
 }
 
 export async function render(root) {
-  const { tasks, members, plansByTask } = await load();
+  const { tasks, members, plansByTask, settings } = await load();
+  CAP = settings.capH;
   const isoDays = weekDays();
   const perMember = weekLoadByMember(tasks, members, isoDays, CAP, plansByTask); // [{id,name,days:[{day,h,over}]}]
   const idx = new Map(members.map((m, i) => [m.id, i]));

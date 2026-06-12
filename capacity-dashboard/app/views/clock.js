@@ -7,7 +7,7 @@ import { dateOnly, hasDate, shiftISO } from "../lib/capacity.js";
 import { deletePlan, logPlan, updateTask, requestReview } from "../lib/api.js";
 import { invalidate } from "../lib/store.js";
 
-const CAP = 8;
+let CAP = 8; // 設定（容量 h/日）で上書き
 const FREECOL = "#e7ebf0";   // 空き=薄グレー
 const itemColor = (it) => (it.prio ? PRIO[it.prio].c : NEUTRAL);
 const patCls = (kind) => (KINDS[kind].pattern !== "task" ? KINDS[kind].pattern : ""); // dot/kic 用クラス
@@ -147,6 +147,7 @@ const DEFS = `<svg width="0" height="0" style="position:absolute" aria-hidden="t
 </defs></svg>`;
 
 export function renderClock(container, data, day, rerender) {
+  CAP = (data.settings && data.settings.capH) || 8;
   const map = todayItemsByMember(data, day, CAP);
   const states = data.members.map((m) => map.get(m.id)).filter(Boolean)
     .sort((a, b) => (b.freeH - a.freeH) || (a.overH - b.overH));
