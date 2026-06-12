@@ -80,6 +80,7 @@ office-work/capacity-dashboard/
 - **設定ビュー**（2026-06-13・`views/settings.js`・ROUTES有効化）: **チーム共有設定**＝容量(h/日)・時刻カレンダーの営業時間・**集計対象WS**（除外WSのタスクは負荷/空き/一覧から外れる・テンプレートWSは常に除外）。保存先= taskstation-exec `GET/POST /settings`（`~/.config/taskstation/settings.json`・**読み取り=全ログインユーザー/書き込み=許可ユーザーのみ**＝管理者）。SPAは store.load が settings を取得し全ビューに配線（today/clock/availability/weekstack/home/week/freefinder/calendar の 8h と H0/H1 ハードコード解消。exec停止時は既定値で劣化動作）。
 - **かんばんビュー**（2026-06-13・`views/kanban.js`・ROUTES有効化）: Vikunja 0.24 の**プロジェクトビュー＋バケット**をそのまま使用（API: `GET /projects/:p`(views)→kanban view id→`GET/PUT/POST/DELETE /projects/:p/views/:v/buckets[...]`・移動=`POST .../buckets/:b/tasks {task_id}`）。WS選択(localStorage記憶)・列=バケット（Enterで追加/タイトルクリックで名前変更/空なら×削除）・カード=タスク（優先度ドット/担当アバター[AI非表示]/期日[超過赤]/見積り/完了タグ・**ドラッグで列移動・クリックで編集モーダル**）。
 - **タスクの分類**（2026-06-13）: 分類=ユーザー定義ラベル（`kinds.js categoryLabels`。「レビュー」ラベルは kind 軸の予約語として分類から除外＝**レビュー×分類が共存**）。taskform に分類コンボボックス（選択/新規作成/空=なし・単一運用・保存はdiff付け替え）、一覧に分類列＋フィルタ。初期分類=エンジニア依頼/定常業務。
+- **クイック追加バー**（2026-06-13・`lib/quickadd.js`＋`views/quickadd.js`・トップバー常設）: TickTick実アカウント調査の結論=利用実態は**瞬間メモ捕獲**（リマインダー/繰り返し/ポモドーロ/習慣はほぼ未使用・完了388件の大半がメモとURLのダンプ）→ 最重要ギャップは**1行自然言語→即タスク化**と判断。構文=`明日15時 MTG準備 #分類 !高 1.5h @担当 >WS URL`（日付=今日/明日/明後日/N日後/X曜/来週X曜/M\/D/M月D日・過去M\/Dは翌年繰上げ。URLとMarkdownリンクは説明の`[資料]`行へ）。**完全一致トークンのみ消費**＝「15時の件」「明日の会議メモ」等の日本語文中は壊さない（純関数パーサ・テスト12件 `quickadd.test.mjs`）。解析結果はチップでライブプレビュー→Enterで作成、`/`キーでどこからでもフォーカス・連続入力でフォーカス維持（ダンプ運用）。既定投入先=**「インボックス」WS（無ければ自動作成・ユーザーごと）**、`>WS名`で明示指定（不明WSはインボックスへフォールバック表示）。**時刻指定があれば日別予定(plan/start_minute)も作成**＝時刻カレンダーに即出現（所要=見積、無ければ1h）。@担当は人間のみ解決（**AI(fable)割当は taskform の隠しコマンド経由のみ＝仕様維持**）。
 - 基盤固め: #1 書き込み破壊性根治(ADR-008) / #2 soft delete / #3 帰属(ADR-009) / #4 負荷の単一真実(ADR-010) / #7 回帰網 / #9 スカラ更新安全化(client updateTask)。
 
 **残り**
@@ -88,6 +89,7 @@ office-work/capacity-dashboard/
 - カレンダー作り込み(残): 営業時間/容量の可変化・複数日（週タイムライン）。※リサイズ・会議/定例の時刻ブロック表示は 2026-06-12 完了。
 - **土日祝の考慮ギャップ**（2026-06-12 監査）: ①見積りの**日割りが暦日割り**（`capacity.js taskHoursOn` が土日祝込みの inclusiveDays で割る→週末に負荷が落ち平日が薄まる。営業日割りにすべき）②**本日系ビュー（today/home KPI）の capH=8 固定**（祝日・週末でも空き8hと表示。`capacityOn` 未使用）。月次空き/リスケ提案/週次freeWindow は `capacityOn` 経由で正しい。
 - 据え置き(ADRで明記): 「本日=plan」完全一本化(due/範囲の暫定表示廃止・ADR-012)/定期occurrenceのmaterialize(ADR-011)/人別可変キャパ(時短)/AI Q&A(53)。
+- 据え置き(TickTick実測 2026-06-13): **リマインダー通知/ポモドーロ/習慣トラッカーは実利用ほぼゼロ**（完了388件中リマインダー0・繰り返し0・期日付き4・ポモ累計4回・習慣0件）につき優先度を撤回。実態=メモ捕獲→クイック追加で対応済み。生データは `~/.local/share/ticktick-export/`（個人情報につきリポジトリ外）。
 
 ## 5. 運用 runbook
 ### フォークを直して再デプロイ（fixN 系の作り方）
