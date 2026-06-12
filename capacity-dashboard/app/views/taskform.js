@@ -40,6 +40,23 @@ const fmtDisplay = (iso) => { const [y, mo, da] = iso.split("-"); return `${y}/$
 // task の日付フィールド（due_date/start_date/end_date）を YYYY/MM/DD 表示に（未設定=空）
 const fieldDisplay = (t, f) => (t && t[f] && !t[f].startsWith("0001") ? fmtDisplay(t[f].slice(0, 10)) : "");
 
+// 資料リンク: スキーマ変更を避け、説明の末尾に "[資料] URL" 行として埋め込んで保存する。
+// description の読み書きは本フォームのみ（他ビュー不使用）なので衝突しない。
+const DOC_LINE_RE = /^\[資料\]\s*(.+)$/;
+function splitDocLinks(desc) {
+  const links = [], rest = [];
+  for (const line of String(desc || "").split("\n")) {
+    const m = line.match(DOC_LINE_RE);
+    if (m) links.push(m[1].trim()); else rest.push(line);
+  }
+  return { text: rest.join("\n").replace(/\n+$/, ""), links };
+}
+function joinDocLinks(text, links) {
+  const t = String(text || "").replace(/\s+$/, "");
+  if (!links.length) return t;
+  return (t ? t + "\n\n" : "") + links.map((u) => `[資料] ${u}`).join("\n");
+}
+
 let _mounted = false;
 
 // taskId 省略=新規 / 指定=編集。保存後 onSaved() を呼ぶ。
@@ -74,6 +91,9 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
   const taskById = new Map((tasks || []).map((t) => [t.id, t]));
   for (const p of curPreds) if (!taskById.has(p.id)) taskById.set(p.id, p);
   const predSet = new Set(curPreds.map((p) => p.id)); // 編集中の作業セット（id）
+  // 資料リンク（説明から分離して編集、保存時に再結合）
+  const docInit = splitDocLinks(task ? task.description : "");
+  const docLinks = [...docInit.links];
 
   // テンプレート: テンプレートWS内のタスク。分類=同WS内の親タスク（subtask 子持ち=分類、それ以外=雛形）。
   const tplLeafs = (templates || []).filter((t) => !(((t.related_tasks || {}).subtask) || []).length);
@@ -87,7 +107,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
   wrap.innerHTML = `
     <div class="tf-bg"></div>
     <div class="tf-card" role="dialog" aria-modal="true">
-      <div class="tf-h"><b>${isEdit ? "タスクを編集" : "タスクを追加"}</b></div>
+      <div class="tf-h"><b>${isEdit ? "タスクを編集" : "タスクを追加"}</b><button type="button" class="tf-x" id="tf-x" aria-label="閉じる">×</button></div>
       <div class="tf-body">
         ${!isEdit ? `
         <label class="tf-l">テンプレートから作成 <span class="tf-hint">（任意・選ぶと下の項目に反映）</span></label>
@@ -148,8 +168,11 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
           <div class="tf-cbx-dd" hidden></div>
         </div>
         <div class="tf-chips" id="tf-dep-chips"></div>
+        <label class="tf-l">資料 <span class="tf-hint">（ドキュメントのURLやパス・Enterで追加・複数可）</span></label>
+        <input id="tf-doc" class="tf-in" autocomplete="off" placeholder="https://… や共有フォルダのパスを入力して Enter">
+        <div class="tf-chips" id="tf-doc-chips"></div>
         <label class="tf-l">説明</label>
-        <textarea id="tf-desc" class="tf-in tf-ta" rows="3" placeholder="任意">${esc(task ? (task.description || "") : "")}</textarea>
+        <textarea id="tf-desc" class="tf-in tf-ta" rows="3" placeholder="任意">${esc(docInit.text)}</textarea>
         ${isEdit ? `<label class="tf-chk"><input id="tf-done" type="checkbox"${task.done ? " checked" : ""}> 完了にする</label>` : ""}
         <div class="tf-err" id="tf-err"></div>
       </div>
@@ -163,9 +186,28 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
 
   const $ = (id) => wrap.querySelector(id);
   const close = () => { wrap.remove(); };
-  wrap.querySelector(".tf-bg").onclick = close;
+  // 外側クリックでは閉じない（誤クリックで入力が飛ぶため）。閉じる=×/キャンセルのみ。
+  $("#tf-x").onclick = close;
   $("#tf-cancel").onclick = close;
   $("#tf-title").focus();
+
+  // ヘッダー掴みでモーダルをドラッグ移動（初回ドラッグで fixed 化、画面外に出ない範囲でクランプ）
+  const card = wrap.querySelector(".tf-card");
+  wrap.querySelector(".tf-h").onmousedown = (ev) => {
+    if (ev.target.closest(".tf-x")) return;
+    const r = card.getBoundingClientRect();
+    const offX = ev.clientX - r.left, offY = ev.clientY - r.top;
+    card.style.position = "fixed"; card.style.margin = "0";
+    card.style.left = r.left + "px"; card.style.top = r.top + "px";
+    const move = (e) => {
+      card.style.left = Math.min(Math.max(e.clientX - offX, 60 - r.width), window.innerWidth - 60) + "px";
+      card.style.top = Math.min(Math.max(e.clientY - offY, 0), window.innerHeight - 40) + "px";
+    };
+    const up = () => { document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+    ev.preventDefault();
+  };
 
   // 日付3欄（開始/終了/期日）: フォーカスを外したら正規表示（YYYY/MM/DD）に整形
   for (const id of ["#tf-start", "#tf-end", "#tf-due"]) {
@@ -199,6 +241,27 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     el.querySelectorAll(".tf-chip-x").forEach((b) => { b.onclick = () => { predSet.delete(+b.dataset.id); renderChips(); }; });
   };
   renderChips();
+
+  // 資料リンク: Enter か blur で追加、× で除去。http(s) はチップから開ける。
+  const renderDocChips = () => {
+    const el = $("#tf-doc-chips");
+    el.innerHTML = docLinks.map((u, i) => {
+      const label = esc(u.length > 46 ? u.slice(0, 44) + "…" : u);
+      const body = /^https?:\/\//i.test(u) ? `<a href="${esc(u)}" target="_blank" rel="noopener">${label}</a>` : label;
+      return `<span class="tf-chip" title="${esc(u)}">${body}<button type="button" class="tf-chip-x" data-i="${i}">×</button></span>`;
+    }).join("");
+    el.querySelectorAll(".tf-chip-x").forEach((b) => { b.onclick = () => { docLinks.splice(+b.dataset.i, 1); renderDocChips(); }; });
+  };
+  renderDocChips();
+  const docEl = $("#tf-doc");
+  const addDoc = () => {
+    const v = docEl.value.trim();
+    if (v && !docLinks.includes(v)) { docLinks.push(v); renderDocChips(); }
+    if (v) docEl.value = "";
+  };
+  docEl.onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); addDoc(); } };
+  docEl.onblur = addDoc; // 入力したまま保存を押しても拾う
+
   const depEl = $("#tf-dep");
   attachCombobox(depEl, {
     items: (q) => {
@@ -222,7 +285,9 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
       $("#tf-title").value = t.title;
       $("#tf-prio").value = String(t.priority || 0);
       $("#tf-est").value = t.time_estimate ? String(Math.round((t.time_estimate / 3600) * 100) / 100) : "";
-      $("#tf-desc").value = t.description || "";
+      const d = splitDocLinks(t.description);
+      $("#tf-desc").value = d.text;
+      docLinks.length = 0; docLinks.push(...d.links); renderDocChips();
     },
   });
 
@@ -239,7 +304,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     try {
       const tplWs = templateProject || await createProject(TEMPLATE_WS);
       const created = await createTaskInProject(tplWs.id, {
-        title, description: $("#tf-desc").value, priority: +$("#tf-prio").value,
+        title, description: joinDocLinks($("#tf-desc").value, docLinks), priority: +$("#tf-prio").value,
         time_estimate: isFinite(estNum) && estNum > 0 ? Math.round(estNum * 3600) : 0,
       });
       const catRaw = $("#tf-parent").value.trim();
@@ -292,7 +357,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     const estNum = estVal ? parseFloat(estVal) : 0;
     if (estVal && (!isFinite(estNum) || estNum < 0)) { err.textContent = "見積りは0以上の数値(h)で入力してください。"; return; }
     const estSec = estVal ? Math.round(estNum * 3600) : 0;
-    const desc = $("#tf-desc").value;
+    const desc = joinDocLinks($("#tf-desc").value, docLinks);
 
     const parentRaw = $("#tf-parent").value.trim();
 
@@ -396,7 +461,9 @@ function ensureStyle() {
   .tf-modal{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center}
   .tf-bg{position:absolute;inset:0;background:rgba(20,30,50,.38)}
   .tf-card{position:relative;width:min(560px,92vw);max-height:90vh;overflow:auto;background:${C.card};border:1px solid ${C.line};border-radius:16px;box-shadow:0 18px 50px rgba(20,30,50,.28)}
-  .tf-h{padding:18px 22px 4px;font-size:16px}.tf-h b{font-size:16px}
+  .tf-h{display:flex;align-items:center;justify-content:space-between;padding:14px 14px 4px 22px;font-size:16px;cursor:move;user-select:none}.tf-h b{font-size:16px}
+  .tf-x{border:0;background:transparent;color:${C.muted};font-size:20px;line-height:1;padding:4px 9px;border-radius:8px;cursor:pointer}
+  .tf-x:hover{background:#f1f4f8;color:${C.ink}}
   .tf-body{padding:8px 22px 4px}
   .tf-l{display:block;font-size:12px;color:${C.muted};font-weight:600;margin:12px 0 5px}
   .tf-req{color:${C.over}}
@@ -419,6 +486,8 @@ function ensureStyle() {
   .tf-cbx-new{color:${C.fill};font-weight:600}
   .tf-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;min-height:26px} /* チップ1行分を予約（追加時のモーダル急伸防止） */
   .tf-chip{display:inline-flex;align-items:center;gap:4px;background:#eef2f7;border:1px solid ${C.line};border-radius:20px;padding:3px 5px 3px 11px;font-size:12px;color:${C.ink}}
+  .tf-chip a{color:${C.fill};text-decoration:none}
+  .tf-chip a:hover{text-decoration:underline}
   .tf-chip-x{border:0;background:transparent;color:${C.muted};cursor:pointer;font-size:14px;line-height:1;padding:0 3px}
   .tf-chip-x:hover{color:${C.over}}
   .tf-err{color:${C.over};font-size:12.5px;min-height:18px;margin:8px 0 2px;font-weight:600}
