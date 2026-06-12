@@ -94,6 +94,10 @@ function shell() {
   import("./views/quickadd.js").then(({ mountQuickAdd }) => {
     mountQuickAdd(document.querySelector(".topbar"), { onCreated: route });
   }).catch(() => {});
+  // 全文検索（Ctrl+K / 🔍）
+  import("./views/searchpal.js").then(({ mountSearch }) => {
+    mountSearch(document.querySelector(".topbar"));
+  }).catch(() => {});
   // Fable（隠し要素）: 実行サービスが許可したユーザーのときだけナビに出現
   import("./lib/exec.js").then(({ execMe }) => execMe()).then((uid) => {
     if (!uid) return;
