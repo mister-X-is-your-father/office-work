@@ -9,6 +9,7 @@ import { PRIO, NEUTRAL, KINDS } from "../lib/kinds.js";
 import { dateOnly } from "../lib/capacity.js";
 import { deletePlan, logPlan } from "../lib/api.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
+import { splitMeta } from "../lib/form.js"; // note の "[資料] URL" 行を抽出
 
 const H0 = 8, H1 = 20, HOURH = 46;       // 8:00〜20:00
 const GRIDH = (H1 - H0) * HOURH;
@@ -67,9 +68,10 @@ function buildModel() {
     if (!startMin) continue;
     const mins = Math.max(15, Math.round((rec.duration_seconds || 0) / 60));
     const kind = rec.kind === "meeting" ? "meeting" : "recurring";
+    const links = splitMeta(rec.note || "").links; // MTG資料（note 埋め込み）
     for (const uid of assignees || rec.assignee_ids || []) {
       if (!memberIds.has(uid)) continue;
-      meetings.push({ memberId: uid, startMin, mins, title: rec.title || "会議", kind, prio: null, fixed: true });
+      meetings.push({ memberId: uid, startMin, mins, title: rec.title || "会議", kind, prio: null, fixed: true, links });
     }
   }
   return { members, placed, tray, meetings };
@@ -126,9 +128,12 @@ function blockHtml(b) {
   const hatch = pat === "meeting" ? "cal-hatch" : (pat === "routine" ? "cal-dots" : "");
   const timeLabel = `${hhmm(b.startMin)}–${hhmm(b.startMin + b.mins)} ・ ${fmtH(b.mins / 60)}`;
   if (b.fixed) {
-    // 会議/定例: 移動・リサイズ不可の固定枠
+    // 会議/定例: 移動・リサイズ不可の固定枠。資料リンク（note の [資料] 行）は 📎 で開ける。
+    const links = (b.links || []).map((u) => /^https?:\/\//i.test(u)
+      ? `<a href="${esc(u)}" target="_blank" rel="noopener" title="${esc(u)}" style="color:#fff;text-decoration:none">📎</a>`
+      : `<span title="${esc(u)}">📎</span>`).join(" ");
     return `<div class="cal-block cal-fixed ${hatch}" style="top:${top}px;height:${h}px;background:${itemColor(b)}" title="${esc(b.title)}（${KINDS[b.kind] ? KINDS[b.kind].label : "会議"}・固定）">
-      <div class="cal-bt">${esc(b.title)}</div><div class="cal-bh">${timeLabel}</div>
+      <div class="cal-bt">${esc(b.title)}${links ? " " + links : ""}</div><div class="cal-bh">${timeLabel}</div>
     </div>`;
   }
   return `<div class="cal-block ${hatch}" draggable="true" data-task="${b.taskId}" data-member="${b.memberId}" data-mins="${b.mins}" data-start="${b.startMin}" data-plan="${b.planId}"

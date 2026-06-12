@@ -6,65 +6,19 @@
 import { load, invalidate, TEMPLATE_WS } from "../lib/store.js";
 import { getTask, createTaskInProject, createProject, updateTask, addAssignee, removeAssignee, addRelation, removeRelation } from "../lib/api.js";
 import { C, esc } from "../lib/ui.js";
-// 相互import（recurrenceform は本ファイルの parseSmartDate/fmtDisplay を関数内でのみ参照）なので安全
+// 共有フォーム部品（スマート日付/[資料][ゴール]規約/時間ステッパー/資料チップ）は lib/form.js に集約
+import { parseSmartDate, fmtDisplay, splitMeta, joinMeta, hourInputHtml, wireHourInput, docChipsHtml, wireDocChips } from "../lib/form.js";
 import { renderRecurrencePanel, ensureRecurrenceStyle } from "./recurrenceform.js";
+// 互換 re-export（既存の import 元を壊さない）
+export { parseSmartDate, fmtDisplay, splitMeta, joinMeta };
 
 const ZERO_DATE = "0001-01-01T00:00:00Z"; // Vikunja の「未設定」センチネル
 const WS_KEY = "ts.taskform.ws"; // 前回タスクを作ったワークスペース（選択UIの既定値）
 // Vikunja priority(0–5)。0=なし。4=最優先までを提示。
 const PRIO_OPTS = [[0, "なし"], [1, "低"], [2, "中"], [3, "高"], [4, "最優先"]];
 
-// 期日のスマート入力: 数字だけで月日を入力（年は当年を自動補完）。
-//   2桁 "62"→6月2日（M+D） / 3桁 "612"→6月12日（M+DD） / 4桁 "1112"→11月12日（MM+DD）
-//   区切りありの "6/12"→当年6/12 / "2026/11/12"・"2026-11-12" は年も解釈 / 8桁 "20261112" も可。
-// 返り値は ISO の日付 "YYYY-MM-DD"（不正なら null）。
-const pad2 = (n) => String(n).padStart(2, "0");
-function mkDate(y, mo, da) {
-  if (mo < 1 || mo > 12 || da < 1 || da > 31) return null;
-  return `${y}-${pad2(mo)}-${pad2(da)}`;
-}
-export function parseSmartDate(raw) {
-  if (raw == null) return null;
-  const s = String(raw).trim();
-  if (!s) return null;
-  const Y = new Date().getFullYear();
-  let m = s.match(/^(\d{4})\D+(\d{1,2})\D+(\d{1,2})$/); // 2026/11/12・2026-11-12
-  if (m) return mkDate(+m[1], +m[2], +m[3]);
-  m = s.match(/^(\d{1,2})\D+(\d{1,2})$/); // 11/12（年なし）→当年
-  if (m) return mkDate(Y, +m[1], +m[2]);
-  const d = s.replace(/\D/g, "");
-  if (d.length === 8) return mkDate(+d.slice(0, 4), +d.slice(4, 6), +d.slice(6, 8)); // 20261112
-  if (d.length === 4) return mkDate(Y, +d.slice(0, 2), +d.slice(2, 4)); // 1112 → 11/12
-  if (d.length === 3) return mkDate(Y, +d.slice(0, 1), +d.slice(1, 3)); // 612 → 6/12
-  if (d.length === 2) return mkDate(Y, +d.slice(0, 1), +d.slice(1, 2)); // 62 → 6/2
-  return null;
-}
-export const fmtDisplay = (iso) => { const [y, mo, da] = iso.split("-"); return `${y}/${mo}/${da}`; };
 // task の日付フィールド（due_date/start_date/end_date）を YYYY/MM/DD 表示に（未設定=空）
 const fieldDisplay = (t, f) => (t && t[f] && !t[f].startsWith("0001") ? fmtDisplay(t[f].slice(0, 10)) : "");
-
-// 資料リンク/ゴール: スキーマ変更を避け、説明に埋め込んで保存する。
-//   資料 = "[資料] URL" 行（複数可・位置不問） / ゴール = "[ゴール]" 行以降のテキストブロック。
-// description の読み書きは本フォームのみ（他ビュー不使用）なので衝突しない。
-const DOC_LINE_RE = /^\[資料\]\s*(.+)$/;
-const GOAL_MARK = "[ゴール]";
-function splitMeta(desc) {
-  const links = [], lines = [];
-  for (const line of String(desc || "").split("\n")) {
-    const m = line.match(DOC_LINE_RE);
-    if (m) links.push(m[1].trim()); else lines.push(line);
-  }
-  const gi = lines.findIndex((l) => l.trim() === GOAL_MARK);
-  const text = (gi >= 0 ? lines.slice(0, gi) : lines).join("\n").replace(/\n+$/, "");
-  const goal = gi >= 0 ? lines.slice(gi + 1).join("\n").trim() : "";
-  return { text, goal, links };
-}
-function joinMeta(text, goal, links) {
-  let out = String(text || "").replace(/\s+$/, "");
-  if (goal && goal.trim()) out += (out ? "\n\n" : "") + GOAL_MARK + "\n" + goal.trim();
-  if (links.length) out += (out ? "\n\n" : "") + links.map((u) => `[資料] ${u}`).join("\n");
-  return out;
-}
 
 let _mounted = false;
 
@@ -152,8 +106,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
           <label class="tf-l">ゴール <span class="tf-hint">（どうなったら完了か）</span></label>
           <textarea id="tf-goal" class="tf-in tf-ta" rows="3" placeholder="例: レビュー承認済み・本番で動作確認済み">${esc(docInit.goal)}</textarea>
           <label class="tf-l">資料 <span class="tf-hint">（URLやパス・Enterで追加・複数可）</span></label>
-          <input id="tf-doc" class="tf-in" autocomplete="off" placeholder="https://… を入力して Enter">
-          <div class="tf-chips" id="tf-doc-chips"></div>
+          ${docChipsHtml("tf-doc")}
         </div>
         <div class="tf-side">
           <div${wsSingle ? " hidden" : ""}>
@@ -171,13 +124,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
             </div>
           </div>
           <label class="tf-l">見積り(h) <span class="tf-hint">（0.25刻み）</span></label>
-          <div class="tf-step">
-            <input id="tf-est" class="tf-in" type="text" inputmode="decimal" autocomplete="off" value="${estH}" placeholder="例: 0.25">
-            <div class="tf-step-btns">
-              <button type="button" id="tf-est-up" tabindex="-1" aria-label="0.25増やす">▲</button>
-              <button type="button" id="tf-est-dn" tabindex="-1" aria-label="0.25減らす">▼</button>
-            </div>
-          </div>
+          ${hourInputHtml("tf-est", { value: estH })}
           <div class="tf-row">
             <div class="tf-col">
               <label class="tf-l">開始予定日</label>
@@ -265,21 +212,8 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     el.onblur = () => { const iso = parseSmartDate(el.value); if (iso) el.value = fmtDisplay(iso); };
   }
 
-  // 見積り: ".25" はフォーカスを外したら "0.25" 表示に。↑↓キー/▲▼ボタンで0.25刻み増減。
-  const estEl = $("#tf-est");
-  estEl.onblur = () => { estEl.value = estEl.value.trim().replace(/^\./, "0."); };
-  const estStep = (delta) => {
-    const cur = parseFloat(estEl.value.trim().replace(/^\./, "0."));
-    const next = Math.max(0, (isFinite(cur) ? cur : 0) + delta);
-    estEl.value = next ? String(Math.round(next * 100) / 100) : "";
-    estEl.focus();
-  };
-  estEl.onkeydown = (ev) => {
-    if (ev.key === "ArrowUp") { ev.preventDefault(); estStep(0.25); }
-    else if (ev.key === "ArrowDown") { ev.preventDefault(); estStep(-0.25); }
-  };
-  $("#tf-est-up").onclick = () => estStep(0.25);
-  $("#tf-est-dn").onclick = () => estStep(-0.25);
+  // 見積り: 共有部品（".25"補完・↑↓キー/▲▼ボタンで0.25刻み）
+  wireHourInput(wrap, "tf-est");
 
   // 先行タスク: コンボボックスで選択→チップ追加、× で除去（作業セット predSet を更新）
   const renderChips = () => {
@@ -292,25 +226,8 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
   };
   renderChips();
 
-  // 資料リンク: Enter か blur で追加、× で除去。http(s) はチップから開ける。
-  const renderDocChips = () => {
-    const el = $("#tf-doc-chips");
-    el.innerHTML = docLinks.map((u, i) => {
-      const label = esc(u.length > 46 ? u.slice(0, 44) + "…" : u);
-      const body = /^https?:\/\//i.test(u) ? `<a href="${esc(u)}" target="_blank" rel="noopener">${label}</a>` : label;
-      return `<span class="tf-chip" title="${esc(u)}">${body}<button type="button" class="tf-chip-x" data-i="${i}">×</button></span>`;
-    }).join("");
-    el.querySelectorAll(".tf-chip-x").forEach((b) => { b.onclick = () => { docLinks.splice(+b.dataset.i, 1); renderDocChips(); }; });
-  };
-  renderDocChips();
-  const docEl = $("#tf-doc");
-  const addDoc = () => {
-    const v = docEl.value.trim();
-    if (v && !docLinks.includes(v)) { docLinks.push(v); renderDocChips(); }
-    if (v) docEl.value = "";
-  };
-  docEl.onkeydown = (ev) => { if (ev.key === "Enter") { ev.preventDefault(); addDoc(); } };
-  docEl.onblur = addDoc; // 入力したまま保存を押しても拾う
+  // 資料リンク: 共有部品（Enter/blurで追加・×で除去・httpはリンク）
+  const docChips = wireDocChips(wrap, "tf-doc", docLinks);
 
   const depEl = $("#tf-dep");
   attachCombobox(depEl, {
@@ -338,7 +255,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
       const d = splitMeta(t.description);
       $("#tf-desc").value = d.text;
       $("#tf-goal").value = d.goal;
-      docLinks.length = 0; docLinks.push(...d.links); renderDocChips();
+      docLinks.length = 0; docLinks.push(...d.links); docChips.render();
     },
   });
 
