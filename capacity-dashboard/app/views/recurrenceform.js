@@ -4,7 +4,7 @@
 import { createRecurrence } from "../lib/api.js";
 import { invalidate } from "../lib/store.js";
 import { C, esc } from "../lib/ui.js";
-import { parseSmartDate, fmtDisplay, joinMeta, hourInputHtml, wireHourInput, docChipsHtml, wireDocChips } from "../lib/form.js";
+import { parseSmartDate, fmtDisplay, fmtDisplayDow, joinMeta, hourInputHtml, wireHourInput, docChipsHtml, wireDocChips, attachDatePicker } from "../lib/form.js";
 
 const BYDAY = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"]; // getUTCDay() の並び
 const DOW_JA = ["日", "月", "火", "水", "木", "金", "土"];
@@ -54,7 +54,7 @@ export function parseTimeOfDay(raw) {
 
 // パネル描画。mode: "mtg"(単発会議) | "rmtg"(定例MTG) | "rtask"(定期タスク)
 // ctx: { members, onSaved, close, $err } — $err は親モーダルのエラー表示要素。
-export function renderRecurrencePanel(el, mode, { members, onSaved, close }) {
+export function renderRecurrencePanel(el, mode, { members, onSaved, close, holidaysByDate = null }) {
   const isMtg = mode === "mtg";
   const isTask = mode === "rtask";
   const kind = isTask ? "task" : "meeting";
@@ -68,7 +68,7 @@ export function renderRecurrencePanel(el, mode, { members, onSaved, close }) {
     <div class="tf-row">
       <div class="tf-col">
         <label class="tf-l">日付 <span class="tf-req">*</span></label>
-        <input id="rf-date" class="tf-in" type="text" inputmode="numeric" autocomplete="off" value="${fmtDisplay(todayISO)}" placeholder="例: 1112">
+        <input id="rf-date" class="tf-in" type="text" inputmode="numeric" autocomplete="off" value="${fmtDisplayDow(todayISO)}" placeholder="例: 1112">
       </div>
       <div class="tf-col">
         <label class="tf-l">開始時刻 <span class="tf-hint">（任意・時刻カレンダーに表示）</span></label>
@@ -94,7 +94,7 @@ export function renderRecurrencePanel(el, mode, { members, onSaved, close }) {
     <div class="tf-row">
       <div class="tf-col">
         <label class="tf-l">開始日 <span class="tf-hint">（起点）</span></label>
-        <input id="rf-date" class="tf-in" type="text" inputmode="numeric" autocomplete="off" value="${fmtDisplay(todayISO)}" placeholder="例: 1112">
+        <input id="rf-date" class="tf-in" type="text" inputmode="numeric" autocomplete="off" value="${fmtDisplayDow(todayISO)}" placeholder="例: 1112">
       </div>
       <div class="tf-col">
         <label class="tf-l">開始時刻 <span class="tf-hint">（任意）</span></label>
@@ -188,12 +188,15 @@ export function renderRecurrencePanel(el, mode, { members, onSaved, close }) {
   }
   dateEl.onblur = () => {
     const iso = parseSmartDate(dateEl.value);
-    if (iso) dateEl.value = fmtDisplay(iso);
+    if (iso) dateEl.value = fmtDisplayDow(iso);
     syncDefaults();
     syncFreqUI();
   };
   const untilEl = $("#rf-until");
-  if (untilEl) untilEl.onblur = () => { const iso = parseSmartDate(untilEl.value); if (iso) untilEl.value = fmtDisplay(iso); };
+  if (untilEl) untilEl.onblur = () => { const iso = parseSmartDate(untilEl.value); if (iso) untilEl.value = fmtDisplayDow(iso); };
+  // カレンダーピッカー（土日祝色分け・祝日名ツールチップ）
+  attachDatePicker(dateEl, { holidaysByDate });
+  if (untilEl) attachDatePicker(untilEl, { holidaysByDate });
 
   // メンバー選択: チェック順 = sel の順序 = 持ち回りの順番
   const orderBox = $("#rf-order");

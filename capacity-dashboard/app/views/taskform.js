@@ -7,7 +7,7 @@ import { load, invalidate, TEMPLATE_WS } from "../lib/store.js";
 import { getTask, createTaskInProject, createProject, updateTask, addAssignee, removeAssignee, addRelation, removeRelation } from "../lib/api.js";
 import { C, esc } from "../lib/ui.js";
 // 共有フォーム部品（スマート日付/[資料][ゴール]規約/時間ステッパー/資料チップ）は lib/form.js に集約
-import { parseSmartDate, fmtDisplay, splitMeta, joinMeta, hourInputHtml, wireHourInput, docChipsHtml, wireDocChips } from "../lib/form.js";
+import { parseSmartDate, fmtDisplay, fmtDisplayDow, splitMeta, joinMeta, hourInputHtml, wireHourInput, docChipsHtml, wireDocChips, attachDatePicker } from "../lib/form.js";
 import { renderRecurrencePanel, ensureRecurrenceStyle } from "./recurrenceform.js";
 // 互換 re-export（既存の import 元を壊さない）
 export { parseSmartDate, fmtDisplay, splitMeta, joinMeta };
@@ -18,17 +18,22 @@ const WS_KEY = "ts.taskform.ws"; // 前回タスクを作ったワークスペ�
 const PRIO_OPTS = [[0, "なし"], [1, "低"], [2, "中"], [3, "高"], [4, "最優先"]];
 
 // task の日付フィールド（due_date/start_date/end_date）を YYYY/MM/DD 表示に（未設定=空）
-const fieldDisplay = (t, f) => (t && t[f] && !t[f].startsWith("0001") ? fmtDisplay(t[f].slice(0, 10)) : "");
+const fieldDisplay = (t, f) => (t && t[f] && !t[f].startsWith("0001") ? fmtDisplayDow(t[f].slice(0, 10)) : "");
 
 let _mounted = false;
 
 // taskId 省略=新規 / 指定=編集。保存後 onSaved() を呼ぶ。
 export async function openTaskForm({ taskId = null, onSaved } = {}) {
-  const { projects, members, tasks, templates = [], templateProject = null } = await load();
+  const { projects, members, tasks, templates = [], templateProject = null, holidaysByDate = null, aiMembers = [] } = await load();
   const task = taskId ? await getTask(taskId) : null;
   const isEdit = !!task;
   const curAssignees = (task && task.assignees) || [];
-  const curAssigneeId = curAssignees.length ? curAssignees[0].id : "";
+  // 主担当=人間の先頭 / 副担当=AI(優先) or 2人目の人間
+  const aiIds = new Set((aiMembers || []).map((m) => m.id));
+  const curHumans = curAssignees.filter((a) => !aiIds.has(a.id));
+  const curAi = curAssignees.find((a) => aiIds.has(a.id)) || null;
+  const curAssigneeId = curHumans.length ? curHumans[0].id : "";
+  const curSubId = curAi ? curAi.id : (curHumans[1] ? curHumans[1].id : "");
   // 現在の親タスク（編集時）= related_tasks.parenttask の先頭
   const curParent = (task && task.related_tasks && (task.related_tasks.parenttask || [])[0]) || null;
   const curParentId = curParent ? curParent.id : null;
@@ -47,6 +52,10 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     `<option value="${p.id}"${p.id === defWsId ? " selected" : ""}>${esc(p.title)}</option>`).join("");
   const memOpts = `<option value="">（なし）</option>` + (members || []).map((m) =>
     `<option value="${m.id}"${m.id === curAssigneeId ? " selected" : ""}>${esc(m.name || m.username)}</option>`).join("");
+  const aiLabel = (m) => `🤖 ${m.name || m.username}（AI）`;
+  const curSubLabel = curSubId
+    ? (curAi ? aiLabel(curAi) : ((curHumans[1] && (curHumans[1].name || curHumans[1].username)) || ""))
+    : "";
   const prioOpts = PRIO_OPTS.map(([v, n]) =>
     `<option value="${v}"${(task ? (task.priority || 0) : 0) === v ? " selected" : ""}>${n}</option>`).join("");
   const estH = task && task.time_estimate ? Math.round((task.time_estimate / 3600) * 100) / 100 : "";
@@ -123,6 +132,13 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
               <select id="tf-prio" class="tf-in">${prioOpts}</select>
             </div>
           </div>
+          <div id="tf-sub-row"${curAssigneeId ? "" : " hidden"}>
+            <label class="tf-l">副担当 <span class="tf-hint">（任意・名前で検索）</span></label>
+            <div class="tf-cbx">
+              <input id="tf-asg2" class="tf-in" autocomplete="off" placeholder="検索して選択" value="${esc(curSubLabel)}">
+              <div class="tf-cbx-dd" hidden></div>
+            </div>
+          </div>
           <label class="tf-l">見積り(h) <span class="tf-hint">（0.25刻み）</span></label>
           ${hourInputHtml("tf-est", { value: estH })}
           <div class="tf-row">
@@ -182,7 +198,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
         paneTask.hidden = !isTask;
         acts.hidden = !isTask;
         paneAlt.hidden = isTask;
-        if (!isTask) renderRecurrencePanel(paneAlt, mode, { members, onSaved, close });
+        if (!isTask) renderRecurrencePanel(paneAlt, mode, { members, onSaved, close, holidaysByDate });
         else $("#tf-title").focus();
       };
     });
@@ -206,10 +222,11 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     ev.preventDefault();
   };
 
-  // 日付3欄（開始/終了/期日）: フォーカスを外したら正規表示（YYYY/MM/DD）に整形
+  // 日付3欄（開始/終了/期日）: blur で曜日付き表示（YYYY/MM/DD（曜））に整形＋カレンダーピッカー（土日祝色分け）
   for (const id of ["#tf-start", "#tf-end", "#tf-due"]) {
     const el = $(id);
-    el.onblur = () => { const iso = parseSmartDate(el.value); if (iso) el.value = fmtDisplay(iso); };
+    el.onblur = () => { const iso = parseSmartDate(el.value); if (iso) el.value = fmtDisplayDow(iso); };
+    attachDatePicker(el, { holidaysByDate });
   }
 
   // 見積り: 共有部品（".25"補完・↑↓キー/▲▼ボタンで0.25刻み）
@@ -237,6 +254,35 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     },
     onPick: (item) => { if (item) { predSet.add(item.id); renderChips(); } depEl.value = ""; },
   });
+
+  // 副担当: 検索式コンボボックス（主担当を選ぶと出現）。人間メンバーは普通に候補に出る。
+  // AI（fable）は「隠しコマンド」: 名前を打ったときだけ候補に現れる（一覧には出さない）。
+  let subSel = curSubId || null;
+  let subSelLabel = curSubLabel;
+  const subEl = $("#tf-asg2");
+  const subRow = $("#tf-sub-row");
+  attachCombobox(subEl, {
+    items: (q) => {
+      const ql = q.toLowerCase();
+      const main = +($("#tf-asg").value || 0);
+      const humans = (members || []).filter((m) => m.id !== main &&
+        (!ql || (m.name || m.username || "").toLowerCase().includes(ql)));
+      const ais = ql ? (aiMembers || []).filter((m) =>
+        (m.username || "").toLowerCase().startsWith(ql) || (m.name || "").toLowerCase().startsWith(ql)) : [];
+      return [...humans.map((m) => ({ title: m.name || m.username, _id: m.id })),
+              ...ais.map((m) => ({ title: aiLabel(m), _id: m.id }))];
+    },
+    onPick: (item) => {
+      if (!item) return;
+      subSel = item._id; subSelLabel = item.title; subEl.value = item.title;
+    },
+  });
+  subEl.addEventListener("blur", () => { if (!subEl.value.trim()) { subSel = null; subSelLabel = ""; } });
+  $("#tf-asg").onchange = () => {
+    const has = !!$("#tf-asg").value;
+    subRow.hidden = !has;
+    if (!has) { subSel = null; subSelLabel = ""; subEl.value = ""; }
+  };
 
   // テンプレートから作成: 選ぶとタイトル/優先度/見積り/説明をフォームに反映（日付・担当は対象外）
   const tplEl = $("#tf-tpl");
@@ -319,6 +365,9 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     if (startISO && endISO && endISO < startISO) { err.textContent = "終了予定日は開始予定日以降にしてください。"; return; }
     const pid = +$("#tf-proj").value;
     const asg = $("#tf-asg").value ? +$("#tf-asg").value : null;
+    // 副担当: 入力欄テキストが選択時のラベルと一致している場合のみ有効（手で消したら解除）
+    const sub = subSel && $("#tf-asg2").value.trim() === subSelLabel && subSel !== asg && asg ? subSel : null;
+    const wantAsg = [asg, sub].filter(Boolean);
     const prio = +$("#tf-prio").value;
     // 見積り: ".25"→0.25 の先頭ドット補完つき自前パース（0.25h=15分 刻みを許容）
     const estVal = $("#tf-est").value.trim().replace(/^\./, "0.");
@@ -341,7 +390,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
         if (endISO) body.end_date = dt(endISO);
         const created = await createTaskInProject(pid, body);
         childId = created.id;
-        if (asg) await addAssignee(childId, asg);
+        for (const id of wantAsg) await addAssignee(childId, id);
       } else {
         const patch = {
           title, description: desc, priority: prio,
@@ -353,9 +402,10 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
         };
         await updateTask(task.id, patch);
         childId = task.id;
-        // 担当 diff（v1=単一担当）
-        for (const a of curAssignees) if (a.id !== asg) await removeAssignee(task.id, a.id);
-        if (asg && asg !== curAssigneeId) await addAssignee(task.id, asg);
+        // 担当 diff（主担当＋副担当。副担当はAI=fable も可）
+        const curIds = new Set(curAssignees.map((a) => a.id));
+        for (const a of curAssignees) if (!wantAsg.includes(a.id)) await removeAssignee(task.id, a.id);
+        for (const id of wantAsg) if (!curIds.has(id)) await addAssignee(task.id, id);
       }
 
       // 先行タスク diff（このタスクが follows する＝前に完了が必要）。

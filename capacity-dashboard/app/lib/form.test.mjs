@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseSmartDate, fmtDisplay, splitMeta, joinMeta } from "./form.js";
+import { parseSmartDate, fmtDisplay, fmtDisplayDow, splitMeta, joinMeta, monthMatrix } from "./form.js";
 
 const Y = new Date().getFullYear();
 
@@ -23,6 +23,26 @@ test("parseSmartDate: 不正値は null", () => {
 
 test("fmtDisplay: ISO → YYYY/MM/DD", () => {
   assert.equal(fmtDisplay("2026-06-12"), "2026/06/12");
+});
+
+test("fmtDisplayDow: 曜日付き表示 ⇄ parseSmartDate で読み戻せる", () => {
+  assert.equal(fmtDisplayDow("2026-06-15"), "2026/06/15（月）");
+  assert.equal(fmtDisplayDow("2026-06-14"), "2026/06/14（日）");
+  assert.equal(parseSmartDate("2026/06/15（月）"), "2026-06-15");
+  assert.equal(parseSmartDate("2026/06/15(月)"), "2026-06-15"); // 半角括弧も許容
+});
+
+test("monthMatrix: 日曜始まり6週・月内フラグ", () => {
+  const m = monthMatrix(2026, 6); // 2026年6月: 6/1=月曜
+  assert.equal(m.length, 6);
+  assert.equal(m[0][0].iso, "2026-05-31"); // 先頭=直前の日曜
+  assert.equal(m[0][0].inMonth, false);
+  assert.equal(m[0][1].iso, "2026-06-01");
+  assert.equal(m[0][1].inMonth, true);
+  // 全行7日・6/30 が月内最後
+  assert.ok(m.every((w) => w.length === 7));
+  assert.ok(m.flat().some((c) => c.iso === "2026-06-30" && c.inMonth));
+  assert.ok(!m.flat().some((c) => c.iso === "2026-07-01" && c.inMonth));
 });
 
 test("splitMeta/joinMeta: [資料]・[ゴール] の往復", () => {

@@ -16,7 +16,8 @@ function mkDate(y, mo, da) {
 }
 export function parseSmartDate(raw) {
   if (raw == null) return null;
-  const s = String(raw).trim();
+  // 末尾の曜日表示「（月）/(月)」は表示用サフィックスなので無視してパース
+  const s = String(raw).trim().replace(/[（(][日月火水木金土][)）]\s*$/, "").trim();
   if (!s) return null;
   const Y = new Date().getFullYear();
   let m = s.match(/^(\d{4})\D+(\d{1,2})\D+(\d{1,2})$/); // 2026/11/12・2026-11-12
@@ -31,6 +32,9 @@ export function parseSmartDate(raw) {
   return null;
 }
 export const fmtDisplay = (iso) => { const [y, mo, da] = iso.split("-"); return `${y}/${mo}/${da}`; };
+export const DOW_JA = ["日", "月", "火", "水", "木", "金", "土"];
+// 入力欄の表示用: 曜日サフィックス付き "2026/06/15（月）"（parseSmartDate はこの形式を読み戻せる）
+export const fmtDisplayDow = (iso) => `${fmtDisplay(iso)}（${DOW_JA[new Date(iso + "T00:00:00Z").getUTCDay()]}）`;
 
 // ── "[資料]"/"[ゴール]" 埋め込み規約（description/note は本フォーム群のみが読み書き） ──
 const DOC_LINE_RE = /^\[資料\]\s*(.+)$/;
@@ -79,6 +83,123 @@ export function wireHourInput(root, id, { step = 0.25, min = 0 } = {}) {
   root.querySelector(`#${id}-up`).onclick = () => stepBy(step);
   root.querySelector(`#${id}-dn`).onclick = () => stepBy(-step);
   return input;
+}
+
+// ── 日付ピッカー（土日祝を色分け・スマート入力と併用） ─────────────────
+// 月グリッド: その月の日曜始まり6週分の [{iso, inMonth}] 配列（純関数・テスト対象）。
+export function monthMatrix(year, month1) {
+  const first = new Date(Date.UTC(year, month1 - 1, 1));
+  const start = new Date(first);
+  start.setUTCDate(1 - first.getUTCDay()); // 直前の日曜へ
+  const weeks = [];
+  for (let w = 0; w < 6; w++) {
+    const row = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(start);
+      d.setUTCDate(start.getUTCDate() + w * 7 + i);
+      row.push({ iso: d.toISOString().slice(0, 10), inMonth: d.getUTCMonth() === month1 - 1 });
+    }
+    weeks.push(row);
+  }
+  return weeks;
+}
+
+// input にカレンダーポップオーバーを付ける。フォーカスで開く・日クリックで選択（曜日付き表示に整形して
+// blur イベントを発火＝既存の整形/曜日追従フックがそのまま動く）。土曜=青・日曜/祝日=赤、祝日は名前ツールチップ。
+// holidaysByDate: Map<"YYYY-MM-DD", 祝日名>（無ければ週末色のみ）。
+export function attachDatePicker(input, { holidaysByDate = null } = {}) {
+  ensureDatePickerStyle();
+  const wrap = input.parentElement;
+  if (getComputedStyle(wrap).position === "static") wrap.style.position = "relative";
+  const pop = document.createElement("div");
+  pop.className = "tf-dp";
+  pop.hidden = true;
+  wrap.appendChild(pop);
+
+  let view = null; // {y, m}（表示中の月）
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const holName = (iso) => (holidaysByDate && (holidaysByDate.get ? holidaysByDate.get(iso) : holidaysByDate[iso])) || null;
+
+  const renderCal = () => {
+    const sel = parseSmartDate(input.value);
+    if (!view) {
+      const base = sel || todayIso;
+      view = { y: +base.slice(0, 4), m: +base.slice(5, 7) };
+    }
+    const rows = monthMatrix(view.y, view.m).map((week) => week.map((c) => {
+      const dow = new Date(c.iso + "T00:00:00Z").getUTCDay();
+      const hol = holName(c.iso);
+      const cls = ["tf-dp-d"];
+      if (!c.inMonth) cls.push("out");
+      if (dow === 6) cls.push("sat");
+      if (dow === 0 || hol) cls.push("sun");
+      if (c.iso === todayIso) cls.push("today");
+      if (sel && c.iso === sel) cls.push("sel");
+      return `<button type="button" class="${cls.join(" ")}" data-iso="${c.iso}"${hol ? ` title="${esc(hol)}"` : ""}>${+c.iso.slice(8, 10)}${hol ? `<i></i>` : ""}</button>`;
+    }).join("")).join("");
+    pop.innerHTML = `
+      <div class="tf-dp-h">
+        <button type="button" class="tf-dp-nav" data-d="-1">‹</button>
+        <span>${view.y}年${view.m}月</span>
+        <button type="button" class="tf-dp-nav" data-d="1">›</button>
+      </div>
+      <div class="tf-dp-w">${DOW_JA.map((n, i) => `<span class="${i === 6 ? "sat" : i === 0 ? "sun" : ""}">${n}</span>`).join("")}</div>
+      <div class="tf-dp-g">${rows}</div>`;
+    pop.querySelectorAll(".tf-dp-nav").forEach((b) => {
+      b.onmousedown = (ev) => ev.preventDefault(); // blur させない
+      b.onclick = () => {
+        let m = view.m + (+b.dataset.d), y = view.y;
+        if (m < 1) { m = 12; y--; } if (m > 12) { m = 1; y++; }
+        view = { y, m };
+        renderCal();
+      };
+    });
+    pop.querySelectorAll(".tf-dp-d").forEach((b) => {
+      b.onmousedown = (ev) => ev.preventDefault();
+      b.onclick = () => {
+        input.value = fmtDisplayDow(b.dataset.iso);
+        close();
+        input.dispatchEvent(new Event("blur")); // 既存の onblur 整形/曜日追従を発火（フォーカスは移動しない）
+      };
+    });
+  };
+  const open = () => {
+    // 親が .tf-col とは限らない（入力欄の直親に追従して入力欄の直下に出す）
+    pop.style.top = (input.offsetTop + input.offsetHeight + 4) + "px";
+    pop.style.left = input.offsetLeft + "px";
+    pop.hidden = false;
+    renderCal();
+  };
+  const close = () => { pop.hidden = true; view = null; };
+  input.addEventListener("focus", open);
+  input.addEventListener("click", open); // フォーカス済みの欄を再クリック（Escで閉じた後など）でも開く
+  input.addEventListener("input", () => { if (!pop.hidden) renderCal(); }); // タイプ中も選択ハイライト追従
+  input.addEventListener("blur", () => setTimeout(close, 120));
+  input.addEventListener("keydown", (ev) => { if (ev.key === "Escape") close(); });
+}
+
+let _dpStyle = false;
+function ensureDatePickerStyle() {
+  if (_dpStyle) return; _dpStyle = true;
+  const s = document.createElement("style");
+  s.textContent = `
+  .tf-dp{position:absolute;z-index:6;background:#fff;border:1px solid #e6e9ee;border-radius:12px;box-shadow:0 10px 30px rgba(20,30,50,.16);padding:10px;width:238px}
+  .tf-dp-h{display:flex;align-items:center;justify-content:space-between;font-size:13px;font-weight:700;margin-bottom:6px}
+  .tf-dp-nav{border:0;background:transparent;font-size:16px;cursor:pointer;color:#6b7480;padding:2px 9px;border-radius:7px}
+  .tf-dp-nav:hover{background:#eef4ff;color:#3a86ff}
+  .tf-dp-w{display:grid;grid-template-columns:repeat(7,1fr);font-size:10.5px;color:#6b7480;text-align:center;margin-bottom:2px}
+  .tf-dp-w .sat{color:#3a86ff}.tf-dp-w .sun{color:#e5484d}
+  .tf-dp-g{display:grid;grid-template-columns:repeat(7,1fr);gap:1px}
+  .tf-dp-d{position:relative;border:0;background:transparent;font:inherit;font-size:12px;padding:5px 0;border-radius:7px;cursor:pointer;color:#1d2430;text-align:center}
+  .tf-dp-d:hover{background:#eef4ff}
+  .tf-dp-d.out{color:#c3c9d2}
+  .tf-dp-d.sat{color:#3a86ff}.tf-dp-d.sat.out{color:#b9d4ff}
+  .tf-dp-d.sun{color:#e5484d}.tf-dp-d.sun.out{color:#f3bfc1}
+  .tf-dp-d.today{outline:1px solid #3a86ff;outline-offset:-1px}
+  .tf-dp-d.sel{background:#3a86ff;color:#fff}
+  .tf-dp-d i{position:absolute;left:50%;bottom:1px;transform:translateX(-50%);width:4px;height:4px;border-radius:50%;background:#e5484d}
+  .tf-dp-d.sel i{background:#fff}`;
+  document.head.appendChild(s);
 }
 
 // ── 資料リンクのチップ入力（links 配列を直接編集する） ─────────────────

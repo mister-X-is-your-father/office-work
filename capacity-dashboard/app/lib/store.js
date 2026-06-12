@@ -6,6 +6,11 @@ import { dateOnly } from "./capacity.js";
 // タスク雛形を保存する専用ワークスペース名（taskform のテンプレート機能が使用）
 export const TEMPLATE_WS = "テンプレート";
 
+// AI 担当アカウント（副担当として選択可）。人間のキャパ計算・メンバー列からは除外する。
+// 実行系: taskstation-fable systemd タイマーが fable 担当タスクを巡回し Claude Code(MAXプラン) で提案コメント。
+export const AI_USERNAMES = new Set(["fable"]);
+export const isAiUser = (u) => !!u && AI_USERNAMES.has(u.username);
+
 let cache = null;
 
 export async function load(force = false) {
@@ -29,19 +34,24 @@ export async function load(force = false) {
     if (!dir.has(u.id)) dir.set(u.id, { id: u.id, username: u.username, name: u.name || u.username });
   }
   // メンバー = タスク assignees ∪ 定期 assignee_ids ∪ 休暇対象者（仕事/予定/休みを持つ人）。
+  // AI 担当（fable）は人間のキャパに混ぜない＝members から除外し aiMembers として別出し。
   const mmap = new Map();
   for (const t of tasks || []) for (const a of t.assignees || []) {
-    if (!mmap.has(a.id)) mmap.set(a.id, { id: a.id, username: a.username, name: a.name || a.username });
+    if (!isAiUser(a) && !mmap.has(a.id)) mmap.set(a.id, { id: a.id, username: a.username, name: a.name || a.username });
   }
   const addId = (id) => {
     if (!id || mmap.has(id)) return;
-    mmap.set(id, dir.get(id) || { id, username: `user${id}`, name: `user${id}` });
+    const u = dir.get(id);
+    if (isAiUser(u)) return;
+    mmap.set(id, u || { id, username: `user${id}`, name: `user${id}` });
   };
   for (const r of recurrences || []) for (const id of r.assignee_ids || []) addId(id);
   for (const u of unavailability || []) addId(u.user_id);
+  const aiMembers = [...dir.values()].filter(isAiUser);
 
   // 祝日 Set / 休暇 Map（capacityOn 用）
   const holidaysSet = new Set((holidays || []).map((h) => dateOnly(h.date)));
+  const holidaysByDate = new Map((holidays || []).map((h) => [dateOnly(h.date), h.name])); // 日付→祝日名（ピッカー表示用）
   const unavailabilityByMember = new Map();
   for (const u of unavailability || []) {
     const arr = unavailabilityByMember.get(u.user_id) || [];
@@ -55,10 +65,10 @@ export async function load(force = false) {
     plannedTasks.map((t) => vik.getPlans(t.id).then((p) => [t.id, p || []]).catch(() => [t.id, []]))
   );
   cache = {
-    tasks: tasks || [], projects: projects || [], members: [...mmap.values()],
+    tasks: tasks || [], projects: projects || [], members: [...mmap.values()], aiMembers,
     templates, templateProject,
     plansByTask: new Map(planPairs),
-    recurrences: recurrences || [], holidaysSet, unavailabilityByMember,
+    recurrences: recurrences || [], holidaysSet, holidaysByDate, unavailabilityByMember,
   };
   return cache;
 }
