@@ -19,13 +19,14 @@ let cache = null;
 
 export async function load(force = false) {
   if (cache && !force) return cache;
-  const [tasksAll, projects, recurrences, holidays, unavailability, me, settingsRaw] = await Promise.all([
+  const [tasksAll, projects, recurrences, holidays, unavailability, me, settingsRaw, labels] = await Promise.all([
     vik.getTasks(), vik.getProjects(),
     vik.getRecurrences().catch(() => []),
     vik.getHolidays().catch(() => []),
     vik.getUnavailability().catch(() => []),
     vik.whoami().catch(() => null),
     getSettings().catch(() => null),
+    vik.getLabels().catch(() => []), // 分類（ラベル）の選択肢用
   ]);
   const st = (settingsRaw && settingsRaw.settings) || {};
   const settings = {
@@ -82,6 +83,7 @@ export async function load(force = false) {
   );
   cache = {
     tasks: tasks || [], projects: projects || [], members: [...mmap.values()], aiMembers, me, settings,
+    labels: labels || [],
     templates, templateProject,
     plansByTask: new Map(planPairs),
     recurrences: recurrences || [], holidaysSet, holidaysByDate, unavailabilityByMember,

@@ -1,12 +1,12 @@
 // タスク一覧（表・mock60 相当）。全タスクをソート/絞り込み可能な表で。
 import { load, projectName, isAiUser } from "../lib/store.js";
-import { PRIO, prioBucket, kindOf, isReviewTask } from "../lib/kinds.js";
+import { PRIO, prioBucket, kindOf, isReviewTask, categoryLabels, categoryColor } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
 
 const HOUR = 3600;
 let SORT = { key: "due", dir: 1 };       // key, dir(1=asc,-1=desc)
-let FILTER = { proj: "", hideDone: true };
+let FILTER = { proj: "", cat: "", hideDone: true };
 
 const stateOf = (t) => (t.done ? "完了" : ((t.percent_done || 0) > 0 ? "進行中" : "未着手"));
 const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(0, 10) : "");
@@ -22,12 +22,13 @@ export async function render(root) {
     fable: execOk && !t.done && (t.assignees || []).some((a) => isAiUser(a))
       && ((t.created_by || {}).id || 0) === ((me && me.id) || -1), // 作成者本人のみ▶表示
     proj: projectName(projects, t.project_id), pid: t.project_id,
-    review: isReviewTask(t), prio: prioBucket(t.priority),
+    review: isReviewTask(t), prio: prioBucket(t.priority), cat: categoryLabels(t)[0] || null,
     due: dueISO(t), est: (t.time_estimate || 0) / HOUR, pct: t.percent_done || 0,
     done: !!t.done, state: stateOf(t),
   }));
   if (FILTER.hideDone) rows = rows.filter((r) => !r.done);
   if (FILTER.proj) rows = rows.filter((r) => String(r.pid) === FILTER.proj);
+  if (FILTER.cat) rows = rows.filter((r) => (r.cat ? r.cat.title : "") === FILTER.cat);
 
   const cmp = {
     title: (a, b) => a.title.localeCompare(b.title, "ja"),
@@ -37,11 +38,19 @@ export async function render(root) {
     est: (a, b) => a.est - b.est,
     pct: (a, b) => a.pct - b.pct,
     state: (a, b) => a.state.localeCompare(b.state, "ja"),
+    cat: (a, b) => ((a.cat && a.cat.title) || "").localeCompare((b.cat && b.cat.title) || "", "ja"),
   }[SORT.key] || (() => 0);
   rows.sort((a, b) => cmp(a, b) * SORT.dir);
 
   const projOpts = `<option value="">全ワークスペース</option>` +
     (projects || []).map((p) => `<option value="${p.id}"${String(p.id) === FILTER.proj ? " selected" : ""}>${esc(p.title)}</option>`).join("");
+  // 分類フィルタ（実際に使われている分類のみ提示）
+  const usedCats = [...new Map(rows.concat([]).map((r) => r.cat).filter(Boolean).map((c) => [c.title, c])).values()]
+    .sort((a, b) => a.title.localeCompare(b.title, "ja"));
+  const allCats = FILTER.cat && !usedCats.some((c) => c.title === FILTER.cat)
+    ? usedCats.concat([{ title: FILTER.cat, id: 0 }]) : usedCats; // フィルタ中の分類が0件になっても選択肢を残す
+  const catOpts = `<option value="">全分類</option>` +
+    allCats.map((c) => `<option value="${esc(c.title)}"${c.title === FILTER.cat ? " selected" : ""}>${esc(c.title)}</option>`).join("");
 
   root.innerHTML = `
     <style>${css()}</style>
@@ -49,14 +58,16 @@ export async function render(root) {
     <div class="tb-tools">
       <button id="tb-add" class="tb-add">タスク追加</button>
       <select id="tb-proj">${projOpts}</select>
+      <select id="tb-cat">${catOpts}</select>
       <label class="tb-chk"><input type="checkbox" id="tb-hd" ${FILTER.hideDone ? "checked" : ""}> 完了を隠す</label>
     </div>
     <div class="card tb-wrap"><table class="tb">
       <thead><tr>${cols().map((c) => th(c)).join("")}</tr></thead>
-      <tbody>${rows.length ? rows.map((r, i) => rowHtml(r, members, i)).join("") : `<tr><td colspan="8" class="tb-empty">該当なし</td></tr>`}</tbody>
+      <tbody>${rows.length ? rows.map((r, i) => rowHtml(r, members, i)).join("") : `<tr><td colspan="9" class="tb-empty">該当なし</td></tr>`}</tbody>
     </table></div>`;
 
   root.querySelector("#tb-proj").onchange = (e) => { FILTER.proj = e.target.value; render(root); };
+  root.querySelector("#tb-cat").onchange = (e) => { FILTER.cat = e.target.value; render(root); };
   root.querySelector("#tb-hd").onchange = (e) => { FILTER.hideDone = e.target.checked; render(root); };
   root.querySelector("#tb-add").onclick = () => openTaskForm({ onSaved: () => render(root) });
   root.querySelectorAll("th[data-k]").forEach((h) => {
@@ -82,6 +93,7 @@ export async function render(root) {
 
 const cols = () => [
   { k: "title", label: "タスク" }, { k: "who", label: "担当" }, { k: null, label: "種別" },
+  { k: "cat", label: "分類" },
   { k: "prio", label: "優先度" }, { k: "due", label: "期日" }, { k: "est", label: "見積" },
   { k: "pct", label: "進捗" }, { k: "state", label: "状態" },
 ];
@@ -93,6 +105,7 @@ function rowHtml(r, members, i) {
   const wn = r.who ? (r.who.name || r.who.username) : "—";
   const ava = r.who ? `<span class="tb-ava" style="background:${member_color(r.who.id)}">${esc((wn[0] || "?"))}</span>` : "";
   const kind = r.review ? `<span class="tb-k review">レビュー</span>` : `<span class="tb-k">タスク</span>`;
+  const cat = r.cat ? `<span class="tb-cat" style="color:${categoryColor(r.cat)};border-color:${categoryColor(r.cat)}40">${esc(r.cat.title)}</span>` : `<span class="tb-cat none">—</span>`;
   const pc = PRIO[r.prio];
   const prio = `<span class="tb-prio"><i style="background:${pc.c}"></i>${pc.n}</span>`;
   const dueCls = r.due && r.due < todayISO() && !r.done ? "over" : "";
@@ -101,6 +114,7 @@ function rowHtml(r, members, i) {
     <td class="tb-title">${esc(r.title)}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${r.t.id}" data-title="${esc(r.title)}" title="Fableに実行させる">▶</button>` : ""}<div class="tb-sub">${esc(r.proj)}</div></td>
     <td>${ava}${esc(wn)}</td>
     <td>${kind}</td>
+    <td>${cat}</td>
     <td>${prio}</td>
     <td class="${dueCls}">${r.due ? r.due.slice(5).replace("-", "/") : "—"}</td>
     <td class="tb-num">${r.est ? fmtH(r.est) : "—"}</td>
@@ -132,6 +146,8 @@ function css() {
   .tb-ava{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;color:#fff;font-size:10px;font-weight:700;margin-right:6px;vertical-align:-5px}
   .tb-k{font-size:10.5px;color:${C.muted};border:1px solid ${C.line};border-radius:5px;padding:1px 6px}
   .tb-k.review{color:${C.fill};border-color:#cfe0ff}
+  .tb-cat{font-size:10.5px;border:1px solid;border-radius:5px;padding:1px 7px;white-space:nowrap;font-weight:600}
+  .tb-cat.none{color:${C.muted};border:0}
   .tb-prio{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}.tb-prio i{width:9px;height:9px;border-radius:3px;display:inline-block}
   .tb-num{font-variant-numeric:tabular-nums;white-space:nowrap}
   td.over{color:${C.over};font-weight:600}

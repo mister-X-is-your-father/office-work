@@ -4,7 +4,8 @@
 // プロジェクト(UI呼称)=親タスク。related_tasks.subtask（親に subtask 関連を張る・名前入力で親を新規作成も可）。
 // 階層: ワークスペース(=API project) ＞ プロジェクト(=親タスク) ＞ タスク。
 import { load, invalidate, TEMPLATE_WS } from "../lib/store.js";
-import { getTask, createTaskInProject, createProject, updateTask, addAssignee, removeAssignee, addRelation, removeRelation } from "../lib/api.js";
+import { getTask, createTaskInProject, createProject, updateTask, addAssignee, removeAssignee, addRelation, removeRelation, createLabel, addTaskLabel, removeTaskLabel } from "../lib/api.js";
+import { categoryLabels, REVIEW_LABEL } from "../lib/kinds.js";
 import { C, esc } from "../lib/ui.js";
 // 共有フォーム部品（スマート日付/[資料][ゴール]規約/時間ステッパー/資料チップ）は lib/form.js に集約
 import { parseSmartDate, fmtDisplay, fmtDisplayDow, splitMeta, joinMeta, hourInputHtml, wireHourInput, docChipsHtml, wireDocChips, attachDatePicker } from "../lib/form.js";
@@ -24,7 +25,7 @@ let _mounted = false;
 
 // taskId 省略=新規 / 指定=編集。保存後 onSaved() を呼ぶ。
 export async function openTaskForm({ taskId = null, onSaved } = {}) {
-  const { projects, members, tasks, templates = [], templateProject = null, holidaysByDate = null, aiMembers = [], me = null } = await load();
+  const { projects, members, tasks, templates = [], templateProject = null, holidaysByDate = null, aiMembers = [], me = null, labels = [] } = await load();
   const task = taskId ? await getTask(taskId) : null;
   const isEdit = !!task;
   const curAssignees = (task && task.assignees) || [];
@@ -66,6 +67,10 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
   const parentCands = candidates.filter((t) => ((((t.related_tasks || {}).subtask) || []).length > 0));
   const parentIds = new Set(parentCands.map((t) => t.id));
   const curParentTitle = curParent ? curParent.title : "";
+  // 分類 = レビュー以外のラベル（単一運用）。レビューは種別(kind)の別軸なので分類とは独立に共存できる。
+  const curCat = task ? (categoryLabels(task)[0] || null) : null;
+  const curCatTitle = curCat ? curCat.title : "";
+  const catChoices = (labels || []).filter((l) => l.title !== REVIEW_LABEL);
   // 先行タスク（依存元）= related_tasks.follows（このタスクが follows する＝その前に完了が必要）
   const curPreds = (task && task.related_tasks && (task.related_tasks.follows || [])) || [];
   const taskById = new Map((tasks || []).map((t) => [t.id, t]));
@@ -136,6 +141,11 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
               <label class="tf-l">優先度</label>
               <select id="tf-prio" class="tf-in">${prioOpts}</select>
             </div>
+          </div>
+          <label class="tf-l">分類 <span class="tf-hint">（任意・無い名前は新規作成）</span></label>
+          <div class="tf-cbx">
+            <input id="tf-cat" class="tf-in" autocomplete="off" value="${esc(curCatTitle)}" placeholder="例: エンジニア依頼 / 定常業務">
+            <div class="tf-cbx-dd" hidden></div>
           </div>
           <div id="tf-sub-row"${curAssigneeId ? "" : " hidden"}>
             <label class="tf-l">副担当 <span class="tf-hint">（任意・名前で検索）</span></label>
@@ -385,6 +395,17 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     onPick: (item, create) => { parentEl.value = item ? item.title : create; },
   });
 
+  // 分類: 既存ラベル（レビュー除く）から選択 or 新規作成。空=分類なし。
+  const catEl = $("#tf-cat");
+  attachCombobox(catEl, {
+    items: (q) => {
+      const ql = q.toLowerCase();
+      return ql ? catChoices.filter((l) => l.title.toLowerCase().includes(ql)) : catChoices;
+    },
+    createText: (q) => `＋ 分類「${q}」を新規作成`,
+    onPick: (item, create) => { catEl.value = item ? item.title : create; },
+  });
+
   $("#tf-save").onclick = async () => {
     const err = $("#tf-err");
     err.className = "tf-err";
@@ -468,6 +489,17 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
       if (parentId !== curParentId) {
         if (curParentId) await removeRelation(curParentId, "subtask", childId);
         if (parentId) await addRelation(parentId, childId, "subtask");
+      }
+
+      // 分類（ラベル・単一）の diff。レビューラベルは kind 用なので一切触らない。
+      const catRaw = $("#tf-cat").value.trim();
+      if ((curCat ? curCat.title : "") !== catRaw) {
+        if (curCat) await removeTaskLabel(childId, curCat.id);
+        if (catRaw && catRaw !== REVIEW_LABEL) {
+          const found = catChoices.find((l) => l.title === catRaw);
+          const label = found || await createLabel(catRaw);
+          await addTaskLabel(childId, label.id);
+        }
       }
 
       if (!isEdit) try { localStorage.setItem(WS_KEY, String(pid)); } catch {}

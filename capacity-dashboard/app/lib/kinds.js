@@ -5,6 +5,12 @@
 export const REVIEW_LABEL = "レビュー";
 export const isReviewTask = (t) => (t.labels || []).some((l) => (l.title || "") === REVIEW_LABEL);
 
+// 分類 = ユーザー定義のラベル（例: エンジニア依頼/定常業務）。kind 軸とは独立。
+// 「レビュー」ラベルだけは kind 判定（上）に使う予約語なので分類からは除外する。
+export const categoryLabels = (t) => (t.labels || []).filter((l) => (l.title || "") !== REVIEW_LABEL);
+const CAT_PAL = ["#3a86ff", "#2fa66b", "#b657d6", "#e5772d", "#0ea5e9", "#f5a623", "#ef476f", "#14b8a6"];
+export const categoryColor = (label) => CAT_PAL[(label && label.id ? label.id : 0) % CAT_PAL.length];
+
 // kind: meeting | recurring | review | task
 // pattern はクロックの模様（ベタ/斜線/ドット/リング）。並び順＝定義順（会議→定例→レビュー→タスク）。
 export const KINDS = {

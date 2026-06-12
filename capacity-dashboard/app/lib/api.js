@@ -103,6 +103,7 @@ export async function createTaskInProject(projectId, body) { return req(`/projec
 export async function getLabels() { return req("/labels"); }
 export async function createLabel(title) { return req("/labels", { method: "PUT", body: { title } }); }
 export async function addTaskLabel(taskId, labelId) { return req(`/tasks/${taskId}/labels`, { method: "PUT", body: { label_id: labelId } }); }
+export async function removeTaskLabel(taskId, labelId) { return req(`/tasks/${taskId}/labels/${labelId}`, { method: "DELETE" }); }
 export async function addAssignee(taskId, userId) { return req(`/tasks/${taskId}/assignees`, { method: "PUT", body: { user_id: userId } }); }
 export async function removeAssignee(taskId, userId) { return req(`/tasks/${taskId}/assignees/${userId}`, { method: "DELETE" }); }
 export async function addRelation(taskId, otherTaskId, kind = "related") { return req(`/tasks/${taskId}/relations`, { method: "PUT", body: { other_task_id: otherTaskId, relation_kind: kind } }); }
