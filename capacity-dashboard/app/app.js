@@ -98,6 +98,11 @@ function shell() {
   import("./views/searchpal.js").then(({ mountSearch }) => {
     mountSearch(document.querySelector(".topbar"));
   }).catch(() => {});
+  // リマインダー通知（個人設定でON時のみ発火。多重起動はフラグで防止）
+  if (!window.__tsNotify) {
+    window.__tsNotify = true;
+    import("./lib/notify.js").then(({ startNotifications }) => startNotifications(() => store.load())).catch(() => {});
+  }
   // Fable（隠し要素）: 実行サービスが許可したユーザーのときだけナビに出現
   import("./lib/exec.js").then(({ execMe }) => execMe()).then((uid) => {
     if (!uid) return;

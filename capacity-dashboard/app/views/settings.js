@@ -1,28 +1,56 @@
-// 設定（チーム共有・mock17 相当の実装版）。保存先は taskstation-exec（許可ユーザーのみ書き込み可）。
-// ここで 8h/対象WS のハードコードが解消される（HANDOFF §8 の懸案）。
+// 設定（チーム共有＋個人設定）。チーム共有の保存先は taskstation-exec（許可ユーザーのみ書き込み可）。
+// 個人設定（リマインダー通知）は localStorage＝exec が落ちていても使える。
 import { load, invalidate, TEMPLATE_WS } from "../lib/store.js";
 import { getSettings, saveSettings } from "../lib/exec.js";
+import { notifyPrefs, saveNotifyPrefs } from "../lib/notify.js";
 import { C, esc } from "../lib/ui.js";
 
 export async function render(root) {
-  const { projects, templateProject } = await load();
-  let cur = null, canEdit = false;
+  const { projects, templateProject, me } = await load();
+  let cur = null, canEdit = false, execDown = false;
   try {
     const d = await getSettings();
     cur = d.settings; canEdit = !!d.can_edit;
   } catch {
-    root.innerHTML = `<h1 class="vtitle">設定</h1><div class="card"><div class="loading">設定サービス（taskstation-exec）に接続できません。既定値（8h/平日・全WS集計）で動作中です。</div></div>`;
-    return;
+    execDown = true;
+    cur = { cap_hours: 8, cal_start: 8, cal_end: 20, excluded_project_ids: [] };
   }
+  // 個人設定: リマインダー通知（自分の予定/会議のN分前・期日タスクは営業開始に）
+  const np = notifyPrefs((me && me.id) || 0);
+  const leadOpts = [1, 5, 10, 15, 30].map((n) =>
+    `<option value="${n}"${n === np.lead ? " selected" : ""}>${n}分前</option>`).join("");
+  const personalCard = `
+      <div class="card st-card">
+        <div class="st-h">リマインダー通知 <span class="st-hint">（個人設定・この端末のブラウザ）</span></div>
+        <label class="st-ws"><input type="checkbox" id="st-ntf" ${np.on ? "checked" : ""}> 通知を有効にする</label>
+        <label class="st-l">タイミング
+          <select id="st-ntf-lead" class="st-in">${leadOpts}</select></label>
+        <div class="st-hint">時刻カレンダーの自分の予定・出席する会議/定例の開始前に通知。期日が今日のタスクは営業開始時刻にまとめて通知。アプリを開いている間に動作します。</div>
+        <div class="st-hint" id="st-ntf-msg" style="margin-top:6px"></div>
+      </div>`;
+
   const wsList = (projects || []).filter((p) => !templateProject || p.id !== templateProject.id);
   const excluded = new Set(cur.excluded_project_ids || []);
   const hourOpts = (sel) => Array.from({ length: 24 }, (_, h) =>
     `<option value="${h}"${h === sel ? " selected" : ""}>${h}:00</option>`).join("");
 
+  if (execDown) {
+    root.innerHTML = `
+      <style>${css()}</style>
+      <h1 class="vtitle">設定</h1>
+      <div class="st-grid">${personalCard}
+        <div class="card st-card"><div class="st-h">チーム共有設定</div>
+          <div class="st-hint">設定サービス（taskstation-exec）に接続できません。既定値（8h/平日・全WS集計）で動作中です。</div></div>
+      </div>`;
+    wireNotify(root, me);
+    return;
+  }
+
   root.innerHTML = `
     <style>${css()}</style>
     <h1 class="vtitle">設定 <small>チーム共有 ${canEdit ? "" : "・閲覧のみ（変更は管理者）"}</small></h1>
     <div class="st-grid">
+      ${personalCard}
       <div class="card st-card">
         <div class="st-h">容量</div>
         <label class="st-l">1人あたりの容量（h/日） <span class="st-hint">（空き・負荷・超過の基準。平日のみ・週末/祝日/休暇は0）</span></label>
@@ -50,6 +78,8 @@ export async function render(root) {
       ${canEdit ? `<button id="st-save" class="st-save">保存</button>` : ""}
     </div>`;
 
+  wireNotify(root, me);
+
   const btn = root.querySelector("#st-save");
   if (btn) btn.onclick = async () => {
     const msg = root.querySelector("#st-msg");
@@ -68,6 +98,26 @@ export async function render(root) {
     }
     btn.disabled = false;
   };
+}
+
+// 通知の個人設定: 変更は即保存（localStorage）。ONにした瞬間にブラウザ権限を要求（要ユーザー操作）。
+function wireNotify(root, me) {
+  const uid = (me && me.id) || 0;
+  const cb = root.querySelector("#st-ntf");
+  const lead = root.querySelector("#st-ntf-lead");
+  const msg = root.querySelector("#st-ntf-msg");
+  const save = () => saveNotifyPrefs(uid, { on: cb.checked, lead: +lead.value });
+  cb.onchange = async () => {
+    save();
+    if (!cb.checked) { msg.textContent = ""; return; }
+    if (typeof Notification === "undefined") { msg.textContent = "このブラウザはデスクトップ通知に未対応です（アプリ内トーストで通知します）。"; return; }
+    let perm = Notification.permission;
+    if (perm === "default") { try { perm = await Notification.requestPermission(); } catch { perm = "denied"; } }
+    msg.textContent = perm === "granted"
+      ? "✓ デスクトップ通知が有効です。"
+      : "ブラウザ通知が許可されていません（アプリ内トーストで通知します）。";
+  };
+  lead.onchange = save;
 }
 
 function css() {
