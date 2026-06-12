@@ -6,6 +6,7 @@ const ROUTES = {
   home:     { label: "ホーム",        grp: "総合",   mod: "./views/home.js" },
   today:    { label: "稼働予定",      grp: "本日",   mod: "./views/today.js" },
   triage:   { label: "トリアージ",    grp: "本日",   mod: "./views/triage.js" },
+  quad:     { label: "四象限",        grp: "本日",   mod: "./views/quad.js" },
   review:   { label: "レビュー",      grp: "本日",   mod: "./views/review.js" },
   availability:{ label: "残容量",     grp: "本日",   mod: "./views/availability.js" },
   calendar: { label: "時刻カレンダー",grp: "本日",   mod: "./views/calendar.js" },
@@ -23,7 +24,7 @@ const ROUTES = {
   // 隠しルート: ORDER に載せない＝通常ユーザーのナビには出ない。許可者のみ shell() がリンクを追加。
   fable:    { label: "🤖 Fable",      grp: "AI",     mod: "./views/fable.js" },
 };
-const ORDER = ["home", "today", "triage", "review", "availability", "calendar", "week", "planner", "freefinder", "weekstack", "estactual", "kanban", "list", "outline", "depgraph", "gantt", "settings"];
+const ORDER = ["home", "today", "triage", "quad", "review", "availability", "calendar", "week", "planner", "freefinder", "weekstack", "estactual", "kanban", "list", "outline", "depgraph", "gantt", "settings"];
 
 const app = document.getElementById("app");
 
