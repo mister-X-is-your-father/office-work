@@ -8,6 +8,7 @@ import { getTask, createTaskInProject, createProject, updateTask, addAssignee, r
 import { C, esc } from "../lib/ui.js";
 
 const ZERO_DATE = "0001-01-01T00:00:00Z"; // Vikunja の「未設定」センチネル
+const WS_KEY = "ts.taskform.ws"; // 前回タスクを作ったワークスペース（選択UIの既定値）
 // Vikunja priority(0–5)。0=なし。4=最優先までを提示。
 const PRIO_OPTS = [[0, "なし"], [1, "低"], [2, "中"], [3, "高"], [4, "最優先"]];
 
@@ -73,9 +74,15 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
   ensureStyle();
   const wrap = document.createElement("div");
   wrap.className = "tf-modal";
-  // ワークスペース選択からテンプレートWSは除外（雛形置き場であって作業場所ではない）
-  const projOpts = (projects || []).filter((p) => !templateProject || p.id !== templateProject.id).map((p) =>
-    `<option value="${p.id}"${task && task.project_id === p.id ? " selected" : ""}>${esc(p.title)}</option>`).join("");
+  // ワークスペース選択からテンプレートWSは除外（雛形置き場であって作業場所ではない）。
+  // 実質1つなら欄ごと非表示（自動選択）、2つ以上で選択UIが出現。既定値は前回使ったWSを記憶。
+  const wsList = (projects || []).filter((p) => !templateProject || p.id !== templateProject.id);
+  const wsSingle = wsList.length <= 1;
+  let lastWs = null; try { lastWs = +localStorage.getItem(WS_KEY) || null; } catch {}
+  const defWsId = task ? task.project_id
+    : (wsList.some((p) => p.id === lastWs) ? lastWs : (wsList[0] && wsList[0].id));
+  const projOpts = wsList.map((p) =>
+    `<option value="${p.id}"${p.id === defWsId ? " selected" : ""}>${esc(p.title)}</option>`).join("");
   const memOpts = `<option value="">（なし）</option>` + (members || []).map((m) =>
     `<option value="${m.id}"${m.id === curAssigneeId ? " selected" : ""}>${esc(m.name || m.username)}</option>`).join("");
   const prioOpts = PRIO_OPTS.map(([v, n]) =>
@@ -127,8 +134,10 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
           <div class="tf-chips" id="tf-doc-chips"></div>
         </div>
         <div class="tf-side">
-          <label class="tf-l">ワークスペース</label>
-          <select id="tf-proj" class="tf-in"${isEdit ? " disabled" : ""}>${projOpts}</select>
+          <div${wsSingle ? " hidden" : ""}>
+            <label class="tf-l">ワークスペース</label>
+            <select id="tf-proj" class="tf-in"${isEdit ? " disabled" : ""}>${projOpts}</select>
+          </div>
           <label class="tf-l">プロジェクト <span class="tf-hint">（無い名前は新規作成）</span></label>
           <div class="tf-cbx">
             <input id="tf-parent" class="tf-in" autocomplete="off" value="${esc(curParentTitle)}" placeholder="選択 / 名前を入力">
@@ -406,6 +415,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
         if (parentId) await addRelation(parentId, childId, "subtask");
       }
 
+      if (!isEdit) try { localStorage.setItem(WS_KEY, String(pid)); } catch {}
       invalidate();
       close();
       onSaved && onSaved();
