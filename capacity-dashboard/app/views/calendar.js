@@ -15,6 +15,9 @@ let H0 = 8, H1 = 20;                      // 営業時間（設定で上書き�
 const HOURH = 46;
 let GRIDH = (H1 - H0) * HOURH;
 const SNAP = 15;
+// ドラッグ標準ゴーストを消すための透明1px画像（着地プレビュー cal-ghost に一本化）
+const BLANK_IMG = new Image();
+BLANK_IMG.src = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
 const itemColor = (it) => (it.prio ? PRIO[it.prio].c : NEUTRAL);
 const min2top = (m) => ((m - H0 * 60) / 60) * HOURH;
 const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
@@ -153,6 +156,15 @@ function blockHtml(b) {
 function wireDnD() {
   let drag = null;
   let resizing = false;
+  let ghost = null; // ドラッグ中の着地プレビュー（SNAP刻みで吸い付く）
+  const removeGhost = () => { if (ghost) { ghost.remove(); ghost = null; } };
+  // カーソル位置→SNAP(15分=0.25h)刻みの開始時刻（dragover プレビューと drop で同一の計算を使う）
+  const snapStartMin = (col, e) => {
+    const rect = col.getBoundingClientRect();
+    const y = e.clientY - rect.top - (drag.grabY || 0);
+    let startMin = H0 * 60 + Math.round((y / HOURH) * 60 / SNAP) * SNAP;
+    return Math.max(H0 * 60, Math.min(H1 * 60 - drag.mins, startMin));
+  };
   _root.querySelectorAll(".cal-chip, .cal-block:not(.cal-fixed)").forEach((el) => {
     el.addEventListener("dragstart", (e) => {
       if (resizing) { e.preventDefault(); return; }
@@ -162,7 +174,11 @@ function wireDnD() {
       drag = { taskId: +el.dataset.task, fromMember: +el.dataset.member, mins: +el.dataset.mins, planId: el.dataset.plan ? +el.dataset.plan : null, grabY };
       e.dataTransfer.effectAllowed = "move";
       try { e.dataTransfer.setData("text/plain", String(drag.taskId)); } catch { /* noop */ }
+      // ブラウザ標準の追従ゴーストは消し、SNAP刻みの着地プレビュー（cal-ghost）だけにする
+      try { e.dataTransfer.setDragImage(BLANK_IMG, 0, 0); } catch { /* noop */ }
+      el.classList.add("dragging");
     });
+    el.addEventListener("dragend", () => { el.classList.remove("dragging"); removeGhost(); _root.querySelectorAll(".cal-colbody.over").forEach((c) => c.classList.remove("over")); });
   });
   // リサイズ: 下端ハンドルをドラッグ → plan の所要(seconds)を更新
   _root.querySelectorAll(".cal-rs").forEach((handle) => {
@@ -198,15 +214,27 @@ function wireDnD() {
     });
   });
   _root.querySelectorAll(".cal-colbody").forEach((col) => {
-    col.addEventListener("dragover", (e) => { e.preventDefault(); col.classList.add("over"); });
-    col.addEventListener("dragleave", () => col.classList.remove("over"));
+    col.addEventListener("dragover", (e) => {
+      e.preventDefault(); col.classList.add("over");
+      if (!drag) return;
+      // SNAP刻みの着地プレビュー: 15分(0.25h)ごとに段階的に動く
+      const startMin = snapStartMin(col, e);
+      if (!ghost) { ghost = document.createElement("div"); ghost.className = "cal-ghost"; }
+      if (ghost.parentElement !== col) col.appendChild(ghost);
+      ghost.style.top = min2top(startMin) + "px";
+      ghost.style.height = Math.max(18, (drag.mins / 60) * HOURH) + "px";
+      ghost.textContent = `${hhmm(startMin)}–${hhmm(startMin + drag.mins)}`;
+    });
+    col.addEventListener("dragleave", (e) => {
+      if (e.relatedTarget && col.contains(e.relatedTarget)) return; // 子要素間の移動は無視
+      col.classList.remove("over");
+      if (ghost && ghost.parentElement === col) removeGhost();
+    });
     col.addEventListener("drop", async (e) => {
       e.preventDefault(); col.classList.remove("over");
       if (!drag) return;
-      const rect = col.getBoundingClientRect();
-      const y = e.clientY - rect.top - (drag.grabY || 0);
-      let startMin = H0 * 60 + Math.round((y / HOURH) * 60 / SNAP) * SNAP;
-      startMin = Math.max(H0 * 60, Math.min(H1 * 60 - drag.mins, startMin));
+      const startMin = snapStartMin(col, e);
+      removeGhost();
       const toMember = +col.dataset.member;
       await place(drag, toMember, startMin);
       drag = null;
@@ -347,6 +375,8 @@ function css() {
   .cal-colbody.over{background:#f3f8ff}
   .cal-block{position:absolute;left:3px;right:3px;border-radius:7px;color:#fff;padding:4px 7px;overflow:hidden;cursor:grab;box-shadow:0 1px 3px rgba(20,30,50,.18);z-index:2}
   .cal-block:active{cursor:grabbing}
+  .cal-block.dragging,.cal-chip.dragging{opacity:.35}
+  .cal-ghost{position:absolute;left:3px;right:3px;z-index:4;pointer-events:none;border:1.5px dashed ${C.fill};background:rgba(58,134,255,.13);border-radius:7px;color:${C.fill};font-size:10.5px;font-weight:700;display:flex;align-items:flex-start;justify-content:center;padding-top:2px;font-variant-numeric:tabular-nums}
   .cal-block.cal-hatch{background-image:repeating-linear-gradient(45deg,rgba(255,255,255,.85) 0 1.4px,transparent 1.4px 3px)}
   .cal-block.cal-dots{background-image:radial-gradient(rgba(255,255,255,.9) .9px,transparent 1.1px);background-size:3px 3px}
   .cal-bt{font-size:11.5px;font-weight:600;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
