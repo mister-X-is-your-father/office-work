@@ -98,6 +98,10 @@ function shell() {
   import("./views/searchpal.js").then(({ mountSearch }) => {
     mountSearch(document.querySelector(".topbar"));
   }).catch(() => {});
+  // 集中タイマー（🍅・終了/中断を実績に自動記録）
+  import("./views/pomodoro.js").then(({ mountPomodoro }) => {
+    mountPomodoro(document.querySelector(".topbar"));
+  }).catch(() => {});
   // リマインダー通知（個人設定でON時のみ発火。多重起動はフラグで防止）
   if (!window.__tsNotify) {
     window.__tsNotify = true;
