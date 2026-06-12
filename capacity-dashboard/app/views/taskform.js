@@ -110,35 +110,43 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
       <div class="tf-h"><b>${isEdit ? "タスクを編集" : "タスクを追加"}</b><button type="button" class="tf-x" id="tf-x" aria-label="閉じる">×</button></div>
       <div class="tf-body">
         ${!isEdit ? `
-        <label class="tf-l">テンプレートから作成 <span class="tf-hint">（任意・選ぶと下の項目に反映）</span></label>
-        <div class="tf-cbx">
-          <input id="tf-tpl" class="tf-in" autocomplete="off" placeholder="テンプレートを検索 / 選択">
-          <div class="tf-cbx-dd" hidden></div>
+        <div class="tf-tplbox">
+          <label class="tf-l">テンプレートから作成 <span class="tf-hint">（任意・選ぶと下の項目に反映）</span></label>
+          <div class="tf-cbx">
+            <input id="tf-tpl" class="tf-in" autocomplete="off" placeholder="テンプレートを検索 / 選択">
+            <div class="tf-cbx-dd" hidden></div>
+          </div>
         </div>` : ""}
         <label class="tf-l">タイトル <span class="tf-req">*</span></label>
         <input id="tf-title" class="tf-in" type="text" value="${esc(task ? task.title : "")}" placeholder="やること">
+
+        <div class="tf-sec">所属</div>
         <div class="tf-row">
           <div class="tf-col">
             <label class="tf-l">ワークスペース <span class="tf-hint">（所属グループ）</span></label>
             <select id="tf-proj" class="tf-in"${isEdit ? " disabled" : ""}>${projOpts}</select>
           </div>
           <div class="tf-col">
+            <label class="tf-l">プロジェクト <span class="tf-hint">（任意・無い名前は新規作成）</span></label>
+            <div class="tf-cbx">
+              <input id="tf-parent" class="tf-in" autocomplete="off" value="${esc(curParentTitle)}" placeholder="選択 / 名前を入力">
+              <div class="tf-cbx-dd" hidden></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tf-sec">計画</div>
+        <div class="tf-row">
+          <div class="tf-col">
             <label class="tf-l">担当</label>
             <select id="tf-asg" class="tf-in">${memOpts}</select>
           </div>
-        </div>
-        <label class="tf-l">プロジェクト <span class="tf-hint">（任意・入力で検索、無い名前は新規作成）</span></label>
-        <div class="tf-cbx">
-          <input id="tf-parent" class="tf-in" autocomplete="off" value="${esc(curParentTitle)}" placeholder="プロジェクトを選択 / 名前を入力">
-          <div class="tf-cbx-dd" hidden></div>
-        </div>
-        <div class="tf-row">
           <div class="tf-col">
             <label class="tf-l">優先度</label>
             <select id="tf-prio" class="tf-in">${prioOpts}</select>
           </div>
           <div class="tf-col">
-            <label class="tf-l">見積り(h) <span class="tf-hint">（0.25刻み可）</span></label>
+            <label class="tf-l">見積り(h) <span class="tf-hint">（0.25刻み）</span></label>
             <div class="tf-step">
               <input id="tf-est" class="tf-in" type="text" inputmode="decimal" autocomplete="off" value="${estH}" placeholder="例: 0.25">
               <div class="tf-step-btns">
@@ -168,6 +176,8 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
           <div class="tf-cbx-dd" hidden></div>
         </div>
         <div class="tf-chips" id="tf-dep-chips"></div>
+
+        <div class="tf-sec">詳細</div>
         <label class="tf-l">資料 <span class="tf-hint">（ドキュメントのURLやパス・Enterで追加・複数可）</span></label>
         <input id="tf-doc" class="tf-in" autocomplete="off" placeholder="https://… や共有フォルダのパスを入力して Enter">
         <div class="tf-chips" id="tf-doc-chips"></div>
@@ -460,12 +470,16 @@ function ensureStyle() {
   s.textContent = `
   .tf-modal{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center}
   .tf-bg{position:absolute;inset:0;background:rgba(20,30,50,.38)}
-  .tf-card{position:relative;width:min(560px,92vw);max-height:90vh;overflow:auto;background:${C.card};border:1px solid ${C.line};border-radius:16px;box-shadow:0 18px 50px rgba(20,30,50,.28)}
+  .tf-card{position:relative;width:min(600px,92vw);max-height:90vh;overflow:auto;background:${C.card};border:1px solid ${C.line};border-radius:16px;box-shadow:0 18px 50px rgba(20,30,50,.28)}
   .tf-h{display:flex;align-items:center;justify-content:space-between;padding:14px 14px 4px 22px;font-size:16px;cursor:move;user-select:none}.tf-h b{font-size:16px}
   .tf-x{border:0;background:transparent;color:${C.muted};font-size:20px;line-height:1;padding:4px 9px;border-radius:8px;cursor:pointer}
   .tf-x:hover{background:#f1f4f8;color:${C.ink}}
   .tf-body{padding:8px 22px 4px}
   .tf-l{display:block;font-size:12px;color:${C.muted};font-weight:600;margin:12px 0 5px}
+  .tf-sec{display:flex;align-items:center;gap:10px;margin:22px 0 0;font-size:11px;font-weight:700;color:${C.muted};letter-spacing:.08em}
+  .tf-sec::after{content:"";flex:1;border-top:1px solid ${C.line}}
+  .tf-tplbox{background:#f4f8ff;border:1px solid #dbe7ff;border-radius:10px;padding:2px 12px 12px;margin:6px 0 14px}
+  .tf-tplbox .tf-l{margin-top:8px}
   .tf-req{color:${C.over}}
   .tf-hint{font-weight:400;color:${C.muted};font-size:11px}
   .tf-in{width:100%;font:inherit;font-size:13.5px;padding:8px 10px;border:1px solid ${C.line};border-radius:9px;background:#fff;box-sizing:border-box;color:${C.ink}}
@@ -492,7 +506,7 @@ function ensureStyle() {
   .tf-chip-x:hover{color:${C.over}}
   .tf-err{color:${C.over};font-size:12.5px;min-height:18px;margin:8px 0 2px;font-weight:600}
   .tf-err.ok{color:${C.free}}
-  .tf-acts{display:flex;justify-content:flex-end;gap:10px;padding:6px 22px 20px}
+  .tf-acts{display:flex;justify-content:flex-end;gap:10px;padding:14px 22px 18px;border-top:1px solid ${C.line};margin-top:10px}
   .tf-acts .tf-tpl-save{margin-right:auto;background:#fff;color:${C.muted}}
   .tf-acts .tf-tpl-save:hover{color:${C.ink}}
   .tf-acts .tf-tpl-save:disabled{opacity:.6;cursor:default}
