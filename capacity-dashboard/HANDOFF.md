@@ -15,7 +15,7 @@
 | **TaskStation（フォーク本番）** | http://leo:7005 （image **`leo-taskstation:0.24.6-fix7`**） |
 | GitHub | https://github.com/mister-x-is-your-father/office-work → `capacity-dashboard/` |
 
-配信は `capacity-dashboard/` で `python3 -m http.server 7010 --bind 0.0.0.0`（leo:7010）。落ちてたら再起動。
+配信は systemd user service **`taskstation-spa.service`**（`~/.local/bin/taskstation-spa-serve.py` を実行。ThreadingHTTPServer・no-storeヘッダ付きで `capacity-dashboard/` を 7010 で配信。enable済み＝ブート自動起動・落ちたら自動再起動）。状態確認は `systemctl --user status taskstation-spa`。
 
 ## 2. ディレクトリ
 ```
