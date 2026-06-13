@@ -184,7 +184,7 @@ export function mountPomodoro(topbar) {
         </div>
         <select id="pm-task" class="pm-in">${opts}</select>
         ${m === "focus" ? `<div class="pm-row">
-          <label>集中 <select id="pm-focus" class="pm-in">${[15, 25, 45, 50].map((n) => `<option value="${n}"${n === 25 ? " selected" : ""}>${n}分</option>`).join("")}</select></label>
+          <label>集中 <select id="pm-focus" class="pm-in">${[5, 10, 15, 25, 45, 50, 60].map((n) => `<option value="${n}"${n === 25 ? " selected" : ""}>${n}分</option>`).join("")}</select></label>
           <label>休憩 <select id="pm-break" class="pm-in">${[5, 10, 15].map((n) => `<option value="${n}">${n}分</option>`).join("")}</select></label>
         </div>` : ""}
         ${m === "countdown" ? `<div class="pm-row">
