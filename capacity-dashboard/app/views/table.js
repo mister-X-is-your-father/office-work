@@ -318,12 +318,14 @@ function wireDrag(root, rerender) {
           moved = true; begin();
         }
         ghost.style.top = (ev.clientY - grabY - groupOffset) + "px"; // 掴んだ行がカーソル下に来るよう調整
-        // 落下位置: 選択外の行の中点で判定
+        // 落下位置はカーソルでなく“掴んでるカード(ゴースト)の中心”で判定（掴んだ位置に左右されない）
+        const gr = ghost.getBoundingClientRect();
+        const refY = gr.top + gr.height / 2;
         let target = null;
         for (const tr of rowsArr()) {
           if (groupSet.has(+tr.dataset.id)) continue;
           const r = tr.getBoundingClientRect();
-          if (ev.clientY < r.top + r.height / 2) { target = tr; break; }
+          if (refY < r.top + r.height / 2) { target = tr; break; }
         }
         moveBlock(target); // target=null なら末尾へ
       };
