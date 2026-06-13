@@ -174,7 +174,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
               <input id="tf-end" class="tf-in" type="text" inputmode="numeric" autocomplete="off" value="${fieldDisplay(task, "end_date")}" placeholder="1120">
             </div>
           </div>
-          <label class="tf-l">期日</label>
+          <label class="tf-l">期限</label>
           <input id="tf-due" class="tf-in" type="text" inputmode="numeric" autocomplete="off" value="${fieldDisplay(task, "due_date")}" placeholder="1112 → 11/12">
           <label class="tf-l">先行タスク <span class="tf-hint">（前に完了が必要）</span></label>
           <div class="tf-cbx">
@@ -245,7 +245,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     ev.preventDefault();
   };
 
-  // 日付3欄（開始/終了/期日）: blur で曜日付き表示（YYYY/MM/DD（曜））に整形＋カレンダーピッカー（土日祝色分け）
+  // 日付3欄（開始/終了/期限）: blur で曜日付き表示（YYYY/MM/DD（曜））に整形＋カレンダーピッカー（土日祝色分け）
   for (const id of ["#tf-start", "#tf-end", "#tf-due"]) {
     const el = $(id);
     el.onblur = () => { const iso = parseSmartDate(el.value); if (iso) el.value = fmtDisplayDow(iso); };
@@ -474,7 +474,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     };
     const startF = parseField("#tf-start", "開始予定日"); if (!startF.ok) return;
     const endF = parseField("#tf-end", "終了予定日"); if (!endF.ok) return;
-    const dueF = parseField("#tf-due", "期日"); if (!dueF.ok) return;
+    const dueF = parseField("#tf-due", "期限"); if (!dueF.ok) return;
     const startISO = startF.iso, endISO = endF.iso, dueISO = dueF.iso;
     if (startISO && endISO && endISO < startISO) { err.textContent = "終了予定日は開始予定日以降にしてください。"; return; }
     const pid = +$("#tf-proj").value;

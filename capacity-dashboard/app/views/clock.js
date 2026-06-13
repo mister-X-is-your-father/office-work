@@ -188,7 +188,7 @@ function wireInteractions(container, data, day, rerender, states) {
       for (const p of todays) await deletePlan(ctx.taskId, p.id);
       await logPlan(ctx.taskId, secs, targetDay, "", ctx.memberId);
     } else {
-      await updateTask(ctx.taskId, { due_date: targetDay + "T00:00:00Z" }); // 見積り/期日ベース → 期日を移動
+      await updateTask(ctx.taskId, { due_date: targetDay + "T00:00:00Z" }); // 見積り/期限ベース → 期限を移動
     }
     invalidate(); close(); await rerender();
   };
@@ -221,12 +221,12 @@ function wireInteractions(container, data, day, rerender, states) {
   function panelMove(ctx) {
     const tomorrow = shiftISO(day, 1);
     let toISO = shiftISO(day, 14), overDue = false, dueLabel = "";
-    if (hasDate(ctx.t.due_date)) { const due = dateOnly(ctx.t.due_date); dueLabel = `期日 ${mdw(due)}`; if (due >= tomorrow) toISO = due; else overDue = true; }
+    if (hasDate(ctx.t.due_date)) { const due = dateOnly(ctx.t.due_date); dueLabel = `期限 ${mdw(due)}`; if (due >= tomorrow) toISO = due; else overDue = true; }
     const sugg = suggestDays(data, ctx.memberId, tomorrow, toISO, ctx.neededH, CAP);
     const list = sugg.length
       ? sugg.slice(0, 8).map((s) => `<button class="ck-day ${s.fits ? "fit" : "part"}" data-day="${s.day}">${mdw(s.day)}<span class="fh">空き ${fmtH(s.freeH)}${s.fits ? "" : "（部分）"}</span></button>`).join("")
-      : `<div class="ck-none">${overDue ? "期日を過ぎています。" : ""}候補の空き日がありません。</div>`;
-    card.innerHTML = head(ctx.title, dueLabel) + `<div class="ck-mlbl">別日へ移す（${overDue ? "直近14日" : "期日まで"}・収まる日優先）</div><div class="ck-days">${list}</div><div class="ck-macts"><button class="ck-back">← 戻る</button></div>`;
+      : `<div class="ck-none">${overDue ? "期限を過ぎています。" : ""}候補の空き日がありません。</div>`;
+    card.innerHTML = head(ctx.title, dueLabel) + `<div class="ck-mlbl">別日へ移す（${overDue ? "直近14日" : "期限まで"}・収まる日優先）</div><div class="ck-days">${list}</div><div class="ck-macts"><button class="ck-back">← 戻る</button></div>`;
     card.querySelectorAll(".ck-day").forEach((d) => { d.onclick = () => move(ctx, d.dataset.day); });
     card.querySelector(".ck-back").onclick = () => menu(ctx);
   }

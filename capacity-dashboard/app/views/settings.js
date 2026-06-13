@@ -15,7 +15,7 @@ export async function render(root) {
     execDown = true;
     cur = { cap_hours: 8, cal_start: 8, cal_end: 20, excluded_project_ids: [] };
   }
-  // 個人設定: リマインダー通知（自分の予定/会議のN分前・期日タスクは営業開始に）
+  // 個人設定: リマインダー通知（自分の予定/会議のN分前・期限タスクは営業開始に）
   const np = notifyPrefs((me && me.id) || 0);
   const leadOpts = [1, 5, 10, 15, 30].map((n) =>
     `<option value="${n}"${n === np.lead ? " selected" : ""}>${n}分前</option>`).join("");
@@ -25,7 +25,7 @@ export async function render(root) {
         <label class="st-ws"><input type="checkbox" id="st-ntf" ${np.on ? "checked" : ""}> 通知を有効にする</label>
         <label class="st-l">タイミング
           <select id="st-ntf-lead" class="st-in">${leadOpts}</select></label>
-        <div class="st-hint">時刻カレンダーの自分の予定・出席する会議/定例の開始前に通知。期日が今日のタスクは営業開始時刻にまとめて通知。アプリを開いている間に動作します。</div>
+        <div class="st-hint">時刻カレンダーの自分の予定・出席する会議/定例の開始前に通知。期限が今日のタスクは営業開始時刻にまとめて通知。アプリを開いている間に動作します。</div>
         <div class="st-hint" id="st-ntf-msg" style="margin-top:6px"></div>
       </div>`;
 

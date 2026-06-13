@@ -143,7 +143,7 @@ export async function ensureReviewLabel() {
   _reviewLabelId = found ? found.id : (await createLabel(REVIEW_LABEL)).id;
   return _reviewLabelId;
 }
-// 元タスクのレビュータスクを生成（レビュアー割当・レビューラベル・関連・期日）。生成した新タスクを返す。
+// 元タスクのレビュータスクを生成（レビュアー割当・レビューラベル・関連・期限）。生成した新タスクを返す。
 export async function requestReview(srcTask, reviewerId, dueISO, estimateSeconds = 1800) {
   const labelId = await ensureReviewLabel();
   const task = await createTaskInProject(srcTask.project_id, { title: `${srcTask.title} のレビュー`, due_date: dueISO + "T00:00:00Z", time_estimate: estimateSeconds });

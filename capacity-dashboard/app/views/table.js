@@ -16,7 +16,7 @@ function loadView(uid) {
   const def = { sorts: [{ key: "due", dir: 1 }], manualMode: false, order: [], hideDone: true, proj: "", cat: "", qaWho: "", qaDue: "" };
   try {
     const raw = JSON.parse(localStorage.getItem(VKEY(uid)) || "null");
-    if (!raw) return { ...def };                       // 初回のみ既定（期日）
+    if (!raw) return { ...def };                       // 初回のみ既定（期限）
     const v = { ...def, ...raw };
     if (!Array.isArray(v.sorts)) v.sorts = [];          // 壊れてる時だけ空に（空配列=意図的な「条件なし」は保持）
     return v;
@@ -40,7 +40,7 @@ const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date
 
 // 軸の定義: ラベル＋比較関数（行 r を受ける）＋セレクトで選んだ時の既定の向き。
 const AXES = {
-  due:     { label: "期日",      cmp: (a, b) => (a.due || "9999").localeCompare(b.due || "9999"), dir: 1 },
+  due:     { label: "期限",      cmp: (a, b) => (a.due || "9999").localeCompare(b.due || "9999"), dir: 1 },
   prio:    { label: "優先度",    cmp: (a, b) => a.prio - b.prio, dir: -1 },
   ws:      { label: "WS",        cmp: (a, b) => a.proj.localeCompare(b.proj, "ja"), dir: 1 },
   cat:     { label: "分類",      cmp: (a, b) => ((a.cat && a.cat.title) || "～").localeCompare((b.cat && b.cat.title) || "～", "ja"), dir: 1 },
@@ -77,10 +77,12 @@ export async function render(root) {
   if (V.hideDone) rows = rows.filter((r) => !r.done);
   if (V.proj) rows = rows.filter((r) => String(r.pid) === V.proj);
   if (V.cat) rows = rows.filter((r) => (r.cat ? r.cat.title : "") === V.cat);
-  // クイック絞り込み（担当＝自分/担当なし、期限＝今日/1週間以内/1ヶ月以内）。本人ごとに保存。
-  if (V.qaWho === "me") rows = rows.filter((r) => (r.t.assignees || []).some((a) => a.id === UID));
-  else if (V.qaWho === "none") rows = rows.filter((r) => !(r.t.assignees || []).some((a) => !isAiUser(a)));
-  if (V.qaDue === "today") rows = rows.filter((r) => r.due === today);
+  // クイック絞り込み（担当＝自分/担当なし/自分＋担当なし、期限＝今日＋期限なし/1週間以内/1ヶ月以内）。本人ごとに保存。
+  const humanAssignees = (t) => (t.assignees || []).filter((a) => !isAiUser(a));
+  if (V.qaWho === "me") rows = rows.filter((r) => humanAssignees(r.t).some((a) => a.id === UID));
+  else if (V.qaWho === "none") rows = rows.filter((r) => humanAssignees(r.t).length === 0);
+  else if (V.qaWho === "me_none") rows = rows.filter((r) => { const h = humanAssignees(r.t); return h.length === 0 || h.some((a) => a.id === UID); });
+  if (V.qaDue === "today_nd") rows = rows.filter((r) => !r.due || r.due === today);
   else if (V.qaDue === "7d") rows = rows.filter((r) => r.due && r.due <= shiftISO(today, 7));
   else if (V.qaDue === "30d") rows = rows.filter((r) => r.due && r.due <= shiftISO(today, 30));
 
@@ -96,7 +98,7 @@ export async function render(root) {
     const pos = new Map(V.order.map((id, i) => [id, i]));
     rows.sort((a, b) => (pos.get(a.t.id) ?? 1e9) - (pos.get(b.t.id) ?? 1e9));
   } else {
-    // 複数軸の組み合わせ（先頭が第1キー…一致したら次の軸へ）。最後に期日→IDで安定化。
+    // 複数軸の組み合わせ（先頭が第1キー…一致したら次の軸へ）。最後に期限→IDで安定化。
     rows.sort((a, b) => {
       for (const s of V.sorts) { const ax = AXES[s.key]; if (ax) { const c = ax.cmp(a, b) * (s.dir || 1); if (c) return c; } }
       return tieBreak(a, b);
@@ -128,7 +130,7 @@ export async function render(root) {
     <div class="tb-tools">
       <button id="tb-add" class="tb-add">タスク追加</button>
       <button id="tb-manual" class="tb-manbtn${manual ? " on" : ""}" title="自分だけの手動ソート">✋ マイソート</button>
-      <span class="tb-sortwrap${manual ? " dim" : ""}">ソート条件: <span class="tb-chips">${chips || `<span class="tb-sc-none">なし（既定: 期日順）</span>`}</span>
+      <span class="tb-sortwrap${manual ? " dim" : ""}">ソート条件: <span class="tb-chips">${chips || `<span class="tb-sc-none">なし（既定: 期限順）</span>`}</span>
         ${V.sorts.length < MAX_SORTS ? `<select id="tb-addsort" class="tb-addsort">${addOpts}</select>` : `<span class="tb-sc-none">最大${MAX_SORTS}件</span>`}</span>
       <select id="tb-proj">${projOpts}</select>
       <select id="tb-cat">${catOpts}</select>
@@ -138,8 +140,9 @@ export async function render(root) {
       <span class="tb-ql">クイック絞り込み</span>
       <button class="tb-qa${V.qaWho === "me" ? " on" : ""}" data-qa="who:me">自分の担当</button>
       <button class="tb-qa${V.qaWho === "none" ? " on" : ""}" data-qa="who:none">担当なし</button>
+      <button class="tb-qa${V.qaWho === "me_none" ? " on" : ""}" data-qa="who:me_none">自分＋担当なし</button>
       <span class="tb-qsep"></span>
-      <button class="tb-qa${V.qaDue === "today" ? " on" : ""}" data-qa="due:today">今日</button>
+      <button class="tb-qa${V.qaDue === "today_nd" ? " on" : ""}" data-qa="due:today_nd">今日＋期限なし</button>
       <button class="tb-qa${V.qaDue === "7d" ? " on" : ""}" data-qa="due:7d">1週間以内</button>
       <button class="tb-qa${V.qaDue === "30d" ? " on" : ""}" data-qa="due:30d">1ヶ月以内</button>
       ${(V.qaWho || V.qaDue) ? `<button class="tb-qa tb-qclr" data-qa="clr">解除</button>` : ""}
@@ -183,7 +186,7 @@ export async function render(root) {
     const k = e.target.value; if (!k || V.sorts.length >= MAX_SORTS) return;
     V.sorts.push({ key: k, dir: AXES[k].dir }); V.manualMode = false; reRender();
   };
-  // チップ: 向き切替 / 削除（最後の1件も外せる＝条件なし=既定の期日順）
+  // チップ: 向き切替 / 削除（最後の1件も外せる＝条件なし=既定の期限順）
   root.querySelectorAll(".tb-sc-k").forEach((b) => { b.onclick = () => { const s = V.sorts[+b.dataset.i]; if (s) { s.dir = -(s.dir || 1); V.manualMode = false; reRender(); } }; });
   root.querySelectorAll(".tb-sc-x").forEach((b) => { b.onclick = () => { V.sorts.splice(+b.dataset.i, 1); reRender(); }; });
   // 列ヘッダ: クリック=第1条件に（単一化）・Shift+クリック=条件として追加/切替（最大5件）
@@ -462,7 +465,7 @@ function wireDrag(root, rerender) {
 
 const cols = () => [
   { k: "title", label: "タスク" }, { k: "who", label: "担当" }, { k: null, label: "種別" },
-  { k: "cat", label: "分類" }, { k: "prio", label: "優先度" }, { k: "due", label: "期日" },
+  { k: "cat", label: "分類" }, { k: "prio", label: "優先度" }, { k: "due", label: "期限" },
   { k: "est", label: "見積" }, { k: "pct", label: "進捗" }, { k: "state", label: "ステータス" },
 ];
 // ヘッダに何番目のソート軸かを小さく表示（組み合わせの見える化）

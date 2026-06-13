@@ -14,7 +14,7 @@ const DOW_JA = ["日", "月", "火", "水", "木", "金", "土"];
 
 const SEL_KEY = (uid) => `ts.smartlist.sel.${uid ?? "anon"}`;
 const LISTS_KEY = (uid) => `ts.smartlists.${uid ?? "anon"}`;
-const SORTS = [["due", "期日順"], ["prio", "優先度順"], ["title", "名前順"], ["created", "追加順"]];
+const SORTS = [["due", "期限順"], ["prio", "優先度順"], ["title", "名前順"], ["created", "追加順"]];
 
 let state = null; // { sel, filter, sort }
 const loadLists = (uid) => { try { return JSON.parse(localStorage.getItem(LISTS_KEY(uid)) || "[]"); } catch { return []; } };
@@ -72,7 +72,7 @@ export async function render(root) {
         </div>
         <div class="sl-bar">
           <input id="sl-text" class="sl-in sl-text" placeholder="🔍 このビュー内を検索" value="${esc(state.filter.text || "")}">
-          ${sel("sl-due", state.filter.due, [["", "期日：すべて"], ["today", "今日"], ["next7", "次の7日間"], ["overdue", "期限切れ"], ["hasdue", "期日あり"], ["none", "期日なし"]])}
+          ${sel("sl-due", state.filter.due, [["", "期限：すべて"], ["today", "今日"], ["next7", "次の7日間"], ["overdue", "期限切れ"], ["hasdue", "期限あり"], ["none", "期限なし"]])}
           ${sel("sl-prio", state.filter.prio, [["", "優先度：すべて"], ["top", "最優先"], ["high", "高+"], ["mid", "中+"], ["none", "なし"]])}
           ${sel("sl-cat", catTitle, [["", "分類：すべて"], ...catChoices(labels)])}
           ${sel("sl-ws", String(state.filter.ws || ""), [["", "WS：すべて"], ...(projects || []).map((p) => [String(p.id), p.title])])}
@@ -148,7 +148,7 @@ function rowHtml(t, projects, today) {
 
 const emptyHtml = () => `<div class="sl-empty"><div class="sl-empty-i">🗂️</div>このビューに該当するタスクはありません。</div>`;
 
-// 期日ソート時はアジェンダ風に日別グルーピング（期限切れ/今日/明日/日付/期日なし）。
+// 期限ソート時はアジェンダ風に日別グルーピング（期限切れ/今日/明日/日付/期限なし）。
 function resultsHtml(sorted, projects, today, sort) {
   if (!sorted.length) return emptyHtml();
   if (sort !== "due") return sorted.map((t) => rowHtml(t, projects, today)).join("");
@@ -168,7 +168,7 @@ function groupByDue(tasks, today) {
   };
   for (const t of tasks) {
     const d = dueOf(t);
-    if (!d) put("none", "期日なし", "none", t);
+    if (!d) put("none", "期限なし", "none", t);
     else if (d < today) put("over", "期限切れ", "over", t);
     else if (d === today) put("today", "今日", "today", t);
     else if (d === tomorrow) put("tomorrow", "明日", "", t);
@@ -177,7 +177,7 @@ function groupByDue(tasks, today) {
       put(d, `${d.slice(5).replace("-", "/")}（${DOW_JA[dt.getUTCDay()]}）`, "", t);
     }
   }
-  // 期限切れ→今日→明日→日付昇順→期日なし
+  // 期限切れ→今日→明日→日付昇順→期限なし
   const rank = (k) => k === "over" ? 0 : k === "today" ? 1 : k === "tomorrow" ? 2 : k === "none" ? 9 : 5;
   return order.map((k) => map.get(k)).sort((a, b) => (rank(a.key) - rank(b.key)) || a.key.localeCompare(b.key));
 }
@@ -288,7 +288,7 @@ function updateCount(root, data, ctx) {
 
 function suggestName(f) {
   const parts = [];
-  const dueN = { today: "今日", next7: "今週", overdue: "期限切れ", none: "期日なし", hasdue: "期日あり" }[f.due];
+  const dueN = { today: "今日", next7: "今週", overdue: "期限切れ", none: "期限なし", hasdue: "期限あり" }[f.due];
   const prN = { top: "最優先", high: "重要", mid: "中+", none: "優先度なし" }[f.prio];
   if (prN) parts.push(prN); if (dueN) parts.push(dueN); if (f.flag) parts.push("フラグ"); if (f._cat) parts.push(f._cat);
   return parts.join("・") || "マイリスト";

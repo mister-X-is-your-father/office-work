@@ -160,7 +160,7 @@ function legendHtml(usedPjs, projects, pjColor) {
     </div>`;
 }
 
-const empty = () => `<div class="t54-empty">本日の予定工数を持つ担当タスクがありません。<br>タスクに担当・期日・見積り、または日別予定を設定してください。</div>`;
+const empty = () => `<div class="t54-empty">本日の予定工数を持つ担当タスクがありません。<br>タスクに担当・期限・見積り、または日別予定を設定してください。</div>`;
 
 function css() {
   return `

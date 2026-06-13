@@ -14,7 +14,7 @@ export const BUILTIN_VIEWS = [
   { key: "overdue", label: "期限切れ", icon: "⚠️", filter: { due: "overdue", status: "undone" } },
   { key: "important", label: "重要", icon: "⭐", filter: { prio: "high", status: "undone" } },
   { key: "flagged", label: "フラグ", icon: "🚩", filter: { flag: true, status: "undone" } },
-  { key: "nodate", label: "期日なし", icon: "📭", filter: { due: "none", status: "undone" } },
+  { key: "nodate", label: "期限なし", icon: "📭", filter: { due: "none", status: "undone" } },
   { key: "completed", label: "完了済み", icon: "✓", filter: { status: "done" } },
 ];
 

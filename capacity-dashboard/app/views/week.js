@@ -26,7 +26,7 @@ export async function render(root) {
       return `<td style="text-align:center;color:${col};font-weight:${d.h > 0 ? 600 : 400}">${d.h ? fmtH(d.h) : "·"}${d.over ? "!" : ""}</td>`;
     }).join("");
     return `<tr><td style="font-weight:600">${esc(r.name)}<div style="font-size:10px;color:${C.muted}">8h/日</div></td>${cells}<td style="text-align:center;font-weight:700">${fmtH(r.weekH)}<div style="font-size:10px;color:${C.muted}">/40h</div></td></tr>`;
-  }).join("") : `<tr><td colspan="7" style="padding:30px;text-align:center;color:${C.muted}">期間/期日＋見積りのある担当タスクがありません。</td></tr>`;
+  }).join("") : `<tr><td colspan="7" style="padding:30px;text-align:center;color:${C.muted}">期間/期限＋見積りのある担当タスクがありません。</td></tr>`;
 
   root.innerHTML = `
     <h1 class="vtitle">週プランニング <small>${days[0].slice(5)}〜${days[4].slice(5)}</small></h1>

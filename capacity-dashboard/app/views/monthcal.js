@@ -1,5 +1,5 @@
-// 月カレンダー（TickTickのカレンダービュー相当）。月グリッドに 期日タスク＋会議/定例 を俯瞰表示。
-// タスクチップをドラッグで別日に落とすと期日を移動（updateTask #9非破壊）。クリックで編集モーダル。
+// 月カレンダー（TickTickのカレンダービュー相当）。月グリッドに 期限タスク＋会議/定例 を俯瞰表示。
+// タスクチップをドラッグで別日に落とすと期限を移動（updateTask #9非破壊）。クリックで編集モーダル。
 // 会議/定例は recurrences の展開（override 適用済み・時刻表示）＝動かせない（例外編集は時刻カレンダーで）。
 import { load, invalidate, isAiUser } from "../lib/store.js";
 import { updateTask } from "../lib/api.js";
@@ -21,7 +21,7 @@ export async function render(root) {
   const weeks = monthMatrix(VIEW.y, VIEW.m);
   const firstISO = weeks[0][0].iso, lastISO = weeks[5][6].iso;
 
-  // 日付 → 項目。タスク=期日ベース（完了は薄く）・会議/定例=展開結果（時刻つき）
+  // 日付 → 項目。タスク=期限ベース（完了は薄く）・会議/定例=展開結果（時刻つき）
   const byDay = new Map();
   const add = (iso, item) => { (byDay.get(iso) || byDay.set(iso, []).get(iso)).push(item); };
   for (const { recurrence: rec, dateISO, assignees, override } of expandRecurrences(recurrences || [], firstISO, lastISO)) {
@@ -46,7 +46,7 @@ export async function render(root) {
 
   root.innerHTML = `
     <style>${css()}</style>
-    <h1 class="vtitle">月カレンダー <small>期日タスク＋会議/定例 ・ チップをドラッグで期日移動</small></h1>
+    <h1 class="vtitle">月カレンダー <small>期限タスク＋会議/定例 ・ チップをドラッグで期限移動</small></h1>
     <div class="mc-tools">
       <button id="mc-prev" class="mc-nav">‹</button>
       <b class="mc-title">${VIEW.y}年${VIEW.m}月</b>

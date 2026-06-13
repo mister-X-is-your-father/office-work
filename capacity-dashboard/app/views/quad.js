@@ -1,8 +1,8 @@
 // 四象限（アイゼンハワー・マトリクス。TickTickプレミアムの同等機能）。
 // 分類ルール（画面の凡例にも明記）:
-//   重要 = 優先度が「高」以上（priority>=3） / 緊急 = 期日が today+N日以内 or 超過（期日なし=緊急でない）。
+//   重要 = 優先度が「高」以上（priority>=3） / 緊急 = 期限が today+N日以内 or 超過（期限なし=緊急でない）。
 //   N（緊急しきい値）は画面で変更可・localStorage に個人保存（ts.quad.urgentDays・既定3日）。
-// ドラッグで区画移動=優先度・期日を書き換え（undoトースト付き）。クリックで編集モーダル。
+// ドラッグで区画移動=優先度・期限を書き換え（undoトースト付き）。クリックで編集モーダル。
 import { load, invalidate, projectName, isAiUser } from "../lib/store.js";
 import { updateTask } from "../lib/api.js";
 import { C, esc, fmtH, member_color, todayISO } from "../lib/ui.js";
@@ -54,14 +54,14 @@ export async function render(root) {
     <style>${css()}</style>
     <h1 class="vtitle">四象限 <small>アイゼンハワー・マトリクス ・ ドラッグで再分類</small></h1>
     <div class="qd-tools">
-      <span class="qd-rule">📐 <b>重要</b> = 優先度が「高」以上 ／ <b>緊急</b> = 期日が
+      <span class="qd-rule">📐 <b>重要</b> = 優先度が「高」以上 ／ <b>緊急</b> = 期限が
         <select id="qd-days">${dayOpts}</select>
-        以内 または超過（期日なし＝緊急でない）</span>
+        以内 または超過（期限なし＝緊急でない）</span>
       <select id="qd-who">${whoOpts}</select>
     </div>
     <div class="qd-matrix">
       <div class="qd-corner"></div>
-      <div class="qd-ax-x"><span>◀ 緊急（期日が近い）</span><span>緊急でない ▶</span></div>
+      <div class="qd-ax-x"><span>◀ 緊急（期限が近い）</span><span>緊急でない ▶</span></div>
       <div class="qd-ax-y"><span>重要（優先度 高〜） ▲</span><span>▼ 重要でない</span></div>
       <div class="qd-grid">
         ${Object.entries(QUADS).map(([k, q]) => `
@@ -72,7 +72,7 @@ export async function render(root) {
           </div>`).join("")}
       </div>
     </div>
-    <div class="qd-hint">ドラッグでの移動はタスクを書き換えます: 重要側へ=優先度を高に ／ 緊急側へ=期日を今日に ／ 緊急でない側へ=期日を＋7日（取り消しは移動直後の「元に戻す」）。</div>
+    <div class="qd-hint">ドラッグでの移動はタスクを書き換えます: 重要側へ=優先度を高に ／ 緊急側へ=期限を今日に ／ 緊急でない側へ=期限を＋7日（取り消しは移動直後の「元に戻す」）。</div>
     <div class="qd-undo" id="qd-undo" hidden></div>`;
 
   root.querySelector("#qd-who").onchange = (e) => { FILTER.who = e.target.value; render(root); };
@@ -91,7 +91,7 @@ export async function render(root) {
       const t = rows.find((x) => x.id === id);
       const dst = cell.dataset.q;
       if (!t || quadOf(t, today, days) === dst) return;
-      // 区画→属性: 重要=優先度3/2、緊急=期日today/今日+7（期日なし→緊急でないならそのまま無期日）
+      // 区画→属性: 重要=優先度3/2、緊急=期限today/今日+7（期限なし→緊急でないならそのまま無期限）
       const imp = dst === "q1" || dst === "q2";
       const urg = dst === "q1" || dst === "q3";
       const prev = { priority: t.priority || 0, due_date: t.due_date || null };

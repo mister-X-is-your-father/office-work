@@ -1,6 +1,6 @@
 // リマインダー通知（TickTickのリマインダーのブラッシュアップ）。
 // 通知源は3系統: ①時刻カレンダーの自分の予定(plan.start_minute) ②自分が出る会議/定例(dtstart時刻)
-// ③今日が期日の自分のタスク（時刻なし→営業開始時刻にまとめて）。
+// ③今日が期限の自分のタスク（時刻なし→営業開始時刻にまとめて）。
 // notifyEvents は純関数（テスト対象）。startNotifications がブラウザ側のスケジューラ。
 // 設定は個人ごと localStorage（ts.notify.<uid>: {on, lead}）。発火済みは日付キーで永続し再通知しない。
 import { expandRecurrences } from "./recurrence.js";
@@ -20,7 +20,7 @@ const hhmm = (m) => `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
 export function notifyEvents({ tasks, plansByTask, recurrences, meId, calStart = 8 }, dayISO) {
   const out = [];
   if (!meId) return out;
-  const plannedTaskIds = new Set(); // 時刻つきpredicate（期日通知の重複排除用）
+  const plannedTaskIds = new Set(); // 時刻つきpredicate（期限通知の重複排除用）
   for (const t of tasks || []) {
     if (t.done) continue;
     for (const p of (plansByTask && plansByTask.get(t.id)) || []) {
@@ -39,12 +39,12 @@ export function notifyEvents({ tasks, plansByTask, recurrences, meId, calStart =
     if (ids.length && !ids.includes(meId)) continue;
     out.push({ key: `rec:${rec.id}:${origISO}`, minute, title: rec.title || "会議", body: `${hhmm(minute)} 開始（${rec.kind === "meeting" ? "会議" : "定例"}）` });
   }
-  // 期日=今日（時刻なし）→ 営業開始にまとめて。時刻つき予定を立て済みのタスクは除外。
+  // 期限=今日（時刻なし）→ 営業開始にまとめて。時刻つき予定を立て済みのタスクは除外。
   for (const t of tasks || []) {
     if (t.done || plannedTaskIds.has(t.id)) continue;
     if (!t.due_date || t.due_date.startsWith("0001") || dateOnly(t.due_date) !== dayISO) continue;
     if (!(t.assignees || []).some((a) => a.id === meId)) continue;
-    out.push({ key: `due:${t.id}:${dayISO}`, minute: calStart * 60, title: t.title, body: "本日が期日" });
+    out.push({ key: `due:${t.id}:${dayISO}`, minute: calStart * 60, title: t.title, body: "本日が期限" });
   }
   return out.sort((a, b) => a.minute - b.minute);
 }

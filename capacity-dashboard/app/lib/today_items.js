@@ -13,7 +13,7 @@ const round1 = (x) => Math.round(x * 10) / 10;
 const planEntriesFor = (plansByTask, id) =>
   plansByTask ? ((plansByTask.get ? plansByTask.get(id) : plansByTask[id]) || null) : null;
 
-// 前倒し: 本日に予定(plan)があり、かつ期日が本日より先。
+// 前倒し: 本日に予定(plan)があり、かつ期限が本日より先。
 function isAdvanced(task, planEntries, isoDay) {
   if (!hasDate(task.due_date)) return false;
   const due = dateOnly(task.due_date);
