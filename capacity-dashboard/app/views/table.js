@@ -3,6 +3,7 @@
 // 共有データ（DB）は一切変えないので、誰がどう並べても他メンバーの見え方に影響しない（衝突しない）。
 import { load, invalidate, projectName, isAiUser } from "../lib/store.js";
 import { savePresets } from "../lib/exec.js";
+import { updateTask, deleteTask } from "../lib/api.js";
 import { PRIO, prioBucket, kindOf, isReviewTask, categoryLabels, categoryColor } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
@@ -43,7 +44,7 @@ const AXES = {
   ws:      { label: "WS",        cmp: (a, b) => a.proj.localeCompare(b.proj, "ja"), dir: 1 },
   cat:     { label: "分類",      cmp: (a, b) => ((a.cat && a.cat.title) || "～").localeCompare((b.cat && b.cat.title) || "～", "ja"), dir: 1 },
   who:     { label: "担当",      cmp: (a, b) => ((a.who && (a.who.name || a.who.username)) || "～").localeCompare((b.who && (b.who.name || b.who.username)) || "～", "ja"), dir: 1 },
-  state:   { label: "状態",      cmp: (a, b) => stateRank(a) - stateRank(b), dir: 1 },
+  state:   { label: "ステータス",      cmp: (a, b) => stateRank(a) - stateRank(b), dir: 1 },
   pct:     { label: "進捗",      cmp: (a, b) => a.pct - b.pct, dir: -1 },
   est:     { label: "見積",      cmp: (a, b) => a.est - b.est, dir: -1 },
   flag:    { label: "フラグ",    cmp: (a, b) => (a.t.is_favorite ? 1 : 0) - (b.t.is_favorite ? 1 : 0), dir: -1 },
@@ -176,6 +177,7 @@ export async function render(root) {
   });
   root.querySelectorAll("tr[data-id]").forEach((tr) => {
     tr.onclick = (e) => { if (V.manualMode || e.target.closest(".tb-fable")) return; openTaskForm({ taskId: +tr.dataset.id, onSaved: () => render(root) }); };
+    tr.oncontextmenu = (e) => { e.preventDefault(); openRowMenu(e.clientX, e.clientY, +tr.dataset.id, tasks, root); };
   });
   root.querySelectorAll(".tb-fable").forEach((b) => {
     b.onclick = async (e) => {
@@ -189,6 +191,8 @@ export async function render(root) {
   if (!docDeselectWired) {
     docDeselectWired = true;
     document.addEventListener("pointerdown", (e) => {
+      if (e.button && e.button !== 0) return;                 // 右クリックでは解除しない
+      if (document.querySelector(".tb-ctx")) return;          // 右クリックメニュー表示中は触らない
       if (!location.hash.startsWith("#/list")) return;        // 一覧ビュー中のみ
       if (!V || !V.manualMode || !selectedIds.size) return;
       if (e.target.closest("tr[data-id], button, select, input, a, label, .tb-chips, .tb-presets, .tb-sortwrap")) return;
@@ -250,6 +254,46 @@ export async function render(root) {
     if (fr) fr.classList.add("tb-flash");
     flashId = null;
   }
+}
+
+// ── 行の右クリックメニュー（編集/完了↔/フラグ↔/削除）。複数選択中の行ならまとめて適用 ──
+let _ctxEl = null, _ctxCleanup = null;
+function closeRowMenu() { if (_ctxEl) { _ctxEl.remove(); _ctxEl = null; } if (_ctxCleanup) { _ctxCleanup(); _ctxCleanup = null; } }
+function openRowMenu(x, y, id, tasks, root) {
+  closeRowMenu();
+  // 対象: 選択集合に含まれ複数選択中なら全選択、それ以外はこの行のみ
+  const ids = (selectedIds.has(id) && selectedIds.size > 1) ? [...selectedIds] : [id];
+  const objs = ids.map((tid) => (tasks || []).find((t) => t.id === tid)).filter(Boolean);
+  if (!objs.length) return;
+  const n = objs.length, multi = n > 1;
+  const allDone = objs.every((t) => t.done);
+  const allFav = objs.every((t) => t.is_favorite);
+  const reload = () => { invalidate(); render(root); };
+  const each = async (fn) => { for (const t of objs) { try { await fn(t); } catch (e) { /* 続行 */ } } reload(); };
+  const items = [
+    ...(multi ? [] : [{ label: "編集", on: () => openTaskForm({ taskId: id, onSaved: () => render(root) }) }]),
+    { label: allDone ? (multi ? `${n}件を未完了に` : "未完了に戻す") : (multi ? `${n}件を完了` : "完了にする"),
+      on: () => each((t) => updateTask(t.id, allDone ? { done: false } : { done: true, percent_done: 100 })) },
+    { label: allFav ? (multi ? `${n}件のフラグを外す` : "フラグを外す") : (multi ? `${n}件にフラグ` : "フラグを付ける"),
+      on: () => each((t) => updateTask(t.id, { is_favorite: !allFav })) },
+    { sep: true },
+    { label: multi ? `${n}件を削除` : "削除", danger: true,
+      on: () => { if (!confirm(multi ? `${n}件のタスクを削除しますか？` : `「${objs[0].title}」を削除しますか？`)) return; selectedIds.clear(); anchorId = null; each((t) => deleteTask(t.id)); } },
+  ];
+  const m = document.createElement("div");
+  m.className = "tb-ctx";
+  m.innerHTML = items.map((it, i) => it.sep ? `<div class="tb-ctx-sep"></div>` : `<button class="tb-ctx-it${it.danger ? " danger" : ""}" data-i="${i}">${esc(it.label)}</button>`).join("");
+  document.body.appendChild(m);
+  _ctxEl = m;
+  const mw = m.offsetWidth, mh = m.offsetHeight;
+  m.style.left = Math.max(6, Math.min(x, window.innerWidth - mw - 8)) + "px";
+  m.style.top = Math.max(6, Math.min(y, window.innerHeight - mh - 8)) + "px";
+  m.querySelectorAll(".tb-ctx-it").forEach((b) => { b.onclick = () => { const it = items[+b.dataset.i]; closeRowMenu(); it.on && it.on(); }; });
+  const onDown = (ev) => { if (!m.contains(ev.target)) closeRowMenu(); };
+  const onKey = (ev) => { if (ev.key === "Escape") closeRowMenu(); };
+  const onScroll = () => closeRowMenu();
+  setTimeout(() => { document.addEventListener("pointerdown", onDown, true); document.addEventListener("keydown", onKey); window.addEventListener("scroll", onScroll, true); window.addEventListener("resize", onScroll); }, 0);
+  _ctxCleanup = () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); window.removeEventListener("scroll", onScroll, true); window.removeEventListener("resize", onScroll); };
 }
 
 // プリセット名の候補（軸ラベルを連結）
@@ -367,7 +411,7 @@ function wireDrag(root, rerender) {
 const cols = () => [
   { k: "title", label: "タスク" }, { k: "who", label: "担当" }, { k: null, label: "種別" },
   { k: "cat", label: "分類" }, { k: "prio", label: "優先度" }, { k: "due", label: "期日" },
-  { k: "est", label: "見積" }, { k: "pct", label: "進捗" }, { k: "state", label: "状態" },
+  { k: "est", label: "見積" }, { k: "pct", label: "進捗" }, { k: "state", label: "ステータス" },
 ];
 // ヘッダに何番目のソート軸かを小さく表示（組み合わせの見える化）
 const th = (c, manual) => {
@@ -451,6 +495,12 @@ function css() {
   .tb-ghost-tbl{border-collapse:collapse;table-layout:fixed;background:#fff;border:1px solid ${C.line};border-radius:9px;overflow:hidden}
   .tb-ghost-tbl td{padding:10px 12px;border-bottom:0;font-size:13px;vertical-align:middle}
   .tb-ghost-tbl tr + tr td{border-top:1px solid ${C.line}}
+  .tb-ctx{position:fixed;z-index:10000;min-width:170px;background:#fff;border:1px solid ${C.line};border-radius:10px;box-shadow:0 12px 34px rgba(20,30,50,.22);padding:5px;display:flex;flex-direction:column}
+  .tb-ctx-it{font:inherit;font-size:13px;text-align:left;border:0;background:transparent;color:${C.ink};padding:8px 12px;border-radius:7px;cursor:pointer;white-space:nowrap}
+  .tb-ctx-it:hover{background:${C.track}}
+  .tb-ctx-it.danger{color:${C.over}}
+  .tb-ctx-it.danger:hover{background:#fdecec}
+  .tb-ctx-sep{height:1px;background:${C.line};margin:5px 6px}
   body.tb-dragging-body{cursor:grabbing}
   body.tb-dragging-body .tb tbody tr:hover{background:transparent}
   /* 着地ハイライト: ドロップ直後にジワっと色が戻る（落ちた先を見失わない） */

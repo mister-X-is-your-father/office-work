@@ -20,7 +20,7 @@ let cache = null;
 
 export async function load(force = false) {
   if (cache && !force) return cache;
-  const [tasksAll, projects, recurrences, holidays, unavailability, me, settingsRaw, labels] = await Promise.all([
+  const [tasksAll, projectsRaw, recurrences, holidays, unavailability, me, settingsRaw, labels] = await Promise.all([
     vik.getTasks(), vik.getProjects(),
     vik.getRecurrences().catch(() => []),
     vik.getHolidays().catch(() => []),
@@ -29,6 +29,9 @@ export async function load(force = false) {
     getSettings().catch(() => null),
     vik.getLabels().catch(() => []), // 分類（ラベル）の選択肢用
   ]);
+  // Vikunja の仮想プロジェクト（お気に入り=-1 等の負ID）は実WSではないので除外
+  // （projectusers が無く 404 になる・WS一覧に幻の「お気に入り」が出るのを防ぐ）
+  const projects = (projectsRaw || []).filter((p) => (p.id || 0) > 0);
   const st = (settingsRaw && settingsRaw.settings) || {};
   const settings = {
     capH: st.cap_hours || SETTINGS_DEFAULT.capH,
