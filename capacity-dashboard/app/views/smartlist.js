@@ -4,10 +4,13 @@
 import { load, invalidate, projectName } from "../lib/store.js";
 import { updateTask } from "../lib/api.js";
 import { taskMatches, next7End, EMPTY_FILTER, BUILTIN_VIEWS } from "../lib/smartlist.js";
+import { shiftISO } from "../lib/capacity.js";
 import { PRIO, categoryLabels, categoryColor } from "../lib/kinds.js";
 import { INBOX_WS } from "./quickadd.js";
 import { openTaskForm } from "./taskform.js";
 import { C, esc, fmtH, member_color, todayISO } from "../lib/ui.js";
+
+const DOW_JA = ["日", "月", "火", "水", "木", "金", "土"];
 
 const SEL_KEY = (uid) => `ts.smartlist.sel.${uid ?? "anon"}`;
 const LISTS_KEY = (uid) => `ts.smartlists.${uid ?? "anon"}`;
@@ -78,7 +81,7 @@ export async function render(root) {
           ${state.sel === "adhoc" ? `<button id="sl-save" class="sl-save">＋ 保存</button>` : ""}
           ${typeof state.sel === "number" ? `<button id="sl-del" class="sl-del">このリストを削除</button>` : ""}
         </div>
-        <div class="sl-list" id="sl-results">${sorted.length ? sorted.map((t) => rowHtml(t, projects, today)).join("") : emptyHtml()}</div>
+        <div class="sl-list" id="sl-results">${resultsHtml(sorted, projects, today, state.sort)}</div>
       </section>
     </div>`;
 
@@ -144,6 +147,40 @@ function rowHtml(t, projects, today) {
 }
 
 const emptyHtml = () => `<div class="sl-empty"><div class="sl-empty-i">🗂️</div>このビューに該当するタスクはありません。</div>`;
+
+// 期日ソート時はアジェンダ風に日別グルーピング（期限切れ/今日/明日/日付/期日なし）。
+function resultsHtml(sorted, projects, today, sort) {
+  if (!sorted.length) return emptyHtml();
+  if (sort !== "due") return sorted.map((t) => rowHtml(t, projects, today)).join("");
+  const groups = groupByDue(sorted, today);
+  return groups.map((g) => `<div class="sl-gh ${g.cls}">${esc(g.header)} <span class="sl-gn">${g.tasks.length}</span></div>
+    ${g.tasks.map((t) => rowHtml(t, projects, today)).join("")}`).join("");
+}
+
+function groupByDue(tasks, today) {
+  const tomorrow = shiftISO(today, 1);
+  const dueOf = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(0, 10) : "");
+  const order = [];
+  const map = new Map();
+  const put = (key, header, cls, t) => {
+    if (!map.has(key)) { map.set(key, { key, header, cls, tasks: [] }); order.push(key); }
+    map.get(key).tasks.push(t);
+  };
+  for (const t of tasks) {
+    const d = dueOf(t);
+    if (!d) put("none", "期日なし", "none", t);
+    else if (d < today) put("over", "期限切れ", "over", t);
+    else if (d === today) put("today", "今日", "today", t);
+    else if (d === tomorrow) put("tomorrow", "明日", "", t);
+    else {
+      const dt = new Date(d + "T00:00:00Z");
+      put(d, `${d.slice(5).replace("-", "/")}（${DOW_JA[dt.getUTCDay()]}）`, "", t);
+    }
+  }
+  // 期限切れ→今日→明日→日付昇順→期日なし
+  const rank = (k) => k === "over" ? 0 : k === "today" ? 1 : k === "tomorrow" ? 2 : k === "none" ? 9 : 5;
+  return order.map((k) => map.get(k)).sort((a, b) => (rank(a.key) - rank(b.key)) || a.key.localeCompare(b.key));
+}
 
 function wire(root, data, uid, lists, ctx) {
   const rerender = () => render(root);
@@ -240,7 +277,7 @@ function paintResults(root, data, ctx) {
   const matched = (data.tasks || []).filter((t) => taskMatches(t, state.filter, ctx) && (!catTitle || categoryLabels(t).some((l) => l.title === catTitle)));
   const sorted = sortTasks(matched, state.sort, ctx.today);
   const box = root.querySelector("#sl-results");
-  box.innerHTML = sorted.length ? sorted.map((t) => rowHtml(t, data.projects, ctx.today)).join("") : emptyHtml();
+  box.innerHTML = resultsHtml(sorted, data.projects, ctx.today, state.sort);
   wireRows(root, data, () => render(root));
 }
 function updateCount(root, data, ctx) {
@@ -288,6 +325,10 @@ function css() {
   .sl-save{border:1px solid ${C.fill};background:${C.fill};color:#fff}
   .sl-del{border:1px solid ${C.line};background:#fff;color:${C.over}}
   .sl-list{display:flex;flex-direction:column;gap:6px}
+  .sl-gh{font-size:11.5px;font-weight:700;color:${C.muted};letter-spacing:.03em;padding:10px 4px 2px;display:flex;align-items:center;gap:7px}
+  .sl-gh:first-child{padding-top:0}
+  .sl-gh.over{color:${C.over}}.sl-gh.today{color:${C.amber}}
+  .sl-gn{font-size:10.5px;font-weight:700;background:${C.track};color:${C.muted};border-radius:9px;padding:0 7px}
   .sl-row{display:flex;align-items:center;gap:11px;background:${C.card};border:1px solid ${C.line};border-radius:11px;padding:11px 14px;cursor:pointer;transition:box-shadow .12s,transform .12s,opacity .25s}
   .sl-row:hover{box-shadow:0 2px 10px rgba(20,30,50,.07);border-color:#dbe2ec}
   .sl-row.completing{opacity:0;transform:translateX(8px)}
