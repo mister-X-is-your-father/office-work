@@ -3,8 +3,8 @@
 // 共有データ（DB）は一切変えないので、誰がどう並べても他メンバーの見え方に影響しない（衝突しない）。
 import { load, invalidate, projectName, isAiUser } from "../lib/store.js";
 import { savePresets } from "../lib/exec.js";
-import { updateTask, deleteTask } from "../lib/api.js";
-import { PRIO, prioBucket, kindOf, isReviewTask, categoryLabels, categoryColor } from "../lib/kinds.js";
+import { updateTask, deleteTask, addAssignee, removeAssignee, addTaskLabel, removeTaskLabel, createLabel } from "../lib/api.js";
+import { PRIO, prioBucket, kindOf, isReviewTask, categoryLabels, categoryColor, REVIEW_LABEL } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 import { shiftISO } from "../lib/capacity.js";
 import { openTaskForm } from "./taskform.js";
@@ -41,7 +41,7 @@ const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date
 // 軸の定義: ラベル＋比較関数（行 r を受ける）＋セレクトで選んだ時の既定の向き。
 const AXES = {
   due:     { label: "期限",      cmp: (a, b) => (a.due || "9999").localeCompare(b.due || "9999"), dir: 1 },
-  prio:    { label: "優先度",    cmp: (a, b) => a.prio - b.prio, dir: -1 },
+  prio:    { label: "重要度",    cmp: (a, b) => a.prio - b.prio, dir: -1 },
   ws:      { label: "WS",        cmp: (a, b) => a.proj.localeCompare(b.proj, "ja"), dir: 1 },
   cat:     { label: "分類",      cmp: (a, b) => ((a.cat && a.cat.title) || "～").localeCompare((b.cat && b.cat.title) || "～", "ja"), dir: 1 },
   who:     { label: "担当",      cmp: (a, b) => ((a.who && (a.who.name || a.who.username)) || "～").localeCompare((b.who && (b.who.name || b.who.username)) || "～", "ja"), dir: 1 },
@@ -56,7 +56,7 @@ const stateRank = (r) => (r.done ? 2 : (r.pct > 0 ? 1 : 0)); // 未着手→進�
 const tieBreak = (a, b) => (a.due || "9999").localeCompare(b.due || "9999") || a.t.id - b.t.id;
 
 export async function render(root) {
-  const { tasks, projects, members, me = null, settings = {} } = await load();
+  const { tasks, projects, members, me = null, settings = {}, labels = [] } = await load();
   const presets = settings.sortPresets || [];   // グローバル共有プリセット
   const canEditPresets = !!settings.canEdit;     // 保存/削除は許可ユーザーのみ（適用は全員可）
   const today = todayISO();
@@ -211,6 +211,12 @@ export async function render(root) {
   root.querySelectorAll(".tb-stbtn").forEach((b) => {
     b.onclick = (e) => { e.stopPropagation(); openStatusMenu(b, +b.dataset.st, tasks, root); };
   });
+  // 一覧から直接編集（担当/分類/重要度/期限/見積）。各セルはボタン＝行クリック(編集)とは分離。
+  root.querySelectorAll(".tb-asbtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openAssigneeMenu(b, +b.dataset.as, tasks, members, root); }; });
+  root.querySelectorAll(".tb-catbtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openCategoryMenu(b, +b.dataset.cat, tasks, labels, root); }; });
+  root.querySelectorAll(".tb-priobtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openPrioMenu(b, +b.dataset.prio, tasks, root); }; });
+  root.querySelectorAll(".tb-duebtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openDueMenu(b, +b.dataset.due, tasks, root, today); }; });
+  root.querySelectorAll(".tb-estbtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openEstMenu(b, +b.dataset.est, tasks, root); }; });
   root.querySelectorAll(".tb-fable").forEach((b) => {
     b.onclick = async (e) => {
       e.stopPropagation(); b.disabled = true;
@@ -315,23 +321,40 @@ function openRowMenu(x, y, id, tasks, root) {
   openMenu(x, y, items);
 }
 
-// 汎用の小メニュー（右クリック/ステータス共用）。items: [{label,danger?,check?,on}|{sep:true}]
-function openMenu(x, y, items) {
+// 汎用の小メニュー。items: [{label,danger?,check?,toggle?,input?,value?,on}|{sep:true}]
+// opts: {keepOpen, rebuild, onClose} — keepOpen中はtoggle項目で閉じずrebuild()で再描画（担当/分類の複数選択用）。
+function openMenu(x, y, items, opts = {}) {
   const m = document.createElement("div");
   m.className = "tb-ctx";
-  m.innerHTML = items.map((it, i) => it.sep ? `<div class="tb-ctx-sep"></div>`
-    : `<button class="tb-ctx-it${it.danger ? " danger" : ""}" data-i="${i}">${it.check !== undefined ? `<span class="tb-ctx-ck">${it.check ? "✓" : ""}</span>` : ""}${esc(it.label)}</button>`).join("");
+  const paint = (its) => {
+    m.innerHTML = its.map((it, i) => {
+      if (it.sep) return `<div class="tb-ctx-sep"></div>`;
+      if (it.input === "date") return `<label class="tb-ctx-inp">${esc(it.label)}<input type="date" data-i="${i}" value="${it.value || ""}"></label>`;
+      return `<button class="tb-ctx-it${it.danger ? " danger" : ""}" data-i="${i}">${it.check !== undefined ? `<span class="tb-ctx-ck">${it.check ? "✓" : ""}</span>` : ""}${esc(it.label)}</button>`;
+    }).join("");
+    m.querySelectorAll(".tb-ctx-it").forEach((b) => {
+      b.onclick = () => {
+        const it = its[+b.dataset.i];
+        if (opts.keepOpen && it.toggle) { it.on && it.on(); paint(opts.rebuild ? opts.rebuild() : its); }
+        else { closeRowMenu(); it.on && it.on(); }
+      };
+    });
+    m.querySelectorAll(".tb-ctx-inp input").forEach((inp) => {
+      inp.onclick = (e) => e.stopPropagation();
+      inp.onchange = () => { const it = its[+inp.dataset.i]; closeRowMenu(); it.on && it.on(inp.value); };
+    });
+  };
   document.body.appendChild(m);
   _ctxEl = m;
+  paint(items);
   const mw = m.offsetWidth, mh = m.offsetHeight;
   m.style.left = Math.max(6, Math.min(x, window.innerWidth - mw - 8)) + "px";
   m.style.top = Math.max(6, Math.min(y, window.innerHeight - mh - 8)) + "px";
-  m.querySelectorAll(".tb-ctx-it").forEach((b) => { b.onclick = () => { const it = items[+b.dataset.i]; closeRowMenu(); it.on && it.on(); }; });
   const onDown = (ev) => { if (!m.contains(ev.target)) closeRowMenu(); };
   const onKey = (ev) => { if (ev.key === "Escape") closeRowMenu(); };
   const onScroll = () => closeRowMenu();
   setTimeout(() => { document.addEventListener("pointerdown", onDown, true); document.addEventListener("keydown", onKey); window.addEventListener("scroll", onScroll, true); window.addEventListener("resize", onScroll); }, 0);
-  _ctxCleanup = () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); window.removeEventListener("scroll", onScroll, true); window.removeEventListener("resize", onScroll); };
+  _ctxCleanup = () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); window.removeEventListener("scroll", onScroll, true); window.removeEventListener("resize", onScroll); if (opts.onClose) opts.onClose(); };
 }
 
 // ステータスのワンクリック変更（チップ直下にメニュー）。未着手/進行中/完了。
@@ -349,6 +372,111 @@ function openStatusMenu(chipEl, id, tasks, root) {
   const it = (key, label) => ({ label, check: cur === key, on: () => set(key) });
   const r = chipEl.getBoundingClientRect();
   openMenu(r.left, r.bottom + 4, [it("todo", "未着手"), it("doing", "進行中"), it("done", "完了")]);
+}
+
+// 重要度のワンクリック変更（なし/低/中/高/最優先）。Vikunja priority を直接更新。
+// ※「優先度」＝重要度×緊急度の合成（四象限/トリアージで算出）。この列は素の重要度。
+function openPrioMenu(chipEl, id, tasks, root) {
+  closeRowMenu();
+  const t = (tasks || []).find((x) => x.id === id); if (!t) return;
+  const cur = t.priority || 0;
+  const reload = () => { invalidate(); render(root); };
+  const opts = [[0, "なし"], [1, "低"], [2, "中"], [3, "高"], [4, "最優先"]];
+  const items = opts.map(([v, label]) => ({ label, check: (cur >= 4 ? 4 : cur) === v, on: () => updateTask(id, { priority: v }).then(reload).catch(() => {}) }));
+  const r = chipEl.getBoundingClientRect();
+  openMenu(r.left, r.bottom + 4, items);
+}
+
+// 期限のワンクリック変更（プリセット＋日付指定＋クリア）。
+function openDueMenu(chipEl, id, tasks, root, today) {
+  closeRowMenu();
+  const t = (tasks || []).find((x) => x.id === id); if (!t) return;
+  const reload = () => { invalidate(); render(root); };
+  const ZERO = "0001-01-01T00:00:00Z";
+  const cur = (t.due_date && !t.due_date.startsWith("0001")) ? t.due_date.slice(0, 10) : "";
+  const set = (iso) => updateTask(id, { due_date: iso ? iso + "T00:00:00Z" : ZERO }).then(reload).catch(() => {});
+  const dow = new Date(today + "T00:00:00Z").getUTCDay();   // 0=日 … 6=土
+  const sat = shiftISO(today, (6 - dow + 7) % 7);           // 今週の土曜（今日以降）
+  const items = [
+    { label: "今日", check: cur === today, on: () => set(today) },
+    { label: "明日", check: cur === shiftISO(today, 1), on: () => set(shiftISO(today, 1)) },
+    { label: "今週末（土）", check: cur === sat, on: () => set(sat) },
+    { label: "1週間後", on: () => set(shiftISO(today, 7)) },
+    { label: "1ヶ月後", on: () => set(shiftISO(today, 30)) },
+    { sep: true },
+    { label: "日付指定", input: "date", value: cur, on: (v) => set(v || null) },
+    { sep: true },
+    { label: "クリア（期限なし）", danger: !!cur, on: () => set(null) },
+  ];
+  const r = chipEl.getBoundingClientRect();
+  openMenu(r.left, r.bottom + 4, items);
+}
+
+// 見積のワンクリック変更（プリセット＋カスタム＋クリア）。
+function openEstMenu(chipEl, id, tasks, root) {
+  closeRowMenu();
+  const t = (tasks || []).find((x) => x.id === id); if (!t) return;
+  const reload = () => { invalidate(); render(root); };
+  const cur = t.time_estimate || 0;
+  const set = (sec) => updateTask(id, { time_estimate: sec }).then(reload).catch(() => {});
+  const opts = [[900, "15分"], [1800, "30分"], [2700, "45分"], [3600, "1時間"], [7200, "2時間"], [14400, "4時間"], [28800, "8時間"]];
+  const items = [
+    ...opts.map(([sec, label]) => ({ label, check: cur === sec, on: () => set(sec) })),
+    { label: "カスタム…", on: () => { const v = prompt("見積（時間。例: 1.5）", cur ? cur / 3600 : ""); if (v === null) return; const h = parseFloat(v); if (isNaN(h) || h < 0) return; set(Math.round(h * 3600)); } },
+    { sep: true },
+    { label: "クリア", danger: cur > 0, on: () => set(0) },
+  ];
+  const r = chipEl.getBoundingClientRect();
+  openMenu(r.left, r.bottom + 4, items);
+}
+
+// 担当のワンクリック変更（メンバーを複数トグル・メニューは開いたまま即反映）。
+function openAssigneeMenu(chipEl, id, tasks, members, root) {
+  closeRowMenu();
+  const t = (tasks || []).find((x) => x.id === id); if (!t) return;
+  if (!t.assignees) t.assignees = [];
+  let dirty = false;
+  const build = () => {
+    const items = (members || []).map((m) => ({
+      label: m.name || m.username,
+      check: t.assignees.some((a) => a.id === m.id),
+      toggle: true,
+      on: () => {
+        dirty = true;
+        if (t.assignees.some((a) => a.id === m.id)) { t.assignees = t.assignees.filter((a) => a.id !== m.id); removeAssignee(id, m.id).catch(() => {}); }
+        else { t.assignees = [...t.assignees, { id: m.id, username: m.username, name: m.name }]; addAssignee(id, m.id).catch(() => {}); }
+      },
+    }));
+    if (t.assignees.length) items.push({ sep: true }, { label: "担当なし（全員外す）", danger: true, on: () => { const cur = [...t.assignees]; t.assignees = []; cur.forEach((a) => removeAssignee(id, a.id).catch(() => {})); invalidate(); render(root); } });
+    return items;
+  };
+  const r = chipEl.getBoundingClientRect();
+  openMenu(r.left, r.bottom + 4, build(), { keepOpen: true, rebuild: build, onClose: () => { if (dirty) { invalidate(); render(root); } } });
+}
+
+// 分類（ラベル）のワンクリック変更（複数トグル＋新規作成）。レビューは予約語なので除外。
+function openCategoryMenu(chipEl, id, tasks, labels, root) {
+  closeRowMenu();
+  const t = (tasks || []).find((x) => x.id === id); if (!t) return;
+  if (!t.labels) t.labels = [];
+  let dirty = false;
+  const cats = (labels || []).filter((l) => l.title !== REVIEW_LABEL);
+  const build = () => {
+    const items = cats.map((l) => ({
+      label: l.title,
+      check: t.labels.some((x) => x.id === l.id),
+      toggle: true,
+      on: () => {
+        dirty = true;
+        if (t.labels.some((x) => x.id === l.id)) { t.labels = t.labels.filter((x) => x.id !== l.id); removeTaskLabel(id, l.id).catch(() => {}); }
+        else { t.labels = [...t.labels, l]; addTaskLabel(id, l.id).catch(() => {}); }
+      },
+    }));
+    items.push({ sep: true }, { label: "＋ 新しい分類…", on: async () => { const name = (prompt("新しい分類名") || "").trim(); if (!name) return; try { const lab = await createLabel(name); await addTaskLabel(id, lab.id); } catch (e) { /* noop */ } invalidate(); render(root); } });
+    return items;
+  };
+  const r = chipEl.getBoundingClientRect();
+  openMenu(r.left, r.bottom + 4, build(), { keepOpen: true, rebuild: build, onClose: () => { if (dirty) { invalidate(); render(root); } } });
 }
 
 // プリセット名の候補（軸ラベルを連結）
@@ -465,7 +593,7 @@ function wireDrag(root, rerender) {
 
 const cols = () => [
   { k: "title", label: "タスク" }, { k: "who", label: "担当" }, { k: null, label: "種別" },
-  { k: "cat", label: "分類" }, { k: "prio", label: "優先度" }, { k: "due", label: "期限" },
+  { k: "cat", label: "分類" }, { k: "prio", label: "重要度" }, { k: "due", label: "期限" },
   { k: "est", label: "見積" }, { k: "pct", label: "進捗" }, { k: "state", label: "ステータス" },
 ];
 // ヘッダに何番目のソート軸かを小さく表示（組み合わせの見える化）
@@ -480,22 +608,29 @@ const th = (c, manual) => {
 };
 
 function rowHtml(r, members, i, manual) {
-  const wn = r.who ? (r.who.name || r.who.username) : "—";
+  const id = r.t.id;
+  const wn = r.who ? (r.who.name || r.who.username) : "";
   const ava = r.who ? `<span class="tb-ava" style="background:${member_color(r.who.id)}">${esc((wn[0] || "?"))}</span>` : "";
+  const whoBtn = `<button class="tb-cell tb-asbtn" data-as="${id}" title="クリックで担当を変更">${ava}${esc(wn || "未設定")}<span class="tb-cell-car">▾</span></button>`;
   const kind = r.review ? `<span class="tb-k review">レビュー</span>` : `<span class="tb-k">タスク</span>`;
-  const cat = r.cat ? `<span class="tb-cat" style="color:${categoryColor(r.cat)};border-color:${categoryColor(r.cat)}40">${esc(r.cat.title)}</span>` : `<span class="tb-cat none">—</span>`;
-  const pc = PRIO[r.prio];
-  const prio = `<span class="tb-prio"><i style="background:${pc.c}"></i>${pc.n}</span>`;
+  const cats = categoryLabels(r.t);
+  const catInner = cats.length ? cats.map((c) => `<span class="tb-cat" style="color:${categoryColor(c)};border-color:${categoryColor(c)}40">${esc(c.title)}</span>`).join(" ") : `<span class="tb-cat none">—</span>`;
+  const catBtn = `<button class="tb-cell tb-catbtn" data-cat="${id}" title="クリックで分類を変更">${catInner}<span class="tb-cell-car">▾</span></button>`;
+  const pr = r.t.priority || 0;
+  const prioInner = pr >= 1 ? `<span class="tb-prio"><i style="background:${PRIO[prioBucket(pr)].c}"></i>${PRIO[prioBucket(pr)].n}</span>` : `<span class="tb-prio-none">なし</span>`;
+  const prioBtn = `<button class="tb-cell tb-priobtn" data-prio="${id}" title="クリックで重要度を変更">${prioInner}<span class="tb-cell-car">▾</span></button>`;
   const dueCls = r.due && r.due < todayISO() && !r.done ? "over" : "";
-  const st = `<button class="tb-st tb-stbtn ${r.done ? "done" : (r.pct > 0 ? "doing" : "todo")}" data-st="${r.t.id}" title="クリックでステータス変更">${r.state}<span class="tb-st-car">▾</span></button>`;
-  return `<tr data-id="${r.t.id}" class="${manual ? "tb-draggable" : ""}${manual && selectedIds.has(r.t.id) ? " tb-sel" : ""}">
-    <td class="tb-title">${esc(r.title)}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">🚩</span>` : ""}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${r.t.id}" data-title="${esc(r.title)}" title="Fableに実行させる">▶</button>` : ""}<div class="tb-sub">${esc(r.proj)}</div></td>
-    <td>${ava}${esc(wn)}</td>
+  const dueBtn = `<button class="tb-cell tb-duebtn ${dueCls}" data-due="${id}" title="クリックで期限を変更">${r.due ? r.due.slice(5).replace("-", "/") : "—"}<span class="tb-cell-car">▾</span></button>`;
+  const estBtn = `<button class="tb-cell tb-num tb-estbtn" data-est="${id}" title="クリックで見積を変更">${r.est ? fmtH(r.est) : "—"}<span class="tb-cell-car">▾</span></button>`;
+  const st = `<button class="tb-st tb-stbtn ${r.done ? "done" : (r.pct > 0 ? "doing" : "todo")}" data-st="${id}" title="クリックでステータス変更">${r.state}<span class="tb-st-car">▾</span></button>`;
+  return `<tr data-id="${id}" class="${manual ? "tb-draggable" : ""}${manual && selectedIds.has(id) ? " tb-sel" : ""}">
+    <td class="tb-title">${esc(r.title)}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">🚩</span>` : ""}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">▶</button>` : ""}<div class="tb-sub">${esc(r.proj)}</div></td>
+    <td>${whoBtn}</td>
     <td>${kind}</td>
-    <td>${cat}</td>
-    <td>${prio}</td>
-    <td class="${dueCls}">${r.due ? r.due.slice(5).replace("-", "/") : "—"}</td>
-    <td class="tb-num">${r.est ? fmtH(r.est) : "—"}</td>
+    <td>${catBtn}</td>
+    <td>${prioBtn}</td>
+    <td>${dueBtn}</td>
+    <td>${estBtn}</td>
     <td><div class="tb-bar"><i style="width:${r.pct}%"></i></div><span class="tb-pct">${r.pct}%</span></td>
     <td>${st}</td>
   </tr>`;
@@ -550,7 +685,9 @@ function css() {
   .tb-ghost-tbl{border-collapse:collapse;table-layout:fixed;background:#fff;border:1px solid ${C.line};border-radius:9px;overflow:hidden}
   .tb-ghost-tbl td{padding:10px 12px;border-bottom:0;font-size:13px;vertical-align:middle}
   .tb-ghost-tbl tr + tr td{border-top:1px solid ${C.line}}
-  .tb-ctx{position:fixed;z-index:10000;min-width:170px;background:#fff;border:1px solid ${C.line};border-radius:10px;box-shadow:0 12px 34px rgba(20,30,50,.22);padding:5px;display:flex;flex-direction:column}
+  .tb-ctx{position:fixed;z-index:10000;min-width:170px;max-height:340px;overflow-y:auto;background:#fff;border:1px solid ${C.line};border-radius:10px;box-shadow:0 12px 34px rgba(20,30,50,.22);padding:5px;display:flex;flex-direction:column}
+  .tb-ctx-inp{font:inherit;font-size:13px;display:flex;align-items:center;gap:8px;justify-content:space-between;padding:7px 12px;color:${C.ink}}
+  .tb-ctx-inp input{font:inherit;font-size:12px;border:1px solid ${C.line};border-radius:6px;padding:3px 6px}
   .tb-ctx-it{font:inherit;font-size:13px;text-align:left;border:0;background:transparent;color:${C.ink};padding:8px 12px;border-radius:7px;cursor:pointer;white-space:nowrap}
   .tb-ctx-it:hover{background:${C.track}}
   .tb-ctx-it.danger{color:${C.over}}
@@ -589,6 +726,14 @@ function css() {
   .tb-stbtn:hover{border-color:rgba(20,30,50,.24);box-shadow:0 1px 4px rgba(20,30,50,.16)}
   .tb-st-car{font-size:8px;opacity:.6;margin-right:-1px}
   .tb-ctx-ck{display:inline-block;width:13px;color:${C.fill};font-weight:700}
+  /* 一覧から直接編集できるセル＝普段は素／hoverで枠＋▾が出て「押せる」と分かる */
+  .tb-cell{font-family:inherit;font-size:13px;color:inherit;background:transparent;border:1px solid transparent;border-radius:7px;padding:3px 7px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;max-width:100%;text-align:left;line-height:1.5}
+  .tb-cell:hover{background:#eef4ff;border-color:#dbe7ff}
+  .tb-cell.tb-num{font-variant-numeric:tabular-nums}
+  .tb-cell.over{color:${C.over};font-weight:600}
+  .tb-cell-car{font-size:8px;opacity:0;color:${C.muted};transition:opacity .1s;margin-left:auto;padding-left:2px}
+  .tb-cell:hover .tb-cell-car{opacity:.6}
+  .tb-prio-none{color:${C.muted}}
   /* クイック絞り込みのチップ列 */
   .tb-quick{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:-4px 0 14px}
   .tb-ql{font-size:11px;color:${C.muted};font-weight:600;margin-right:2px}
