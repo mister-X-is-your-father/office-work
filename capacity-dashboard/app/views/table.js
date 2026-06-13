@@ -330,6 +330,7 @@ function openMenu(x, y, items, opts = {}) {
     m.innerHTML = its.map((it, i) => {
       if (it.sep) return `<div class="tb-ctx-sep"></div>`;
       if (it.input === "date") return `<label class="tb-ctx-inp">${esc(it.label)}<input type="date" data-i="${i}" value="${it.value || ""}"></label>`;
+      if (it.input === "hours") return `<label class="tb-ctx-inp">${esc(it.label)}<span class="tb-ctx-unit"><input type="number" step="0.25" min="0" data-i="${i}" value="${it.value || ""}" placeholder="例 1.5">時間</span></label>`;
       return `<button class="tb-ctx-it${it.danger ? " danger" : ""}" data-i="${i}">${it.check !== undefined ? `<span class="tb-ctx-ck">${it.check ? "✓" : ""}</span>` : ""}${esc(it.label)}</button>`;
     }).join("");
     m.querySelectorAll(".tb-ctx-it").forEach((b) => {
@@ -422,7 +423,8 @@ function openEstMenu(chipEl, id, tasks, root) {
   const opts = [[900, "15分"], [1800, "30分"], [2700, "45分"], [3600, "1時間"], [7200, "2時間"], [14400, "4時間"], [28800, "8時間"]];
   const items = [
     ...opts.map(([sec, label]) => ({ label, check: cur === sec, on: () => set(sec) })),
-    { label: "カスタム…", on: () => { const v = prompt("見積（時間。例: 1.5）", cur ? cur / 3600 : ""); if (v === null) return; const h = parseFloat(v); if (isNaN(h) || h < 0) return; set(Math.round(h * 3600)); } },
+    { sep: true },
+    { label: "カスタム", input: "hours", value: cur ? cur / 3600 : "", on: (v) => { const h = parseFloat(v); if (isNaN(h) || h < 0) return; set(Math.round(h * 3600)); } },
     { sep: true },
     { label: "クリア", danger: cur > 0, on: () => set(0) },
   ];
@@ -688,6 +690,8 @@ function css() {
   .tb-ctx{position:fixed;z-index:10000;min-width:170px;max-height:340px;overflow-y:auto;background:#fff;border:1px solid ${C.line};border-radius:10px;box-shadow:0 12px 34px rgba(20,30,50,.22);padding:5px;display:flex;flex-direction:column}
   .tb-ctx-inp{font:inherit;font-size:13px;display:flex;align-items:center;gap:8px;justify-content:space-between;padding:7px 12px;color:${C.ink}}
   .tb-ctx-inp input{font:inherit;font-size:12px;border:1px solid ${C.line};border-radius:6px;padding:3px 6px}
+  .tb-ctx-unit{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:${C.muted}}
+  .tb-ctx-unit input{width:66px;text-align:right}
   .tb-ctx-it{font:inherit;font-size:13px;text-align:left;border:0;background:transparent;color:${C.ink};padding:8px 12px;border-radius:7px;cursor:pointer;white-space:nowrap}
   .tb-ctx-it:hover{background:${C.track}}
   .tb-ctx-it.danger{color:${C.over}}
