@@ -1,10 +1,10 @@
 // タスク追加モーダルの MTG / 定例MTG / 定期タスク タブのパネル（taskform.js から呼ばれる）。
 // すべて recurrences（RRULE・dumb storage）として保存。MTG=COUNT=1 の単発 occurrence。
 // 定期タスクは「持ち回り」(rotation) 対応: 担当は assignee_ids を配列順に巡回（解釈は recurrence.js）。
-import { createRecurrence } from "../lib/api.js";
+import { createRecurrence, updateRecurrence } from "../lib/api.js";
 import { invalidate } from "../lib/store.js";
 import { C, esc } from "../lib/ui.js";
-import { parseSmartDate, fmtDisplay, fmtDisplayDow, joinMeta, hourInputHtml, wireHourInput, docChipsHtml, wireDocChips, attachDatePicker } from "../lib/form.js";
+import { parseSmartDate, fmtDisplay, fmtDisplayDow, joinMeta, splitMeta, hourInputHtml, wireHourInput, docChipsHtml, wireDocChips, attachDatePicker } from "../lib/form.js";
 
 const BYDAY = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"]; // getUTCDay() の並び
 const DOW_JA = ["日", "月", "火", "水", "木", "金", "土"];
@@ -41,6 +41,56 @@ export function rruleText({ unit, interval, weekdays, monthlyMode, mday, nth, nt
   return monthlyMode === "nth" ? `${pre} ${NTH_LABEL[nth]}${DOW_JA[nthDow]}曜日` : `${pre} ${mday}日`;
 }
 
+// RRULE 文字列 → buildRRule が受け取る state（編集時のプレフィル用・buildRRule の逆写像）。
+// 解釈できない要素は既定値に倒す（落とさない）。COUNT=1 の DAILY は単発(MTG)＝isOnce。
+export function parseRRuleToState(rrule) {
+  const p = {};
+  for (const kv of String(rrule || "").split(";")) {
+    const [k, v] = kv.split("=");
+    if (k) p[k.toUpperCase()] = v;
+  }
+  const freq = p.FREQ;
+  const interval = Math.max(1, Math.min(99, parseInt(p.INTERVAL, 10) || 1));
+  const isOnce = freq === "DAILY" && p.COUNT === "1";
+  let unit = "weekly", weekdays = [], monthlyMode = "same", mday = 1, nth = 1, nthDow = 1;
+  if (freq === "DAILY") unit = "daily";
+  else if (freq === "WEEKLY") {
+    unit = "weekly";
+    weekdays = String(p.BYDAY || "").split(",").map((d) => BYDAY.indexOf(d)).filter((i) => i >= 0);
+  } else if (freq === "MONTHLY") {
+    unit = "monthly";
+    if (p.BYMONTHDAY) { monthlyMode = "same"; mday = Math.max(1, Math.min(31, parseInt(p.BYMONTHDAY, 10) || 1)); }
+    else if (p.BYDAY) {
+      monthlyMode = "nth";
+      const m = String(p.BYDAY).match(/(-?\d+)([A-Z]{2})/);
+      if (m) { nth = parseInt(m[1], 10); const di = BYDAY.indexOf(m[2]); if (di >= 0) nthDow = di; }
+    }
+  }
+  let untilISO = null;
+  const um = String(p.UNTIL || "").match(/^(\d{4})(\d{2})(\d{2})/);
+  if (um) untilISO = `${um[1]}-${um[2]}-${um[3]}`;
+  return { isOnce, unit, interval, weekdays, monthlyMode, mday, nth, nthDow, untilISO };
+}
+
+// 既存 recurrence のUI種別（mtg=単発会議 / rmtg=定例MTG / rtask=定期タスク）を判定。
+export function recurrenceMode(rec) {
+  const st = parseRRuleToState(rec.rrule);
+  if (rec.kind === "task") return "rtask";
+  return st.isOnce ? "mtg" : "rmtg";
+}
+
+// 一覧表示用の要約（繰り返し文・開始時刻・所要・終了日）。
+export function summarizeRecurrence(rec) {
+  const st = parseRRuleToState(rec.rrule);
+  const time = String(rec.dtstart || "").slice(11, 16);
+  const hasTime = !!time && time !== "00:00";
+  const durH = (rec.duration_seconds || 0) / 3600;
+  const rep = st.isOnce
+    ? "単発 " + fmtDisplay(String(rec.dtstart || "").slice(0, 10))
+    : rruleText(st);
+  return { rep, time: hasTime ? time : "", durTxt: durH ? `${Math.round(durH * 100) / 100}h` : "", untilISO: st.untilISO };
+}
+
 // "10:00"・"1000"・"930" → 0:00 からの分（不正は null。空は -1=時刻なし）
 export function parseTimeOfDay(raw) {
   const s = String(raw || "").trim();
@@ -54,16 +104,23 @@ export function parseTimeOfDay(raw) {
 
 // パネル描画。mode: "mtg"(単発会議) | "rmtg"(定例MTG) | "rtask"(定期タスク)
 // ctx: { members, onSaved, close, $err } — $err は親モーダルのエラー表示要素。
-export function renderRecurrencePanel(el, mode, { members, onSaved, close, holidaysByDate = null }) {
+export function renderRecurrencePanel(el, mode, { members, onSaved, close, holidaysByDate = null, existing = null }) {
   const isMtg = mode === "mtg";
   const isTask = mode === "rtask";
   const kind = isTask ? "task" : "meeting";
+  const isEdit = !!existing;
   const todayISO = new Date().toISOString().slice(0, 10);
-  const sel = []; // 選択済みメンバー（順序が持ち回りの順番）
+  // 編集時のプレフィル元
+  const exMeta = existing ? splitMeta(existing.note) : null;
+  const exState = existing ? parseRRuleToState(existing.rrule) : null;
+  const exDateISO = existing ? String(existing.dtstart || "").slice(0, 10) : todayISO;
+  const exTime = existing ? String(existing.dtstart || "").slice(11, 16) : "";
+  const exHasTime = !!exTime && exTime !== "00:00";
+  const sel = isEdit ? [...(existing.assignee_ids || [])] : []; // 選択済みメンバー（順序が持ち回りの順番）
 
   el.innerHTML = `
     <label class="tf-l">タイトル <span class="tf-req">*</span></label>
-    <input id="rf-title" class="tf-in" type="text" placeholder="${isMtg ? "例: 顧客定例キックオフ" : isTask ? "例: 週次バックアップ確認" : "例: チーム定例"}">
+    <input id="rf-title" class="tf-in" type="text" value="${esc(existing ? existing.title : "")}" placeholder="${isMtg ? "例: 顧客定例キックオフ" : isTask ? "例: 週次バックアップ確認" : "例: チーム定例"}">
     ${isMtg ? `
     <div class="tf-row">
       <div class="tf-col">
@@ -232,10 +289,37 @@ export function renderRecurrencePanel(el, mode, { members, onSaved, close, holid
   if (rotEl) rotEl.onchange = renderOrder;
 
   // 資料リンク: 共有部品。taskform と同じ規約（note に "[資料] URL" 行として保存）。
-  const docLinks = [];
+  const docLinks = exMeta ? [...exMeta.links] : [];
   wireDocChips(el, "rf-doc", docLinks);
   // 所要(h): 共有部品（".25"補完・↑↓キー/▲▼ボタンで0.25刻み）
   wireHourInput(el, "rf-dur");
+
+  // ===== 編集時のプレフィル =====（新規は既定値のまま）
+  if (isEdit) {
+    dateEl.value = fmtDisplayDow(exDateISO);
+    if (exHasTime && $("#rf-time")) $("#rf-time").value = exTime;
+    if (exMeta && $("#rf-note")) $("#rf-note").value = exMeta.text;
+    if (existing.duration_seconds) $("#rf-dur").value = String(Math.round((existing.duration_seconds / 3600) * 100) / 100);
+    if (untilEl && exState.untilISO) untilEl.value = fmtDisplayDow(exState.untilISO);
+    if (unitEl) {
+      touchedDow = true; touchedMonthly = true;
+      intEl.value = String(exState.interval);
+      unitEl.value = exState.unit;
+      dowBtns.forEach((b) => b.classList.toggle("on", exState.weekdays.includes(+b.dataset.dow)));
+      if ($("#rf-mday")) $("#rf-mday").value = String(exState.mday);
+      if ($("#rf-nth-n")) $("#rf-nth-n").value = String(exState.nth);
+      if ($("#rf-nth-dow")) $("#rf-nth-dow").value = String(exState.nthDow);
+      const radio = el.querySelector(`input[name="rf-mm"][value="${exState.monthlyMode}"]`);
+      if (radio) radio.checked = true;
+      syncFreqUI();
+    }
+    // メンバーのチェック（sel は assignee_ids の順＝持ち回り順を保持済み）
+    el.querySelectorAll("#rf-members input").forEach((cb) => { cb.checked = sel.includes(+cb.dataset.mid); });
+    if (rotEl) rotEl.checked = !!existing.rotation;
+    renderOrder();
+    const sv = $("#rf-save");
+    if (sv) sv.textContent = "保存";
+  }
 
   $("#rf-save").onclick = async () => {
     const err = $("#rf-err");
@@ -264,7 +348,7 @@ export function renderRecurrencePanel(el, mode, { members, onSaved, close, holid
     btn.disabled = true;
     try {
       const hh = timeMin >= 0 ? `${String(Math.floor(timeMin / 60)).padStart(2, "0")}:${String(timeMin % 60).padStart(2, "0")}:00` : "00:00:00";
-      await createRecurrence({
+      const body = {
         title, kind,
         rrule: isMtg ? buildRRule({ freq: "once" }) : buildRRule({ ...st, untilISO }),
         dtstart: `${iso}T${hh}Z`,
@@ -272,7 +356,10 @@ export function renderRecurrencePanel(el, mode, { members, onSaved, close, holid
         assignee_ids: sel,
         rotation,
         note: joinMeta($("#rf-note").value.trim(), "", docLinks),
-      });
+      };
+      // 編集時は overrides（この回だけ変更）を保持＝RRULE/dtstart 変更で既存例外を消さない
+      if (isEdit) { body.overrides = existing.overrides || {}; await updateRecurrence(existing.id, body); }
+      else await createRecurrence(body);
       invalidate();
       close();
       onSaved && onSaved();
@@ -281,6 +368,47 @@ export function renderRecurrencePanel(el, mode, { members, onSaved, close, holid
       err.textContent = "× " + e.message;
     }
   };
+}
+
+// 独立モーダル（管理ビューから定期/会議を新規作成・編集）。taskform のタブUIとは別に、
+// 単体で開ける軽量シェル。新規=種別タブ（定例MTG/定期タスク/MTG）、編集=種別を判定して単一パネル。
+export async function openRecurrenceForm({ existing = null, members = [], holidaysByDate = null, onSaved } = {}) {
+  const { ensureStyle } = await import("./taskform.js"); // 基本スタイル(.tf-modal/.tf-in 等)を流用
+  ensureStyle();
+  ensureRecurrenceStyle();
+  const isEdit = !!existing;
+  const TABS = [["rmtg", "定例MTG"], ["rtask", "定期タスク"], ["mtg", "MTG"]];
+
+  const wrap = document.createElement("div");
+  wrap.className = "tf-modal";
+  wrap.innerHTML = `
+    <div class="tf-bg"></div>
+    <div class="tf-card">
+      <div class="tf-h"><b>${isEdit ? "定期・会議を編集" : "定期・会議を追加"}</b><button class="tf-x" id="rf-x" aria-label="閉じる">✕</button></div>
+      ${isEdit ? "" : `<div class="tf-tabs" id="rf-tabs">${TABS.map(([v, n], i) =>
+        `<button type="button" data-tab="${v}" class="${i === 0 ? "on" : ""}">${n}</button>`).join("")}</div>`}
+      <div class="tf-body tf-alt" id="rf-pane" style="padding:14px 22px 18px"></div>
+    </div>`;
+  document.body.appendChild(wrap);
+  const close = () => wrap.remove();
+  wrap.querySelector("#rf-x").onclick = close;
+  wrap.querySelector(".tf-bg").onclick = close;
+
+  const pane = wrap.querySelector("#rf-pane");
+  const mount = (mode) => renderRecurrencePanel(pane, mode, { members, onSaved, close, holidaysByDate, existing });
+
+  if (isEdit) {
+    mount(recurrenceMode(existing));
+  } else {
+    const tabs = wrap.querySelector("#rf-tabs");
+    tabs.querySelectorAll("button").forEach((b) => {
+      b.onclick = () => {
+        tabs.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+        mount(b.dataset.tab);
+      };
+    });
+    mount(TABS[0][0]);
+  }
 }
 
 // パネル用の追加スタイル（taskform の ensureStyle とは独立に1回だけ注入）

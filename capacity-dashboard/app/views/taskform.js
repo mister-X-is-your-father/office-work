@@ -603,7 +603,7 @@ function attachCombobox(input, { items, createText, onPick }) {
   };
 }
 
-function ensureStyle() {
+export function ensureStyle() {
   if (_mounted) return; _mounted = true;
   const s = document.createElement("style");
   s.textContent = `
