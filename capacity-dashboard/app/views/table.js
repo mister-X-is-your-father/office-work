@@ -331,8 +331,11 @@ function openMenu(x, y, items, opts = {}) {
       if (it.sep) return `<div class="tb-ctx-sep"></div>`;
       if (it.input === "date") return `<label class="tb-ctx-inp">${esc(it.label)}<input type="date" data-i="${i}" value="${it.value || ""}"></label>`;
       if (it.input === "hmgrid") return `<div class="tb-hg">`
-        + `<div class="tb-hg-row"><span class="tb-hg-lbl">時間</span>${it.hOpts.map((v) => `<button class="tb-hg-b${v === it.h ? " on" : ""}" data-i="${i}" data-hk="${v}">${v}</button>`).join("")}</div>`
-        + `<div class="tb-hg-row"><span class="tb-hg-lbl">分</span>${it.mOpts.map((v) => `<button class="tb-hg-b${v === it.m ? " on" : ""}" data-i="${i}" data-mk="${v}">${v}</button>`).join("")}</div>`
+        + `<div class="tb-hg-cols">`
+        + `<div class="tb-hg-col"><span class="tb-hg-lbl">時間</span><div class="tb-hg-wrap">${it.hOpts.map((v) => `<button class="tb-hg-b${v === it.h ? " on" : ""}" data-i="${i}" data-hk="${v}">${v}</button>`).join("")}</div></div>`
+        + `<div class="tb-hg-col"><span class="tb-hg-lbl">分</span><div class="tb-hg-min">${it.mOpts.map((v) => `<button class="tb-hg-b${v === it.m ? " on" : ""}" data-i="${i}" data-mk="${v}">${v}</button>`).join("")}</div></div>`
+        + `</div>`
+        + `<div class="tb-hg-direct"><span class="tb-hg-lbl">直接</span><input type="number" min="0" data-i="${i}" data-dir="h" value="${it.h || ""}" placeholder="0">時間<input type="number" min="0" max="59" data-i="${i}" data-dir="m" value="${it.m || ""}" placeholder="0">分<button class="tb-hg-apply" data-i="${i}">適用</button></div>`
         + `</div>`;
       return `<button class="tb-ctx-it${it.danger ? " danger" : ""}" data-i="${i}">${it.check !== undefined ? `<span class="tb-ctx-ck">${it.check ? "✓" : ""}</span>` : ""}${esc(it.label)}</button>`;
     }).join("");
@@ -357,6 +360,19 @@ function openMenu(x, y, items, opts = {}) {
         paint(its);
       };
     });
+    // 直接入力（任意の時間・分）→ 適用 or Enter で反映
+    const applyDirect = (i) => {
+      const it = its[i], box = m.querySelector(".tb-hg-direct");
+      it.h = +(box.querySelector('[data-dir="h"]').value || 0);
+      it.m = +(box.querySelector('[data-dir="m"]').value || 0);
+      it.onPick && it.onPick(it.h, it.m);
+      paint(its);
+    };
+    m.querySelectorAll(".tb-hg-direct input").forEach((inp) => {
+      inp.onclick = (e) => e.stopPropagation();
+      inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); applyDirect(+inp.dataset.i); } };
+    });
+    m.querySelectorAll(".tb-hg-apply").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); applyDirect(+b.dataset.i); }; });
   };
   document.body.appendChild(m);
   _ctxEl = m;
@@ -707,12 +723,19 @@ function css() {
   .tb-ctx-inp input{font:inherit;font-size:12px;border:1px solid ${C.line};border-radius:6px;padding:3px 6px}
   .tb-ctx-unit{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:${C.muted}}
   .tb-ctx-unit input{width:66px;text-align:right}
-  .tb-hg{display:flex;flex-direction:column;gap:6px;padding:7px 9px}
-  .tb-hg-row{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
-  .tb-hg-lbl{font-size:11px;color:${C.muted};width:28px;flex:none}
-  .tb-hg-b{font:inherit;font-size:12px;min-width:30px;padding:4px 7px;border:1px solid ${C.line};border-radius:6px;background:#fff;color:${C.ink};cursor:pointer}
+  .tb-hg{display:flex;flex-direction:column;gap:8px;padding:8px 10px}
+  .tb-hg-cols{display:flex;gap:16px;align-items:flex-start}
+  .tb-hg-col{display:flex;flex-direction:column;gap:5px}
+  .tb-hg-lbl{font-size:11px;color:${C.muted};font-weight:600}
+  .tb-hg-wrap{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
+  .tb-hg-min{display:flex;flex-direction:column;gap:4px}
+  .tb-hg-b{font:inherit;font-size:12px;min-width:32px;padding:4px 7px;border:1px solid ${C.line};border-radius:6px;background:#fff;color:${C.ink};cursor:pointer;text-align:center}
   .tb-hg-b:hover{border-color:${C.fill};color:${C.fill}}
   .tb-hg-b.on{background:${C.fill};border-color:${C.fill};color:#fff;font-weight:700}
+  .tb-hg-direct{display:flex;align-items:center;gap:5px;margin-top:2px;padding-top:8px;border-top:1px solid ${C.line};font-size:12px;color:${C.muted};flex-wrap:wrap}
+  .tb-hg-direct input{width:50px;font:inherit;font-size:12px;border:1px solid ${C.line};border-radius:6px;padding:3px 6px;text-align:right}
+  .tb-hg-apply{font:inherit;font-size:12px;font-weight:600;color:${C.fill};background:#eaf2ff;border:1px solid #cfe0ff;border-radius:6px;padding:3px 11px;cursor:pointer}
+  .tb-hg-apply:hover{background:#dbe9ff}
   .tb-ctx-it{font:inherit;font-size:13px;text-align:left;border:0;background:transparent;color:${C.ink};padding:8px 12px;border-radius:7px;cursor:pointer;white-space:nowrap}
   .tb-ctx-it:hover{background:${C.track}}
   .tb-ctx-it.danger{color:${C.over}}
