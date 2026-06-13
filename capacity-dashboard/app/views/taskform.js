@@ -146,7 +146,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
               <select id="tf-asg" class="tf-in">${memOpts}</select>
             </div>
             <div class="tf-col">
-              <label class="tf-l">優先度</label>
+              <label class="tf-l">重要度</label>
               <select id="tf-prio" class="tf-in">${prioOpts}</select>
             </div>
           </div>
@@ -188,7 +188,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
       </div>
       <div class="tf-body tf-alt" id="tf-alt" hidden></div>
       <div class="tf-acts">
-        <button class="tf-tpl-save" id="tf-tpl-save" title="タイトル/優先度/見積り/説明を雛形として保存（プロジェクト欄=分類）">テンプレートとして保存</button>
+        <button class="tf-tpl-save" id="tf-tpl-save" title="タイトル/重要度/見積り/説明を雛形として保存（プロジェクト欄=分類）">テンプレートとして保存</button>
         <button class="tf-cancel" id="tf-cancel">キャンセル</button>
         <button class="tf-save" id="tf-save">${isEdit ? "保存" : "追加"}</button>
       </div>
@@ -386,7 +386,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     if (!has) { subSel = null; subSelLabel = ""; subEl.value = ""; }
   };
 
-  // テンプレートから作成: 選ぶとタイトル/優先度/見積り/説明をフォームに反映（日付・担当は対象外）
+  // テンプレートから作成: 選ぶとタイトル/重要度/見積り/説明をフォームに反映（日付・担当は対象外）
   const tplEl = $("#tf-tpl");
   if (tplEl) attachCombobox(tplEl, {
     items: (q) => {
@@ -408,7 +408,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     },
   });
 
-  // テンプレートとして保存: 雛形(タイトル/優先度/見積り/説明)をテンプレートWSに保存。プロジェクト欄=分類。
+  // テンプレートとして保存: 雛形(タイトル/重要度/見積り/説明)をテンプレートWSに保存。プロジェクト欄=分類。
   $("#tf-tpl-save").onclick = async () => {
     const err = $("#tf-err");
     err.className = "tf-err";

@@ -14,7 +14,7 @@ const DOW_JA = ["日", "月", "火", "水", "木", "金", "土"];
 
 const SEL_KEY = (uid) => `ts.smartlist.sel.${uid ?? "anon"}`;
 const LISTS_KEY = (uid) => `ts.smartlists.${uid ?? "anon"}`;
-const SORTS = [["due", "期限順"], ["prio", "優先度順"], ["title", "名前順"], ["created", "追加順"]];
+const SORTS = [["due", "期限順"], ["prio", "重要度順"], ["title", "名前順"], ["created", "追加順"]];
 
 let state = null; // { sel, filter, sort }
 const loadLists = (uid) => { try { return JSON.parse(localStorage.getItem(LISTS_KEY(uid)) || "[]"); } catch { return []; } };
@@ -73,7 +73,7 @@ export async function render(root) {
         <div class="sl-bar">
           <input id="sl-text" class="sl-in sl-text" placeholder="🔍 このビュー内を検索" value="${esc(state.filter.text || "")}">
           ${sel("sl-due", state.filter.due, [["", "期限：すべて"], ["today", "今日"], ["next7", "次の7日間"], ["overdue", "期限切れ"], ["hasdue", "期限あり"], ["none", "期限なし"]])}
-          ${sel("sl-prio", state.filter.prio, [["", "優先度：すべて"], ["top", "最優先"], ["high", "高+"], ["mid", "中+"], ["none", "なし"]])}
+          ${sel("sl-prio", state.filter.prio, [["", "重要度：すべて"], ["top", "最優先"], ["high", "高+"], ["mid", "中+"], ["none", "なし"]])}
           ${sel("sl-cat", catTitle, [["", "分類：すべて"], ...catChoices(labels)])}
           ${sel("sl-ws", String(state.filter.ws || ""), [["", "WS：すべて"], ...(projects || []).map((p) => [String(p.id), p.title])])}
           ${sel("sl-status", state.filter.status, [["undone", "未完了"], ["todo", "未着手"], ["doing", "進行中"], ["done", "完了"], ["", "すべて"]])}
@@ -289,7 +289,7 @@ function updateCount(root, data, ctx) {
 function suggestName(f) {
   const parts = [];
   const dueN = { today: "今日", next7: "今週", overdue: "期限切れ", none: "期限なし", hasdue: "期限あり" }[f.due];
-  const prN = { top: "最優先", high: "重要", mid: "中+", none: "優先度なし" }[f.prio];
+  const prN = { top: "最優先", high: "重要", mid: "中+", none: "重要度なし" }[f.prio];
   if (prN) parts.push(prN); if (dueN) parts.push(dueN); if (f.flag) parts.push("フラグ"); if (f._cat) parts.push(f._cat);
   return parts.join("・") || "マイリスト";
 }

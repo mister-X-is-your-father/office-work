@@ -43,7 +43,7 @@ function chipsHtml(r) {
   else c.push(`<span class="qa-chip title">${esc(r.title)}</span>`);
   if (r.dateISO) c.push(`<span class="qa-chip">📅 ${fmtDateChip(r.dateISO, r.startMinute)}</span>`);
   if (r.estimateH) c.push(`<span class="qa-chip">⏱ ${fmtH(r.estimateH)}</span>`);
-  if (r.priority) c.push(`<span class="qa-chip">優先度: ${PRIO_NAME[r.priority]}</span>`);
+  if (r.priority) c.push(`<span class="qa-chip">重要度: ${PRIO_NAME[r.priority]}</span>`);
   for (const l of r.labels) c.push(`<span class="qa-chip">#${esc(l)}</span>`);
   if (r.assignee) c.push(r.member
     ? `<span class="qa-chip">👤 ${esc(r.member.name || r.member.username)}</span>`

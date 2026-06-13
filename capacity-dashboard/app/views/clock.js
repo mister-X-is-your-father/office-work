@@ -1,5 +1,5 @@
 // 今日の稼働予定 — 円時計ビュー（mock 57 を実データ配線）。
-// 色=優先度／模様=種別／外周=超過／空き=薄グレー／カテゴリ別の折りたたみセクション。
+// 色=重要度／模様=種別／外周=超過／空き=薄グレー／カテゴリ別の折りたたみセクション。
 import { todayItemsByMember, suggestDays } from "../lib/today_items.js";
 import { KINDS, KIND_ORDER, PRIO, NEUTRAL } from "../lib/kinds.js";
 import { fmtH, esc, member_color, todayISO } from "../lib/ui.js";
@@ -121,7 +121,7 @@ function kpiStrip(states) {
 
 function legend() {
   return `<div class="ck-legend">
-    <span class="grp"><span class="glbl">優先度</span>
+    <span class="grp"><span class="glbl">重要度</span>
       <span class="it"><i class="sw" style="background:${PRIO[4].c}"></i>最優先</span>
       <span class="it"><i class="sw" style="background:${PRIO[3].c}"></i>高</span>
       <span class="it"><i class="sw" style="background:${PRIO[2].c}"></i>中</span>
@@ -154,7 +154,7 @@ export function renderClock(container, data, day, rerender) {
   const states = data.members.map((m) => map.get(m.id)).filter(Boolean)
     .sort((a, b) => (b.freeH - a.freeH) || (a.overH - b.overH));
   container.innerHTML = `<style>${css()}</style>${DEFS}
-    <div class="ck-subtitle">並び=会議→定例→レビュー→優先度（12時起点）／色=優先度／模様=種別／ピン=当日追加／外周=超過</div>
+    <div class="ck-subtitle">並び=会議→定例→レビュー→重要度（12時起点）／色=重要度／模様=種別／ピン=当日追加／外周=超過</div>
     ${states.length ? kpiStrip(states) : ""}
     <div class="ck-grid">${states.map((m, i) => cardHTML(m, i)).join("")}</div>
     ${states.length ? legend() : `<div class="ck-empty">今日のメンバー負荷がありません。</div>`}

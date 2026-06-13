@@ -25,7 +25,7 @@ export const kindRank = (k) => { const i = KIND_ORDER.indexOf(k); return i < 0 ?
 // タスク側の kind 判定（会議/定例は recurrences 由来なのでここでは扱わない）。
 export const kindOf = (task) => (isReviewTask(task) ? "review" : "task");
 
-// 優先度→色（最優先=赤 / 高=橙 / 中=青 / 低=灰）。会議/定例は優先度なし→中立色。
+// 重要度→色（最優先=赤 / 高=橙 / 中=青 / 低=灰）。会議/定例は重要度なし→中立色。
 export const PRIO = { 4: { c: "#e5484d", n: "最優先" }, 3: { c: "#f5872e", n: "高" }, 2: { c: "#3a86ff", n: "中" }, 1: { c: "#8a93a0", n: "低" } };
 export const NEUTRAL = "#8a93a0";
 
