@@ -28,6 +28,7 @@ function loadMySorts(uid) { try { return JSON.parse(localStorage.getItem(MSKEY(u
 function saveMySorts(uid, list) { try { localStorage.setItem(MSKEY(uid), JSON.stringify(list)); } catch { /* noop */ } }
 
 let V = null, UID = null;
+let flashId = null; // ドロップ直後にジワっと色が戻る着地ハイライト対象（再描画後に適用）
 
 const stateOf = (t) => (t.done ? "完了" : ((t.percent_done || 0) > 0 ? "進行中" : "未着手"));
 const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(0, 10) : "");
@@ -224,6 +225,13 @@ export async function render(root) {
   };
 
   if (manual) wireDrag(root, () => render(root));
+
+  // ドロップ直後の着地ハイライト（ジワっと色が戻る＝どこに入ったか見失わない）
+  if (flashId != null) {
+    const fr = root.querySelector(`tr[data-id="${flashId}"]`);
+    if (fr) fr.classList.add("tb-flash");
+    flashId = null;
+  }
 }
 
 // プリセット名の候補（軸ラベルを連結）
@@ -293,6 +301,7 @@ function wireDrag(root, rerender) {
         while (vi < vis.length) next.push(vis[vi++]);
         V.order = [...new Set(next)];
         saveView(UID, V);
+        flashId = dragId; // 着地した行を再描画後にジワっとハイライト
         rerender();
       };
       document.addEventListener("pointermove", move);
@@ -376,16 +385,18 @@ function css() {
   table.tb{width:100%;border-collapse:collapse;font-size:13px}
   .tb tbody tr[data-id]{cursor:pointer}
   .tb tbody tr.tb-draggable{cursor:grab;user-select:none;touch-action:pan-y}
-  /* 元の場所＝ギャップ（プレースホルダ）: 中身を隠して薄い帯に */
-  .tb tbody tr.tb-ph td{background:#eef4ff!important;position:relative}
+  /* 元の場所＝ギャップ（プレースホルダ）: 中身を隠し、本物の影でへこんだ空きスロットに */
+  .tb tbody tr.tb-ph td{background:#eceff3!important;position:relative;box-shadow:inset 0 3px 6px -2px rgba(20,30,50,.28),inset 0 -3px 6px -2px rgba(20,30,50,.28)}
   .tb tbody tr.tb-ph td > *{visibility:hidden}
-  .tb tbody tr.tb-ph td:first-child{box-shadow:inset 3px 0 0 ${C.fill}}
   /* カーソル追従の浮きカード（ゴースト） */
   .tb-ghost{filter:drop-shadow(0 10px 24px rgba(20,30,50,.28));transform:scale(1.01);opacity:.97}
   .tb-ghost-tbl{border-collapse:collapse;table-layout:fixed;background:#fff;border:1px solid ${C.line};border-radius:9px;overflow:hidden}
   .tb-ghost-tbl td{padding:10px 12px;border-bottom:0;font-size:13px;vertical-align:middle}
   body.tb-dragging-body{cursor:grabbing}
   body.tb-dragging-body .tb tbody tr:hover{background:transparent}
+  /* 着地ハイライト: ドロップ直後にジワっと色が戻る（落ちた先を見失わない） */
+  @keyframes tb-flash-fade{from{background-color:rgba(58,134,255,.32)}to{background-color:rgba(58,134,255,0)}}
+  .tb tbody tr.tb-flash td{animation:tb-flash-fade 1.1s ease-out}
   .tb-fav{font-size:11px;vertical-align:1px}
   .tb-fable{width:22px;height:22px;border-radius:50%;border:1px solid ${C.fill};background:#fff;color:${C.fill};cursor:pointer;font-size:9px;padding:0;vertical-align:1px;margin-left:4px}
   .tb-fable:hover{background:${C.fill};color:#fff}.tb-fable:disabled{opacity:.5;cursor:default}
