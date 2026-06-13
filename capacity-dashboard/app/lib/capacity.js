@@ -346,4 +346,4 @@ export function toMemberDayEntries(taskPairs, kind) {
   return out;
 }
 
-function round1(x) { return Math.round(x * 10) / 10; }
+function round1(x) { return Math.round(x * 100) / 100; } // 時間表示=小数2桁（15分=0.25を保持）

@@ -9,7 +9,7 @@ import { kindOf, kindRank, prioBucket, isReviewTask } from "./kinds.js";
 // 後方互換の再export（既存の import 元を壊さない）
 export { prioBucket, isReviewTask };
 
-const round1 = (x) => Math.round(x * 10) / 10;
+const round1 = (x) => Math.round(x * 100) / 100; // 時間表示=小数2桁
 const planEntriesFor = (plansByTask, id) =>
   plansByTask ? ((plansByTask.get ? plansByTask.get(id) : plansByTask[id]) || null) : null;
 

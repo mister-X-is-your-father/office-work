@@ -110,7 +110,7 @@ function kpiStrip(states) {
     if (it.kind === "recurring") { fixedH += it.h; rtnH += it.h; }
     if (it.flags && it.flags.adhoc) adhocN++;
   }
-  const realH = Math.round((usedAll - Math.min(fixedH, usedAll)) * 10) / 10;
+  const realH = Math.round((usedAll - Math.min(fixedH, usedAll)) * 100) / 100;
   return `<div class="ck-strip">
     <div class="ck-kpi"><div class="l">チーム稼働</div><div class="v">${fmtH(usedAll)}<small>/ ${cap}h ・ ${rate}%</small></div><div class="ck-bar"><i style="width:${rate}%;background:#3a86ff"></i><i style="flex:1;background:#eef1f5"></i></div></div>
     <div class="ck-kpi over ${overH > 0 ? "" : "zero"}"><div class="l">要再配分（超過）</div><div class="v">${overH > 0 ? "+" + fmtH(overH) : "なし"}</div><div class="s">${overMembers.length ? esc(overMembers.map((m) => m.member.name || m.member.username).join("・")) + " → 移し先を検討" : "全員が容量内"}</div></div>

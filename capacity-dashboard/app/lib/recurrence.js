@@ -3,7 +3,7 @@
 import { rrulestr } from "./vendor/rrule.mjs";
 
 const toH = (s) => (s || 0) / 3600;
-const round1 = (x) => Math.round(x * 10) / 10;
+const round1 = (x) => Math.round(x * 100) / 100; // 時間表示=小数2桁
 const dowOf = (isoDay) => new Date(isoDay + "T00:00:00Z").getUTCDay(); // 0=日,6=土
 
 // API の dtstart(ISO) → RRULE の DTSTART 形式 "YYYYMMDDTHHMMSSZ"

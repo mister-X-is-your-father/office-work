@@ -19,7 +19,7 @@ export function dailyThroughput(tasks, todayISO, days = 14) {
   return [...map.entries()].map(([day, v]) => ({ day, added: v.added, done: v.done }));
 }
 
-const r1 = (x) => Math.round(x * 10) / 10;
+const r1 = (x) => Math.round(x * 100) / 100; // 時間表示=小数2桁
 
 // プロジェクト別の見積り/実績/件数/完了数。
 export function projectTotals(tasks) {
