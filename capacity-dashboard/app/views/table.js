@@ -28,7 +28,9 @@ function loadMySorts(uid) { try { return JSON.parse(localStorage.getItem(MSKEY(u
 function saveMySorts(uid, list) { try { localStorage.setItem(MSKEY(uid), JSON.stringify(list)); } catch { /* noop */ } }
 
 let V = null, UID = null;
-let flashId = null; // ドロップ直後にジワっと色が戻る着地ハイライト対象（再描画後に適用）
+let flashId = null;          // ドロップ直後にジワっと色が戻る着地ハイライト対象（再描画後に適用）
+let selectedIds = new Set(); // まとめて移動用の複数選択（マイソート中のみ・Ctrl/Shiftで操作）
+let anchorId = null;         // Shift範囲選択の起点
 
 const stateOf = (t) => (t.done ? "完了" : ((t.percent_done || 0) > 0 ? "進行中" : "未着手"));
 const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(0, 10) : "");
@@ -74,6 +76,9 @@ export async function render(root) {
   if (V.cat) rows = rows.filter((r) => (r.cat ? r.cat.title : "") === V.cat);
 
   const manual = V.manualMode;
+  // 選択はマイソート中のみ有効。表示中のタスクに限定（フィルタ/モード変更で掃除）
+  if (!manual) { selectedIds.clear(); anchorId = null; }
+  else { const vis = new Set(rows.map((r) => r.t.id)); selectedIds.forEach((id) => { if (!vis.has(id)) selectedIds.delete(id); }); }
   if (manual) {
     const allIds = rows.map((r) => r.t.id);
     const have = new Set(V.order), allSet = new Set(allIds);
@@ -120,7 +125,8 @@ export async function render(root) {
       <select id="tb-cat">${catOpts}</select>
       <label class="tb-chk"><input type="checkbox" id="tb-hd" ${V.hideDone ? "checked" : ""}> 完了を隠す</label>
     </div>
-    ${manual ? `<div class="tb-mynote">「マイソート」はあなただけの順番です（この端末に保存・他のメンバーには影響しません）。組み合わせソートに戻すには「✋ マイソート」をもう一度。</div>
+    ${manual ? `<div class="tb-mynote">「マイソート」はあなただけの順番です（この端末に保存・他のメンバーには影響しません）。Ctrl/⌘・Shift＋クリックで複数選択→まとめてドラッグ移動。</div>
+    ${selectedIds.size ? `<div class="tb-selbar"><b>${selectedIds.size}件</b>選択中 ・ 1つをドラッグするとまとめて移動 <button id="tb-selclear" class="tb-selclear">選択解除</button></div>` : ""}
     <div class="tb-presets">
       <span class="tb-pl">保存したマイソート<span class="tb-pl-g" title="あなた専用・この端末">👤</span></span>
       ${mysorts.map((m, i) => `<span class="tb-pz"><button class="tb-mz-a" data-mi="${i}" title="この手動順を適用">${esc(m.name)}</button><button class="tb-mz-x" data-mi="${i}" title="削除">×</button></span>`).join("") || `<span class="tb-sc-none">まだありません</span>`}
@@ -178,6 +184,8 @@ export async function render(root) {
       catch { b.disabled = false; }
     };
   });
+  const selClear = root.querySelector("#tb-selclear");
+  if (selClear) selClear.onclick = () => { selectedIds.clear(); anchorId = null; render(root); };
 
   // プリセット: 適用は本人のV.sortsに反映（共有データは変えない）／保存・削除は全員に反映（要許可）
   root.querySelectorAll(".tb-pz-a").forEach((b) => {
@@ -239,69 +247,87 @@ function presetSuggest(sorts) {
   return (sorts || []).map((s) => (AXES[s.key] ? AXES[s.key].label : s.key) + (s.dir > 0 ? "↑" : "↓")).join("・") || "マイプリセット";
 }
 
-// TickTick風ドラッグ並べ替え: 掴んだ行はカーソルに追従して浮き上がる「ゴースト」、
-// 元の場所は薄いプレースホルダ（ギャップ）になり、落下位置へ滑らかに移動する。
-// マイソート中は行のどこを掴んでもOK。動かさず離せばタップ＝編集モーダル。
+// TickTick風ドラッグ並べ替え＋まとめて移動。
+// Ctrl/⌘・Shift＋クリックで複数選択 → 1つを掴むと選択行をまとめてドラッグ。
+// 掴んだ行群はゴーストで浮き、元の場所は影のギャップになり落下位置へ移動。動かさず離せばタップ＝編集。
 function wireDrag(root, rerender) {
   const tbody = root.querySelector("tbody");
   const rowsArr = () => [...tbody.querySelectorAll("tr[data-id]")];
+  const orderedSelected = () => rowsArr().filter((tr) => selectedIds.has(+tr.dataset.id)); // DOM順の選択行
+  const toggleSel = (id) => { selectedIds.has(id) ? selectedIds.delete(id) : selectedIds.add(id); anchorId = id; rerender(); };
+  const rangeSel = (id) => {
+    const ids = rowsArr().map((tr) => +tr.dataset.id);
+    const a = ids.indexOf(anchorId), b = ids.indexOf(id);
+    if (a < 0) { selectedIds.add(id); anchorId = id; rerender(); return; }
+    const [lo, hi] = a < b ? [a, b] : [b, a];
+    for (let i = lo; i <= hi; i++) selectedIds.add(ids[i]);
+    rerender();
+  };
+
   rowsArr().forEach((dragRow) => {
     dragRow.addEventListener("pointerdown", (e) => {
       if (e.button && e.button !== 0) return;
       if (e.target.closest("button, a, input, select")) return; // ▶やリンク等は各自のクリックに任せる
       const dragId = +dragRow.dataset.id;
+      // 修飾キー＝選択操作（ドラッグしない）
+      if (e.ctrlKey || e.metaKey) { e.preventDefault(); toggleSel(dragId); return; }
+      if (e.shiftKey) { e.preventDefault(); rangeSel(dragId); return; }
+
       const startX = e.clientX, startY = e.clientY;
-      let moved = false, ghost = null, grabY = 0, ghostLeft = 0, ghostW = 0;
+      // 掴んだ行が選択集合に含まれ複数あるなら、その全部をまとめて移動
+      const groupSet = (selectedIds.has(dragId) && selectedIds.size > 1) ? new Set(selectedIds) : new Set([dragId]);
+      let moved = false, ghost = null, grabY = 0;
 
       const begin = () => {
         const rect = dragRow.getBoundingClientRect();
-        grabY = startY - rect.top; ghostLeft = rect.left; ghostW = rect.width;
-        // セル幅を固定したクローンを浮かせる（テーブルでも列幅が崩れない）
+        grabY = startY - rect.top;
         const widths = [...dragRow.children].map((td) => td.getBoundingClientRect().width);
         const clone = dragRow.cloneNode(true);
-        clone.classList.remove("tb-ph");
+        clone.classList.remove("tb-ph", "tb-sel");
         [...clone.children].forEach((td, i) => { td.style.width = widths[i] + "px"; });
         ghost = document.createElement("div");
         ghost.className = "tb-ghost";
-        ghost.style.cssText = `position:fixed;left:${ghostLeft}px;top:${rect.top}px;width:${ghostW}px;z-index:9999;pointer-events:none`;
-        ghost.innerHTML = `<table class="tb tb-ghost-tbl"><tbody></tbody></table>`;
+        ghost.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;z-index:9999;pointer-events:none`;
+        const badge = groupSet.size > 1 ? `<span class="tb-ghost-badge">${groupSet.size}</span>` : "";
+        ghost.innerHTML = `<table class="tb tb-ghost-tbl"><tbody></tbody></table>${badge}`;
         ghost.querySelector("tbody").appendChild(clone);
         document.body.appendChild(ghost);
-        dragRow.classList.add("tb-ph"); // 元の行＝ギャップ（プレースホルダ）
+        rowsArr().forEach((tr) => { if (groupSet.has(+tr.dataset.id)) tr.classList.add("tb-ph"); }); // 選択行＝影ギャップ
         document.body.classList.add("tb-dragging-body");
+      };
+      const moveBlock = (beforeNode) => {
+        // 選択行群をDOM順のまま beforeNode の前へ連続配置
+        for (const tr of orderedSelected().length ? orderedSelected() : [dragRow]) tbody.insertBefore(tr, beforeNode);
       };
       const move = (ev) => {
         if (!moved) {
           if (Math.abs(ev.clientY - startY) <= 4 && Math.abs(ev.clientX - startX) <= 4) return;
           moved = true; begin();
         }
-        ghost.style.top = (ev.clientY - grabY) + "px";        // カーソルに追従（縦）
-        // 落下位置のギャップ（プレースホルダ）を移動
-        let placed = false;
+        ghost.style.top = (ev.clientY - grabY) + "px"; // カーソル追従（縦）
+        // 落下位置: 選択外の行の中点で判定
+        let target = null;
         for (const tr of rowsArr()) {
-          if (tr === dragRow) continue;
+          if (groupSet.has(+tr.dataset.id)) continue;
           const r = tr.getBoundingClientRect();
-          if (ev.clientY < r.top + r.height / 2) {
-            if (dragRow.nextSibling !== tr) tbody.insertBefore(dragRow, tr);
-            placed = true; break;
-          }
+          if (ev.clientY < r.top + r.height / 2) { target = tr; break; }
         }
-        if (!placed && tbody.lastElementChild !== dragRow) tbody.appendChild(dragRow);
+        moveBlock(target); // target=null なら末尾へ
       };
       const up = () => {
         document.removeEventListener("pointermove", move);
         document.removeEventListener("pointerup", up);
         if (ghost) ghost.remove();
-        dragRow.classList.remove("tb-ph");
+        rowsArr().forEach((tr) => tr.classList.remove("tb-ph"));
         document.body.classList.remove("tb-dragging-body");
-        if (!moved) { openTaskForm({ taskId: dragId, onSaved: rerender }); return; } // タップ＝編集
+        if (!moved) { selectedIds.clear(); anchorId = null; openTaskForm({ taskId: dragId, onSaved: rerender }); return; } // タップ＝編集
         const vis = rowsArr().map((x) => +x.dataset.id);   // 現DOM順＝確定順
         const visSet = new Set(vis); let vi = 0; const next = [];
         for (const id of V.order) next.push(visSet.has(id) ? vis[vi++] : id);
         while (vi < vis.length) next.push(vis[vi++]);
         V.order = [...new Set(next)];
         saveView(UID, V);
-        flashId = dragId; // 着地した行を再描画後にジワっとハイライト
+        flashId = dragId; // 着地した先頭行をハイライト
         rerender();
       };
       document.addEventListener("pointermove", move);
@@ -335,7 +361,7 @@ function rowHtml(r, members, i, manual) {
   const prio = `<span class="tb-prio"><i style="background:${pc.c}"></i>${pc.n}</span>`;
   const dueCls = r.due && r.due < todayISO() && !r.done ? "over" : "";
   const st = `<span class="tb-st ${r.done ? "done" : (r.pct > 0 ? "doing" : "todo")}">${r.state}</span>`;
-  return `<tr data-id="${r.t.id}" class="${manual ? "tb-draggable" : ""}">
+  return `<tr data-id="${r.t.id}" class="${manual ? "tb-draggable" : ""}${manual && selectedIds.has(r.t.id) ? " tb-sel" : ""}">
     <td class="tb-title">${esc(r.title)}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">🚩</span>` : ""}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${r.t.id}" data-title="${esc(r.title)}" title="Fableに実行させる">▶</button>` : ""}<div class="tb-sub">${esc(r.proj)}</div></td>
     <td>${ava}${esc(wn)}</td>
     <td>${kind}</td>
@@ -385,8 +411,15 @@ function css() {
   table.tb{width:100%;border-collapse:collapse;font-size:13px}
   .tb tbody tr[data-id]{cursor:pointer}
   .tb tbody tr.tb-draggable{cursor:grab;user-select:none;touch-action:pan-y}
-  /* 元の場所＝ギャップ（プレースホルダ）: 中身を隠し、本物の影でへこんだ空きスロットに */
-  .tb tbody tr.tb-ph td{background:#eceff3!important;position:relative;box-shadow:inset 0 3px 6px -2px rgba(20,30,50,.28),inset 0 -3px 6px -2px rgba(20,30,50,.28)}
+  .tb tbody tr.tb-sel td{background:#e6f0ff}
+  .tb tbody tr.tb-sel td:first-child{box-shadow:inset 3px 0 0 ${C.fill}}
+  .tb-selbar{font-size:12px;color:${C.ink};margin:-6px 0 12px;background:#eaf2ff;border:1px solid #cfe0ff;border-radius:8px;padding:7px 11px;display:flex;align-items:center;gap:8px}
+  .tb-selbar b{color:${C.fill}}
+  .tb-selclear{margin-left:auto;font:inherit;font-size:11.5px;border:1px solid ${C.line};background:#fff;border-radius:7px;padding:3px 10px;cursor:pointer;color:${C.muted}}
+  .tb-selclear:hover{border-color:${C.fill};color:${C.fill}}
+  .tb-ghost-badge{position:absolute;top:-8px;right:-8px;min-width:20px;height:20px;border-radius:10px;background:${C.over};color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 5px;box-shadow:0 2px 6px rgba(0,0,0,.3)}
+  /* 元の場所＝ギャップ: 文字も枠も無く、ただ柔らかい影が落ちているだけに見せる */
+  .tb tbody tr.tb-ph td{background:rgba(20,30,50,.05)!important;border-bottom-color:transparent!important;box-shadow:inset 0 7px 9px -7px rgba(20,30,50,.5),inset 0 -7px 9px -7px rgba(20,30,50,.5)}
   .tb tbody tr.tb-ph td > *{visibility:hidden}
   /* カーソル追従の浮きカード（ゴースト） */
   .tb-ghost{filter:drop-shadow(0 10px 24px rgba(20,30,50,.28));transform:scale(1.01);opacity:.97}
