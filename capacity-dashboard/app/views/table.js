@@ -197,32 +197,53 @@ function presetSuggest(sorts) {
   return (sorts || []).map((s) => (AXES[s.key] ? AXES[s.key].label : s.key) + (s.dir > 0 ? "↑" : "↓")).join("・") || "マイプリセット";
 }
 
+// ポインタイベント方式の並べ替え（HTML5 DnDより確実・タッチ対応）。
+// グリップ(⠿)を掴んで上下、行の上半分/下半分で挿入位置を示し、離して確定。
 function wireDrag(root, rerender) {
   const tbody = root.querySelector("tbody");
-  let dragId = null;
+  const rowsArr = () => [...tbody.querySelectorAll("tr[data-id]")];
   root.querySelectorAll(".tb-grip").forEach((g) => {
-    g.addEventListener("dragstart", (e) => { dragId = +g.closest("tr").dataset.id; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", String(dragId)); g.closest("tr").classList.add("tb-dragging"); });
-    g.addEventListener("dragend", () => { root.querySelectorAll(".tb-dragging,.tb-over").forEach((x) => x.classList.remove("tb-dragging", "tb-over")); });
-  });
-  root.querySelectorAll("tr[data-id]").forEach((tr) => {
-    tr.addEventListener("dragover", (e) => { if (dragId == null) return; e.preventDefault(); root.querySelectorAll(".tb-over").forEach((x) => x.classList.remove("tb-over")); tr.classList.add("tb-over"); });
-    tr.addEventListener("drop", (e) => {
+    g.addEventListener("pointerdown", (e) => {
       e.preventDefault();
-      const targetId = +tr.dataset.id;
-      if (dragId == null || targetId === dragId) return;
-      const vis = [...tbody.querySelectorAll("tr[data-id]")].map((x) => +x.dataset.id);
-      const from = vis.indexOf(dragId); if (from >= 0) vis.splice(from, 1);
-      let to = vis.indexOf(targetId);
-      const rect = tr.getBoundingClientRect();
-      if (e.clientY > rect.top + rect.height / 2) to += 1;
-      vis.splice(Math.max(0, to), 0, dragId);
-      const visSet = new Set(vis);
-      let vi = 0; const next = [];
-      for (const id of V.order) next.push(visSet.has(id) ? vis[vi++] : id);
-      while (vi < vis.length) next.push(vis[vi++]);
-      V.order = [...new Set(next)];
-      saveView(UID, V);
-      dragId = null; rerender();
+      const dragRow = g.closest("tr");
+      const dragId = +dragRow.dataset.id;
+      let moved = false, insert = null; // insert={id, before}
+      dragRow.classList.add("tb-dragging");
+      try { g.setPointerCapture(e.pointerId); } catch { /* noop */ }
+      const clearMarks = () => rowsArr().forEach((x) => x.classList.remove("tb-over", "tb-over-bottom"));
+      const move = (ev) => {
+        if (Math.abs(ev.clientY - e.clientY) > 3) moved = true;
+        let target = null, before = true;
+        for (const tr of rowsArr()) {
+          if (tr === dragRow) continue;
+          const r = tr.getBoundingClientRect();
+          if (ev.clientY < r.top + r.height / 2) { target = tr; before = true; break; }
+          target = tr; before = false; // どの中点より下なら最後の行の後ろ
+        }
+        clearMarks();
+        if (target) { target.classList.add(before ? "tb-over" : "tb-over-bottom"); insert = { id: +target.dataset.id, before }; }
+        else insert = null;
+      };
+      const up = () => {
+        g.removeEventListener("pointermove", move);
+        g.removeEventListener("pointerup", up);
+        try { g.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+        clearMarks(); dragRow.classList.remove("tb-dragging");
+        if (!moved || !insert) return; // 動いてない/対象なし＝何もしない
+        const vis = rowsArr().map((x) => +x.dataset.id);
+        const from = vis.indexOf(dragId); if (from >= 0) vis.splice(from, 1);
+        let idx = vis.indexOf(insert.id); if (!insert.before) idx += 1;
+        vis.splice(Math.max(0, idx), 0, dragId);
+        // 表示中idを新順に差し替え、非表示分の位置は保持して全体順を再構築
+        const visSet = new Set(vis); let vi = 0; const next = [];
+        for (const id of V.order) next.push(visSet.has(id) ? vis[vi++] : id);
+        while (vi < vis.length) next.push(vis[vi++]);
+        V.order = [...new Set(next)];
+        saveView(UID, V);
+        rerender();
+      };
+      g.addEventListener("pointermove", move);
+      g.addEventListener("pointerup", up);
     });
   });
 }
@@ -253,7 +274,7 @@ function rowHtml(r, members, i, manual) {
   const prio = `<span class="tb-prio"><i style="background:${pc.c}"></i>${pc.n}</span>`;
   const dueCls = r.due && r.due < todayISO() && !r.done ? "over" : "";
   const st = `<span class="tb-st ${r.done ? "done" : (r.pct > 0 ? "doing" : "todo")}">${r.state}</span>`;
-  const grip = manual ? `<td class="tb-gripcell"><span class="tb-grip" draggable="true" title="ドラッグで並べ替え">⠿</span></td>` : "";
+  const grip = manual ? `<td class="tb-gripcell"><span class="tb-grip" title="ドラッグで並べ替え">⠿</span></td>` : "";
   return `<tr data-id="${r.t.id}">
     ${grip}
     <td class="tb-title">${esc(r.title)}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">🚩</span>` : ""}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${r.t.id}" data-title="${esc(r.title)}" title="Fableに実行させる">▶</button>` : ""}<div class="tb-sub">${esc(r.proj)}</div></td>
@@ -305,8 +326,9 @@ function css() {
   .tb tbody tr[data-id]{cursor:pointer}
   .tb tbody tr.tb-dragging{opacity:.4}
   .tb tbody tr.tb-over td{box-shadow:inset 0 2px 0 ${C.fill}}
+  .tb tbody tr.tb-over-bottom td{box-shadow:inset 0 -2px 0 ${C.fill}}
   .tb-gripcell{width:26px;text-align:center;padding-left:6px!important;padding-right:0!important}
-  .tb-grip{display:inline-block;cursor:grab;color:${C.muted};font-size:15px;line-height:1;user-select:none}
+  .tb-grip{display:inline-block;cursor:grab;color:${C.muted};font-size:15px;line-height:1;user-select:none;touch-action:none}
   .tb-grip:hover{color:${C.fill}}.tb-grip:active{cursor:grabbing}
   .tb-fav{font-size:11px;vertical-align:1px}
   .tb-fable{width:22px;height:22px;border-radius:50%;border:1px solid ${C.fill};background:#fff;color:${C.fill};cursor:pointer;font-size:9px;padding:0;vertical-align:1px;margin-left:4px}
