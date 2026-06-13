@@ -19,6 +19,11 @@ function loadView(uid) {
 }
 function saveView(uid, v) { try { localStorage.setItem(VKEY(uid), JSON.stringify(v)); } catch { /* noop */ } }
 
+// 保存したマイソート（手動順）＝本人ごと（手動順は個人の並びなのでローカル保存）。[{name, order:[taskId]}]
+const MSKEY = (uid) => `ts.list.mysorts.${uid ?? "anon"}`;
+function loadMySorts(uid) { try { return JSON.parse(localStorage.getItem(MSKEY(uid))) || []; } catch { return []; } }
+function saveMySorts(uid, list) { try { localStorage.setItem(MSKEY(uid), JSON.stringify(list)); } catch { /* noop */ } }
+
 let V = null, UID = null;
 
 const stateOf = (t) => (t.done ? "完了" : ((t.percent_done || 0) > 0 ? "進行中" : "未着手"));
@@ -48,6 +53,7 @@ export async function render(root) {
   const today = todayISO();
   UID = (me && me.id) || 0;
   V = loadView(UID);
+  const mysorts = loadMySorts(UID); // 保存したマイソート（本人ごと）
   let execOk = false;
   try { const ex = await import("../lib/exec.js"); execOk = !!(await ex.execMe()); } catch { /* noop */ }
   let rows = (tasks || []).map((t) => ({
@@ -103,18 +109,23 @@ export async function render(root) {
     <h1 class="vtitle">タスク一覧 <small>${rows.length}件 ${manual ? "・ ⠿ をドラッグで自分用に並べ替え" : "・ 軸を重ねて組み合わせソート（列ヘッダ: クリック=主キー / Shift+クリック=軸を追加）"}</small></h1>
     <div class="tb-tools">
       <button id="tb-add" class="tb-add">タスク追加</button>
-      <button id="tb-manual" class="tb-manbtn${manual ? " on" : ""}" title="自分だけの手動並び">✋ マイソート</button>
-      <span class="tb-sortwrap${manual ? " dim" : ""}">並び: <span class="tb-chips">${chips || `<span class="tb-sc-none">既定</span>`}</span>
+      <button id="tb-manual" class="tb-manbtn${manual ? " on" : ""}" title="自分だけの手動ソート">✋ マイソート</button>
+      <span class="tb-sortwrap${manual ? " dim" : ""}">ソート: <span class="tb-chips">${chips || `<span class="tb-sc-none">既定</span>`}</span>
         <select id="tb-addsort" class="tb-addsort">${addOpts}</select></span>
       <select id="tb-proj">${projOpts}</select>
       <select id="tb-cat">${catOpts}</select>
       <label class="tb-chk"><input type="checkbox" id="tb-hd" ${V.hideDone ? "checked" : ""}> 完了を隠す</label>
     </div>
-    ${manual ? `<div class="tb-mynote">「マイソート」はあなただけの順番です（この端末に保存・他のメンバーには影響しません）。組み合わせソートに戻すには「✋ マイソート」をもう一度。</div>` : ""}
+    ${manual ? `<div class="tb-mynote">「マイソート」はあなただけの順番です（この端末に保存・他のメンバーには影響しません）。組み合わせソートに戻すには「✋ マイソート」をもう一度。</div>
+    <div class="tb-presets">
+      <span class="tb-pl">保存したマイソート<span class="tb-pl-g" title="あなた専用・この端末">👤</span></span>
+      ${mysorts.map((m, i) => `<span class="tb-pz"><button class="tb-mz-a" data-mi="${i}" title="この手動順を適用">${esc(m.name)}</button><button class="tb-mz-x" data-mi="${i}" title="削除">×</button></span>`).join("") || `<span class="tb-sc-none">まだありません</span>`}
+      <button class="tb-psave" id="tb-msave" title="今の手動のソート順に名前を付けて保存">💾 今のソートを保存</button>
+    </div>` : ""}
     ${(presets.length || canEditPresets) && !manual ? `<div class="tb-presets">
       <span class="tb-pl">プリセット<span class="tb-pl-g" title="チーム全員で共有">🌐</span></span>
-      ${presets.map((p, i) => `<span class="tb-pz" data-pi="${i}"><button class="tb-pz-a" data-pi="${i}" title="この並びを適用">${esc(p.name)}</button>${canEditPresets ? `<button class="tb-pz-x" data-pi="${i}" title="削除（全員に反映）">×</button>` : ""}</span>`).join("") || `<span class="tb-sc-none">まだありません</span>`}
-      ${canEditPresets ? `<button class="tb-psave" id="tb-psave" title="今の組み合わせソートを共有プリセットとして保存">💾 現在の並びを保存</button>` : ""}
+      ${presets.map((p, i) => `<span class="tb-pz" data-pi="${i}"><button class="tb-pz-a" data-pi="${i}" title="このソートを適用">${esc(p.name)}</button>${canEditPresets ? `<button class="tb-pz-x" data-pi="${i}" title="削除（全員に反映）">×</button>` : ""}</span>`).join("") || `<span class="tb-sc-none">まだありません</span>`}
+      ${canEditPresets ? `<button class="tb-psave" id="tb-psave" title="今の組み合わせソートを共有プリセットとして保存">💾 現在のソートを保存</button>` : ""}
     </div>` : ""}
     <div class="card tb-wrap"><table class="tb">
       <thead><tr>${cols(manual).map((c) => th(c, manual)).join("")}</tr></thead>
@@ -187,6 +198,25 @@ export async function render(root) {
     psave.disabled = true;
     try { await savePresets(next); invalidate(); render(root); }
     catch (err) { psave.disabled = false; alert("保存に失敗: " + err.message); }
+  };
+
+  // マイソート（手動順）の保存・適用・削除＝本人ごと（ローカル）
+  root.querySelectorAll(".tb-mz-a").forEach((b) => {
+    b.onclick = () => { const m = mysorts[+b.dataset.mi]; if (!m) return; V.order = [...(m.order || [])]; V.manualMode = true; reRender(); };
+  });
+  root.querySelectorAll(".tb-mz-x").forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      const m = mysorts[+b.dataset.mi]; if (!m || !confirm(`マイソート「${m.name}」を削除しますか？`)) return;
+      saveMySorts(UID, mysorts.filter((_, i) => i !== +b.dataset.mi)); render(root);
+    };
+  });
+  const msave = root.querySelector("#tb-msave");
+  if (msave) msave.onclick = () => {
+    const name = (prompt("マイソート名（あなた専用）", "やる順") || "").trim();
+    if (!name) return;
+    const next = [...mysorts.filter((m) => m.name !== name), { name, order: [...(V.order || [])] }];
+    saveMySorts(UID, next); render(root);
   };
 
   if (manual) wireDrag(root, () => render(root));
