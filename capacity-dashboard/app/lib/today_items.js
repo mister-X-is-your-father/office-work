@@ -3,7 +3,7 @@
 // WorkItem は「種別(kind) × 時間属性(flags: adhoc/advanced)」の2軸（ADR-012）。色/模様はビュー側。
 // 並び: 会議 → 定例 → レビュー → タスク(優先度 最優先→低)。
 import { toH, dateOnly, hasDate, taskPlannedHoursByMemberOn, assigneeIds, shiftISO } from "./capacity.js";
-import { expandRecurrences, occurrenceLoadEntries, freeByMemberDay } from "./recurrence.js";
+import { expandRecurrences, occurrenceLoadEntries, freeByMemberDay, capacityOn } from "./recurrence.js";
 import { kindOf, kindRank, prioBucket, isReviewTask } from "./kinds.js";
 
 // 後方互換の再export（既存の import 元を壊さない）
@@ -24,14 +24,14 @@ function isAdvanced(task, planEntries, isoDay) {
 // data: { tasks, members, plansByTask, recurrences }
 // 返り値: Map<memberId, { member, items:[{taskId?,title,h,kind,prio,flags:{adhoc,advanced}}], usedH, freeH, overH, status }>
 export function todayItemsByMember(data, isoDay, capH = 8) {
-  const { tasks = [], members = [], plansByTask = null, recurrences = [] } = data || {};
+  const { tasks = [], members = [], plansByTask = null, recurrences = [], holidaysSet, unavailabilityByMember } = data || {};
   const map = new Map(members.map((m) => [m.id, { member: m, items: [], usedH: 0 }]));
   const push = (mid, item) => { const r = map.get(mid); if (r) { r.items.push(item); r.usedH += item.h; } };
 
-  // 通常タスク／レビュー（予定 or 見積り日割り）。kind=種別, flags=時間属性。
+  // 通常タスク／レビュー（予定 or 見積り営業日割り）。kind=種別, flags=時間属性。
   for (const t of tasks) {
     const planEntries = planEntriesFor(plansByTask, t.id);
-    const byMember = taskPlannedHoursByMemberOn(t, isoDay, planEntries);
+    const byMember = taskPlannedHoursByMemberOn(t, isoDay, planEntries, { holidays: holidaysSet });
     if (!byMember.size) continue;
     const kind = kindOf(t); // 'review' | 'task'
     const flags = {
@@ -56,14 +56,18 @@ export function todayItemsByMember(data, isoDay, capH = 8) {
     }
   }
 
-  // 並べ替え＋集計
+  // 並べ替え＋集計。容量は人別（週末/祝日/休暇=0＝capacityOn）で本日KPIを正確に。
   for (const r of map.values()) {
     r.items.sort((a, b) => (kindRank(a.kind) - kindRank(b.kind)) || ((b.prio || 0) - (a.prio || 0)));
     r.usedH = round1(r.usedH);
-    r.freeH = round1(Math.max(0, capH - r.usedH));
-    r.overH = round1(Math.max(0, r.usedH - capH));
-    r.capH = capH;
-    r.status = r.usedH > capH + 1e-6 ? "over" : (Math.abs(r.usedH - capH) < 1e-6 ? "full" : "free");
+    const memCap = capacityOn(r.member, isoDay, { holidays: holidaysSet, unavailabilityByMember, capH });
+    r.freeH = round1(Math.max(0, memCap - r.usedH));
+    r.overH = round1(Math.max(0, r.usedH - memCap));
+    r.capH = memCap;
+    // capH=0（週末/祝日/休暇）: 負荷ありは衝突='over'、無ければ'off'。
+    r.status = memCap <= 1e-6
+      ? (r.usedH > 1e-6 ? "over" : "off")
+      : (r.usedH > memCap + 1e-6 ? "over" : (Math.abs(r.usedH - memCap) < 1e-6 ? "full" : "free"));
   }
   return map;
 }

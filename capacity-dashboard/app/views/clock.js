@@ -55,7 +55,8 @@ function clockSVG(m) {
   // 中央の大きい数字＝本日の稼働予定(used)。空き/超過はサブに（予定ゼロ＝大きく0h・サブ「空き8h」）。
   const big = fmtH(m.usedH);
   const bigcol = m.overH > 0 ? "#e5484d" : (m.usedH > 1e-6 ? "#1d2430" : "#9aa3af");
-  const sub = m.overH > 0 ? `超過 +${fmtH(m.overH)}` : (m.freeH > 0 ? `空き ${fmtH(m.freeH)}` : "満稼働");
+  const sub = m.overH > 0 ? `超過 +${fmtH(m.overH)}`
+    : (m.status === "off" ? "休（非稼働日）" : (m.freeH > 0 ? `空き ${fmtH(m.freeH)}` : "満稼働"));
   return `<svg class="ck-dial" width="200" height="200" viewBox="0 0 200 200" role="img" aria-label="${esc(m.member.name || "")} 予定${big} ${sub}">
     ${out.join("\n    ")}
     <text x="${CX}" y="${CY - 1}" text-anchor="middle" class="ck-cn" fill="${bigcol}" style="font-variant-numeric:tabular-nums">${big}</text>
@@ -66,8 +67,9 @@ function clockSVG(m) {
 /* ---------- card with collapsible category sections ---------- */
 function cardHTML(m, idx) {
   const nm = m.member.name || m.member.username || `#${m.member.id}`;
-  const stateCls = m.overH > 0 ? "over" : (m.freeH > 0 ? "free" : "just");
-  const stateTxt = m.overH > 0 ? `超過 +${fmtH(m.overH)}` : (m.freeH > 0 ? `空き ${fmtH(m.freeH)}` : "ちょうど");
+  const off = m.status === "off";
+  const stateCls = m.overH > 0 ? "over" : (off ? "just" : (m.freeH > 0 ? "free" : "just"));
+  const stateTxt = m.overH > 0 ? `超過 +${fmtH(m.overH)}` : (off ? "休（非稼働日）" : (m.freeH > 0 ? `空き ${fmtH(m.freeH)}` : "ちょうど"));
   let sections = "";
   for (const kind of KIND_ORDER) {
     const items = m.items.filter((it) => it.kind === kind);
@@ -96,7 +98,7 @@ function cardHTML(m, idx) {
 }
 
 function kpiStrip(states) {
-  const cap = states.length * CAP;
+  const cap = states.reduce((s, m) => s + (m.capH ?? CAP), 0); // 人別容量（週末/祝日/休暇=0）
   const usedAll = states.reduce((s, m) => s + Math.min(m.usedH, CAP), 0);
   const rate = cap > 0 ? Math.round(usedAll / cap * 100) : 0;
   const overMembers = states.filter((m) => m.overH > 0);
