@@ -1,4 +1,4 @@
-// タスク一覧（表・mock60 相当）。**複数軸の組み合わせソート**＋**個人ごとの並び順**（マイ並び＝手動）。
+// タスク一覧（表・mock60 相当）。**複数軸の組み合わせソート**＋**個人ごとの並び順**（マイソート＝手動）。
 // 並び設定（ソート軸の連なり・手動順・絞り込み）は **見ている本人ごとに localStorage 保存**＝
 // 共有データ（DB）は一切変えないので、誰がどう並べても他メンバーの見え方に影響しない（衝突しない）。
 import { load, invalidate, projectName, isAiUser } from "../lib/store.js";
@@ -103,14 +103,14 @@ export async function render(root) {
     <h1 class="vtitle">タスク一覧 <small>${rows.length}件 ${manual ? "・ ⠿ をドラッグで自分用に並べ替え" : "・ 軸を重ねて組み合わせソート（列ヘッダ: クリック=主キー / Shift+クリック=軸を追加）"}</small></h1>
     <div class="tb-tools">
       <button id="tb-add" class="tb-add">タスク追加</button>
-      <button id="tb-manual" class="tb-manbtn${manual ? " on" : ""}" title="自分だけの手動並び">✋ マイ並び</button>
+      <button id="tb-manual" class="tb-manbtn${manual ? " on" : ""}" title="自分だけの手動並び">✋ マイソート</button>
       <span class="tb-sortwrap${manual ? " dim" : ""}">並び: <span class="tb-chips">${chips || `<span class="tb-sc-none">既定</span>`}</span>
         <select id="tb-addsort" class="tb-addsort">${addOpts}</select></span>
       <select id="tb-proj">${projOpts}</select>
       <select id="tb-cat">${catOpts}</select>
       <label class="tb-chk"><input type="checkbox" id="tb-hd" ${V.hideDone ? "checked" : ""}> 完了を隠す</label>
     </div>
-    ${manual ? `<div class="tb-mynote">「マイ並び」はあなただけの順番です（この端末に保存・他のメンバーには影響しません）。組み合わせソートに戻すには「✋ マイ並び」をもう一度。</div>` : ""}
+    ${manual ? `<div class="tb-mynote">「マイソート」はあなただけの順番です（この端末に保存・他のメンバーには影響しません）。組み合わせソートに戻すには「✋ マイソート」をもう一度。</div>` : ""}
     ${(presets.length || canEditPresets) && !manual ? `<div class="tb-presets">
       <span class="tb-pl">プリセット<span class="tb-pl-g" title="チーム全員で共有">🌐</span></span>
       ${presets.map((p, i) => `<span class="tb-pz" data-pi="${i}"><button class="tb-pz-a" data-pi="${i}" title="この並びを適用">${esc(p.name)}</button>${canEditPresets ? `<button class="tb-pz-x" data-pi="${i}" title="削除（全員に反映）">×</button>` : ""}</span>`).join("") || `<span class="tb-sc-none">まだありません</span>`}
@@ -129,7 +129,7 @@ export async function render(root) {
   root.querySelector("#tb-cat").onchange = (e) => { V.cat = e.target.value; reRender(); };
   root.querySelector("#tb-hd").onchange = (e) => { V.hideDone = e.target.checked; reRender(); };
   root.querySelector("#tb-add").onclick = () => openTaskForm({ onSaved: () => render(root) });
-  // 軸を追加（マイ並び中でも触れるが、追加したら組み合わせソートに切替）
+  // 軸を追加（マイソート中でも触れるが、追加したら組み合わせソートに切替）
   root.querySelector("#tb-addsort").onchange = (e) => {
     const k = e.target.value; if (!k) return;
     V.sorts.push({ key: k, dir: AXES[k].dir }); V.manualMode = false; reRender();
