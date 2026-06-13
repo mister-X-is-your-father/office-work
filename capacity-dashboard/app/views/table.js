@@ -330,10 +330,10 @@ function openMenu(x, y, items, opts = {}) {
     m.innerHTML = its.map((it, i) => {
       if (it.sep) return `<div class="tb-ctx-sep"></div>`;
       if (it.input === "date") return `<label class="tb-ctx-inp">${esc(it.label)}<input type="date" data-i="${i}" value="${it.value || ""}"></label>`;
-      if (it.input === "hm") return `<div class="tb-ctx-inp tb-ctx-hm">${esc(it.label)}<span class="tb-ctx-unit">`
-        + `<select data-i="${i}" data-hm="h">${it.hOpts.map((v) => `<option value="${v}"${v === (it.h || 0) ? " selected" : ""}>${v}</option>`).join("")}</select>時間`
-        + `<select data-i="${i}" data-hm="m">${it.mOpts.map((v) => `<option value="${v}"${v === (it.m || 0) ? " selected" : ""}>${v}</option>`).join("")}</select>分`
-        + `</span><button class="tb-ctx-apply" data-i="${i}">適用</button></div>`;
+      if (it.input === "hmgrid") return `<div class="tb-hg">`
+        + `<div class="tb-hg-row"><span class="tb-hg-lbl">時間</span>${it.hOpts.map((v) => `<button class="tb-hg-b${v === it.h ? " on" : ""}" data-i="${i}" data-hk="${v}">${v}</button>`).join("")}</div>`
+        + `<div class="tb-hg-row"><span class="tb-hg-lbl">分</span>${it.mOpts.map((v) => `<button class="tb-hg-b${v === it.m ? " on" : ""}" data-i="${i}" data-mk="${v}">${v}</button>`).join("")}</div>`
+        + `</div>`;
       return `<button class="tb-ctx-it${it.danger ? " danger" : ""}" data-i="${i}">${it.check !== undefined ? `<span class="tb-ctx-ck">${it.check ? "✓" : ""}</span>` : ""}${esc(it.label)}</button>`;
     }).join("");
     m.querySelectorAll(".tb-ctx-it").forEach((b) => {
@@ -343,13 +343,20 @@ function openMenu(x, y, items, opts = {}) {
         else { closeRowMenu(); it.on && it.on(); }
       };
     });
-    const commitHm = (i) => { const it = its[i]; const box = m.querySelector(`.tb-ctx-hm`); const h = +(box.querySelector('[data-hm="h"]').value || 0); const mn = +(box.querySelector('[data-hm="m"]').value || 0); closeRowMenu(); it.on && it.on({ h, m: mn }); };
     m.querySelectorAll(".tb-ctx-inp input").forEach((inp) => {   // 日付指定（type=date）
       inp.onclick = (e) => e.stopPropagation();
       inp.onchange = () => { const it = its[+inp.dataset.i]; closeRowMenu(); it.on && it.on(inp.value); };
     });
-    m.querySelectorAll(".tb-ctx-hm select").forEach((s) => { s.onclick = (e) => e.stopPropagation(); });
-    m.querySelectorAll(".tb-ctx-apply").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); commitHm(+b.dataset.i); }; });
+    // 時間/分グリッド: ボタンをワンタップで選択（メニューは開いたまま・即反映）
+    m.querySelectorAll(".tb-hg-b").forEach((b) => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        const it = its[+b.dataset.i];
+        if (b.dataset.hk !== undefined) it.h = +b.dataset.hk; else it.m = +b.dataset.mk;
+        it.onPick && it.onPick(it.h, it.m);
+        paint(its);
+      };
+    });
   };
   document.body.appendChild(m);
   _ctxEl = m;
@@ -419,28 +426,25 @@ function openDueMenu(chipEl, id, tasks, root, today) {
   openMenu(r.left, r.bottom + 4, items);
 }
 
-// 見積のワンクリック変更（プリセット＋カスタム＋クリア）。
+// 見積のワンクリック変更。開いた瞬間に時間(0〜10)と分(0/15/30/45)のボタンが並び、
+// ワンタップで選択（メニューは開いたまま即反映・閉じた時にサーバー同期）。
 function openEstMenu(chipEl, id, tasks, root) {
   closeRowMenu();
   const t = (tasks || []).find((x) => x.id === id); if (!t) return;
-  const reload = () => { invalidate(); render(root); };
   const cur = t.time_estimate || 0;
-  const set = (sec) => updateTask(id, { time_estimate: sec }).then(reload).catch(() => {});
-  const opts = [[900, "15分"], [1800, "30分"], [2700, "45分"], [3600, "1時間"], [7200, "2時間"], [14400, "4時間"], [28800, "8時間"]];
-  const ih = Math.floor(cur / 3600);
   const mBase = [0, 15, 30, 45];
+  const hOpts = Array.from({ length: 11 }, (_, k) => k); // 0〜10時間
   const imRaw = Math.round((cur % 3600) / 60);
-  const im = mBase.reduce((p, c) => Math.abs(c - imRaw) < Math.abs(p - imRaw) ? c : p, 0); // 現在値を最寄りの0/15/30/45へ
-  const hOpts = Array.from({ length: 13 }, (_, k) => k); // 0〜12時間
-  const items = [
-    ...opts.map(([sec, label]) => ({ label, check: cur === sec, on: () => set(sec) })),
+  let h = Math.min(10, Math.floor(cur / 3600));
+  let mn = mBase.reduce((p, c) => Math.abs(c - imRaw) < Math.abs(p - imRaw) ? c : p, 0); // 現在値を最寄りの0/15/30/45へ
+  let dirty = false;
+  const build = () => [
+    { input: "hmgrid", h, m: mn, hOpts, mOpts: mBase, onPick: (nh, nm) => { h = nh; mn = nm; dirty = true; updateTask(id, { time_estimate: h * 3600 + mn * 60 }).catch(() => {}); } },
     { sep: true },
-    { label: "指定", input: "hm", h: ih, m: im, hOpts, mOpts: mBase, on: ({ h, m }) => { const sec = h * 3600 + m * 60; if (sec < 0) return; set(sec); } },
-    { sep: true },
-    { label: "クリア", danger: cur > 0, on: () => set(0) },
+    { label: "クリア", danger: cur > 0, on: () => { updateTask(id, { time_estimate: 0 }).then(() => { invalidate(); render(root); }).catch(() => {}); } },
   ];
   const r = chipEl.getBoundingClientRect();
-  openMenu(r.left, r.bottom + 4, items);
+  openMenu(r.left, r.bottom + 4, build(), { keepOpen: true, rebuild: build, onClose: () => { if (dirty) { invalidate(); render(root); } } });
 }
 
 // 担当のワンクリック変更（メンバーを複数トグル・メニューは開いたまま即反映）。
@@ -703,10 +707,12 @@ function css() {
   .tb-ctx-inp input{font:inherit;font-size:12px;border:1px solid ${C.line};border-radius:6px;padding:3px 6px}
   .tb-ctx-unit{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:${C.muted}}
   .tb-ctx-unit input{width:66px;text-align:right}
-  .tb-ctx-hm{flex-wrap:wrap;gap:8px}
-  .tb-ctx-hm select{font:inherit;font-size:12px;border:1px solid ${C.line};border-radius:6px;padding:3px 6px;background:#fff;cursor:pointer}
-  .tb-ctx-apply{font:inherit;font-size:12px;font-weight:600;color:${C.fill};background:#eaf2ff;border:1px solid #cfe0ff;border-radius:6px;padding:3px 11px;cursor:pointer}
-  .tb-ctx-apply:hover{background:#dbe9ff}
+  .tb-hg{display:flex;flex-direction:column;gap:6px;padding:7px 9px}
+  .tb-hg-row{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+  .tb-hg-lbl{font-size:11px;color:${C.muted};width:28px;flex:none}
+  .tb-hg-b{font:inherit;font-size:12px;min-width:30px;padding:4px 7px;border:1px solid ${C.line};border-radius:6px;background:#fff;color:${C.ink};cursor:pointer}
+  .tb-hg-b:hover{border-color:${C.fill};color:${C.fill}}
+  .tb-hg-b.on{background:${C.fill};border-color:${C.fill};color:#fff;font-weight:700}
   .tb-ctx-it{font:inherit;font-size:13px;text-align:left;border:0;background:transparent;color:${C.ink};padding:8px 12px;border-radius:7px;cursor:pointer;white-space:nowrap}
   .tb-ctx-it:hover{background:${C.track}}
   .tb-ctx-it.danger{color:${C.over}}
