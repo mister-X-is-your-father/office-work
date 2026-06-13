@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  toH, dateOnly, hasDate, isActiveOn, taskHoursOn,
+  toH, dateOnly, hasDate, isActiveOn, taskHoursOn, isBusinessDay, businessDays,
   loadByMember, weekLoadByMember, estimateVsActual, triage, sumByMemberDay,
   shiftISO, taskRanges, dependencyEdges, dayScale, toMemberDayEntries, taskPlannedHoursByMemberOn,
   buildTaskTree, depLayers,
@@ -55,12 +55,40 @@ test("isActiveOn", () => {
   assert.equal(isActiveOn({ due_date: due("2026-06-12") }, TODAY), false);
 });
 
-test("taskHoursOn: 期間は日割り / due は全量", () => {
-  // 8h を 2日(6/09-6/10) → 4h/日
+test("taskHoursOn: 期間は営業日割り / due は全量", () => {
+  // 8h を 2営業日(6/09火-6/10水) → 4h/日
   assert.equal(taskHoursOn({ time_estimate: 28800, start_date: due("2026-06-09"), end_date: due(TODAY) }, TODAY), 4);
   // due のみ → 全量
   assert.equal(taskHoursOn({ time_estimate: 14400, due_date: due(TODAY) }, TODAY), 4);
   assert.equal(taskHoursOn({ time_estimate: 14400, due_date: due("2026-06-12") }, TODAY), 0);
+});
+
+test("taskHoursOn: 週末をまたぐ期間は営業日のみで等分（週末に負荷を載せない）", () => {
+  // 6/12(金)〜6/15(月): 暦4日だが営業日は金・月の2日 → 8h/2 = 4h/営業日
+  const t = { time_estimate: 28800, start_date: due("2026-06-12"), end_date: due("2026-06-15") };
+  assert.equal(taskHoursOn(t, "2026-06-12"), 4); // 金
+  assert.equal(taskHoursOn(t, "2026-06-13"), 0); // 土=0
+  assert.equal(taskHoursOn(t, "2026-06-14"), 0); // 日=0
+  assert.equal(taskHoursOn(t, "2026-06-15"), 4); // 月
+});
+
+test("taskHoursOn: holidays を渡すと祝日も除外して等分", () => {
+  // 6/10(水)〜6/12(金) 営業3日だが 6/11 を祝日にすると 2日 → 6h/2=3h
+  const holidays = new Set(["2026-06-11"]);
+  const t = { time_estimate: 21600, start_date: due("2026-06-10"), end_date: due("2026-06-12") };
+  assert.equal(taskHoursOn(t, "2026-06-10", { holidays }), 3);
+  assert.equal(taskHoursOn(t, "2026-06-11", { holidays }), 0); // 祝日=0
+  assert.equal(taskHoursOn(t, "2026-06-12", { holidays }), 3);
+});
+
+test("loadByMember: capacityFor で週末は容量0='off'、負荷ありは'over'", () => {
+  const SAT = "2026-06-13";
+  const capacityFor = (m, day) => isBusinessDay(day) ? 8 : 0;
+  // 週末に due のタスク（due は全量載る）→ 容量0なので over
+  const tasks = [{ id: 1, title: "x", assignees: [{ id: 1 }], time_estimate: 7200, due_date: due(SAT) }];
+  const rows = loadByMember(tasks, members, SAT, 8, null, { capacityFor });
+  assert.equal(rows.find((r) => r.id === 1).status, "over");
+  assert.equal(rows.find((r) => r.id === 2).status, "off"); // 負荷なし・容量0
 });
 
 test("loadByMember: 空き/超過/満", () => {

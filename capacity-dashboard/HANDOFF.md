@@ -49,7 +49,7 @@ office-work/capacity-dashboard/
 | **個人休暇** | `member_unavailability`(user_id, start_date, end_date, reason) | `/unavailability` |
 
 **2. 計算（純関数・TDD・計40テスト）.** `capacity.js`(空き/負荷/予実/ガント/トリアージ/`buildTaskTree`/`depLayers`) ＋ `recurrence.js`(RRULE展開・空き) ＋ `today_items.js`(本日WorkItem) ＋ `kinds.js`(種別定義)。
-- 負荷の**単一真実**（[ADR-010](docs/01-decisions.md)/#4）: タスクは **plansあれば plans、無ければ見積り日割り**。**多担当=全員にフル**（按分しない。会議も同様）。`user_id`(対象者)が信頼できれば その1人にフル。
+- 負荷の**単一真実**（[ADR-010](docs/01-decisions.md)/#4）: タスクは **plansあれば plans、無ければ見積りの営業日割り**（2026-06-13〜・土日祝に負荷を載せず平日のみ等分。`taskHoursOn`/`businessDays`・holidays Set 任意）。**多担当=全員にフル**（按分しない。会議も同様）。`user_id`(対象者)が信頼できれば その1人にフル。本日系KPIの容量は `capacityOn` で週末/祝日/休暇=0（ステータス `off`）。
 - 月次空き（[ADR-011](docs/01-decisions.md)）: `expandRecurrences`(rrule.js)＋`occurrenceLoadEntries`(全員フル)＋`capacityOn`(週末/祝日/休暇=0)＋`freeByMemberDay`。
 - 本日WorkItem（[ADR-012](docs/01-decisions.md)）: `todayItemsByMember` が `{kind, prio, flags:{adhoc,advanced}}` を返す。**kind=種別**(会議/定例/レビュー/タスク=`recurrences.kind`＋ラベル)、**flags=時間属性**(当日追加=created当日/前倒し=plan当日かつ期日先)。表示トークンは `kinds.js`。
 - 時刻配置（[ADR-013](docs/01-decisions.md)）: 「本日にやる＝`task_time_plan`」、`start_minute`(0:00からの分・null=終日)でカレンダー配置。移動=delete+create。
@@ -92,13 +92,14 @@ office-work/capacity-dashboard/
   - 対象外と判断: 位置リマインダー・音声入力・メールtoタスク（モバイル/インフラ専用思想）。カレンダー同期(Google/CalDAV)・モバイルPWAは未着手の大物として残り。
 - **クイック追加バー**（2026-06-13・`lib/quickadd.js`＋`views/quickadd.js`・トップバー常設）: TickTick実アカウント調査の結論=利用実態は**瞬間メモ捕獲**（リマインダー/繰り返し/ポモドーロ/習慣はほぼ未使用・完了388件の大半がメモとURLのダンプ）→ 最重要ギャップは**1行自然言語→即タスク化**と判断。構文=`明日15時 MTG準備 #分類 !高 1.5h @担当 >WS URL`（日付=今日/明日/明後日/N日後/X曜/来週X曜/M\/D/M月D日・過去M\/Dは翌年繰上げ。URLとMarkdownリンクは説明の`[資料]`行へ）。**完全一致トークンのみ消費**＝「15時の件」「明日の会議メモ」等の日本語文中は壊さない（純関数パーサ・テスト12件 `quickadd.test.mjs`）。解析結果はチップでライブプレビュー→Enterで作成、`/`キーでどこからでもフォーカス・連続入力でフォーカス維持（ダンプ運用）。既定投入先=**「インボックス」WS（無ければ自動作成・ユーザーごと）**、`>WS名`で明示指定（不明WSはインボックスへフォールバック表示）。**時刻指定があれば日別予定(plan/start_minute)も作成**＝時刻カレンダーに即出現（所要=見積、無ければ1h）。@担当は人間のみ解決（**AI(fable)割当は taskform の隠しコマンド経由のみ＝仕様維持**）。
 - **予定の基礎データ管理ビュー**（2026-06-13・`views/manage.js`・ROUTES「その他」グループ）: 定期/祝日/休暇の登録・編集・削除を1画面に集約＝**seed/API 依存を解消**（HANDOFF §9 最優先を消化）。3カード構成: ①**定期・会議**=一覧（RRULE→人間可読要約＝`recurrenceform.js summarizeRecurrence`／持ち回りは「A→B→C」表示）＋新規（種別タブ）＋編集＋削除。②**祝日**=スマート日付＋名称で追加・日付順一覧（過去は淡色）・削除（国民の祝日は別途週1自動同期、ここは会社独自休業日向け）。③**個人休暇**=メンバー/開始/終了/理由で追加・一覧・削除（期間は両端含む＝capacityOn が容量0に）。**定期の編集**=`recurrenceform.js` を拡張: `parseRRuleToState`（RRULE文字列→buildRRule状態の逆写像）・`recurrenceMode`（mtg/rmtg/rtask判定）でモーダルをプレフィル→`updateRecurrence`（overrides保持＝この回だけ変更を消さない）。新規/編集とも独立モーダル `openRecurrenceForm`（taskform の `ensureStyle` を動的importで流用＝循環依存回避）。taskform 側のタブ作成UIは非破壊（`renderRecurrencePanel` は `existing` 既定null）。全80テストグリーン・Playwright で編集往復(10:00↔11:00)・祝日追加/削除往復・taskform定期タブ回帰なしを確認。
+- **土日祝の考慮ギャップ修正**（2026-06-13）: 見積りの暦日割り→**営業日割り**（週末に負荷が漏れない）＋本日系KPI（home/today/availability）の容量を `capacityOn` 配線で週末/祝日/休暇=0（ステータス `off`=「休」表示）に。詳細は §4 残り。capacity.js 純関数＋テスト83件グリーン。
 - 基盤固め: #1 書き込み破壊性根治(ADR-008) / #2 soft delete / #3 帰属(ADR-009) / #4 負荷の単一真実(ADR-010) / #7 回帰網 / #9 スカラ更新安全化(client updateTask)。
 
 **残り**
 - **入力UI(残)**: 定期/祝日/休暇の登録・編集・削除は **`views/manage.js` で完了**（2026-06-13）。残るは #3 対象者選択UI（planner フォーム）と、祝日/休暇の**編集**（現状は削除→再追加で代替・需要薄）。
 - 残ビュー: なし（2026-06-13 時点で全20ルート稼働: 16＋四象限・習慣・月カレンダー、＋隠しFable）。
 - カレンダー作り込み(残): 営業時間/容量の可変化・複数日（週タイムライン）。※リサイズ・会議/定例の時刻ブロック表示は 2026-06-12 完了。
-- **土日祝の考慮ギャップ**（2026-06-12 監査）: ①見積りの**日割りが暦日割り**（`capacity.js taskHoursOn` が土日祝込みの inclusiveDays で割る→週末に負荷が落ち平日が薄まる。営業日割りにすべき）②**本日系ビュー（today/home KPI）の capH=8 固定**（祝日・週末でも空き8hと表示。`capacityOn` 未使用）。月次空き/リスケ提案/週次freeWindow は `capacityOn` 経由で正しい。
+- ~~**土日祝の考慮ギャップ**（2026-06-12 監査）~~ → **2026-06-13 修正済**: ①`capacity.js taskHoursOn` を**営業日割り**化（`isBusinessDay`/`businessDays`・土日祝には負荷を載せず平日のみ等分・holidays Set 任意・全期間休日のみ暦割りフォールバック）。`loadByMember`/`weekLoadByMember`/`taskPlannedHoursByMemberOn` に `{holidays}` opt 追加（テスト+3=83件）。②本日系ビュー（home/today/availability）に `capacityFor=capacityOn(...)` を配線＝週末/祝日/休暇は容量0→新ステータス **`off`**（loadByMember が返す・「休/非稼働日」表示・availの0除算NaN解消）。week/weekstack は holidays 営業日割りのみ配線（週Mon-Fri表示のため per-day 容量0化は将来）。
 - 据え置き(ADRで明記): 「本日=plan」完全一本化(due/範囲の暫定表示廃止・ADR-012)/定期occurrenceのmaterialize(ADR-011)/人別可変キャパ(時短)/AI Q&A(53)。
 - TickTick関連(2026-06-13): 実測では通知/ポモ/習慣の利用ほぼゼロだったが、**ユーザー方針=「機能パリティ」**につき上記一式を実装済み。残る大物は **カレンダー同期(Google/CalDAV)** と **モバイル/PWA**。生データは `~/.local/share/ticktick-export/`（個人情報につきリポジトリ外）。
 

@@ -15,10 +15,10 @@ function weekDays() {
 }
 
 export async function render(root) {
-  const { tasks, members, plansByTask, settings } = await load();
+  const { tasks, members, plansByTask, settings, holidaysSet } = await load();
   CAP = settings.capH;
   const isoDays = weekDays();
-  const perMember = weekLoadByMember(tasks, members, isoDays, CAP, plansByTask); // [{id,name,days:[{day,h,over}]}]
+  const perMember = weekLoadByMember(tasks, members, isoDays, CAP, plansByTask, { holidays: holidaysSet }); // [{id,name,days:[{day,h,over}]}]
   const idx = new Map(members.map((m, i) => [m.id, i]));
 
   // 日 → [{member, h}] へ転置

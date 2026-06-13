@@ -1,15 +1,18 @@
 // 残容量カード（mock04 相当・実データ）。本日のメンバー別 残り容量を大きく表示。
 import { load } from "../lib/store.js";
 import { loadByMember } from "../lib/capacity.js";
+import { capacityOn } from "../lib/recurrence.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 
 let CAP = 8; // 設定（容量 h/日）で上書き
 
 export async function render(root) {
-  const { tasks, members, plansByTask, settings } = await load();
+  const { tasks, members, plansByTask, settings, holidaysSet, unavailabilityByMember } = await load();
   CAP = settings.capH;
   const day = todayISO();
-  const rows = loadByMember(tasks, members, day, CAP, plansByTask)
+  // 営業日割り＋人別容量（週末/祝日/休暇=0）で残容量を正確に（§土日祝ギャップ）
+  const capacityFor = (m, d) => capacityOn(m, d, { holidays: holidaysSet, unavailabilityByMember, capH: CAP });
+  const rows = loadByMember(tasks, members, day, CAP, plansByTask, { holidays: holidaysSet, capacityFor })
     .sort((a, b) => b.freeH - a.freeH);
 
   const totFree = rows.reduce((s, r) => s + r.freeH, 0);
@@ -29,19 +32,22 @@ export async function render(root) {
 
 function cardHtml(r, i) {
   const nm = r.name;
+  const off = r.status === "off"; // 週末/祝日/休暇＝容量0
   const over = r.overH > 0;
-  const big = over ? `-${fmtH(r.overH)}` : (r.freeH > 0 ? `+${fmtH(r.freeH)}` : "±0h");
-  const bigcls = over ? "over" : (r.freeH > 0 ? "free" : "full");
-  const ratio = Math.min(100, Math.round((r.assignedH / r.capH) * 100));
-  const overRatio = over ? Math.min(100, Math.round((r.overH / r.capH) * 100)) : 0;
+  const big = off ? "休" : (over ? `-${fmtH(r.overH)}` : (r.freeH > 0 ? `+${fmtH(r.freeH)}` : "±0h"));
+  const bigcls = off ? "full" : (over ? "over" : (r.freeH > 0 ? "free" : "full"));
+  const ratio = r.capH > 0 ? Math.min(100, Math.round((r.assignedH / r.capH) * 100)) : 0;
+  const overRatio = over && r.capH > 0 ? Math.min(100, Math.round((r.overH / r.capH) * 100)) : 0;
   const tasks = (r.tasks || []).sort((a, b) => b.h - a.h).map((t) =>
     `<div class="av-t"><span class="av-tn">${esc(t.title)}</span><span class="av-th">${fmtH(t.h)}</span></div>`).join("")
     || `<div class="av-none">本日のアサインなし</div>`;
+  const badge = off ? `<span class="av-badge full">非稼働日</span>`
+    : (over ? `<span class="av-badge over">超過</span>` : (r.freeH > 0 ? `<span class="av-badge free">余裕</span>` : `<span class="av-badge full">満</span>`));
   return `<div class="av-card ${over ? "is-over" : ""}">
     <div class="av-h"><span class="av-ava" style="background:${member_color(r.id)}">${esc((nm[0] || "?"))}</span><span class="av-nm">${esc(nm)}</span>
-      ${over ? `<span class="av-badge over">超過</span>` : (r.freeH > 0 ? `<span class="av-badge free">余裕</span>` : `<span class="av-badge full">満</span>`)}</div>
+      ${badge}</div>
     <div class="av-big ${bigcls}">${big}</div>
-    <div class="av-sub">${fmtH(r.assignedH)} / ${r.capH}h</div>
+    <div class="av-sub">${off ? "非稼働日（週末/祝日/休暇）" : `${fmtH(r.assignedH)} / ${r.capH}h`}</div>
     <div class="av-bar"><i style="width:${ratio}%;background:${over ? C.over : C.fill}"></i>${over ? `<b style="width:${overRatio}%"></b>` : ""}</div>
     <div class="av-list">${tasks}</div>
   </div>`;

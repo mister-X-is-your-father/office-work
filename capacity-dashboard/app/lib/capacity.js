@@ -12,6 +12,21 @@ export function inclusiveDays(isoA, isoB) {
   const n = Math.round((Date.parse(isoB) - Date.parse(isoA)) / 86400000) + 1;
   return n > 0 ? n : 1;
 }
+// 営業日判定: 土日 と（渡されれば）祝日を除く。holidays は Set<"YYYY-MM-DD"> 想定。
+export function isBusinessDay(iso, holidays = null) {
+  const dow = new Date(iso + "T00:00:00Z").getUTCDay();
+  if (dow === 0 || dow === 6) return false;
+  if (holidays && holidays.has && holidays.has(iso)) return false;
+  return true;
+}
+// [isoA,isoB] inclusive の営業日数（土日祝除く）。0=全期間が休日。
+export function businessDays(isoA, isoB, holidays = null) {
+  let n = 0;
+  for (let cur = isoA, i = 0; cur <= isoB && i < 4000; cur = shiftISO(cur, 1), i++) {
+    if (isBusinessDay(cur, holidays)) n++;
+  }
+  return n;
+}
 export function daysUntil(isoFrom, isoTo) {
   return Math.round((Date.parse(isoTo) - Date.parse(isoFrom)) / 86400000);
 }
@@ -28,14 +43,20 @@ export function isActiveOn(task, isoDay) {
   return false;
 }
 
-// isoDay にこのタスクが要する見積り時間(h)。期間タスクは日割り。
-export function taskHoursOn(task, isoDay) {
+// isoDay にこのタスクが要する見積り時間(h)。期間タスクは**営業日割り**（土日祝に負荷を載せず、
+// 平日のみで等分＝週末に負荷が漏れない）。holidays(Set) を渡すと祝日も休みとして除外。
+// 全期間が休日の特殊ケースのみ暦日割りにフォールバック（0除算回避）。
+export function taskHoursOn(task, isoDay, { holidays = null } = {}) {
   if (task.done) return 0;
   const estH = toH(task.time_estimate);
   if (!estH) return 0;
   if (hasDate(task.start_date) && hasDate(task.end_date)) {
     const st = dateOnly(task.start_date), en = dateOnly(task.end_date);
-    if (st <= isoDay && isoDay <= en) return estH / inclusiveDays(st, en);
+    if (st <= isoDay && isoDay <= en) {
+      if (!isBusinessDay(isoDay, holidays)) return 0; // 土日祝には負荷を載せない
+      const bd = businessDays(st, en, holidays);
+      return bd > 0 ? estH / bd : estH / inclusiveDays(st, en);
+    }
   }
   if (hasDate(task.due_date) && dateOnly(task.due_date) === isoDay) return estH;
   return 0;
@@ -50,7 +71,7 @@ function planEntriesFor(plansByTask, taskId) {
 // 【単一真実】タスクの isoDay 当日の予定負荷を memberId -> h で返す（#4）。
 // plans があればその日の plan 秒を、無ければ見積り日割りを。いずれも担当者全員に「フル」（按分しない）。
 // 特定の対象者(user_id, #3)が信頼できる場合はその1人にフル。done タスクは負荷ゼロ。
-export function taskPlannedHoursByMemberOn(task, isoDay, planEntries) {
+export function taskPlannedHoursByMemberOn(task, isoDay, planEntries, { holidays = null } = {}) {
   const out = new Map();
   if (task.done) return out;
   const add = (mid, h) => { if (h > 0) out.set(mid, (out.get(mid) || 0) + h); };
@@ -63,17 +84,20 @@ export function taskPlannedHoursByMemberOn(task, isoDay, planEntries) {
       else for (const aid of aids) add(aid, h); // 多担当=全員にフル
     }
   } else {
-    const h = taskHoursOn(task, isoDay);
+    const h = taskHoursOn(task, isoDay, { holidays }); // 見積りフォールバックは営業日割り
     if (h > 0) for (const aid of aids) add(aid, h); // 多担当=全員にフル
   }
   return out;
 }
 
-// 指定日の人別負荷。plansByTask を渡すと plans 優先（無いタスクは見積り日割り）。
-export function loadByMember(tasks, members, isoDay, capH = 8, plansByTask = null) {
-  const map = new Map(members.map((m) => [m.id, { id: m.id, name: m.name || m.username, capH, assignedH: 0, tasks: [] }]));
+// 指定日の人別負荷。plansByTask を渡すと plans 優先（無いタスクは見積り営業日割り）。
+// opts.holidays(Set): 見積り割りで祝日を除外。opts.capacityFor(member,isoDay): 人別の容量
+//   （週末/祝日/休暇=0 等）。未指定なら scalar capH を全員一律で使用（従来挙動）。
+export function loadByMember(tasks, members, isoDay, capH = 8, plansByTask = null, { holidays = null, capacityFor = null } = {}) {
+  const capOf = (m) => (capacityFor ? capacityFor(m, isoDay) : capH);
+  const map = new Map(members.map((m) => [m.id, { id: m.id, name: m.name || m.username, capH: capOf(m), assignedH: 0, tasks: [] }]));
   for (const t of tasks) {
-    const byMember = taskPlannedHoursByMemberOn(t, isoDay, planEntriesFor(plansByTask, t.id));
+    const byMember = taskPlannedHoursByMemberOn(t, isoDay, planEntriesFor(plansByTask, t.id), { holidays });
     for (const [mid, h] of byMember) {
       const row = map.get(mid);
       if (!row) continue;
@@ -86,17 +110,21 @@ export function loadByMember(tasks, members, isoDay, capH = 8, plansByTask = nul
     assignedH: round1(r.assignedH),
     freeH: round1(Math.max(0, r.capH - r.assignedH)),
     overH: round1(Math.max(0, r.assignedH - r.capH)),
-    status: r.assignedH > r.capH + 1e-6 ? "over" : (Math.abs(r.assignedH - r.capH) < 1e-6 ? "full" : "free"),
+    // capH=0（週末/祝日/休暇）: 負荷ありは衝突='over'、無ければ'off'。
+    status: r.capH <= 1e-6
+      ? (r.assignedH > 1e-6 ? "over" : "off")
+      : (r.assignedH > r.capH + 1e-6 ? "over" : (Math.abs(r.assignedH - r.capH) < 1e-6 ? "full" : "free")),
   }));
 }
 
 // 週（isoDays配列）の人別×日 負荷。plansByTask を渡すと plans 優先。
-export function weekLoadByMember(tasks, members, isoDays, capH = 8, plansByTask = null) {
+// opts.holidays(Set): 見積り営業日割りで祝日を除外。
+export function weekLoadByMember(tasks, members, isoDays, capH = 8, plansByTask = null, { holidays = null } = {}) {
   return members.map((m) => {
     const days = isoDays.map((day) => {
       let h = 0;
       for (const t of tasks) {
-        const byMember = taskPlannedHoursByMemberOn(t, day, planEntriesFor(plansByTask, t.id));
+        const byMember = taskPlannedHoursByMemberOn(t, day, planEntriesFor(plansByTask, t.id), { holidays });
         h += byMember.get(m.id) || 0;
       }
       return { day, h: round1(h), over: h > capH + 1e-6 };

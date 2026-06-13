@@ -1,6 +1,7 @@
 // 本日の稼働予定。円時計(clock.js)／積み上げ(mock54) を切替表示。
 import { load } from "../lib/store.js";
 import { loadByMember } from "../lib/capacity.js";
+import { capacityOn } from "../lib/recurrence.js";
 import { projectName } from "../lib/store.js";
 import { whoami } from "../lib/api.js";
 import { C, fmtH, esc, todayISO } from "../lib/ui.js";
@@ -48,7 +49,7 @@ export async function render(root) {
 }
 
 function renderStacked(body, data, day) {
-  const { tasks, members, projects, plansByTask } = data;
+  const { tasks, members, projects, plansByTask, holidaysSet, unavailabilityByMember } = data;
   const taskById = new Map((tasks || []).map((t) => [t.id, t]));
   const pjIdx = new Map();
   const pjColor = (pid) => {
@@ -56,7 +57,9 @@ function renderStacked(body, data, day) {
     if (!pjIdx.has(pid)) pjIdx.set(pid, pjIdx.size);
     return PJPAL[pjIdx.get(pid) % PJPAL.length];
   };
-  const rows = loadByMember(tasks, members, day, CAP, plansByTask).sort((a, b) => b.freeH - a.freeH);
+  // 営業日割り（holidays）＋人別容量（週末/祝日/休暇=0）で本日KPIを正確に（§土日祝ギャップ）
+  const capacityFor = (m, d) => capacityOn(m, d, { holidays: holidaysSet, unavailabilityByMember, capH: CAP });
+  const rows = loadByMember(tasks, members, day, CAP, plansByTask, { holidays: holidaysSet, capacityFor }).sort((a, b) => b.freeH - a.freeH);
   const totCap = rows.reduce((s, r) => s + r.capH, 0);
   const totAsg = rows.reduce((s, r) => s + r.assignedH, 0);
   const free = Math.max(0, totCap - totAsg);
@@ -134,8 +137,8 @@ function colHtml(r, i, g) {
     inner += `<div class="t54-overbadge" style="bottom:${FOOT_H + total * pxPerH + 8}px">超過 +${fmtH(over)}</div>`;
   }
   // フッター
-  const cls = r.status === "over" ? "over" : (r.status === "full" ? "full" : "free");
-  const txt = r.status === "over" ? "超過 +" + fmtH(over) : (r.status === "full" ? "満稼働" : "空き " + fmtH(free));
+  const cls = r.status === "over" ? "over" : (r.status === "full" ? "full" : (r.status === "off" ? "off" : "free"));
+  const txt = r.status === "over" ? "超過 +" + fmtH(over) : (r.status === "full" ? "満稼働" : (r.status === "off" ? "休 (非稼働日)" : "空き " + fmtH(free)));
   const dot = ["#e5772d", "#3a86ff", "#2fa66b", "#b657d6", "#0ea5e9", "#f5a623"][i % 6];
   inner += `<div class="t54-foot">
       <div class="t54-nm"><span class="t54-dot" style="background:${dot}"></span>${esc(r.name)}</div>
@@ -189,7 +192,7 @@ function css() {
   .t54-nm{font-size:14.5px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:6px}
   .t54-dot{width:9px;height:9px;border-radius:50%;display:inline-block}
   .t54-status{font-size:11.5px;margin-top:3px;font-weight:700}
-  .t54-status.free{color:${C.free}}.t54-status.over{color:${C.over}}.t54-status.full{color:${C.full}}
+  .t54-status.free{color:${C.free}}.t54-status.over{color:${C.over}}.t54-status.full{color:${C.full}}.t54-status.off{color:${C.muted}}
   .t54-total{font-size:10.5px;color:${C.muted};margin-top:2px}
   .t54-legend{display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin:18px 2px 0;font-size:11.5px;color:${C.muted}}
   .t54-legend .item{display:flex;align-items:center;gap:6px}

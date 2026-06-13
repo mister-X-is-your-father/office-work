@@ -1,13 +1,15 @@
 // 総合ホーム（mock 27 相当・実データ。今日の空き＋アラート）
 import { load } from "../lib/store.js";
 import { loadByMember, estimateVsActual, triage } from "../lib/capacity.js";
-import { holidayDataStatus } from "../lib/recurrence.js";
+import { holidayDataStatus, capacityOn } from "../lib/recurrence.js";
 import { C, fmtH, esc, capacityBar, todayISO } from "../lib/ui.js";
 
 export async function render(root) {
-  const { tasks, members, plansByTask, holidaysSet, settings } = await load();
+  const { tasks, members, plansByTask, holidaysSet, unavailabilityByMember, settings } = await load();
   const day = todayISO();
-  const rows = loadByMember(tasks, members, day, settings.capH, plansByTask).sort((a, b) => b.freeH - a.freeH);
+  // 営業日割り＋人別容量（週末/祝日/休暇=0）で本日KPIを正確に（§土日祝ギャップ）
+  const capacityFor = (m, d) => capacityOn(m, d, { holidays: holidaysSet, unavailabilityByMember, capH: settings.capH });
+  const rows = loadByMember(tasks, members, day, settings.capH, plansByTask, { holidays: holidaysSet, capacityFor }).sort((a, b) => b.freeH - a.freeH);
   const ev = estimateVsActual(tasks);
   const tri = triage(tasks, day);
 
@@ -41,7 +43,7 @@ export async function render(root) {
         ${rows.slice(0, 6).map(r => `<div style="display:flex;align-items:center;gap:12px;padding:10px 16px">
           <div style="width:90px;font-weight:600;font-size:13px">${esc(r.name)}</div>
           <div style="flex:1">${capacityBar(r.assignedH, r.capH)}</div>
-          <div style="width:96px;text-align:right;font-size:12px;font-weight:600;color:${r.status === "over" ? C.over : r.status === "free" ? C.free : C.full}">${r.status === "over" ? "+" + fmtH(r.overH) : r.status === "free" ? "空き" + fmtH(r.freeH) : "満"}</div>
+          <div style="width:96px;text-align:right;font-size:12px;font-weight:600;color:${r.status === "over" ? C.over : r.status === "free" ? C.free : r.status === "off" ? C.muted : C.full}">${r.status === "over" ? "+" + fmtH(r.overH) : r.status === "free" ? "空き" + fmtH(r.freeH) : r.status === "off" ? "休" : "満"}</div>
         </div>`).join("") || `<div style="padding:24px;text-align:center;color:${C.muted}">データなし</div>`}
       </div>
       <div class="card" style="padding:6px 0">
