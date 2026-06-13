@@ -6,13 +6,14 @@ import { savePresets } from "../lib/exec.js";
 import { updateTask, deleteTask } from "../lib/api.js";
 import { PRIO, prioBucket, kindOf, isReviewTask, categoryLabels, categoryColor } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
+import { shiftISO } from "../lib/capacity.js";
 import { openTaskForm } from "./taskform.js";
 
 const HOUR = 3600;
 const MAX_SORTS = 5; // 組めるソート条件の上限（第1〜第5条件）
 const VKEY = (uid) => `ts.list.view.${uid ?? "anon"}`;
 function loadView(uid) {
-  const def = { sorts: [{ key: "due", dir: 1 }], manualMode: false, order: [], hideDone: true, proj: "", cat: "" };
+  const def = { sorts: [{ key: "due", dir: 1 }], manualMode: false, order: [], hideDone: true, proj: "", cat: "", qaWho: "", qaDue: "" };
   try {
     const raw = JSON.parse(localStorage.getItem(VKEY(uid)) || "null");
     if (!raw) return { ...def };                       // 初回のみ既定（期日）
@@ -76,6 +77,12 @@ export async function render(root) {
   if (V.hideDone) rows = rows.filter((r) => !r.done);
   if (V.proj) rows = rows.filter((r) => String(r.pid) === V.proj);
   if (V.cat) rows = rows.filter((r) => (r.cat ? r.cat.title : "") === V.cat);
+  // クイック絞り込み（担当＝自分/担当なし、期限＝今日/1週間以内/1ヶ月以内）。本人ごとに保存。
+  if (V.qaWho === "me") rows = rows.filter((r) => (r.t.assignees || []).some((a) => a.id === UID));
+  else if (V.qaWho === "none") rows = rows.filter((r) => !(r.t.assignees || []).some((a) => !isAiUser(a)));
+  if (V.qaDue === "today") rows = rows.filter((r) => r.due === today);
+  else if (V.qaDue === "7d") rows = rows.filter((r) => r.due && r.due <= shiftISO(today, 7));
+  else if (V.qaDue === "30d") rows = rows.filter((r) => r.due && r.due <= shiftISO(today, 30));
 
   const manual = V.manualMode;
   // 選択はマイソート中のみ有効。表示中のタスクに限定（フィルタ/モード変更で掃除）
@@ -127,6 +134,16 @@ export async function render(root) {
       <select id="tb-cat">${catOpts}</select>
       <label class="tb-chk"><input type="checkbox" id="tb-hd" ${V.hideDone ? "checked" : ""}> 完了を隠す</label>
     </div>
+    <div class="tb-quick">
+      <span class="tb-ql">クイック絞り込み</span>
+      <button class="tb-qa${V.qaWho === "me" ? " on" : ""}" data-qa="who:me">自分の担当</button>
+      <button class="tb-qa${V.qaWho === "none" ? " on" : ""}" data-qa="who:none">担当なし</button>
+      <span class="tb-qsep"></span>
+      <button class="tb-qa${V.qaDue === "today" ? " on" : ""}" data-qa="due:today">今日</button>
+      <button class="tb-qa${V.qaDue === "7d" ? " on" : ""}" data-qa="due:7d">1週間以内</button>
+      <button class="tb-qa${V.qaDue === "30d" ? " on" : ""}" data-qa="due:30d">1ヶ月以内</button>
+      ${(V.qaWho || V.qaDue) ? `<button class="tb-qa tb-qclr" data-qa="clr">解除</button>` : ""}
+    </div>
     ${manual ? `<div class="tb-mynote">「マイソート」はあなただけの順番です（この端末に保存・他のメンバーには影響しません）。Ctrl/⌘・Shift＋クリックで複数選択→まとめてドラッグ移動。</div>
     <div class="tb-presets">
       <span class="tb-pl">保存したマイソート<span class="tb-pl-g" title="あなた専用・この端末">👤</span></span>
@@ -149,6 +166,15 @@ export async function render(root) {
   root.querySelector("#tb-manual").onclick = () => { V.manualMode = !V.manualMode; reRender(); };
   root.querySelector("#tb-proj").onchange = (e) => { V.proj = e.target.value; reRender(); };
   root.querySelector("#tb-cat").onchange = (e) => { V.cat = e.target.value; reRender(); };
+  root.querySelectorAll(".tb-qa").forEach((b) => {
+    b.onclick = () => {
+      const [g, v] = b.dataset.qa.split(":");
+      if (g === "clr") { V.qaWho = ""; V.qaDue = ""; }
+      else if (g === "who") V.qaWho = V.qaWho === v ? "" : v;
+      else V.qaDue = V.qaDue === v ? "" : v;
+      reRender();
+    };
+  });
   root.querySelector("#tb-hd").onchange = (e) => { V.hideDone = e.target.checked; reRender(); };
   root.querySelector("#tb-add").onclick = () => openTaskForm({ onSaved: () => render(root) });
   // 条件を追加（最大5件・5件到達時はセレクト自体を出さない）。マイソート中なら組み合わせソートに切替
@@ -178,6 +204,9 @@ export async function render(root) {
   root.querySelectorAll("tr[data-id]").forEach((tr) => {
     tr.onclick = (e) => { if (V.manualMode || e.target.closest(".tb-fable")) return; openTaskForm({ taskId: +tr.dataset.id, onSaved: () => render(root) }); };
     tr.oncontextmenu = (e) => { e.preventDefault(); openRowMenu(e.clientX, e.clientY, +tr.dataset.id, tasks, root); };
+  });
+  root.querySelectorAll(".tb-stbtn").forEach((b) => {
+    b.onclick = (e) => { e.stopPropagation(); openStatusMenu(b, +b.dataset.st, tasks, root); };
   });
   root.querySelectorAll(".tb-fable").forEach((b) => {
     b.onclick = async (e) => {
@@ -280,9 +309,15 @@ function openRowMenu(x, y, id, tasks, root) {
     { label: multi ? `${n}件を削除` : "削除", danger: true,
       on: () => { if (!confirm(multi ? `${n}件のタスクを削除しますか？` : `「${objs[0].title}」を削除しますか？`)) return; selectedIds.clear(); anchorId = null; each((t) => deleteTask(t.id)); } },
   ];
+  openMenu(x, y, items);
+}
+
+// 汎用の小メニュー（右クリック/ステータス共用）。items: [{label,danger?,check?,on}|{sep:true}]
+function openMenu(x, y, items) {
   const m = document.createElement("div");
   m.className = "tb-ctx";
-  m.innerHTML = items.map((it, i) => it.sep ? `<div class="tb-ctx-sep"></div>` : `<button class="tb-ctx-it${it.danger ? " danger" : ""}" data-i="${i}">${esc(it.label)}</button>`).join("");
+  m.innerHTML = items.map((it, i) => it.sep ? `<div class="tb-ctx-sep"></div>`
+    : `<button class="tb-ctx-it${it.danger ? " danger" : ""}" data-i="${i}">${it.check !== undefined ? `<span class="tb-ctx-ck">${it.check ? "✓" : ""}</span>` : ""}${esc(it.label)}</button>`).join("");
   document.body.appendChild(m);
   _ctxEl = m;
   const mw = m.offsetWidth, mh = m.offsetHeight;
@@ -294,6 +329,23 @@ function openRowMenu(x, y, id, tasks, root) {
   const onScroll = () => closeRowMenu();
   setTimeout(() => { document.addEventListener("pointerdown", onDown, true); document.addEventListener("keydown", onKey); window.addEventListener("scroll", onScroll, true); window.addEventListener("resize", onScroll); }, 0);
   _ctxCleanup = () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); window.removeEventListener("scroll", onScroll, true); window.removeEventListener("resize", onScroll); };
+}
+
+// ステータスのワンクリック変更（チップ直下にメニュー）。未着手/進行中/完了。
+function openStatusMenu(chipEl, id, tasks, root) {
+  closeRowMenu();
+  const t = (tasks || []).find((x) => x.id === id); if (!t) return;
+  const cur = t.done ? "done" : ((t.percent_done || 0) > 0 ? "doing" : "todo");
+  const reload = () => { invalidate(); render(root); };
+  const set = (key) => {
+    const patch = key === "done" ? { done: true, percent_done: 100 }
+      : key === "doing" ? { done: false, percent_done: (t.percent_done > 0 && t.percent_done < 100) ? t.percent_done : 50 }
+      : { done: false, percent_done: 0 };
+    updateTask(id, patch).then(reload).catch(() => {});
+  };
+  const it = (key, label) => ({ label, check: cur === key, on: () => set(key) });
+  const r = chipEl.getBoundingClientRect();
+  openMenu(r.left, r.bottom + 4, [it("todo", "未着手"), it("doing", "進行中"), it("done", "完了")]);
 }
 
 // プリセット名の候補（軸ラベルを連結）
@@ -432,7 +484,7 @@ function rowHtml(r, members, i, manual) {
   const pc = PRIO[r.prio];
   const prio = `<span class="tb-prio"><i style="background:${pc.c}"></i>${pc.n}</span>`;
   const dueCls = r.due && r.due < todayISO() && !r.done ? "over" : "";
-  const st = `<span class="tb-st ${r.done ? "done" : (r.pct > 0 ? "doing" : "todo")}">${r.state}</span>`;
+  const st = `<button class="tb-st tb-stbtn ${r.done ? "done" : (r.pct > 0 ? "doing" : "todo")}" data-st="${r.t.id}" title="クリックでステータス変更">${r.state}<span class="tb-st-car">▾</span></button>`;
   return `<tr data-id="${r.t.id}" class="${manual ? "tb-draggable" : ""}${manual && selectedIds.has(r.t.id) ? " tb-sel" : ""}">
     <td class="tb-title">${esc(r.title)}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">🚩</span>` : ""}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${r.t.id}" data-title="${esc(r.title)}" title="Fableに実行させる">▶</button>` : ""}<div class="tb-sub">${esc(r.proj)}</div></td>
     <td>${ava}${esc(wn)}</td>
@@ -529,5 +581,18 @@ function css() {
   .tb-pct{font-size:11.5px;color:${C.muted};font-variant-numeric:tabular-nums}
   .tb-st{font-size:11px;font-weight:600;border-radius:20px;padding:2px 9px}
   .tb-st.todo{color:${C.muted};background:#f0f1f4}.tb-st.doing{color:${C.fill};background:#eaf2ff}.tb-st.done{color:${C.free};background:#eaf7ef}
+  /* ステータスはワンクリックで変更（押せる見た目＝枠＋▾＋hover） */
+  .tb-stbtn{font-family:inherit;cursor:pointer;border:1px solid rgba(20,30,50,.12);display:inline-flex;align-items:center;gap:4px;transition:box-shadow .12s,border-color .12s}
+  .tb-stbtn:hover{border-color:rgba(20,30,50,.24);box-shadow:0 1px 4px rgba(20,30,50,.16)}
+  .tb-st-car{font-size:8px;opacity:.6;margin-right:-1px}
+  .tb-ctx-ck{display:inline-block;width:13px;color:${C.fill};font-weight:700}
+  /* クイック絞り込みのチップ列 */
+  .tb-quick{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:-4px 0 14px}
+  .tb-ql{font-size:11px;color:${C.muted};font-weight:600;margin-right:2px}
+  .tb-qsep{width:1px;height:16px;background:${C.line};margin:0 3px}
+  .tb-qa{font:inherit;font-size:12px;padding:4px 11px;border:1px solid ${C.line};border-radius:16px;background:#fff;color:${C.ink};cursor:pointer;transition:all .12s}
+  .tb-qa:hover{border-color:${C.fill};color:${C.fill}}
+  .tb-qa.on{background:${C.fill};border-color:${C.fill};color:#fff;font-weight:600}
+  .tb-qclr{color:${C.muted}}.tb-qclr:hover{color:${C.over};border-color:${C.over}}
   .tb-empty{text-align:center;color:${C.muted};padding:30px}`;
 }
