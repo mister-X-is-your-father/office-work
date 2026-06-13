@@ -460,7 +460,7 @@ function ensureStyle() {
   .pm-card{position:fixed;right:18px;bottom:18px;z-index:50;width:272px;background:#fff;border:1px solid var(--line);
     border-radius:14px;box-shadow:0 18px 50px rgba(10,18,35,.25);padding:14px 16px}
   .pm-h{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:700;margin-bottom:10px;cursor:move;user-select:none;touch-action:none}
-  .pm-modebox{min-height:50px}
+  .pm-modebox{min-height:52px}
   .pm-cnt{font-size:11px;color:var(--muted);font-weight:500;margin-left:auto}
   .pm-x{border:0;background:transparent;font-size:15px;color:var(--muted);cursor:pointer;padding:0 2px}
   .pm-tabs{display:flex;gap:4px;margin-bottom:9px}
