@@ -2,7 +2,9 @@
 // 認証は TaskStation の JWT をそのまま送る（サービス側で許可ユーザーIDを検証＝隠し要素）。
 import { token } from "./api.js";
 
-export const EXEC_BASE = `http://${location.hostname}:7020`;
+// オリジン適応（api.js と同様）: HTTPS（PWA・tailscale serve で /exec を同居）では相対、
+// 平文 HTTP では 7020 を直叩き。mixed content 回避。
+export const EXEC_BASE = location.protocol === "https:" ? location.origin + "/exec" : `http://${location.hostname}:7020`;
 
 async function req(path, { method = "GET", body } = {}) {
   const r = await fetch(EXEC_BASE + path, {

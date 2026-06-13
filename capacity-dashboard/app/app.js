@@ -148,3 +148,50 @@ function boot() {
 window.addEventListener("hashchange", route);
 
 if (vik.isAuthed()) boot(); else showLogin();
+
+// ── PWA ──────────────────────────────────────────────────────────────
+// Service Worker 登録（アプリシェルのオフライン起動・スタンドアロン化）。
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch((e) => console.warn("SW登録失敗", e));
+  });
+}
+
+// オフライン時のバナー（データ保存はオンライン復帰後の注意喚起）。
+function ensureNetBanner() {
+  let b = document.getElementById("ts-offline");
+  if (!b) {
+    b = document.createElement("div");
+    b.id = "ts-offline";
+    b.textContent = "⚠ オフライン — 表示は直近のキャッシュです（追加・編集はオンライン復帰後に）";
+    b.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:9998;background:#e5484d;color:#fff;font:600 12.5px/1.4 system-ui,sans-serif;text-align:center;padding:8px 12px";
+    document.body.appendChild(b);
+  }
+  b.style.display = navigator.onLine ? "none" : "block";
+}
+window.addEventListener("online", ensureNetBanner);
+window.addEventListener("offline", ensureNetBanner);
+ensureNetBanner();
+
+// インストール導線（beforeinstallprompt をフックして右下にボタン）。
+let _deferredPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  _deferredPrompt = e;
+  if (document.getElementById("ts-install")) return;
+  const b = document.createElement("button");
+  b.id = "ts-install";
+  b.textContent = "📲 アプリをインストール";
+  b.style.cssText = "position:fixed;right:18px;bottom:18px;z-index:9999;background:#3a86ff;color:#fff;border:0;border-radius:24px;padding:11px 18px;font:700 13px system-ui,sans-serif;box-shadow:0 6px 20px rgba(58,134,255,.4);cursor:pointer";
+  b.onclick = async () => {
+    if (!_deferredPrompt) return;
+    _deferredPrompt.prompt();
+    try { await _deferredPrompt.userChoice; } catch {}
+    _deferredPrompt = null; b.remove();
+  };
+  document.body.appendChild(b);
+});
+window.addEventListener("appinstalled", () => {
+  _deferredPrompt = null;
+  const b = document.getElementById("ts-install"); if (b) b.remove();
+});

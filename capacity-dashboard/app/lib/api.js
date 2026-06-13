@@ -1,6 +1,8 @@
 // TaskStation API クライアント（フォーク版: time_estimate / time_spent / /tasks/:task/times 対応）
-// JWT は Authorization ヘッダ。CORS は TaskStation 側で有効化済み。
-export const API = "http://leo:7005/api/v1";
+// JWT は Authorization ヘッダ。
+// オリジン適応: HTTPS（PWA・tailscale serve で /api を同一オリジンに同居）では相対 /api/v1 を使い、
+// mixed content と CORS を回避。平文 HTTP（http://leo:7010）では従来どおり 7005 を直叩き。
+export const API = location.protocol === "https:" ? location.origin + "/api/v1" : "http://leo:7005/api/v1";
 const TKEY = "taskstation_token";
 
 export function token() { return sessionStorage.getItem(TKEY) || ""; }
