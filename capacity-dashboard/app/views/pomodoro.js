@@ -141,11 +141,47 @@ export function mountPomodoro(topbar) {
     paint(); paintPip();
   };
 
+  // ── ドラッグ移動（ヘッダ掴み・位置は localStorage に保持） ──
+  const POS_KEY = "ts.pomo.pos";
+  function restorePos(c) {
+    try {
+      const p = JSON.parse(localStorage.getItem(POS_KEY) || "null");
+      if (p && typeof p.left === "number") {
+        c.style.left = p.left + "px"; c.style.top = p.top + "px";
+        c.style.right = "auto"; c.style.bottom = "auto";
+      }
+    } catch { /* noop */ }
+  }
+  function wireDrag(c) {
+    c.addEventListener("pointerdown", (e) => {
+      const h = e.target.closest(".pm-h");
+      if (!h || e.target.closest(".pm-x")) return; // ヘッダのみ・×ボタンは除外
+      const r = c.getBoundingClientRect();
+      const offX = e.clientX - r.left, offY = e.clientY - r.top;
+      c.style.right = "auto"; c.style.bottom = "auto";
+      const move = (ev) => {
+        const l = Math.max(4, Math.min(window.innerWidth - r.width - 4, ev.clientX - offX));
+        const t = Math.max(4, Math.min(window.innerHeight - r.height - 4, ev.clientY - offY));
+        c.style.left = l + "px"; c.style.top = t + "px";
+      };
+      const up = () => {
+        document.removeEventListener("pointermove", move);
+        document.removeEventListener("pointerup", up);
+        try { localStorage.setItem(POS_KEY, JSON.stringify({ left: parseFloat(c.style.left), top: parseFloat(c.style.top) })); } catch { /* noop */ }
+      };
+      document.addEventListener("pointermove", move);
+      document.addEventListener("pointerup", up);
+      e.preventDefault();
+    });
+  }
+
   const open = async () => {
     if (card) { card.remove(); card = null; clearInterval(timer); timer = null; if (!st.get()) document.title = BASE_TITLE; return; }
     card = document.createElement("div");
     card.className = "pm-card";
     document.body.appendChild(card);
+    restorePos(card);  // 前回ドラッグした位置を復元
+    wireDrag(card);    // ヘッダをドラッグで移動（card は再描画をまたいで永続＝1回配線でOK）
     // 候補=未完了の全タスク（自分の担当を先頭グループに。担当未設定のタスクも選べる）
     let mine = [], others = [];
     try {
@@ -183,6 +219,7 @@ export function mountPomodoro(topbar) {
           <button data-m="countup" class="${m === "countup" ? "on" : ""}">⏱ アップ</button>
         </div>
         <select id="pm-task" class="pm-in">${opts}</select>
+        <div class="pm-modebox">
         ${m === "focus" ? `<div class="pm-row">
           <label>集中 <select id="pm-focus" class="pm-in">${[5, 10, 15, 25, 45, 50, 60].map((n) => `<option value="${n}"${n === 25 ? " selected" : ""}>${n}分</option>`).join("")}</select></label>
           <label>休憩 <select id="pm-break" class="pm-in">${[5, 10, 15].map((n) => `<option value="${n}">${n}分</option>`).join("")}</select></label>
@@ -190,7 +227,8 @@ export function mountPomodoro(topbar) {
         ${m === "countdown" ? `<div class="pm-row">
           <label>時間（分） <input id="pm-dur" class="pm-in" type="number" min="1" max="480" value="30"></label>
         </div>` : ""}
-        ${m === "countup" ? `<div class="pm-hint" style="margin:2px 0 0">ストップウォッチ。停止したときの経過時間を実績に記録します。</div>` : ""}
+        ${m === "countup" ? `<div class="pm-hint" style="margin:0">ストップウォッチ。停止したときの経過時間を実績に記録します。</div>` : ""}
+        </div>
         <button class="pm-go" id="pm-go">▶ 開始</button>
         <div class="pm-hint">終了/中断時に選択タスクの実績へ自動記録（90秒未満は記録しません）</div>`;
       card.querySelector("#pm-x").onclick = open;
@@ -246,7 +284,9 @@ export function mountPomodoro(topbar) {
   async function openPip() {
     if (pip) { pip.focus(); return; }
     if (!("documentPictureInPicture" in window)) {
-      notifyDone("最前面表示は未対応", "このブラウザは Document Picture-in-Picture に未対応です（Chrome/Edge で利用可）");
+      // Document PiP は secure context(HTTPS) 専用。平文 http だと Chrome でも未露出になる。
+      if (!window.isSecureContext) notifyDone("最前面表示には HTTPS が必要", "PWA版（https://leo.tail65add4.ts.net:7011/app/）で開くと最前面の小窓が使えます。");
+      else notifyDone("最前面表示は未対応", "このブラウザは Document Picture-in-Picture に未対応です（Chrome/Edge で利用可）");
       return;
     }
     try {
@@ -293,7 +333,8 @@ function ensureStyle() {
   s.textContent = `
   .pm-card{position:fixed;right:18px;bottom:18px;z-index:50;width:272px;background:#fff;border:1px solid var(--line);
     border-radius:14px;box-shadow:0 18px 50px rgba(10,18,35,.25);padding:14px 16px}
-  .pm-h{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:700;margin-bottom:10px}
+  .pm-h{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:700;margin-bottom:10px;cursor:move;user-select:none;touch-action:none}
+  .pm-modebox{min-height:50px}
   .pm-cnt{font-size:11px;color:var(--muted);font-weight:500;margin-left:auto}
   .pm-x{border:0;background:transparent;font-size:15px;color:var(--muted);cursor:pointer;padding:0 2px}
   .pm-tabs{display:flex;gap:4px;margin-bottom:9px}
