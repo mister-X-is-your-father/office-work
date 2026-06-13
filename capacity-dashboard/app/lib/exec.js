@@ -31,6 +31,8 @@ export function getNotes(taskId) { return req(`/notes/${taskId}`); }
 // チーム設定（読み取り=全ログインユーザー / 書き込み=許可ユーザーのみ）
 export function getSettings() { return req("/settings"); }
 export function saveSettings(s) { return req("/settings", { method: "POST", body: s }); }
+// 一覧の共有ソートプリセット（グローバル）: [{name, sorts:[{key,dir}]}]。書き込みは許可ユーザーのみ。
+export function savePresets(sortPresets) { return req("/settings", { method: "POST", body: { sort_presets: sortPresets } }); }
 // 成果物（Fable作業ディレクトリのファイル）
 export function getFiles() { return req("/files"); }
 export function fileUrl(relPath) { return `${EXEC_BASE}/file/${encodeURIComponent(relPath)}?token=${encodeURIComponent(token())}`; }

@@ -1,7 +1,8 @@
 // タスク一覧（表・mock60 相当）。**複数軸の組み合わせソート**＋**個人ごとの並び順**（マイ並び＝手動）。
 // 並び設定（ソート軸の連なり・手動順・絞り込み）は **見ている本人ごとに localStorage 保存**＝
 // 共有データ（DB）は一切変えないので、誰がどう並べても他メンバーの見え方に影響しない（衝突しない）。
-import { load, projectName, isAiUser } from "../lib/store.js";
+import { load, invalidate, projectName, isAiUser } from "../lib/store.js";
+import { savePresets } from "../lib/exec.js";
 import { PRIO, prioBucket, kindOf, isReviewTask, categoryLabels, categoryColor } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
@@ -41,7 +42,9 @@ const stateRank = (r) => (r.done ? 2 : (r.pct > 0 ? 1 : 0)); // 未着手→進�
 const tieBreak = (a, b) => (a.due || "9999").localeCompare(b.due || "9999") || a.t.id - b.t.id;
 
 export async function render(root) {
-  const { tasks, projects, members, me = null } = await load();
+  const { tasks, projects, members, me = null, settings = {} } = await load();
+  const presets = settings.sortPresets || [];   // グローバル共有プリセット
+  const canEditPresets = !!settings.canEdit;     // 保存/削除は許可ユーザーのみ（適用は全員可）
   const today = todayISO();
   UID = (me && me.id) || 0;
   V = loadView(UID);
@@ -108,6 +111,11 @@ export async function render(root) {
       <label class="tb-chk"><input type="checkbox" id="tb-hd" ${V.hideDone ? "checked" : ""}> 完了を隠す</label>
     </div>
     ${manual ? `<div class="tb-mynote">「マイ並び」はあなただけの順番です（この端末に保存・他のメンバーには影響しません）。組み合わせソートに戻すには「✋ マイ並び」をもう一度。</div>` : ""}
+    ${(presets.length || canEditPresets) && !manual ? `<div class="tb-presets">
+      <span class="tb-pl">プリセット<span class="tb-pl-g" title="チーム全員で共有">🌐</span></span>
+      ${presets.map((p, i) => `<span class="tb-pz" data-pi="${i}"><button class="tb-pz-a" data-pi="${i}" title="この並びを適用">${esc(p.name)}</button>${canEditPresets ? `<button class="tb-pz-x" data-pi="${i}" title="削除（全員に反映）">×</button>` : ""}</span>`).join("") || `<span class="tb-sc-none">まだありません</span>`}
+      ${canEditPresets ? `<button class="tb-psave" id="tb-psave" title="今の組み合わせソートを共有プリセットとして保存">💾 現在の並びを保存</button>` : ""}
+    </div>` : ""}
     <div class="card tb-wrap"><table class="tb">
       <thead><tr>${cols(manual).map((c) => th(c, manual)).join("")}</tr></thead>
       <tbody>${rows.length ? rows.map((r, i) => rowHtml(r, members, i, manual)).join("") : `<tr><td colspan="${manual ? 10 : 9}" class="tb-empty">該当なし</td></tr>`}</tbody>
@@ -155,7 +163,38 @@ export async function render(root) {
     };
   });
 
+  // プリセット: 適用は本人のV.sortsに反映（共有データは変えない）／保存・削除は全員に反映（要許可）
+  root.querySelectorAll(".tb-pz-a").forEach((b) => {
+    b.onclick = () => {
+      const p = presets[+b.dataset.pi]; if (!p) return;
+      V.sorts = (p.sorts || []).map((s) => ({ key: s.key, dir: s.dir })); V.manualMode = false; reRender();
+    };
+  });
+  root.querySelectorAll(".tb-pz-x").forEach((b) => {
+    b.onclick = async (e) => {
+      e.stopPropagation();
+      const p = presets[+b.dataset.pi]; if (!p || !confirm(`共有プリセット「${p.name}」を削除しますか？（全員に反映）`)) return;
+      b.disabled = true;
+      try { await savePresets(presets.filter((_, i) => i !== +b.dataset.pi)); invalidate(); render(root); }
+      catch (err) { b.disabled = false; alert("削除に失敗: " + err.message); }
+    };
+  });
+  const psave = root.querySelector("#tb-psave");
+  if (psave) psave.onclick = async () => {
+    const name = (prompt("共有プリセット名（全員が使えます）", presetSuggest(V.sorts)) || "").trim();
+    if (!name) return;
+    const next = [...presets.filter((p) => p.name !== name), { name, sorts: V.sorts.map((s) => ({ key: s.key, dir: s.dir })) }];
+    psave.disabled = true;
+    try { await savePresets(next); invalidate(); render(root); }
+    catch (err) { psave.disabled = false; alert("保存に失敗: " + err.message); }
+  };
+
   if (manual) wireDrag(root, () => render(root));
+}
+
+// プリセット名の候補（軸ラベルを連結）
+function presetSuggest(sorts) {
+  return (sorts || []).map((s) => (AXES[s.key] ? AXES[s.key].label : s.key) + (s.dir > 0 ? "↑" : "↓")).join("・") || "マイプリセット";
 }
 
 function wireDrag(root, rerender) {
@@ -251,6 +290,16 @@ function css() {
   .tb-addsort{font-size:12px!important;padding:5px 8px!important;color:${C.muted}}
   .tb-chk{font-size:13px;color:${C.muted};display:flex;align-items:center;gap:6px}
   .tb-mynote{font-size:11.5px;color:${C.muted};margin:-6px 0 12px;background:#f3f8ff;border:1px solid #dce9ff;border-radius:8px;padding:7px 11px}
+  .tb-presets{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:-6px 0 12px}
+  .tb-pl{font-size:11.5px;color:${C.muted};font-weight:600;display:inline-flex;align-items:center;gap:3px}
+  .tb-pl-g{font-size:10px}
+  .tb-pz{display:inline-flex;align-items:center;border:1px solid ${C.line};background:#fff;border-radius:999px;overflow:hidden}
+  .tb-pz-a{font:inherit;font-size:11.5px;font-weight:600;color:${C.ink};background:transparent;border:0;padding:4px 11px;cursor:pointer;white-space:nowrap}
+  .tb-pz-a:hover{background:${C.track};color:${C.fill}}
+  .tb-pz-x{font:inherit;font-size:12px;color:${C.muted};background:transparent;border:0;border-left:1px solid ${C.line};padding:4px 7px;cursor:pointer}
+  .tb-pz-x:hover{color:${C.over};background:#fdecec}
+  .tb-psave{font:inherit;font-size:11.5px;font-weight:600;padding:4px 11px;border:1px dashed ${C.line};border-radius:999px;background:#fff;color:${C.muted};cursor:pointer}
+  .tb-psave:hover{border-color:${C.fill};color:${C.fill}}.tb-psave:disabled{opacity:.6}
   .tb-wrap{overflow-x:auto}
   table.tb{width:100%;border-collapse:collapse;font-size:13px}
   .tb tbody tr[data-id]{cursor:pointer}

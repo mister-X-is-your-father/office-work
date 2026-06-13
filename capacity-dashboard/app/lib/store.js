@@ -35,6 +35,7 @@ export async function load(force = false) {
     calStart: st.cal_start ?? SETTINGS_DEFAULT.calStart,
     calEnd: st.cal_end ?? SETTINGS_DEFAULT.calEnd,
     excludedWs: st.excluded_project_ids || [],
+    sortPresets: st.sort_presets || [], // 一覧の共有ソートプリセット（グローバル）
     canEdit: !!(settingsRaw && settingsRaw.can_edit),
   };
   // テンプレートWS（雛形置き場）＋習慣WS（習慣トラッカー）＋設定で除外されたWSは通常タスクから分離
