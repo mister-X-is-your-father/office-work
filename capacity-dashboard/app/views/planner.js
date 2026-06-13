@@ -52,10 +52,18 @@ export async function render(root) {
     return `<tr><td style="font-weight:600">${esc(m.name)}<div style="font-size:10px;color:${C.muted}">8h/日</div></td>${cells}<td style="text-align:center;font-weight:700">${fmtH(wk)}</td></tr>`;
   }).join("") : `<tr><td colspan="7" style="padding:30px;text-align:center;color:${C.muted}">メンバーがいません。</td></tr>`;
 
-  // 予定追加フォーム（担当のあるタスク）
-  const assigned = tasks.filter(t => (t.assignees || []).length && !t.done);
-  const taskOpts = assigned.map(t => `<option value="${t.id}">${esc(t.title)}（${esc((t.assignees[0] || {}).username || "")}）</option>`).join("");
+  // 予定追加フォーム（担当のあるタスク）。#3: 対象者(user_id)を明示して予定を帰属させる。
+  const memById = new Map(members.map(m => [m.id, m]));
+  // タスクの人間担当 id（AI/不明は members から除外済みなので memById で絞る）
+  const humanAssignees = (t) => (t.assignees || []).map(a => a.id).filter(id => memById.has(id));
+  const assigned = tasks.filter(t => humanAssignees(t).length && !t.done);
+  const taskOpts = assigned.map(t => `<option value="${t.id}">${esc(t.title)}</option>`).join("");
   const dayOpts = days.map((d, i) => `<option value="${d}">${DOW[i]} ${d.slice(5)}</option>`).join("");
+  // 対象者オプション（選択タスクの担当者に追従。初期=先頭タスクの担当）
+  const memOptsFor = (t) => humanAssignees(t).map((id, i) => {
+    const m = memById.get(id);
+    return `<option value="${id}"${i === 0 ? " selected" : ""}>${esc(m.name || m.username)}</option>`;
+  }).join("");
 
   root.innerHTML = `
     <h1 class="vtitle">週プランナー <small>${days[0].slice(5)}〜${days[4].slice(5)} ・ 予定×実績</small></h1>
@@ -66,6 +74,7 @@ export async function render(root) {
       <div style="font-weight:700;font-size:13px;margin-bottom:10px">予定を追加（何日に何を何時間）</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <select id="pl-task" style="flex:1;min-width:200px;padding:7px 9px;border:1px solid ${C.line};border-radius:8px">${taskOpts}</select>
+        <select id="pl-mem" title="この予定を誰の容量に乗せるか" style="padding:7px 9px;border:1px solid ${C.line};border-radius:8px">${assigned[0] ? memOptsFor(assigned[0]) : ""}</select>
         <select id="pl-day" style="padding:7px 9px;border:1px solid ${C.line};border-radius:8px">${dayOpts}</select>
         <input id="pl-h" type="number" min="0.5" step="0.5" value="2" style="width:72px;padding:7px 9px;border:1px solid ${C.line};border-radius:8px"> h
         <button id="pl-add" style="border:0;background:${C.fill};color:#fff;border-radius:8px;padding:8px 16px;font-weight:700;cursor:pointer">追加</button>
@@ -75,15 +84,24 @@ export async function render(root) {
     <div style="font-size:11.5px;color:${C.muted};margin-top:10px">「予」=予定（task_time_plans）／「実」=実績（task_time_entries）。予定が容量8hを超える日は赤。</div>
     <style>.ptable{width:100%;border-collapse:collapse;font-size:13px}.ptable th{font-size:11px;color:${C.muted};font-weight:600;padding:8px 6px;border-bottom:1px solid ${C.line}}.ptable td{padding:8px 6px;border-bottom:1px solid ${C.line};font-variant-numeric:tabular-nums}</style>`;
 
+  // タスクを変えたら対象者セレクタをそのタスクの担当者に追従
+  const taskSel = root.querySelector("#pl-task");
+  const memSel = root.querySelector("#pl-mem");
+  taskSel.onchange = () => {
+    const t = assigned.find(x => x.id === +taskSel.value);
+    memSel.innerHTML = t ? memOptsFor(t) : "";
+  };
+
   root.querySelector("#pl-add").onclick = async () => {
-    const tid = +root.querySelector("#pl-task").value;
+    const tid = +taskSel.value;
+    const uid = +memSel.value || null; // #3: 対象者を user_id として帰属
     const day = root.querySelector("#pl-day").value;
     const h = parseFloat(root.querySelector("#pl-h").value);
     const msg = root.querySelector("#pl-msg");
     if (!tid || !day || !(h > 0)) { msg.textContent = "入力を確認"; return; }
     msg.textContent = "保存中…";
     try {
-      await vik.logPlan(tid, Math.round(h * 3600), day);
+      await vik.logPlan(tid, Math.round(h * 3600), day, "", uid);
       invalidate();
       await render(root); // 再描画で反映
     } catch (e) { msg.textContent = "× " + e.message; }

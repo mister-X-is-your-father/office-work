@@ -96,7 +96,7 @@ office-work/capacity-dashboard/
 - 基盤固め: #1 書き込み破壊性根治(ADR-008) / #2 soft delete / #3 帰属(ADR-009) / #4 負荷の単一真実(ADR-010) / #7 回帰網 / #9 スカラ更新安全化(client updateTask)。
 
 **残り**
-- **入力UI(残)**: 定期/祝日/休暇の登録・編集・削除は **`views/manage.js` で完了**（2026-06-13）。残るは #3 対象者選択UI（planner フォーム）と、祝日/休暇の**編集**（現状は削除→再追加で代替・需要薄）。
+- **入力UI(残)**: 定期/祝日/休暇の登録・編集・削除は **`views/manage.js` で完了**（2026-06-13）。**#3 対象者選択UI も完了**（2026-06-13・週プランナーの予定追加に対象者セレクタ＝選択タスクの人間担当に追従・`logPlan` に user_id 送信＝対象者に帰属）。残るは祝日/休暇の**編集**（現状は削除→再追加で代替・需要薄）。
 - 残ビュー: なし（2026-06-13 時点で全20ルート稼働: 16＋四象限・習慣・月カレンダー、＋隠しFable）。
 - カレンダー作り込み(残): 営業時間/容量の可変化・複数日（週タイムライン）。※リサイズ・会議/定例の時刻ブロック表示は 2026-06-12 完了。
 - ~~**土日祝の考慮ギャップ**（2026-06-12 監査）~~ → **2026-06-13 修正済**: ①`capacity.js taskHoursOn` を**営業日割り**化（`isBusinessDay`/`businessDays`・土日祝には負荷を載せず平日のみ等分・holidays Set 任意・全期間休日のみ暦割りフォールバック）。`loadByMember`/`weekLoadByMember`/`taskPlannedHoursByMemberOn` に `{holidays}` opt 追加（テスト+3=83件）。②本日系ビュー（home/today/availability）に `capacityFor=capacityOn(...)` を配線＝週末/祝日/休暇は容量0→新ステータス **`off`**（loadByMember が返す・「休/非稼働日」表示・availの0除算NaN解消）。week/weekstack は holidays 営業日割りのみ配線（週Mon-Fri表示のため per-day 容量0化は将来）。
@@ -177,8 +177,8 @@ cd capacity-dashboard/app/lib/vendor && docker run --rm -v "$PWD":/out node:20-a
 → **ユーザー確定（2026-06-10）: 当面 全員8h/平日で十分**。上の保留は要件化したら再ADR（時刻帯/人別キャパは ADR-011/§可用性 で一度見送り済）。
 
 ## 9. 次の一手（おすすめ順）
-1. **#3 SPA配線**（planner の対象者選択＋logTime/logPlan の user_id 送信）。※入力UI(定期/祝日/休暇)は `views/manage.js` で完了（2026-06-13）。
-2. **負荷ヒストリー/バーンダウン or PJ別配分**（データ即可・新ビュー）。
-3. ガント作り込み（updateTask 使用・ドラッグ編集）。※かんばん/一覧は完了。
-4. P2清掃: #8 日別バッチ取得(N+1)。（#5 members×projectusers・#6 est:Nh ラベル掃除 は 2026-06-12/13 消化済み）
-5. AI Q&A(53) を別API化するか判断。
+1. **負荷ヒストリー/バーンダウン or PJ別配分**（データ即可・新ビュー。time_entries.logged_on / project_id×時間）。
+2. ガント作り込み（updateTask 使用・ドラッグ編集）。※かんばん/一覧は完了。
+3. P2清掃: #8 日別バッチ取得(N+1)。（#5 members×projectusers・#6 est:Nh ラベル掃除 は 2026-06-12/13 消化済み）
+4. AI Q&A(53) を別API化するか判断。
+※入力UI(定期/祝日/休暇)＝`views/manage.js`・**#3 対象者選択(planner)＝logPlan に user_id**・土日祝の営業日割り＋本日系容量0 は 2026-06-13 完了。
