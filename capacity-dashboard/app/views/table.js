@@ -7,7 +7,8 @@ import { updateTask, deleteTask, addAssignee, removeAssignee, addTaskLabel, remo
 import { PRIO, prioBucket, kindOf, isReviewTask, categoryLabels, categoryColor, REVIEW_LABEL } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 import { shiftISO } from "../lib/capacity.js";
-import { openTaskForm } from "./taskform.js";
+import { openTaskForm, ensureStyle as ensureFormStyle } from "./taskform.js";
+import { hourInputHtml, wireHourInput } from "../lib/form.js";
 
 const HOUR = 3600;
 const MAX_SORTS = 5; // 組めるソート条件の上限（第1〜第5条件）
@@ -335,7 +336,7 @@ function openMenu(x, y, items, opts = {}) {
         + `<div class="tb-hg-col"><span class="tb-hg-lbl">時間</span><div class="tb-hg-wrap">${it.hOpts.map((v) => `<button class="tb-hg-b${v === it.h ? " on" : ""}" data-i="${i}" data-hk="${v}">${v}</button>`).join("")}</div></div>`
         + `<div class="tb-hg-col"><span class="tb-hg-lbl">分</span><div class="tb-hg-min">${it.mOpts.map((v) => `<button class="tb-hg-b${v === it.m ? " on" : ""}" data-i="${i}" data-mk="${v}">${v}</button>`).join("")}</div></div>`
         + `</div>`
-        + `<div class="tb-hg-direct"><span class="tb-hg-lbl">直接</span><input type="number" min="0" data-i="${i}" data-dir="h" value="${it.h || ""}" placeholder="0">時間<input type="number" min="0" max="59" data-i="${i}" data-dir="m" value="${it.m || ""}" placeholder="0">分<button class="tb-hg-apply" data-i="${i}">適用</button></div>`
+        + `<div class="tb-hg-direct"><span class="tb-hg-lbl">直接(h)</span>${hourInputHtml("tb-est-direct", { value: it.hv ?? "" })}<button class="tb-hg-apply" data-i="${i}">適用</button></div>`
         + `</div>`;
       return `<button class="tb-ctx-it${it.danger ? " danger" : ""}" data-i="${i}">${it.check !== undefined ? `<span class="tb-ctx-ck">${it.check ? "✓" : ""}</span>` : ""}${esc(it.label)}</button>`;
     }).join("");
@@ -351,28 +352,26 @@ function openMenu(x, y, items, opts = {}) {
       inp.onchange = () => { const it = its[+inp.dataset.i]; closeRowMenu(); it.on && it.on(inp.value); };
     });
     // 時間/分グリッド: ボタンをワンタップで選択（メニューは開いたまま・即反映）
+    const repaint = () => paint(opts.rebuild ? opts.rebuild() : its);
     m.querySelectorAll(".tb-hg-b").forEach((b) => {
       b.onclick = (e) => {
         e.stopPropagation();
         const it = its[+b.dataset.i];
-        if (b.dataset.hk !== undefined) it.h = +b.dataset.hk; else it.m = +b.dataset.mk;
-        it.onPick && it.onPick(it.h, it.m);
-        paint(its);
+        if (b.dataset.hk !== undefined) it.onPick && it.onPick(+b.dataset.hk, it.m);
+        else it.onPick && it.onPick(it.h, +b.dataset.mk);
+        repaint();
       };
     });
-    // 直接入力（任意の時間・分）→ 適用 or Enter で反映
-    const applyDirect = (i) => {
-      const it = its[i], box = m.querySelector(".tb-hg-direct");
-      it.h = +(box.querySelector('[data-dir="h"]').value || 0);
-      it.m = +(box.querySelector('[data-dir="m"]').value || 0);
-      it.onPick && it.onPick(it.h, it.m);
-      paint(its);
-    };
-    m.querySelectorAll(".tb-hg-direct input").forEach((inp) => {
-      inp.onclick = (e) => e.stopPropagation();
-      inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); applyDirect(+inp.dataset.i); } };
-    });
-    m.querySelectorAll(".tb-hg-apply").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); applyDirect(+b.dataset.i); }; });
+    // 直接入力(h)＝編集画面と同じ0.25刻みステッパー。適用 or Enter で反映。
+    const dEl = m.querySelector("#tb-est-direct");
+    if (dEl) {
+      wireHourInput(m, "tb-est-direct");
+      const applyEl = m.querySelector(".tb-hg-apply");
+      const applyHours = () => { const v = dEl.value.trim().replace(/^\./, "0."); const hf = v ? parseFloat(v) : 0; const it = its[+applyEl.dataset.i]; it.onHours && it.onHours(hf); repaint(); };
+      dEl.addEventListener("click", (e) => e.stopPropagation());
+      dEl.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); applyHours(); } });
+      applyEl.onclick = (e) => { e.stopPropagation(); applyHours(); };
+    }
   };
   document.body.appendChild(m);
   _ctxEl = m;
@@ -446,16 +445,21 @@ function openDueMenu(chipEl, id, tasks, root, today) {
 // ワンタップで選択（メニューは開いたまま即反映・閉じた時にサーバー同期）。
 function openEstMenu(chipEl, id, tasks, root) {
   closeRowMenu();
+  ensureFormStyle(); // 直接入力(h)のステッパー .tf-step を効かせる
   const t = (tasks || []).find((x) => x.id === id); if (!t) return;
   const cur = t.time_estimate || 0;
   const mBase = [0, 15, 30, 45];
   const hOpts = Array.from({ length: 11 }, (_, k) => k); // 0〜10時間
-  const imRaw = Math.round((cur % 3600) / 60);
+  const nearestM = (sec) => mBase.reduce((p, c) => Math.abs(c - Math.round((sec % 3600) / 60)) < Math.abs(p - Math.round((sec % 3600) / 60)) ? c : p, 0);
   let h = Math.min(10, Math.floor(cur / 3600));
-  let mn = mBase.reduce((p, c) => Math.abs(c - imRaw) < Math.abs(p - imRaw) ? c : p, 0); // 現在値を最寄りの0/15/30/45へ
+  let mn = nearestM(cur);
+  let hv = cur ? Math.round((cur / 3600) * 100) / 100 : ""; // 直接入力欄(h・小数)
   let dirty = false;
+  const commit = (sec) => { dirty = true; updateTask(id, { time_estimate: sec }).catch(() => {}); };
   const build = () => [
-    { input: "hmgrid", h, m: mn, hOpts, mOpts: mBase, onPick: (nh, nm) => { h = nh; mn = nm; dirty = true; updateTask(id, { time_estimate: h * 3600 + mn * 60 }).catch(() => {}); } },
+    { input: "hmgrid", h, m: mn, hv, hOpts, mOpts: mBase,
+      onPick: (nh, nm) => { h = nh; mn = nm; const sec = h * 3600 + mn * 60; hv = sec ? Math.round((sec / 3600) * 100) / 100 : ""; commit(sec); },
+      onHours: (hf) => { if (!isFinite(hf) || hf < 0) return; const sec = Math.round(hf * 3600); hv = hf || ""; h = Math.min(10, Math.floor(hf)); mn = nearestM(sec); commit(sec); } },
     { sep: true },
     { label: "クリア", danger: cur > 0, on: () => { updateTask(id, { time_estimate: 0 }).then(() => { invalidate(); render(root); }).catch(() => {}); } },
   ];
@@ -732,9 +736,9 @@ function css() {
   .tb-hg-b{font:inherit;font-size:12px;min-width:32px;padding:4px 7px;border:1px solid ${C.line};border-radius:6px;background:#fff;color:${C.ink};cursor:pointer;text-align:center}
   .tb-hg-b:hover{border-color:${C.fill};color:${C.fill}}
   .tb-hg-b.on{background:${C.fill};border-color:${C.fill};color:#fff;font-weight:700}
-  .tb-hg-direct{display:flex;align-items:center;gap:5px;margin-top:2px;padding-top:8px;border-top:1px solid ${C.line};font-size:12px;color:${C.muted};flex-wrap:wrap}
-  .tb-hg-direct input{width:50px;font:inherit;font-size:12px;border:1px solid ${C.line};border-radius:6px;padding:3px 6px;text-align:right}
-  .tb-hg-apply{font:inherit;font-size:12px;font-weight:600;color:${C.fill};background:#eaf2ff;border:1px solid #cfe0ff;border-radius:6px;padding:3px 11px;cursor:pointer}
+  .tb-hg-direct{display:flex;align-items:center;gap:7px;margin-top:2px;padding-top:8px;border-top:1px solid ${C.line};font-size:12px;color:${C.muted}}
+  .tb-hg-direct .tf-step{flex:1;min-width:0}
+  .tb-hg-apply{font:inherit;font-size:12px;font-weight:600;color:${C.fill};background:#eaf2ff;border:1px solid #cfe0ff;border-radius:6px;padding:5px 12px;cursor:pointer;flex:none}
   .tb-hg-apply:hover{background:#dbe9ff}
   .tb-ctx-it{font:inherit;font-size:13px;text-align:left;border:0;background:transparent;color:${C.ink};padding:8px 12px;border-radius:7px;cursor:pointer;white-space:nowrap}
   .tb-ctx-it:hover{background:${C.track}}
