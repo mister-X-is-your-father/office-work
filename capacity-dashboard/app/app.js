@@ -4,6 +4,7 @@ import * as store from "./lib/store.js";
 
 const ROUTES = {
   home:     { label: "ホーム",        grp: "総合",   mod: "./views/home.js" },
+  smart:    { label: "スマートリスト", grp: "総合",   mod: "./views/smartlist.js" },
   today:    { label: "稼働予定",      grp: "本日",   mod: "./views/today.js" },
   triage:   { label: "トリアージ",    grp: "本日",   mod: "./views/triage.js" },
   quad:     { label: "四象限",        grp: "本日",   mod: "./views/quad.js" },
@@ -27,7 +28,7 @@ const ROUTES = {
   // 隠しルート: ORDER に載せない＝通常ユーザーのナビには出ない。許可者のみ shell() がリンクを追加。
   fable:    { label: "🤖 Fable",      grp: "AI",     mod: "./views/fable.js" },
 };
-const ORDER = ["home", "today", "triage", "quad", "habits", "review", "availability", "calendar", "monthcal", "week", "planner", "freefinder", "weekstack", "estactual", "kanban", "list", "outline", "depgraph", "gantt", "manage", "settings"];
+const ORDER = ["home", "smart", "today", "triage", "quad", "habits", "review", "availability", "calendar", "monthcal", "week", "planner", "freefinder", "weekstack", "estactual", "kanban", "list", "outline", "depgraph", "gantt", "manage", "settings"];
 
 const app = document.getElementById("app");
 
