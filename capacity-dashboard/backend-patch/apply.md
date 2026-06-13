@@ -150,10 +150,10 @@ docker build -t leo-vikunja:0.24.6-timetracking .
 
 ## 5. デプロイ（pm-trials の TaskStation を差し替え）
 
-`/home/neo/pm-trials/vikunja/docker-compose.yml` の
+`/home/neo/apps/pm-trials/vikunja/docker-compose.yml` の
 `image: vikunja/vikunja:0.24.6` を `image: leo-vikunja:timetracking` に変更し:
 ```bash
-cd /home/neo/pm-trials/vikunja && docker compose up -d
+cd /home/neo/apps/pm-trials/vikunja && docker compose up -d
 ```
 → 起動時に migration 自動適用（`task_time_entries` 作成・`tasks.time_estimate` 追加）。
 

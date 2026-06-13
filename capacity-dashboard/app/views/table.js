@@ -449,17 +449,18 @@ function openEstMenu(chipEl, id, tasks, root) {
   const t = (tasks || []).find((x) => x.id === id); if (!t) return;
   const cur = t.time_estimate || 0;
   const mBase = [0, 15, 30, 45];
-  const hOpts = Array.from({ length: 11 }, (_, k) => k); // 0〜10時間
-  const nearestM = (sec) => mBase.reduce((p, c) => Math.abs(c - Math.round((sec % 3600) / 60)) < Math.abs(p - Math.round((sec % 3600) / 60)) ? c : p, 0);
-  let h = Math.min(10, Math.floor(cur / 3600));
-  let mn = nearestM(cur);
-  let hv = cur ? Math.round((cur / 3600) * 100) / 100 : ""; // 直接入力欄(h・小数)
+  const hOpts = Array.from({ length: 10 }, (_, k) => k + 1); // 1〜10時間（0は分ボタン/直接入力で）
+  const toHv = (sec) => sec ? Math.round((sec / 3600) * 100) / 100 : "";
+  // 秒→グリッドの選択(時間/分)。0〜10時間かつ0.25h刻みに一致する時だけ選択、それ以外は無選択(null)。
+  const syncGrid = (sec) => { const hf = sec / 3600; if (sec && hf <= 10 && Number.isInteger(hf * 4)) { const hi = Math.floor(hf); return { h: hi, m: Math.round((hf - hi) * 60) }; } return { h: null, m: null }; };
+  let g = syncGrid(cur), h = g.h, mn = g.m;
+  let hv = toHv(cur);
   let dirty = false;
   const commit = (sec) => { dirty = true; updateTask(id, { time_estimate: sec }).catch(() => {}); };
   const build = () => [
     { input: "hmgrid", h, m: mn, hv, hOpts, mOpts: mBase,
-      onPick: (nh, nm) => { h = nh; mn = nm; const sec = h * 3600 + mn * 60; hv = sec ? Math.round((sec / 3600) * 100) / 100 : ""; commit(sec); },
-      onHours: (hf) => { if (!isFinite(hf) || hf < 0) return; const sec = Math.round(hf * 3600); hv = hf || ""; h = Math.min(10, Math.floor(hf)); mn = nearestM(sec); commit(sec); } },
+      onPick: (nh, nm) => { h = (nh == null ? 0 : nh); mn = (nm == null ? 0 : nm); const sec = h * 3600 + mn * 60; hv = toHv(sec); commit(sec); },
+      onHours: (hf) => { if (!isFinite(hf) || hf < 0) return; const sec = Math.round(hf * 3600); hv = hf || ""; const s = syncGrid(sec); h = s.h; mn = s.m; commit(sec); } },
     { sep: true },
     { label: "クリア", danger: cur > 0, on: () => { updateTask(id, { time_estimate: 0 }).then(() => { invalidate(); render(root); }).catch(() => {}); } },
   ];
@@ -731,7 +732,7 @@ function css() {
   .tb-hg-cols{display:flex;gap:16px;align-items:flex-start}
   .tb-hg-col{display:flex;flex-direction:column;gap:5px}
   .tb-hg-lbl{font-size:11px;color:${C.muted};font-weight:600}
-  .tb-hg-wrap{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
+  .tb-hg-wrap{display:grid;grid-auto-flow:column;grid-template-rows:repeat(5,auto);gap:4px}
   .tb-hg-min{display:flex;flex-direction:column;gap:4px}
   .tb-hg-b{font:inherit;font-size:12px;min-width:32px;padding:4px 7px;border:1px solid ${C.line};border-radius:6px;background:#fff;color:${C.ink};cursor:pointer;text-align:center}
   .tb-hg-b:hover{border-color:${C.fill};color:${C.fill}}

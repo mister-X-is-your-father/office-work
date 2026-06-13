@@ -36,7 +36,7 @@ cd capacity-dashboard
 python3 -m http.server 7010 --bind 0.0.0.0          # → http://leo:7010/（/app/ がSPA）
 
 # 2) バックエンド（TaskStationフォーク）= 本番は docker compose で常時稼働
-cd /home/neo/pm-trials/vikunja && docker compose up -d   # → http://leo:7005（image leo-taskstation:0.24.6-fixN）
+cd /home/neo/apps/pm-trials/vikunja && docker compose up -d   # → http://leo:7005（image leo-taskstation:0.24.6-fixN）
 
 # 3) テスト
 cd capacity-dashboard/app/lib && docker run --rm -v "$PWD":/w -w /w node:20-alpine node --test   # 計算層37件

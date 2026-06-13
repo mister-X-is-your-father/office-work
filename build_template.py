@@ -328,5 +328,5 @@ for a,b,c in trouble:
 ws.freeze_panes="A3"
 
 if "Sheet" in wb.sheetnames: del wb["Sheet"]
-out="/home/neo/office-work/会議ファシリテーション_テンプレ.xlsx"
+out="/home/neo/apps/office-work/会議ファシリテーション_テンプレ.xlsx"
 wb.save(out); print("SAVED",out); print("SHEETS",wb.sheetnames)

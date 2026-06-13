@@ -119,7 +119,7 @@ Instagantt の Workload 相当を **OSS・自前ホスト（データ主権）**
 
 | ステージ | やること | 成果物 | 品質ゲート（TDD＋e2e） | 場所 |
 |---|---|---|---|---|
-| **S1 孵化** | TaskStationフォークに能力を足す（DBスキーマ＋API） | migration / model / route / fixture | schema-first＋契約テスト・`pkg/models`ユニット全green・**rollback経路**・DB規範準拠 | `/home/neo/vikunja-fork/` |
+| **S1 孵化** | TaskStationフォークに能力を足す（DBスキーマ＋API） | migration / model / route / fixture | schema-first＋契約テスト・`pkg/models`ユニット全green・**rollback経路**・DB規範準拠 | `/home/neo/vendor/vikunja-fork/` |
 | **S2 検証** | フォーク上で動作確認（本番に触れず） | 隔離検証ログ | 使い捨てsqlite別ポートでe2e・**Playwrightモンキー(TaskStation UI)**・`pkg/models`回帰ゼロ | leo:7011等 |
 | **S3 昇格** | 自前機能・自前UI(SPA)へ巣立つ。TaskStationを抽象境界越しに使う | `capacity.js`/`views/*`/`vikunja.js` | **純関数TDD**・view snapshot・**SPA Playwright e2e**・回帰ゼロ | `capacity-dashboard/app/` |
 

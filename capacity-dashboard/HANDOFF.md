@@ -33,8 +33,8 @@ office-work/capacity-dashboard/
 │              freefinder weekstack estactual gantt list(table) outline depgraph .js
 ├── docs/ 00..06（06=要件・進捗の正本）
 └── backend-patch/                       # ★フォーク差分の再現一式＋apply.md＋seed-*.py
-/home/neo/vikunja-fork/vikunja/          # ← TaskStation v0.24.6 clone＋パッチ適用済（ビルド元）
-/home/neo/pm-trials/vikunja/docker-compose.yml  # ← 本番compose(image=leo-taskstation:...fix9)
+/home/neo/vendor/vikunja-fork/vikunja/          # ← TaskStation v0.24.6 clone＋パッチ適用済（ビルド元）
+/home/neo/apps/pm-trials/vikunja/docker-compose.yml  # ← 本番compose(image=leo-taskstation:...fix9)
 ```
 
 ## 3. アーキテクチャ（3層）＝ 昇格モデル S1孵化(fork)→S2検証(隔離)→S3製品(SPA)（[ADR-007](docs/01-decisions.md)）
@@ -117,7 +117,7 @@ office-work/capacity-dashboard/
 ホストに Go 無し。**xgo不使用**＝docker golang:1.22 でネイティブビルド。frontend は `frontend/dist`（go:embed）。
 **ブランド化はソース側**（`frontend/src` の大文字"Vikunja"→"TaskStation"・`src/assets/logo*.svg`/`public/favicon.*`・`src/urls.ts`）→ frontend再ビルドで dist に反映。
 ```bash
-cd /home/neo/vikunja-fork/vikunja
+cd /home/neo/vendor/vikunja-fork/vikunja
 # (ブランディング変更時のみ) frontend再ビルド: pnpm build → dist再生成 → 下のgo buildでembed
 #   ※dist/が過去のdocker由来でroot所有なら先に: docker run --rm -v "$PWD/frontend":/w -w /w alpine rm -rf dist stats.html
 docker run --rm -v "$PWD":/app -v vikunja-gocache:/go -w /app -e CGO_ENABLED=1 \
@@ -126,11 +126,11 @@ docker build -f Dockerfile.deploy -t leo-taskstation:0.24.6-fixN .   # 次は fi
 # 本番反映（必ず backup → image差し替え → recreate。migrationは起動時自動）
 docker run --rm -v vikunja_vikunja-db:/from -v vikunja_vikunja-db-backup-fixN:/to alpine sh -c 'cp -a /from/. /to/'
 # pm-trials/vikunja/docker-compose.yml の image: を新タグに編集
-cd /home/neo/pm-trials/vikunja && docker compose up -d --force-recreate
+cd /home/neo/apps/pm-trials/vikunja && docker compose up -d --force-recreate
 ```
 ### テスト
 ```bash
-cd /home/neo/vikunja-fork/vikunja
+cd /home/neo/vendor/vikunja-fork/vikunja
 docker run --rm -v "$PWD":/app -v vikunja-gocache:/go -w /app -e CGO_ENABLED=1 -e VIKUNJA_SERVICE_ROOTPATH=/app \
   golang:1.22 go test ./pkg/models/ ./pkg/integrations/ -count=1     # フォーク回帰（必須）
 cd capacity-dashboard/app/lib && docker run --rm -v "$PWD":/w -w /w node:20-alpine node --test  # capacity21+recurrence8
