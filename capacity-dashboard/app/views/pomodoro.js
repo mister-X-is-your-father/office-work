@@ -35,6 +35,78 @@ const dispMs = (s) => s.mode === "countup"
   ? (s.paused ? s.elapsedMs : Date.now() - s.startedAt)
   : (s.paused ? s.remainMs : s.endsAt - Date.now());
 
+// ── 表示スキン カタログ（8種）＋色・透明度カスタム（localStorage 永続・スキーマ変更なし） ──
+const DISP_KEY = "ts.pomo.disp";
+const SKINS = [
+  { key: "card", name: "標準" }, { key: "minimal", name: "ミニマル" },
+  { key: "bar", name: "バー" }, { key: "ring", name: "リング" },
+  { key: "segments", name: "セグメント" }, { key: "jumbo", name: "特大" },
+  { key: "compact", name: "コンパクト" }, { key: "dots", name: "ドット" },
+];
+function dispCfg() {
+  try { return { skin: "card", accent: "#3a86ff", opacity: 1, ...(JSON.parse(localStorage.getItem(DISP_KEY)) || {}) }; }
+  catch { return { skin: "card", accent: "#3a86ff", opacity: 1 }; }
+}
+function saveDispCfg(c) { try { localStorage.setItem(DISP_KEY, JSON.stringify(c)); } catch { /* noop */ } }
+
+// 進捗 0..1（countup は終端なし=null）
+const totalMsOf = (s) => s.mode === "focus" ? (s.focusMin || 0) * 60000
+  : s.mode === "break" ? (s.breakMin || 0) * 60000
+  : s.mode === "countdown" ? (s.durMin || 0) * 60000 : null;
+function progressOf(s) {
+  const t = totalMsOf(s); if (!t) return null;
+  return Math.max(0, Math.min(1, 1 - Math.max(0, dispMs(s)) / t));
+}
+
+// 表示エリアのHTML（インラインstyle＝PiPの別ドキュメントでもそのまま使える）。
+// c: { timeText, label, taskTitle, progress(0..1|null), accent }
+function renderDisplay(skin, c) {
+  const ac = c.accent || "#3a86ff", t = esc(c.timeText), lbl = esc(c.label || "");
+  const pr = c.progress;
+  const pct = pr == null ? 100 : Math.round(pr * 100);
+  const num = (px, col) => `<div style="font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:1px;line-height:1;font-size:${px}px${col ? `;color:${col}` : ""}">${t}</div>`;
+  const task = c.taskTitle ? `<div style="font-size:11px;opacity:.65;max-width:96%;margin:5px auto 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.taskTitle)}</div>` : "";
+  const track = "rgba(127,135,150,.22)";
+  switch (skin) {
+    case "minimal":
+      return `<div style="text-align:center;padding:8px 0">${num(48)}</div>`;
+    case "jumbo":
+      return `<div style="text-align:center;padding:10px 0">${num(66, ac)}${task}</div>`;
+    case "bar":
+      return `<div style="padding:4px 0">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px"><span style="font-size:11px;opacity:.65">${lbl}</span>${num(30)}</div>
+        <div style="height:9px;border-radius:6px;background:${track};overflow:hidden"><div style="height:100%;width:${pct}%;background:${ac};border-radius:6px;transition:width .5s"></div></div>${task}</div>`;
+    case "compact":
+      return `<div style="display:flex;align-items:center;gap:11px;padding:2px 0">${num(26)}
+        <div style="flex:1"><div style="font-size:10px;opacity:.65;margin-bottom:4px">${lbl}</div>
+        <div style="height:6px;border-radius:5px;background:${track};overflow:hidden"><div style="height:100%;width:${pct}%;background:${ac};border-radius:5px;transition:width .5s"></div></div></div></div>`;
+    case "segments": {
+      const n = 12, on = pr == null ? n : Math.round(pr * n);
+      const segs = Array.from({ length: n }, (_, i) => `<div style="flex:1;height:11px;border-radius:2px;background:${i < on ? ac : track}"></div>`).join("");
+      return `<div style="padding:4px 0"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px"><span style="font-size:11px;opacity:.65">${lbl}</span>${num(28)}</div><div style="display:flex;gap:3px">${segs}</div>${task}</div>`;
+    }
+    case "dots": {
+      const n = 10, on = pr == null ? n : Math.round(pr * n);
+      const dots = Array.from({ length: n }, (_, i) => `<span style="width:9px;height:9px;border-radius:50%;background:${i < on ? ac : track}"></span>`).join("");
+      return `<div style="text-align:center;padding:4px 0">${num(32)}<div style="display:flex;gap:6px;justify-content:center;margin-top:9px">${dots}</div>${task}</div>`;
+    }
+    case "ring": {
+      const R = 46, CIRC = 2 * Math.PI * R, off = pr == null ? 0 : CIRC * (1 - pr);
+      const prog = pr == null
+        ? `<circle cx="60" cy="60" r="${R}" fill="none" stroke="${ac}" stroke-width="9" stroke-linecap="round" stroke-dasharray="5 9"/>`
+        : `<circle cx="60" cy="60" r="${R}" fill="none" stroke="${ac}" stroke-width="9" stroke-linecap="round" stroke-dasharray="${CIRC}" stroke-dashoffset="${off}" style="transition:stroke-dashoffset .5s"/>`;
+      return `<div style="display:flex;flex-direction:column;align-items:center;padding:4px 0">
+        <div style="position:relative;width:120px;height:120px">
+          <svg width="120" height="120" viewBox="0 0 120 120" style="transform:rotate(-90deg)"><circle cx="60" cy="60" r="${R}" fill="none" stroke="${track}" stroke-width="9"/>${prog}</svg>
+          <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">${num(24)}<div style="font-size:10px;opacity:.65;margin-top:3px">${lbl}</div></div>
+        </div>${task}</div>`;
+    }
+    case "card":
+    default:
+      return `<div style="text-align:center;padding:6px 0">${num(40, ac)}${task}</div>`;
+  }
+}
+
 function notifyDone(title, body) {
   if (typeof Notification !== "undefined" && Notification.permission === "granted") {
     try { new Notification(title, { body, tag: "pomo" }); return; } catch { /* fallthrough */ }
@@ -155,7 +227,7 @@ export function mountPomodoro(topbar) {
   function wireDrag(c) {
     c.addEventListener("pointerdown", (e) => {
       const h = e.target.closest(".pm-h");
-      if (!h || e.target.closest(".pm-x")) return; // ヘッダのみ・×ボタンは除外
+      if (!h || e.target.closest("button")) return; // ヘッダのみ・ヘッダ内ボタン(×/🎨)は除外
       const r = c.getBoundingClientRect();
       const offX = e.clientX - r.left, offY = e.clientY - r.top;
       c.style.right = "auto"; c.style.bottom = "auto";
@@ -200,10 +272,48 @@ export function mountPomodoro(topbar) {
   };
   btn.onclick = open;
 
+  // カード全体に色/透明度を適用（半透明＝背景rgba＋ぼかし。文字は不透明のまま）
+  function applyCardStyle(c, cfg) {
+    const op = Math.max(0.3, Math.min(1, cfg.opacity ?? 1));
+    c.style.background = `rgba(255,255,255,${op})`;
+    c.style.backdropFilter = op < 1 ? "blur(7px)" : "";
+    c.style.webkitBackdropFilter = op < 1 ? "blur(7px)" : "";
+    c.style.setProperty("--pm-accent", cfg.accent || "#3a86ff");
+  }
+
+  // 表示カスタムのピッカー（スキン8種＋色＋透明度）。実行カード下にトグル表示。
+  function buildPicker(panel) {
+    const cfg = dispCfg();
+    panel.innerHTML = `
+      <div class="pm-pk-grid">
+        ${SKINS.map((sk) => `<button class="pm-pk-chip${cfg.skin === sk.key ? " on" : ""}" data-skin="${sk.key}">${esc(sk.name)}</button>`).join("")}
+      </div>
+      <div class="pm-pk-row">
+        <label>色 <input type="color" id="pm-pk-color" value="${esc(cfg.accent)}"></label>
+        <label class="pm-pk-op">透明度 <input type="range" id="pm-pk-op" min="0.3" max="1" step="0.05" value="${cfg.opacity}"></label>
+      </div>`;
+    const apply = (patch) => {
+      const next = { ...dispCfg(), ...patch };
+      saveDispCfg(next);
+      applyCardStyle(card, next);
+      // 即時プレビュー（次tickでも更新されるが待たずに反映）
+      const s = st.get(); const disp = card.querySelector("#pm-disp");
+      if (s && disp) {
+        const label = { focus: "🍅 集中中", break: "☕ 休憩中", countdown: "⏲ カウントダウン", countup: "⏱ 計測中" }[s.mode];
+        disp.innerHTML = renderDisplay(next.skin, { timeText: mmss(dispMs(s)), label, taskTitle: s.taskTitle, progress: progressOf(s), accent: next.accent });
+      }
+      panel.querySelectorAll(".pm-pk-chip").forEach((b) => b.classList.toggle("on", b.dataset.skin === next.skin));
+    };
+    panel.querySelectorAll(".pm-pk-chip").forEach((b) => { b.onclick = () => apply({ skin: b.dataset.skin }); });
+    panel.querySelector("#pm-pk-color").oninput = (e) => apply({ accent: e.target.value });
+    panel.querySelector("#pm-pk-op").oninput = (e) => apply({ opacity: +e.target.value });
+  }
+
   function paint() {
     if (!card) return;
     const s = st.get();
     if (!s) {
+      card._running = false; // 次に開始したとき実行シェルを作り直す
       if (card._idle) return; // アイドル表示は毎秒再描画しない（select の選択を守る）
       card._idle = true;
       const og = (label, list) => list.length
@@ -265,19 +375,37 @@ export function mountPomodoro(topbar) {
     }
     card._idle = false;
     const label = { focus: "🍅 集中中", break: "☕ 休憩中", countdown: "⏲ カウントダウン", countup: "⏱ 計測中" }[s.mode];
-    card.innerHTML = `
-      <div class="pm-h">${label} <span class="pm-cnt">本日 ${countToday()} 回</span><button class="pm-x" id="pm-x">×</button></div>
-      <div class="pm-time${s.mode === "break" ? " brk" : ""}">${mmss(dispMs(s))}</div>
-      ${s.taskTitle ? `<div class="pm-task">${esc(s.taskTitle)}</div>` : `<div class="pm-task none">実績記録なし</div>`}
-      <div class="pm-row">
-        <button class="pm-go sub" id="pm-pause">${s.paused ? "▶ 再開" : "⏸ 一時停止"}</button>
-        <button class="pm-go sub stop" id="pm-stop">■ ${s.mode === "break" ? "休憩を終わる" : "停止"}</button>
-      </div>
-      <button class="pm-pip" id="pm-pip" title="常に最前面の小窓にタイマーを表示（Chrome系）">⬆ 最前面に表示</button>`;
-    card.querySelector("#pm-x").onclick = open;
-    card.querySelector("#pm-pause").onclick = doPause;
-    card.querySelector("#pm-stop").onclick = doStop;
-    card.querySelector("#pm-pip").onclick = openPip;
+    // シェルは1回だけ構築（毎秒は表示エリアのみ更新＝ピッカー入力やフォーカスが消えない・チラつかない）
+    if (!card._running || card._runMode !== s.mode) {
+      card._running = true; card._runMode = s.mode;
+      card.innerHTML = `
+        <div class="pm-h">${label} <span class="pm-cnt">本日 ${countToday()} 回</span>
+          <button class="pm-gear" id="pm-gear" title="表示をカスタム">🎨</button>
+          <button class="pm-x" id="pm-x">×</button></div>
+        <div class="pm-disp" id="pm-disp"></div>
+        <div class="pm-row">
+          <button class="pm-go sub" id="pm-pause"></button>
+          <button class="pm-go sub stop" id="pm-stop">■ ${s.mode === "break" ? "休憩を終わる" : "停止"}</button>
+        </div>
+        <button class="pm-pip" id="pm-pip" title="常に最前面の小窓にタイマーを表示（Chrome系・PWA/HTTPS）">⬆ 最前面に表示</button>
+        <div class="pm-picker" id="pm-picker" hidden></div>`;
+      card.querySelector("#pm-x").onclick = open;
+      card.querySelector("#pm-pause").onclick = doPause;
+      card.querySelector("#pm-stop").onclick = doStop;
+      card.querySelector("#pm-pip").onclick = openPip;
+      card.querySelector("#pm-gear").onclick = () => {
+        const p = card.querySelector("#pm-picker");
+        p.hidden = !p.hidden;
+        if (!p.hidden) buildPicker(p);
+      };
+      applyCardStyle(card, dispCfg());
+    }
+    // 毎秒: 表示エリア＋一時停止ラベルだけ更新
+    const cfg = dispCfg();
+    const disp = card.querySelector("#pm-disp");
+    if (disp) disp.innerHTML = renderDisplay(cfg.skin, { timeText: mmss(dispMs(s)), label, taskTitle: s.taskTitle, progress: progressOf(s), accent: cfg.accent });
+    const pb = card.querySelector("#pm-pause"); if (pb) pb.textContent = s.paused ? "▶ 再開" : "⏸ 一時停止";
+    return;
   }
 
   // ── 最前面ミニタイマー（Document Picture-in-Picture・Chrome系） ──
@@ -290,19 +418,18 @@ export function mountPomodoro(topbar) {
       return;
     }
     try {
-      pip = await window.documentPictureInPicture.requestWindow({ width: 230, height: 132 });
+      // ring/jumbo も収まるサイズ。スキンは選択中のものを反映。
+      pip = await window.documentPictureInPicture.requestWindow({ width: 248, height: 210 });
     } catch (e) {
       notifyDone("最前面表示を開けません", e.message || "");
       return;
     }
-    pip.document.body.style.cssText = "margin:0;font-family:system-ui,sans-serif;background:#1d2430;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:2px;user-select:none";
+    pip.document.body.style.cssText = "margin:0;font-family:system-ui,sans-serif;background:#1d2430;color:#fff;display:flex;flex-direction:column;align-items:stretch;justify-content:center;height:100vh;gap:6px;padding:10px 14px;box-sizing:border-box;user-select:none";
     pip.document.body.innerHTML = `
-      <div id="pp-mode" style="font-size:11px;opacity:.75"></div>
-      <div id="pp-time" style="font-size:34px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:1px;line-height:1.1"></div>
-      <div id="pp-task" style="font-size:10.5px;opacity:.7;max-width:92%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
-      <div style="display:flex;gap:8px;margin-top:7px">
-        <button id="pp-pause" style="font:inherit;font-size:11px;border:1px solid #5b6470;border-radius:7px;background:transparent;color:#fff;padding:3px 12px;cursor:pointer">⏸</button>
-        <button id="pp-stop" style="font:inherit;font-size:11px;border:1px solid #8a5054;border-radius:7px;background:transparent;color:#ff9b9b;padding:3px 12px;cursor:pointer">■</button>
+      <div id="pp-disp"></div>
+      <div style="display:flex;gap:8px;margin-top:2px;justify-content:center">
+        <button id="pp-pause" style="font:inherit;font-size:11px;border:1px solid #5b6470;border-radius:7px;background:transparent;color:#fff;padding:4px 14px;cursor:pointer">⏸</button>
+        <button id="pp-stop" style="font:inherit;font-size:11px;border:1px solid #8a5054;border-radius:7px;background:transparent;color:#ff9b9b;padding:4px 14px;cursor:pointer">■</button>
       </div>`;
     pip.document.getElementById("pp-pause").onclick = doPause;
     pip.document.getElementById("pp-stop").onclick = doStop;
@@ -313,11 +440,10 @@ export function mountPomodoro(topbar) {
     if (!pip) return;
     const s = st.get();
     if (!s) { closePip(); return; }
-    const d = pip.document;
-    const label = { focus: "🍅 集中中", break: "☕ 休憩中", countdown: "⏲ カウントダウン", countup: "⏱ 計測中" }[s.mode];
-    d.getElementById("pp-mode").textContent = label + (s.paused ? "（一時停止）" : "");
-    d.getElementById("pp-time").textContent = mmss(dispMs(s));
-    d.getElementById("pp-task").textContent = s.taskTitle || "実績記録なし";
+    const d = pip.document, cfg = dispCfg();
+    const label = { focus: "🍅 集中中", break: "☕ 休憩中", countdown: "⏲ カウントダウン", countup: "⏱ 計測中" }[s.mode] + (s.paused ? "（一時停止）" : "");
+    const disp = d.getElementById("pp-disp");
+    if (disp) disp.innerHTML = renderDisplay(cfg.skin, { timeText: mmss(dispMs(s)), label, taskTitle: s.taskTitle, progress: progressOf(s), accent: cfg.accent });
     d.getElementById("pp-pause").textContent = s.paused ? "▶" : "⏸";
   }
   function closePip() { if (pip) { try { pip.close(); } catch { /* noop */ } pip = null; } }
@@ -350,6 +476,20 @@ function ensureStyle() {
   .pm-go.sub.stop{border-color:#e3b3b5;color:#b3261e}
   .pm-pip{width:100%;margin-top:8px;font:inherit;font-size:11.5px;padding:6px 0;border-radius:8px;border:1px dashed var(--line);background:#fff;color:var(--muted);cursor:pointer}
   .pm-pip:hover{color:var(--fill);border-color:#b9d4ff}
+  .pm-disp{margin:4px 0 2px}
+  .pm-gear{border:0;background:transparent;font-size:13px;cursor:pointer;padding:0 2px;line-height:1;opacity:.7}
+  .pm-gear:hover{opacity:1}
+  .pm-picker{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+  .pm-picker[hidden]{display:none}
+  .pm-pk-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
+  .pm-pk-chip{font:inherit;font-size:10.5px;padding:6px 0;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--muted);cursor:pointer;white-space:nowrap}
+  .pm-pk-chip:hover{border-color:#b9d4ff;color:var(--ink)}
+  .pm-pk-chip.on{border-color:var(--fill);background:#f3f8ff;color:var(--fill);font-weight:700}
+  .pm-pk-row{display:flex;align-items:center;gap:14px;margin-top:10px;font-size:11px;color:var(--muted)}
+  .pm-pk-row label{display:flex;align-items:center;gap:6px}
+  .pm-pk-row input[type=color]{width:30px;height:24px;border:1px solid var(--line);border-radius:6px;background:#fff;padding:0;cursor:pointer}
+  .pm-pk-op{flex:1}
+  .pm-pk-op input[type=range]{flex:1;width:100%;accent-color:var(--fill)}
   .pm-time{font-size:42px;font-weight:800;text-align:center;font-variant-numeric:tabular-nums;letter-spacing:1px;margin:6px 0 2px;color:#1d2430}
   .pm-time.brk{color:#2fa66b}
   .pm-task{font-size:12px;color:var(--muted);text-align:center;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
