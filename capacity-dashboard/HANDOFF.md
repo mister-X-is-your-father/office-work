@@ -91,6 +91,7 @@ office-work/capacity-dashboard/
   - **習慣トラッカー**（`lib/habits.js`＋`views/habits.js`・本日グループ・テスト5件）: 習慣=**「習慣」WS** のタスク（担当=本人・ユーザーごと自動作成・store.load が通常タスクから除外）。チェック=実績エントリ（`logged_on`・**RFC3339必須**・60秒固定）。直近7日ストリップ・🔥連続日数（今日未チェックでも昨日まで連続なら継続扱い）・トグル=logTime/deleteTime。api.js に deleteTime/deleteTask 追加。
   - 対象外と判断: 位置リマインダー・音声入力・メールtoタスク（モバイル/インフラ専用思想）。カレンダー同期(Google/CalDAV)・モバイルPWAは未着手の大物として残り。
 - **クイック追加バー**（2026-06-13・`lib/quickadd.js`＋`views/quickadd.js`・トップバー常設）: TickTick実アカウント調査の結論=利用実態は**瞬間メモ捕獲**（リマインダー/繰り返し/ポモドーロ/習慣はほぼ未使用・完了388件の大半がメモとURLのダンプ）→ 最重要ギャップは**1行自然言語→即タスク化**と判断。構文=`明日15時 MTG準備 #分類 !高 1.5h @担当 >WS URL`（日付=今日/明日/明後日/N日後/X曜/来週X曜/M\/D/M月D日・過去M\/Dは翌年繰上げ。URLとMarkdownリンクは説明の`[資料]`行へ）。**完全一致トークンのみ消費**＝「15時の件」「明日の会議メモ」等の日本語文中は壊さない（純関数パーサ・テスト12件 `quickadd.test.mjs`）。解析結果はチップでライブプレビュー→Enterで作成、`/`キーでどこからでもフォーカス・連続入力でフォーカス維持（ダンプ運用）。既定投入先=**「インボックス」WS（無ければ自動作成・ユーザーごと）**、`>WS名`で明示指定（不明WSはインボックスへフォールバック表示）。**時刻指定があれば日別予定(plan/start_minute)も作成**＝時刻カレンダーに即出現（所要=見積、無ければ1h）。@担当は人間のみ解決（**AI(fable)割当は taskform の隠しコマンド経由のみ＝仕様維持**）。
+- **ガント ドラッグ編集**（2026-06-13・`views/gantt.js`）: 予定バーを直接つかんで日程変更。**ソース別に整合**（`taskRanges` は plans＞dates＞due で根拠を1つだけ選ぶ＝事故が起きない不変条件）: **dates バー**=本体ドラッグで移動＋左右端ハンドルで伸縮→`updateTask(start_date/end_date)`、**due バー**=移動→`updateTask(due_date)`、**plans バー**=移動のみ＝全 plan_date を delta 日ずらす（`deletePlan`→`logPlan` で seconds/user_id/**start_minute**/note 保持・start/end があれば併せてずらす）。pointer events 委譲＋delta方式（`dayDelta=round(dx/COL_W)`）＋プレビュー（`scale.range` 再計算）＋日付ラベル。**バークリック（無移動）で編集モーダル**（`openTaskForm`）。ピクセル→日付の純関数 `capacity.js applyBarDrag(bar,dayDelta,edge)`（move/start/end・最小1日クランプ）＋テスト3件（計86）。検証: Playwrightで dates移動±3/端伸縮±2/plans移動±2（時刻9:00保持）/クリック編集をサーバー往復で確認・デモデータ復元済・エラー0。
 - **予定の基礎データ管理ビュー**（2026-06-13・`views/manage.js`・ROUTES「その他」グループ）: 定期/祝日/休暇の登録・編集・削除を1画面に集約＝**seed/API 依存を解消**（HANDOFF §9 最優先を消化）。3カード構成: ①**定期・会議**=一覧（RRULE→人間可読要約＝`recurrenceform.js summarizeRecurrence`／持ち回りは「A→B→C」表示）＋新規（種別タブ）＋編集＋削除。②**祝日**=スマート日付＋名称で追加・日付順一覧（過去は淡色）・削除（国民の祝日は別途週1自動同期、ここは会社独自休業日向け）。③**個人休暇**=メンバー/開始/終了/理由で追加・一覧・削除（期間は両端含む＝capacityOn が容量0に）。**定期の編集**=`recurrenceform.js` を拡張: `parseRRuleToState`（RRULE文字列→buildRRule状態の逆写像）・`recurrenceMode`（mtg/rmtg/rtask判定）でモーダルをプレフィル→`updateRecurrence`（overrides保持＝この回だけ変更を消さない）。新規/編集とも独立モーダル `openRecurrenceForm`（taskform の `ensureStyle` を動的importで流用＝循環依存回避）。taskform 側のタブ作成UIは非破壊（`renderRecurrencePanel` は `existing` 既定null）。全80テストグリーン・Playwright で編集往復(10:00↔11:00)・祝日追加/削除往復・taskform定期タブ回帰なしを確認。
 - **土日祝の考慮ギャップ修正**（2026-06-13）: 見積りの暦日割り→**営業日割り**（週末に負荷が漏れない）＋本日系KPI（home/today/availability）の容量を `capacityOn` 配線で週末/祝日/休暇=0（ステータス `off`=「休」表示）に。詳細は §4 残り。capacity.js 純関数＋テスト83件グリーン。
 - 基盤固め: #1 書き込み破壊性根治(ADR-008) / #2 soft delete / #3 帰属(ADR-009) / #4 負荷の単一真実(ADR-010) / #7 回帰網 / #9 スカラ更新安全化(client updateTask)。
@@ -159,7 +160,7 @@ cd capacity-dashboard/app/lib/vendor && docker run --rm -v "$PWD":/out node:20-a
   - グローバル設定エンティティの権限は `label_rights.go` 流（LinkSharing 以外 true）。
 - **定期は仮想 occurrence**: `recurrences` は RRULE 文字列を保存するだけ。展開・空き計算は **SPA(recurrence.js/rrule.js)**。実タスク/plans は生成しない＝計画用（実績追跡は将来 materialize）。
 - **定期の開催時刻＝dtstart の時刻**（2026-06-12 規約化）: UTC文字列の HH:MM をそのまま壁時計として扱う（TZ変換しない・`00:00`=時刻なし）。時刻カレンダーが固定ブロック表示に使用。`expandRecurrences` の窓は日単位 inclusive（`toISO T23:59:59Z`）— `T00:00` 締めだと時刻付き occurrence が落ちる。
-- **ガント**: 予定バー範囲は plans→start/end→due の階層(`taskRanges`)。依存は TaskStation が precedes 作成時に逆 follows も自動付与→`dependencyEdges` で前向き正規化＋重複除去。
+- **ガント**: 予定バー範囲は plans→start/end→due の階層(`taskRanges`)。依存は TaskStation が precedes 作成時に逆 follows も自動付与→`dependencyEdges` で前向き正規化＋重複除去。**ドラッグ編集**（2026-06-13）はこの source 階層を不変条件に使う＝plans があれば必ず plans バーが表示されるので「dates を動かして裏の plans がズレる」事故は起きない。plans バー移動は実エントリ(`task_time_plans`)を delta 日ずらす（start_minute/担当保持）。座標↔日付変換は純関数 `applyBarDrag`。
 - TaskStation: username≥3文字 / 共有の `user_id` は文字列(ユーザー名)。bash の `UID` は予約変数。
 
 ## 8. データ構造の到達点（“UIだけ” vs “schema変更が要る”）
@@ -178,7 +179,7 @@ cd capacity-dashboard/app/lib/vendor && docker run --rm -v "$PWD":/out node:20-a
 
 ## 9. 次の一手（おすすめ順）
 1. **負荷ヒストリー/バーンダウン or PJ別配分**（データ即可・新ビュー。time_entries.logged_on / project_id×時間）。
-2. ガント作り込み（updateTask 使用・ドラッグ編集）。※かんばん/一覧は完了。
-3. P2清掃: #8 日別バッチ取得(N+1)。（#5 members×projectusers・#6 est:Nh ラベル掃除 は 2026-06-12/13 消化済み）
-4. AI Q&A(53) を別API化するか判断。
+2. P2清掃: #8 日別バッチ取得(N+1)。（#5 members×projectusers・#6 est:Nh ラベル掃除 は 2026-06-12/13 消化済み）
+3. AI Q&A(53) を別API化するか判断。
+4. ガント追加（任意）: 依存違反の赤警告（dependencyEdges 流用）・21日窓の前後スクロール。※ドラッグ編集本体は 2026-06-13 完了。
 ※入力UI(定期/祝日/休暇)＝`views/manage.js`・**#3 対象者選択(planner)＝logPlan に user_id**・土日祝の営業日割り＋本日系容量0 は 2026-06-13 完了。

@@ -1,8 +1,10 @@
 // 予実ガント（フェーズ3）。予定バー×実績バーを時間軸に重ね、依存矢印・今日線・進捗・超過を描く。
 // タスク行モード(mock29型) / 人別レーンモード(mock30型) をトグル切替。取得はフロントN+1（planner.js踏襲）。
-import { load } from "../lib/store.js";
+import { load, invalidate } from "../lib/store.js";
 import * as vik from "../lib/api.js";
-import { taskRanges, dependencyEdges, dayScale, toMemberDayEntries, sumByMemberDay, shiftISO } from "../lib/capacity.js";
+import { taskRanges, dependencyEdges, dayScale, toMemberDayEntries, sumByMemberDay, shiftISO, applyBarDrag, dateOnly, hasDate } from "../lib/capacity.js";
+import { fmtDisplayDow } from "../lib/form.js";
+import { openTaskForm } from "./taskform.js";
 import { C, member_color, fmtH, esc, todayISO } from "../lib/ui.js";
 
 const COL_W = 40, LABEL_W = 280, LABEL_W_P = 320, ROW_H = 42, GRP_H = 56, WINDOW_DAYS = 21;
@@ -53,15 +55,18 @@ export async function render(root) {
     return `<div class="gh-corner">${state.mode === "task" ? "タスク" : "メンバー"} / 日付</div>${days}`;
   }
 
-  // タスク1行ぶんのバー領域HTML（予定バー＋実績バー）
-  function barsHTML(r) {
+  // タスク1行ぶんのバー領域HTML（予定バー＋実績バー）。taskId を data 属性に載せてドラッグで参照。
+  function barsHTML(r, taskId) {
     const cells = scale.axis.map((a) => `<div class="cell${a.weekend ? " weekend" : ""}"></div>`).join("");
     let bars = "";
     if (r.planned.source) {
       const pg = scale.range(r.planned.start, r.planned.end);
       const left = pg.fromIdx * COL_W + 2, w = pg.span * COL_W - 4;
       const clip = (pg.clippedLeft ? " clipL" : "") + (pg.clippedRight ? " clipR" : "");
-      bars += `<div class="bar plan${clip}" style="left:${left}px;width:${w}px" title="予定 ${fmtH(r.planned.h)}（${srcLabel(r.planned.source)}）"></div>`;
+      // dates のみ端リサイズ可。plans/dates/due はすべて移動＋クリックで編集（draggable）。
+      const resizable = r.planned.source === "dates";
+      const handles = resizable ? `<span class="bar-h l"></span><span class="bar-h r"></span>` : "";
+      bars += `<div class="bar plan draggable${clip}" data-task="${taskId}" data-src="${r.planned.source}" style="left:${left}px;width:${w}px" title="予定 ${fmtH(r.planned.h)}（${srcLabel(r.planned.source)}）・ドラッグで移動${resizable ? "／端で伸縮" : ""}・クリックで編集">${handles}</div>`;
     }
     if (r.actual.start) {
       const ag = scale.range(r.actual.start, r.actual.end);
@@ -115,7 +120,7 @@ export async function render(root) {
               <span class="r-pj">${esc(pjName)}</span></span>
           </span>
         </div>
-        ${barsHTML(r)}
+        ${barsHTML(r, t.id)}
       </div>`;
     }).join("") || `<div class="empty">表示できるタスクがありません（窓: ${startISO}〜${scale.axis[WINDOW_DAYS - 1].iso}）。</div>`;
 
@@ -166,7 +171,7 @@ export async function render(root) {
                 <span class="r-meta"><span>見${fmtH(r.estH)}・実${fmtH(r.spentH)}・予${fmtH(r.planned.h)}</span>
                 ${r.over ? `<span class="r-flag">超過</span>` : ""}</span></span>
             </div>
-            ${barsHTML(r)}
+            ${barsHTML(r, t.id)}
           </div>`;
           rowOffset += ROW_H;
         }
@@ -230,6 +235,83 @@ export async function render(root) {
     state.collapsed.has(id) ? state.collapsed.delete(id) : state.collapsed.add(id);
     paint();
   });
+
+  // ── バーのドラッグ編集（移動／dates は端で伸縮）＋クリックで編集モーダル ──
+  let drag = null, dlabel = null;
+  const reload = () => { invalidate(); render(root); };
+  const isoZ = (d) => d + "T00:00:00Z";
+  const showLabel = (text, x, y) => {
+    if (!dlabel) { dlabel = document.createElement("div"); dlabel.className = "gv-draglabel"; document.body.appendChild(dlabel); }
+    dlabel.textContent = text; dlabel.style.left = (x + 14) + "px"; dlabel.style.top = (y - 8) + "px"; dlabel.style.display = "block";
+  };
+  const hideLabel = () => { if (dlabel) dlabel.style.display = "none"; };
+
+  rowsEl.addEventListener("pointerdown", (e) => {
+    const bar = e.target.closest(".bar.draggable");
+    if (!bar) return;
+    const taskId = +bar.dataset.task;
+    const r = rangeByTask.get(taskId);
+    if (!r || !r.planned.source) return;
+    const isHandle = e.target.classList.contains("bar-h");
+    const edge = isHandle ? (e.target.classList.contains("l") ? "start" : "end") : "move";
+    e.preventDefault();
+    try { bar.setPointerCapture(e.pointerId); } catch {}
+    drag = { bar, taskId, src: r.planned.source, edge, startX: e.clientX,
+             base: { start: r.planned.start, end: r.planned.end }, dayDelta: 0, moved: false };
+  });
+
+  rowsEl.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const dx = e.clientX - drag.startX;
+    if (Math.abs(dx) > 4) drag.moved = true;
+    drag.dayDelta = Math.round(dx / COL_W);
+    const nb = applyBarDrag(drag.base, drag.dayDelta, drag.edge);
+    const pg = scale.range(nb.start, nb.end);
+    drag.bar.style.left = (pg.fromIdx * COL_W + 2) + "px";
+    drag.bar.style.width = (pg.span * COL_W - 4) + "px";
+    drag.bar.classList.add("dragging");
+    showLabel(drag.src === "due" ? fmtDisplayDow(nb.start) : `${fmtDisplayDow(nb.start)} 〜 ${fmtDisplayDow(nb.end)}`, e.clientX, e.clientY);
+  });
+
+  rowsEl.addEventListener("pointerup", async (e) => {
+    const d = drag; drag = null; hideLabel();
+    if (!d) return;
+    d.bar.classList.remove("dragging");
+    try { d.bar.releasePointerCapture(e.pointerId); } catch {}
+    if (!d.moved) { // クリック＝編集モーダル
+      openTaskForm({ taskId: d.taskId, onSaved: reload });
+      return;
+    }
+    if (d.dayDelta === 0) { reload(); return; } // 動かしたが半日未満＝元へ戻す
+    const nb = applyBarDrag(d.base, d.dayDelta, d.edge);
+    try { await commitDrag(d.taskId, d.src, nb, d.dayDelta); }
+    catch (err) { alert("日程の更新に失敗: " + err.message); }
+    reload();
+  });
+
+  // ソース別のコミット。dates/due=updateTask（非破壊）、plans=全エントリを delta 日ずらす（整合）。
+  async function commitDrag(taskId, src, nb, dayDelta) {
+    if (src === "due") {
+      await vik.updateTask(taskId, { due_date: isoZ(nb.start) });
+    } else if (src === "dates") {
+      await vik.updateTask(taskId, { start_date: isoZ(nb.start), end_date: isoZ(nb.end) });
+    } else if (src === "plans") {
+      // 日別予定（別テーブル）を delete→再作成で delta 日ずらす（seconds/user_id/start_minute/note 保持）
+      for (const p of (plansById.get(taskId) || [])) {
+        const newDay = shiftISO(dateOnly(p.plan_date), dayDelta);
+        await vik.deletePlan(taskId, p.id);
+        await vik.logPlan(taskId, p.seconds, newDay, p.note || "", p.user_id || null, p.start_minute ?? null);
+      }
+      // タスク本体に start/end があれば一緒にずらして整合
+      const t = tasks.find((x) => x.id === taskId);
+      if (t && hasDate(t.start_date) && hasDate(t.end_date)) {
+        await vik.updateTask(taskId, {
+          start_date: isoZ(shiftISO(dateOnly(t.start_date), dayDelta)),
+          end_date: isoZ(shiftISO(dateOnly(t.end_date), dayDelta)),
+        });
+      }
+    }
+  }
 
   paint();
 }
@@ -325,6 +407,12 @@ function shell(projects, members, memberIdx) {
   .gv .bar.clipR{border-radius:5px 0 0 5px}
   .gv .bar .fill{position:absolute;left:0;top:0;bottom:0;border-radius:5px 0 0 5px}
   .gv .bar .blabel{position:absolute;right:6px;top:0;bottom:0;display:flex;align-items:center;font-size:9.5px;font-weight:700;color:${C.ink}}
+  .gv .bar.plan.draggable{cursor:grab;touch-action:none}
+  .gv .bar.plan.draggable:hover{box-shadow:inset 0 0 0 1.5px ${C.fill}}
+  .gv .bar.plan.dragging{cursor:grabbing;opacity:.9;z-index:7;box-shadow:inset 0 0 0 1.5px ${C.fill}}
+  .gv .bar-h{position:absolute;top:0;bottom:0;width:7px;cursor:ew-resize;z-index:1}
+  .gv .bar-h.l{left:0}.gv .bar-h.r{right:0}
+  .gv-draglabel{position:fixed;z-index:9999;background:${C.ink};color:#fff;font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px;pointer-events:none;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.25);display:none}
   .gv .today-line{position:absolute;top:0;width:0;border-left:2px dashed ${C.over};z-index:6;pointer-events:none}
   .gv .today-line .tl-cap{position:absolute;top:-1px;left:-15px;font-size:9px;color:#fff;background:${C.over};padding:1px 5px;border-radius:4px}
   .gv svg.deps{position:absolute;left:var(--label-w);top:0;pointer-events:none;z-index:4;overflow:visible}

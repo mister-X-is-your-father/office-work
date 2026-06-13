@@ -282,6 +282,25 @@ export function depLayers(ids, edges) {
   return { level, critical, order };
 }
 
+// ガントのバードラッグ → 新しい開始/終了日（純関数）。
+//   bar: { start, end, source }（source: "dates"|"due"|"plans"）, dayDelta: ±整数日
+//   edge: "move"（本体移動・両端ずらす） | "start"（左端伸縮） | "end"（右端伸縮）
+// 伸縮は最小1日でクランプ（start<=end を保証）。due/plans は move のみ想定（呼び出し側で edge="move"）。
+export function applyBarDrag(bar, dayDelta, edge = "move") {
+  const start = bar.start, end = bar.end;
+  if (edge === "start") {
+    let ns = shiftISO(start, dayDelta);
+    if (ns > end) ns = end; // 終了日を超えない（最小1日）
+    return { start: ns, end };
+  }
+  if (edge === "end") {
+    let ne = shiftISO(end, dayDelta);
+    if (ne < start) ne = start; // 開始日を下回らない（最小1日）
+    return { start, end: ne };
+  }
+  return { start: shiftISO(start, dayDelta), end: shiftISO(end, dayDelta) }; // move
+}
+
 // 日付軸スケール器。startISO から days 日の窓。列index と範囲→span を返す。
 export function dayScale(startISO, days) {
   const axis = [];

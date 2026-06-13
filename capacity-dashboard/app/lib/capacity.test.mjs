@@ -4,7 +4,7 @@ import {
   toH, dateOnly, hasDate, isActiveOn, taskHoursOn, isBusinessDay, businessDays,
   loadByMember, weekLoadByMember, estimateVsActual, triage, sumByMemberDay,
   shiftISO, taskRanges, dependencyEdges, dayScale, toMemberDayEntries, taskPlannedHoursByMemberOn,
-  buildTaskTree, depLayers,
+  buildTaskTree, depLayers, applyBarDrag,
 } from "./capacity.js";
 
 test("depLayers: 段組み＋クリティカルパス(最長鎖)", () => {
@@ -79,6 +79,35 @@ test("taskHoursOn: holidays を渡すと祝日も除外して等分", () => {
   assert.equal(taskHoursOn(t, "2026-06-10", { holidays }), 3);
   assert.equal(taskHoursOn(t, "2026-06-11", { holidays }), 0); // 祝日=0
   assert.equal(taskHoursOn(t, "2026-06-12", { holidays }), 3);
+});
+
+test("applyBarDrag: move は両端を delta 日ずらす", () => {
+  const r = applyBarDrag({ start: "2026-06-09", end: "2026-06-11", source: "dates" }, 3, "move");
+  assert.deepEqual(r, { start: "2026-06-12", end: "2026-06-14" });
+  // 負方向
+  assert.deepEqual(applyBarDrag({ start: "2026-06-09", end: "2026-06-11", source: "dates" }, -2, "move"),
+    { start: "2026-06-07", end: "2026-06-09" });
+});
+
+test("applyBarDrag: due は move で1日点ごと移動", () => {
+  // due は start=end（1日点）として渡す
+  assert.deepEqual(applyBarDrag({ start: "2026-06-10", end: "2026-06-10", source: "due" }, 5, "move"),
+    { start: "2026-06-15", end: "2026-06-15" });
+});
+
+test("applyBarDrag: start/end の伸縮と最小1日クランプ", () => {
+  // 左端を後ろへ → 開始日だけ変わる
+  assert.deepEqual(applyBarDrag({ start: "2026-06-09", end: "2026-06-15", source: "dates" }, 2, "start"),
+    { start: "2026-06-11", end: "2026-06-15" });
+  // 右端を前へ → 終了日だけ変わる
+  assert.deepEqual(applyBarDrag({ start: "2026-06-09", end: "2026-06-15", source: "dates" }, -3, "end"),
+    { start: "2026-06-09", end: "2026-06-12" });
+  // 左端を終了日より後ろへ動かしても end でクランプ（最小1日）
+  assert.deepEqual(applyBarDrag({ start: "2026-06-09", end: "2026-06-11", source: "dates" }, 10, "start"),
+    { start: "2026-06-11", end: "2026-06-11" });
+  // 右端を開始日より前へ動かしても start でクランプ
+  assert.deepEqual(applyBarDrag({ start: "2026-06-09", end: "2026-06-11", source: "dates" }, -10, "end"),
+    { start: "2026-06-09", end: "2026-06-09" });
 });
 
 test("loadByMember: capacityFor で週末は容量0='off'、負荷ありは'over'", () => {
