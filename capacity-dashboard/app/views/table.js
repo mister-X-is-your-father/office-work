@@ -231,43 +231,63 @@ function presetSuggest(sorts) {
   return (sorts || []).map((s) => (AXES[s.key] ? AXES[s.key].label : s.key) + (s.dir > 0 ? "↑" : "↓")).join("・") || "マイプリセット";
 }
 
-// ポインタイベント方式の並べ替え（HTML5 DnDより確実・タッチ対応）。
-// マイソート中は**行のどこを掴んでもドラッグ**（かんばん風）。動かさず離せばタップ＝編集モーダル。
+// TickTick風ドラッグ並べ替え: 掴んだ行はカーソルに追従して浮き上がる「ゴースト」、
+// 元の場所は薄いプレースホルダ（ギャップ）になり、落下位置へ滑らかに移動する。
+// マイソート中は行のどこを掴んでもOK。動かさず離せばタップ＝編集モーダル。
 function wireDrag(root, rerender) {
   const tbody = root.querySelector("tbody");
   const rowsArr = () => [...tbody.querySelectorAll("tr[data-id]")];
   rowsArr().forEach((dragRow) => {
     dragRow.addEventListener("pointerdown", (e) => {
-      if (e.button && e.button !== 0) return;                 // 左クリック/主ポインタのみ
+      if (e.button && e.button !== 0) return;
       if (e.target.closest("button, a, input, select")) return; // ▶やリンク等は各自のクリックに任せる
       const dragId = +dragRow.dataset.id;
       const startX = e.clientX, startY = e.clientY;
-      let moved = false;
-      // 移動中はDOMを実際に並べ替える＝「移動後の状態」がそのままライブで見える（よくあるやつ）
+      let moved = false, ghost = null, grabY = 0, ghostLeft = 0, ghostW = 0;
+
+      const begin = () => {
+        const rect = dragRow.getBoundingClientRect();
+        grabY = startY - rect.top; ghostLeft = rect.left; ghostW = rect.width;
+        // セル幅を固定したクローンを浮かせる（テーブルでも列幅が崩れない）
+        const widths = [...dragRow.children].map((td) => td.getBoundingClientRect().width);
+        const clone = dragRow.cloneNode(true);
+        clone.classList.remove("tb-ph");
+        [...clone.children].forEach((td, i) => { td.style.width = widths[i] + "px"; });
+        ghost = document.createElement("div");
+        ghost.className = "tb-ghost";
+        ghost.style.cssText = `position:fixed;left:${ghostLeft}px;top:${rect.top}px;width:${ghostW}px;z-index:9999;pointer-events:none`;
+        ghost.innerHTML = `<table class="tb tb-ghost-tbl"><tbody></tbody></table>`;
+        ghost.querySelector("tbody").appendChild(clone);
+        document.body.appendChild(ghost);
+        dragRow.classList.add("tb-ph"); // 元の行＝ギャップ（プレースホルダ）
+        document.body.classList.add("tb-dragging-body");
+      };
       const move = (ev) => {
-        if (!moved && (Math.abs(ev.clientY - startY) > 4 || Math.abs(ev.clientX - startX) > 4)) {
-          moved = true; dragRow.classList.add("tb-dragging"); document.body.classList.add("tb-dragging-body");
+        if (!moved) {
+          if (Math.abs(ev.clientY - startY) <= 4 && Math.abs(ev.clientX - startX) <= 4) return;
+          moved = true; begin();
         }
-        if (!moved) return;
-        // ポインタ位置の直上にある行の前/後ろへ dragRow を実挿入
+        ghost.style.top = (ev.clientY - grabY) + "px";        // カーソルに追従（縦）
+        // 落下位置のギャップ（プレースホルダ）を移動
         let placed = false;
         for (const tr of rowsArr()) {
           if (tr === dragRow) continue;
           const r = tr.getBoundingClientRect();
           if (ev.clientY < r.top + r.height / 2) {
-            if (dragRow.nextSibling !== tr) tbody.insertBefore(dragRow, tr); // 既にその位置なら触らない
+            if (dragRow.nextSibling !== tr) tbody.insertBefore(dragRow, tr);
             placed = true; break;
           }
         }
-        if (!placed && tbody.lastElementChild !== dragRow) tbody.appendChild(dragRow); // 一番下
+        if (!placed && tbody.lastElementChild !== dragRow) tbody.appendChild(dragRow);
       };
       const up = () => {
         document.removeEventListener("pointermove", move);
         document.removeEventListener("pointerup", up);
-        dragRow.classList.remove("tb-dragging"); document.body.classList.remove("tb-dragging-body");
+        if (ghost) ghost.remove();
+        dragRow.classList.remove("tb-ph");
+        document.body.classList.remove("tb-dragging-body");
         if (!moved) { openTaskForm({ taskId: dragId, onSaved: rerender }); return; } // タップ＝編集
-        // 現在のDOM順＝確定順。非表示(フィルタ外)分は元の位置を保持して全体順を再構築
-        const vis = rowsArr().map((x) => +x.dataset.id);
+        const vis = rowsArr().map((x) => +x.dataset.id);   // 現DOM順＝確定順
         const visSet = new Set(vis); let vi = 0; const next = [];
         for (const id of V.order) next.push(visSet.has(id) ? vis[vi++] : id);
         while (vi < vis.length) next.push(vis[vi++]);
@@ -355,17 +375,17 @@ function css() {
   .tb-wrap{overflow-x:auto}
   table.tb{width:100%;border-collapse:collapse;font-size:13px}
   .tb tbody tr[data-id]{cursor:pointer}
-  .tb tbody tr.tb-dragging{opacity:.4}
-  .tb tbody tr.tb-over td{box-shadow:inset 0 2px 0 ${C.fill}}
-  .tb tbody tr.tb-over-bottom td{box-shadow:inset 0 -2px 0 ${C.fill}}
   .tb tbody tr.tb-draggable{cursor:grab;user-select:none;touch-action:pan-y}
-  .tb tbody tr.tb-draggable.tb-dragging{cursor:grabbing;background:#eaf2ff}
-  .tb tbody tr.tb-draggable.tb-dragging td{box-shadow:inset 0 1px 0 ${C.fill},inset 0 -1px 0 ${C.fill}}
-  .tb tbody tr.tb-draggable.tb-dragging td:first-child{box-shadow:inset 3px 0 0 ${C.fill},inset 0 1px 0 ${C.fill},inset 0 -1px 0 ${C.fill}}
-  /* ドラッグ中は他行のホバー背景を消してプレビューを見やすく */
-  body.tb-dragging-body .tb tbody tr:hover{background:transparent}
+  /* 元の場所＝ギャップ（プレースホルダ）: 中身を隠して薄い帯に */
+  .tb tbody tr.tb-ph td{background:#eef4ff!important;position:relative}
+  .tb tbody tr.tb-ph td > *{visibility:hidden}
+  .tb tbody tr.tb-ph td:first-child{box-shadow:inset 3px 0 0 ${C.fill}}
+  /* カーソル追従の浮きカード（ゴースト） */
+  .tb-ghost{filter:drop-shadow(0 10px 24px rgba(20,30,50,.28));transform:scale(1.01);opacity:.97}
+  .tb-ghost-tbl{border-collapse:collapse;table-layout:fixed;background:#fff;border:1px solid ${C.line};border-radius:9px;overflow:hidden}
+  .tb-ghost-tbl td{padding:10px 12px;border-bottom:0;font-size:13px;vertical-align:middle}
   body.tb-dragging-body{cursor:grabbing}
-  body.tb-dragging-body .tb tbody tr.tb-dragging:hover{background:#eaf2ff}
+  body.tb-dragging-body .tb tbody tr:hover{background:transparent}
   .tb-fav{font-size:11px;vertical-align:1px}
   .tb-fable{width:22px;height:22px;border-radius:50%;border:1px solid ${C.fill};background:#fff;color:${C.fill};cursor:pointer;font-size:9px;padding:0;vertical-align:1px;margin-left:4px}
   .tb-fable:hover{background:${C.fill};color:#fff}.tb-fable:disabled{opacity:.5;cursor:default}
