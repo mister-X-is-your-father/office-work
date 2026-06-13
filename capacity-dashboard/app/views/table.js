@@ -330,7 +330,7 @@ function openMenu(x, y, items, opts = {}) {
     m.innerHTML = its.map((it, i) => {
       if (it.sep) return `<div class="tb-ctx-sep"></div>`;
       if (it.input === "date") return `<label class="tb-ctx-inp">${esc(it.label)}<input type="date" data-i="${i}" value="${it.value || ""}"></label>`;
-      if (it.input === "hours") return `<label class="tb-ctx-inp">${esc(it.label)}<span class="tb-ctx-unit"><input type="number" step="0.25" min="0" data-i="${i}" value="${it.value || ""}" placeholder="例 1.5">時間</span></label>`;
+      if (it.input === "hm") return `<div class="tb-ctx-inp tb-ctx-hm">${esc(it.label)}<span class="tb-ctx-unit"><input type="number" min="0" data-i="${i}" data-hm="h" value="${it.h ?? ""}" placeholder="0">時間<input type="number" min="0" max="59" data-i="${i}" data-hm="m" value="${it.m ?? ""}" placeholder="0">分</span><button class="tb-ctx-apply" data-i="${i}">適用</button></div>`;
       return `<button class="tb-ctx-it${it.danger ? " danger" : ""}" data-i="${i}">${it.check !== undefined ? `<span class="tb-ctx-ck">${it.check ? "✓" : ""}</span>` : ""}${esc(it.label)}</button>`;
     }).join("");
     m.querySelectorAll(".tb-ctx-it").forEach((b) => {
@@ -340,10 +340,14 @@ function openMenu(x, y, items, opts = {}) {
         else { closeRowMenu(); it.on && it.on(); }
       };
     });
+    const commitHm = (i) => { const it = its[i]; const box = m.querySelector(`.tb-ctx-hm`); const h = +(box.querySelector('[data-hm="h"]').value || 0); const mn = +(box.querySelector('[data-hm="m"]').value || 0); closeRowMenu(); it.on && it.on({ h, m: mn }); };
     m.querySelectorAll(".tb-ctx-inp input").forEach((inp) => {
+      const it = its[+inp.dataset.i];
       inp.onclick = (e) => e.stopPropagation();
-      inp.onchange = () => { const it = its[+inp.dataset.i]; closeRowMenu(); it.on && it.on(inp.value); };
+      if (it.input === "hm") { inp.onkeydown = (e) => { if (e.key === "Enter") commitHm(+inp.dataset.i); }; return; }
+      inp.onchange = () => { closeRowMenu(); it.on && it.on(inp.value); };
     });
+    m.querySelectorAll(".tb-ctx-apply").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); commitHm(+b.dataset.i); }; });
   };
   document.body.appendChild(m);
   _ctxEl = m;
@@ -421,10 +425,11 @@ function openEstMenu(chipEl, id, tasks, root) {
   const cur = t.time_estimate || 0;
   const set = (sec) => updateTask(id, { time_estimate: sec }).then(reload).catch(() => {});
   const opts = [[900, "15分"], [1800, "30分"], [2700, "45分"], [3600, "1時間"], [7200, "2時間"], [14400, "4時間"], [28800, "8時間"]];
+  const ih = Math.floor(cur / 3600), im = Math.round((cur % 3600) / 60);
   const items = [
     ...opts.map(([sec, label]) => ({ label, check: cur === sec, on: () => set(sec) })),
     { sep: true },
-    { label: "カスタム", input: "hours", value: cur ? cur / 3600 : "", on: (v) => { const h = parseFloat(v); if (isNaN(h) || h < 0) return; set(Math.round(h * 3600)); } },
+    { label: "指定", input: "hm", h: ih || "", m: im || "", on: ({ h, m }) => { const sec = Math.round(h) * 3600 + Math.round(m) * 60; if (sec < 0) return; set(sec); } },
     { sep: true },
     { label: "クリア", danger: cur > 0, on: () => set(0) },
   ];
@@ -692,6 +697,10 @@ function css() {
   .tb-ctx-inp input{font:inherit;font-size:12px;border:1px solid ${C.line};border-radius:6px;padding:3px 6px}
   .tb-ctx-unit{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:${C.muted}}
   .tb-ctx-unit input{width:66px;text-align:right}
+  .tb-ctx-hm{flex-wrap:wrap;gap:8px}
+  .tb-ctx-hm .tb-ctx-unit input{width:50px}
+  .tb-ctx-apply{font:inherit;font-size:12px;font-weight:600;color:${C.fill};background:#eaf2ff;border:1px solid #cfe0ff;border-radius:6px;padding:3px 11px;cursor:pointer}
+  .tb-ctx-apply:hover{background:#dbe9ff}
   .tb-ctx-it{font:inherit;font-size:13px;text-align:left;border:0;background:transparent;color:${C.ink};padding:8px 12px;border-radius:7px;cursor:pointer;white-space:nowrap}
   .tb-ctx-it:hover{background:${C.track}}
   .tb-ctx-it.danger{color:${C.over}}
