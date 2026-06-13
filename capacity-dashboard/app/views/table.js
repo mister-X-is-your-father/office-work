@@ -426,10 +426,11 @@ function css() {
   .tb-selclear:hover{border-color:${C.fill};color:${C.fill}}
   .tb-ghost-badge{position:absolute;top:-8px;right:-8px;min-width:20px;height:20px;border-radius:10px;background:${C.over};color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 5px;box-shadow:0 2px 6px rgba(0,0,0,.3)}
   /* 元の場所＝ギャップ: 文字も枠も無く、ただ柔らかい影が落ちているだけに見せる */
-  .tb tbody tr.tb-ph td{background:rgba(20,30,50,.05)!important;color:transparent!important;border-bottom-color:transparent!important;box-shadow:inset 0 7px 9px -7px rgba(20,30,50,.5),inset 0 -7px 9px -7px rgba(20,30,50,.5)}
+  /* 列境界の継ぎ目を作らないよう box-shadow をやめ、全セル共通の縦グラデーションで上下を陰影に */
+  .tb tbody tr.tb-ph td{color:transparent!important;border-bottom-color:transparent!important;background:linear-gradient(180deg,rgba(20,30,50,.20),rgba(20,30,50,.05) 40%,rgba(20,30,50,.05) 60%,rgba(20,30,50,.20))!important}
   .tb tbody tr.tb-ph td *{visibility:hidden}
   /* カーソル追従の浮きカード（ゴースト） */
-  .tb-ghost{filter:drop-shadow(0 10px 24px rgba(20,30,50,.28));transform:scale(1.01);opacity:.97}
+  .tb-ghost{filter:drop-shadow(0 10px 24px rgba(20,30,50,.28));transform:scale(1.01);opacity:.72}
   .tb-ghost-tbl{border-collapse:collapse;table-layout:fixed;background:#fff;border:1px solid ${C.line};border-radius:9px;overflow:hidden}
   .tb-ghost-tbl td{padding:10px 12px;border-bottom:0;font-size:13px;vertical-align:middle}
   .tb-ghost-tbl tr + tr td{border-top:1px solid ${C.line}}
