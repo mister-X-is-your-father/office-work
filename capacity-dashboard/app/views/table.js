@@ -447,7 +447,7 @@ function css() {
   .tb tbody tr.tb-ph td{color:transparent!important;border-bottom-color:transparent!important;background:rgba(20,30,50,.08)!important}
   .tb tbody tr.tb-ph td *{visibility:hidden}
   /* カーソル追従の浮きカード（ゴースト） */
-  .tb-ghost{filter:drop-shadow(0 10px 24px rgba(20,30,50,.28));transform:scale(1.01);opacity:.72}
+  .tb-ghost{filter:drop-shadow(0 10px 24px rgba(20,30,50,.22));transform:scale(1.01);opacity:.45}
   .tb-ghost-tbl{border-collapse:collapse;table-layout:fixed;background:#fff;border:1px solid ${C.line};border-radius:9px;overflow:hidden}
   .tb-ghost-tbl td{padding:10px 12px;border-bottom:0;font-size:13px;vertical-align:middle}
   .tb-ghost-tbl tr + tr td{border-top:1px solid ${C.line}}
