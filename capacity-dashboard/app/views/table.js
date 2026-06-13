@@ -242,35 +242,32 @@ function wireDrag(root, rerender) {
       if (e.target.closest("button, a, input, select")) return; // ▶やリンク等は各自のクリックに任せる
       const dragId = +dragRow.dataset.id;
       const startX = e.clientX, startY = e.clientY;
-      let moved = false, insert = null;
-      const clearMarks = () => rowsArr().forEach((x) => x.classList.remove("tb-over", "tb-over-bottom"));
+      let moved = false;
+      // 移動中はDOMを実際に並べ替える＝「移動後の状態」がそのままライブで見える（よくあるやつ）
       const move = (ev) => {
         if (!moved && (Math.abs(ev.clientY - startY) > 4 || Math.abs(ev.clientX - startX) > 4)) {
-          moved = true; dragRow.classList.add("tb-dragging");
+          moved = true; dragRow.classList.add("tb-dragging"); document.body.classList.add("tb-dragging-body");
         }
         if (!moved) return;
-        let target = null, before = true;
+        // ポインタ位置の直上にある行の前/後ろへ dragRow を実挿入
+        let placed = false;
         for (const tr of rowsArr()) {
           if (tr === dragRow) continue;
           const r = tr.getBoundingClientRect();
-          if (ev.clientY < r.top + r.height / 2) { target = tr; before = true; break; }
-          target = tr; before = false; // どの中点より下なら最後の行の後ろ
+          if (ev.clientY < r.top + r.height / 2) {
+            if (dragRow.nextSibling !== tr) tbody.insertBefore(dragRow, tr); // 既にその位置なら触らない
+            placed = true; break;
+          }
         }
-        clearMarks();
-        if (target) { target.classList.add(before ? "tb-over" : "tb-over-bottom"); insert = { id: +target.dataset.id, before }; }
-        else insert = null;
+        if (!placed && tbody.lastElementChild !== dragRow) tbody.appendChild(dragRow); // 一番下
       };
       const up = () => {
         document.removeEventListener("pointermove", move);
         document.removeEventListener("pointerup", up);
-        clearMarks(); dragRow.classList.remove("tb-dragging");
+        dragRow.classList.remove("tb-dragging"); document.body.classList.remove("tb-dragging-body");
         if (!moved) { openTaskForm({ taskId: dragId, onSaved: rerender }); return; } // タップ＝編集
-        if (!insert) return;
+        // 現在のDOM順＝確定順。非表示(フィルタ外)分は元の位置を保持して全体順を再構築
         const vis = rowsArr().map((x) => +x.dataset.id);
-        const from = vis.indexOf(dragId); if (from >= 0) vis.splice(from, 1);
-        let idx = vis.indexOf(insert.id); if (!insert.before) idx += 1;
-        vis.splice(Math.max(0, idx), 0, dragId);
-        // 表示中idを新順に差し替え、非表示分の位置は保持して全体順を再構築
         const visSet = new Set(vis); let vi = 0; const next = [];
         for (const id of V.order) next.push(visSet.has(id) ? vis[vi++] : id);
         while (vi < vis.length) next.push(vis[vi++]);
@@ -362,7 +359,13 @@ function css() {
   .tb tbody tr.tb-over td{box-shadow:inset 0 2px 0 ${C.fill}}
   .tb tbody tr.tb-over-bottom td{box-shadow:inset 0 -2px 0 ${C.fill}}
   .tb tbody tr.tb-draggable{cursor:grab;user-select:none;touch-action:pan-y}
-  .tb tbody tr.tb-draggable.tb-dragging{cursor:grabbing;background:#eef5ff;opacity:.85}
+  .tb tbody tr.tb-draggable.tb-dragging{cursor:grabbing;background:#eaf2ff}
+  .tb tbody tr.tb-draggable.tb-dragging td{box-shadow:inset 0 1px 0 ${C.fill},inset 0 -1px 0 ${C.fill}}
+  .tb tbody tr.tb-draggable.tb-dragging td:first-child{box-shadow:inset 3px 0 0 ${C.fill},inset 0 1px 0 ${C.fill},inset 0 -1px 0 ${C.fill}}
+  /* ドラッグ中は他行のホバー背景を消してプレビューを見やすく */
+  body.tb-dragging-body .tb tbody tr:hover{background:transparent}
+  body.tb-dragging-body{cursor:grabbing}
+  body.tb-dragging-body .tb tbody tr.tb-dragging:hover{background:#eaf2ff}
   .tb-fav{font-size:11px;vertical-align:1px}
   .tb-fable{width:22px;height:22px;border-radius:50%;border:1px solid ${C.fill};background:#fff;color:${C.fill};cursor:pointer;font-size:9px;padding:0;vertical-align:1px;margin-left:4px}
   .tb-fable:hover{background:${C.fill};color:#fff}.tb-fable:disabled{opacity:.5;cursor:default}
