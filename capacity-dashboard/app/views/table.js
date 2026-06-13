@@ -357,7 +357,8 @@ function openMenu(x, y, items, opts = {}) {
       b.onclick = (e) => {
         e.stopPropagation();
         const it = its[+b.dataset.i];
-        if (b.dataset.hk !== undefined) it.onPick && it.onPick(+b.dataset.hk, it.m);
+        // 時間は同じボタン再押下でトグル解除（=0時間）。分はそのまま選択。
+        if (b.dataset.hk !== undefined) { const v = +b.dataset.hk; it.onPick && it.onPick(v === it.h ? 0 : v, it.m); }
         else it.onPick && it.onPick(it.h, +b.dataset.mk);
         repaint();
       };
