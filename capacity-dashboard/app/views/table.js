@@ -31,6 +31,7 @@ let V = null, UID = null;
 let flashId = null;          // ドロップ直後にジワっと色が戻る着地ハイライト対象（再描画後に適用）
 let selectedIds = new Set(); // まとめて移動用の複数選択（マイソート中のみ・Ctrl/Shiftで操作）
 let anchorId = null;         // Shift範囲選択の起点
+let lastRoot = null, docDeselectWired = false; // 余白クリック解除（document全体・右側の地まで拾う）
 
 const stateOf = (t) => (t.done ? "完了" : ((t.percent_done || 0) > 0 ? "進行中" : "未着手"));
 const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(0, 10) : "");
@@ -126,7 +127,6 @@ export async function render(root) {
       <label class="tb-chk"><input type="checkbox" id="tb-hd" ${V.hideDone ? "checked" : ""}> 完了を隠す</label>
     </div>
     ${manual ? `<div class="tb-mynote">「マイソート」はあなただけの順番です（この端末に保存・他のメンバーには影響しません）。Ctrl/⌘・Shift＋クリックで複数選択→まとめてドラッグ移動。</div>
-    ${selectedIds.size ? `<div class="tb-selbar"><b>${selectedIds.size}件</b>選択中 ・ 1つをドラッグするとまとめて移動 <button id="tb-selclear" class="tb-selclear">選択解除</button></div>` : ""}
     <div class="tb-presets">
       <span class="tb-pl">保存したマイソート<span class="tb-pl-g" title="あなた専用・この端末">👤</span></span>
       ${mysorts.map((m, i) => `<span class="tb-pz"><button class="tb-mz-a" data-mi="${i}" title="この手動順を適用">${esc(m.name)}</button><button class="tb-mz-x" data-mi="${i}" title="削除">×</button></span>`).join("") || `<span class="tb-sc-none">まだありません</span>`}
@@ -184,14 +184,18 @@ export async function render(root) {
       catch { b.disabled = false; }
     };
   });
-  const selClear = root.querySelector("#tb-selclear");
-  if (selClear) selClear.onclick = () => { selectedIds.clear(); anchorId = null; render(root); };
-  // 余白（行・操作系以外）クリックで選択解除
-  root.onclick = (e) => {
-    if (!V.manualMode || !selectedIds.size) return;
-    if (e.target.closest("tr[data-id], button, select, input, a, label, .tb-chips, .tb-presets, .tb-selbar, .tb-sortwrap")) return;
-    selectedIds.clear(); anchorId = null; render(root);
-  };
+  // 余白クリックで選択解除（document全体＝コンテンツ右側の地まで拾う）。一覧表示中のみ作動。
+  lastRoot = root;
+  if (!docDeselectWired) {
+    docDeselectWired = true;
+    document.addEventListener("pointerdown", (e) => {
+      if (!location.hash.startsWith("#/list")) return;        // 一覧ビュー中のみ
+      if (!V || !V.manualMode || !selectedIds.size) return;
+      if (e.target.closest("tr[data-id], button, select, input, a, label, .tb-chips, .tb-presets, .tb-sortwrap")) return;
+      selectedIds.clear(); anchorId = null;
+      if (lastRoot && lastRoot.isConnected) render(lastRoot);
+    });
+  }
 
   // プリセット: 適用は本人のV.sortsに反映（共有データは変えない）／保存・削除は全員に反映（要許可）
   root.querySelectorAll(".tb-pz-a").forEach((b) => {
@@ -437,10 +441,6 @@ function css() {
   .tb tbody tr.tb-draggable{cursor:grab;user-select:none;touch-action:pan-y}
   .tb tbody tr.tb-sel td{background:#e6f0ff}
   .tb tbody tr.tb-sel td:first-child{box-shadow:inset 3px 0 0 ${C.fill}}
-  .tb-selbar{font-size:12px;color:${C.ink};margin:-6px 0 12px;background:#eaf2ff;border:1px solid #cfe0ff;border-radius:8px;padding:7px 11px;display:flex;align-items:center;gap:8px}
-  .tb-selbar b{color:${C.fill}}
-  .tb-selclear{margin-left:auto;font:inherit;font-size:11.5px;border:1px solid ${C.line};background:#fff;border-radius:7px;padding:3px 10px;cursor:pointer;color:${C.muted}}
-  .tb-selclear:hover{border-color:${C.fill};color:${C.fill}}
   .tb-ghost-badge{position:absolute;top:-8px;right:-8px;min-width:20px;height:20px;border-radius:10px;background:${C.over};color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 5px;box-shadow:0 2px 6px rgba(0,0,0,.3)}
   /* 元の場所＝ギャップ: 文字も枠も無く、ただ柔らかい影が落ちているだけに見せる */
   /* 落下ギャップ＝フラットな薄いグレーの空き帯（グラデ無し・継ぎ目無し） */
