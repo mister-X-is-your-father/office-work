@@ -1,4 +1,4 @@
-// 本日の稼働予定 — 円時計ビュー（mock 57 を実データ配線）。
+// 今日の稼働予定 — 円時計ビュー（mock 57 を実データ配線）。
 // 色=優先度／模様=種別／外周=超過／空き=薄グレー／カテゴリ別の折りたたみセクション。
 import { todayItemsByMember, suggestDays } from "../lib/today_items.js";
 import { KINDS, KIND_ORDER, PRIO, NEUTRAL } from "../lib/kinds.js";
@@ -52,7 +52,7 @@ function clockSVG(m) {
   if (m.freeH > 0) out.push(`<path d="${arc(R, m.usedH / CAP, 1)}" fill="none" stroke="${FREECOL}" stroke-width="${STROKE}" stroke-linecap="butt"/>`);
   const capInner = R - STROKE / 2 - 6, capOuter = (m.overH > 0 ? 99 : R + STROKE / 2 + 5);
   out.push(`<line x1="${CX}" y1="${(CY - capInner).toFixed(1)}" x2="${CX}" y2="${(CY - capOuter).toFixed(1)}" stroke="#9aa3af" stroke-width="2"/>`);
-  // 中央の大きい数字＝本日の稼働予定(used)。空き/超過はサブに（予定ゼロ＝大きく0h・サブ「空き8h」）。
+  // 中央の大きい数字＝今日の稼働予定(used)。空き/超過はサブに（予定ゼロ＝大きく0h・サブ「空き8h」）。
   const big = fmtH(m.usedH);
   const bigcol = m.overH > 0 ? "#e5484d" : (m.usedH > 1e-6 ? "#1d2430" : "#9aa3af");
   const sub = m.overH > 0 ? `超過 +${fmtH(m.overH)}`
@@ -88,7 +88,7 @@ function cardHTML(m, idx) {
     </details>`;
   }
   if (m.freeH > 0) sections += `<div class="ck-row free"><i class="ck-dot" style="background:${FREECOL}"></i><span class="ck-tn">空き工数</span><span class="ck-th">${fmtH(m.freeH)}</span></div>`;
-  if (!m.items.length) sections = `<div class="ck-empty">本日の予定なし</div>` + sections;
+  if (!m.items.length) sections = `<div class="ck-empty">今日の予定なし</div>` + sections;
 
   return `<div class="ck-card ${m.overH > 0 ? "is-over" : ""}">
     <div class="ck-h"><span class="ck-av" style="background:${member_color(idx)}">${esc((nm)[0] || "?")}</span><span class="ck-nm">${esc(nm)}</span><span class="ck-badge ${stateCls}">${stateTxt}</span></div>
@@ -114,7 +114,7 @@ function kpiStrip(states) {
   return `<div class="ck-strip">
     <div class="ck-kpi"><div class="l">チーム稼働</div><div class="v">${fmtH(usedAll)}<small>/ ${cap}h ・ ${rate}%</small></div><div class="ck-bar"><i style="width:${rate}%;background:#3a86ff"></i><i style="flex:1;background:#eef1f5"></i></div></div>
     <div class="ck-kpi over ${overH > 0 ? "" : "zero"}"><div class="l">要再配分（超過）</div><div class="v">${overH > 0 ? "+" + fmtH(overH) : "なし"}</div><div class="s">${overMembers.length ? esc(overMembers.map((m) => m.member.name || m.member.username).join("・")) + " → 移し先を検討" : "全員が容量内"}</div></div>
-    <div class="ck-kpi"><div class="l">本日の最優先</div><div class="v">${mustN}<small>件 ・ ${fmtH(mustH)}</small></div><div class="s">落とせない最優先（赤）。当日追加 ${adhocN}件</div></div>
+    <div class="ck-kpi"><div class="l">今日の最優先</div><div class="v">${mustN}<small>件 ・ ${fmtH(mustH)}</small></div><div class="s">落とせない最優先（赤）。当日追加 ${adhocN}件</div></div>
     <div class="ck-kpi"><div class="l">固定枠（会議・定例）</div><div class="v">${fmtH(fixedH)}</div><div class="s">会議${fmtH(mtgH)}・定例${fmtH(rtnH)}／実作業に使えるのは ${fmtH(realH)}</div></div>
   </div>`;
 }
@@ -157,17 +157,17 @@ export function renderClock(container, data, day, rerender) {
     <div class="ck-subtitle">並び=会議→定例→レビュー→優先度（12時起点）／色=優先度／模様=種別／ピン=当日追加／外周=超過</div>
     ${states.length ? kpiStrip(states) : ""}
     <div class="ck-grid">${states.map((m, i) => cardHTML(m, i)).join("")}</div>
-    ${states.length ? legend() : `<div class="ck-empty">本日のメンバー負荷がありません。</div>`}
+    ${states.length ? legend() : `<div class="ck-empty">今日のメンバー負荷がありません。</div>`}
     <div class="ck-modal" id="ck-modal" hidden><div class="ck-modal-bg"></div><div class="ck-modal-card" id="ck-modal-card"></div></div>`;
   wireInteractions(container, data, day, rerender, states);
   return container;
 }
 
-/* ---------- 別日へ移す / 本日から外す ---------- */
+/* ---------- 別日へ移す / 今日から外す ---------- */
 const WDOW = ["日", "月", "火", "水", "木", "金", "土"];
 const mdw = (iso) => { const d = new Date(iso + "T00:00:00Z"); return `${d.getUTCMonth() + 1}/${d.getUTCDate()}(${WDOW[d.getUTCDay()]})`; };
 const plansOf = (data, taskId) => (data.plansByTask && data.plansByTask.get ? data.plansByTask.get(taskId) : null) || [];
-// このメンバーの本日負荷に効くplan: 自分指定 or 未指定 or「担当外user_id＝全担当へ配分」。
+// このメンバーの今日負荷に効くplan: 自分指定 or 未指定 or「担当外user_id＝全担当へ配分」。
 const todayPlans = (data, taskId, memberId, day, aids = []) =>
   plansOf(data, taskId).filter((p) => dateOnly(p.plan_date) === day && (p.user_id === memberId || !p.user_id || !aids.includes(p.user_id)));
 const aidsOf = (data, taskId) => ((data.tasks.find((x) => x.id === taskId) || {}).assignees || []).map((a) => a.id);
@@ -209,7 +209,7 @@ function wireInteractions(container, data, day, rerender, states) {
       <div class="ck-menu">
         <button data-a="move">📅 別日へ移す</button>
         <button data-a="review">👀 レビュー依頼</button>
-        ${planBased ? `<button data-a="drop" class="danger">本日から外す</button>` : ""}
+        ${planBased ? `<button data-a="drop" class="danger">今日から外す</button>` : ""}
       </div>
       <div class="ck-macts"><button class="ck-cancel">キャンセル</button></div>`;
     card.querySelector('[data-a="move"]').onclick = () => panelMove(ctx);
@@ -235,7 +235,7 @@ function wireInteractions(container, data, day, rerender, states) {
     const list = others.length
       ? others.map((m, i) => `<button class="ck-day" data-rev="${m.id}"><span class="ck-pwho"><i class="ck-pav" style="background:${member_color(i)}">${esc((m.name || m.username || "?")[0])}</i>${esc(m.name || m.username)}</span><span class="fh">空き ${fmtH(freeBy.get(m.id) || 0)}</span></button>`).join("")
       : `<div class="ck-none">他のメンバーがいません。</div>`;
-    card.innerHTML = head(`「${ctx.title}」のレビュー依頼`, "依頼先を選択") + `<div class="ck-mlbl">レビュアー（空き多い順）・本日の当日追加に出ます</div><div class="ck-days">${list}</div><div class="ck-macts"><button class="ck-back">← 戻る</button></div>`;
+    card.innerHTML = head(`「${ctx.title}」のレビュー依頼`, "依頼先を選択") + `<div class="ck-mlbl">レビュアー（空き多い順）・今日の当日追加に出ます</div><div class="ck-days">${list}</div><div class="ck-macts"><button class="ck-back">← 戻る</button></div>`;
     card.querySelectorAll("[data-rev]").forEach((b) => { b.onclick = () => review(ctx, +b.dataset.rev); });
     card.querySelector(".ck-back").onclick = () => menu(ctx);
   }

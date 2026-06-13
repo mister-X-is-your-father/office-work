@@ -1,4 +1,4 @@
-// 本日の稼働予定（円時計ビュー）用の整形レイヤー（純関数・TDD対象）。
+// 今日の稼働予定（円時計ビュー）用の整形レイヤー（純関数・TDD対象）。
 // タスク(予定/見積り日割り)＋会議/定例(RRULE展開)を統合し、メンバー別に WorkItem として列挙。
 // WorkItem は「種別(kind) × 時間属性(flags: adhoc/advanced)」の2軸（ADR-012）。色/模様はビュー側。
 // 並び: 会議 → 定例 → レビュー → タスク(優先度 最優先→低)。
@@ -13,7 +13,7 @@ const round1 = (x) => Math.round(x * 10) / 10;
 const planEntriesFor = (plansByTask, id) =>
   plansByTask ? ((plansByTask.get ? plansByTask.get(id) : plansByTask[id]) || null) : null;
 
-// 前倒し: 本日に予定(plan)があり、かつ期限が本日より先。
+// 前倒し: 今日に予定(plan)があり、かつ期限が今日より先。
 function isAdvanced(task, planEntries, isoDay) {
   if (!hasDate(task.due_date)) return false;
   const due = dateOnly(task.due_date);
@@ -43,7 +43,7 @@ export function todayItemsByMember(data, isoDay, capH = 8) {
     }
   }
 
-  // 会議/定例（本日に展開した occurrence）。優先度なし・時間属性なし。
+  // 会議/定例（今日に展開した occurrence）。優先度なし・時間属性なし。
   // 持ち回りは expandRecurrences が assignees をその回の担当1名に解決済み。
   for (const { recurrence, dateISO, assignees, override } of expandRecurrences(recurrences, isoDay, isoDay)) {
     if (dateISO !== isoDay) continue;
@@ -56,7 +56,7 @@ export function todayItemsByMember(data, isoDay, capH = 8) {
     }
   }
 
-  // 並べ替え＋集計。容量は人別（週末/祝日/休暇=0＝capacityOn）で本日KPIを正確に。
+  // 並べ替え＋集計。容量は人別（週末/祝日/休暇=0＝capacityOn）で今日KPIを正確に。
   for (const r of map.values()) {
     r.items.sort((a, b) => (kindRank(a.kind) - kindRank(b.kind)) || ((b.prio || 0) - (a.prio || 0)));
     r.usedH = round1(r.usedH);

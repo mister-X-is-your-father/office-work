@@ -10,7 +10,7 @@ import { logTime } from "../lib/api.js";
 import { esc } from "../lib/ui.js";
 
 const KEY = "ts.pomo";            // 実行中状態（下記 st 形）
-const CNT = "ts.pomo.count.";     // 本日の完了集中回数（日付キー）
+const CNT = "ts.pomo.count.";     // 今日の完了集中回数（日付キー）
 const BASE_TITLE = document.title || "TaskStation";
 
 // st: { taskId, taskTitle, mode: focus|break|countdown|countup, focusMin, breakMin, durMin,
@@ -322,7 +322,7 @@ export function mountPomodoro(topbar) {
         og("自分の担当", card._mine || []) + og("その他のタスク", card._others || []);
       const m = card._mode;
       card.innerHTML = `
-        <div class="pm-h">${MODE_ICON[m === "focus" ? "focus" : m]} 集中タイマー <span class="pm-cnt">本日 ${countToday()} 回</span><button class="pm-x" id="pm-x">×</button></div>
+        <div class="pm-h">${MODE_ICON[m === "focus" ? "focus" : m]} 集中タイマー <span class="pm-cnt">今日 ${countToday()} 回</span><button class="pm-x" id="pm-x">×</button></div>
         <div class="pm-tabs">
           <button data-m="focus" class="${m === "focus" ? "on" : ""}">🍅 ポモドーロ</button>
           <button data-m="countdown" class="${m === "countdown" ? "on" : ""}">⏲ ダウン</button>
@@ -379,7 +379,7 @@ export function mountPomodoro(topbar) {
     if (!card._running || card._runMode !== s.mode) {
       card._running = true; card._runMode = s.mode;
       card.innerHTML = `
-        <div class="pm-h">${label} <span class="pm-cnt">本日 ${countToday()} 回</span>
+        <div class="pm-h">${label} <span class="pm-cnt">今日 ${countToday()} 回</span>
           <button class="pm-gear" id="pm-gear" title="表示をカスタム">🎨</button>
           <button class="pm-x" id="pm-x">×</button></div>
         <div class="pm-disp" id="pm-disp"></div>

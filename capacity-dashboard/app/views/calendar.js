@@ -1,4 +1,4 @@
-// 本日の時刻カレンダー（mock49 相当・実データ／ADR-013）。資源タイムライン＋未配置トレイ＋ドラッグ配置。
+// 今日の時刻カレンダー（mock49 相当・実データ／ADR-013）。資源タイムライン＋未配置トレイ＋ドラッグ配置。
 // task_time_plans.start_minute（時刻）で配置。未配置タスクをドラッグして時刻と担当を確定。
 // 会議/定例は recurrences.dtstart の時刻（UTC文字列の HH:MM=壁時計・00:00=時刻なし）で固定ブロック表示。
 // ブロック下端のハンドルをドラッグで所要時間を変更（リサイズ）。
@@ -39,7 +39,7 @@ function buildModel() {
   const byTask = new Map((tasks || []).map((t) => [t.id, t]));
   const itemMap = todayItemsByMember(_data, _day, _data.settings.capH);
 
-  // 配置済みブロック（start_minute あり・本日）
+  // 配置済みブロック（start_minute あり・今日）
   const placed = [];
   const placedKey = new Set();
   for (const t of (tasks || [])) {
@@ -54,7 +54,7 @@ function buildModel() {
       placedKey.add(t.id + ":" + mid);
     }
   }
-  // 未配置トレイ（本日の負荷があるが start_minute 無し。会議/定例=occurrence は除く）
+  // 未配置トレイ（今日の負荷があるが start_minute 無し。会議/定例=occurrence は除く）
   const tray = [];
   for (const m of members) {
     const st = itemMap.get(m.id);
@@ -117,8 +117,8 @@ function paint() {
         <span class="cal-chip-t">${esc(it.title)}</span><span class="cal-chip-h">${fmtH(it.mins / 60)}</span></div>`).join("")
     : `<div class="cal-tray-empty">未配置のタスクはありません</div>`;
 
-  // タスク一覧プール: 本日の負荷を持たない未完了タスクも直接ドラッグして配置できる
-  // （所要=見積り・無ければ1h。ドロップで本日の plan＋時刻が付く。配置後はリサイズで調整可）
+  // タスク一覧プール: 今日の負荷を持たない未完了タスクも直接ドラッグして配置できる
+  // （所要=見積り・無ければ1h。ドロップで今日の plan＋時刻が付く。配置後はリサイズで調整可）
   const usedIds = new Set([...placed.map((b) => b.taskId), ...tray.map((it) => it.taskId)]);
   const dayMins = (H1 - H0) * 60;
   const pool = (_data.tasks || [])
@@ -135,7 +135,7 @@ function paint() {
 
   _root.innerHTML = `
     <style>${css()}</style>
-    <h1 class="vtitle">本日の時刻カレンダー <small>${_day} ・ ドラッグで時刻・担当を配置</small></h1>
+    <h1 class="vtitle">今日の時刻カレンダー <small>${_day} ・ ドラッグで時刻・担当を配置</small></h1>
     <div class="cal-tray"><div class="cal-tray-h">未配置（${tray.length}）</div><div class="cal-tray-list" id="cal-tray">${trayHtml}</div></div>
     <div class="cal-pool">
       <div class="cal-pool-hd">
@@ -364,7 +364,7 @@ async function resizePlan(taskId, planId, memberId, startMin, mins) {
 
 async function place(drag, toMember, startMin) {
   const seconds = drag.mins * 60;
-  // 既存の本日plan（このタスク×元担当）を削除してから時刻付きで作り直す（移動）。
+  // 既存の今日plan（このタスク×元担当）を削除してから時刻付きで作り直す（移動）。
   const plans = (_data.plansByTask && _data.plansByTask.get && _data.plansByTask.get(drag.taskId)) || [];
   const aids = ((_data.tasks.find((t) => t.id === drag.taskId) || {}).assignees || []).map((a) => a.id);
   const sameDay = plans.filter((p) => dateOnly(p.plan_date) === _day &&

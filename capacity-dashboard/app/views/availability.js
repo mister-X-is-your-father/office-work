@@ -1,4 +1,4 @@
-// 残容量カード（mock04 相当・実データ）。本日のメンバー別 残り容量を大きく表示。
+// 残容量カード（mock04 相当・実データ）。今日のメンバー別 残り容量を大きく表示。
 import { load } from "../lib/store.js";
 import { loadByMember } from "../lib/capacity.js";
 import { capacityOn } from "../lib/recurrence.js";
@@ -27,7 +27,7 @@ export async function render(root) {
       <div class="kpi"><div class="l">受け入れ余力</div><div class="v">${freeN}<small>名</small></div></div>
       <div class="kpi ${overN ? "over" : ""}"><div class="l">超過</div><div class="v">${overN}<small>名</small></div></div>
     </div>
-    <div class="av-grid">${rows.length ? rows.map(cardHtml).join("") : `<div class="av-empty">本日のメンバー負荷がありません。</div>`}</div>`;
+    <div class="av-grid">${rows.length ? rows.map(cardHtml).join("") : `<div class="av-empty">今日のメンバー負荷がありません。</div>`}</div>`;
 }
 
 function cardHtml(r, i) {
@@ -40,7 +40,7 @@ function cardHtml(r, i) {
   const overRatio = over && r.capH > 0 ? Math.min(100, Math.round((r.overH / r.capH) * 100)) : 0;
   const tasks = (r.tasks || []).sort((a, b) => b.h - a.h).map((t) =>
     `<div class="av-t"><span class="av-tn">${esc(t.title)}</span><span class="av-th">${fmtH(t.h)}</span></div>`).join("")
-    || `<div class="av-none">本日のアサインなし</div>`;
+    || `<div class="av-none">今日のアサインなし</div>`;
   const badge = off ? `<span class="av-badge full">非稼働日</span>`
     : (over ? `<span class="av-badge over">超過</span>` : (r.freeH > 0 ? `<span class="av-badge free">余裕</span>` : `<span class="av-badge full">満</span>`));
   return `<div class="av-card ${over ? "is-over" : ""}">

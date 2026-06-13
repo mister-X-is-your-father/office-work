@@ -1,4 +1,4 @@
-// 本日の稼働予定。円時計(clock.js)／積み上げ(mock54) を切替表示。
+// 今日の稼働予定。円時計(clock.js)／積み上げ(mock54) を切替表示。
 import { load } from "../lib/store.js";
 import { loadByMember } from "../lib/capacity.js";
 import { capacityOn } from "../lib/recurrence.js";
@@ -30,7 +30,7 @@ export async function render(root) {
     <style>.t-seg{display:inline-flex;background:#fff;border:1px solid ${C.line};border-radius:10px;padding:3px;margin:0 0 16px;box-shadow:0 1px 2px rgba(20,30,50,.04)}
     .t-seg button{border:0;background:transparent;color:${C.muted};font:inherit;font-size:13px;font-weight:600;padding:5px 14px;border-radius:8px;cursor:pointer}
     .t-seg button.on{background:${C.fill};color:#fff}</style>
-    <h1 class="vtitle">本日の稼働予定 <small>${day}</small></h1>
+    <h1 class="vtitle">今日の稼働予定 <small>${day}</small></h1>
     <div class="t-seg">
       <button data-m="stacked" class="${MODE === "stacked" ? "on" : ""}">積み上げ</button>
       <button data-m="clock" class="${MODE === "clock" ? "on" : ""}">円時計</button>
@@ -57,7 +57,7 @@ function renderStacked(body, data, day) {
     if (!pjIdx.has(pid)) pjIdx.set(pid, pjIdx.size);
     return PJPAL[pjIdx.get(pid) % PJPAL.length];
   };
-  // 営業日割り（holidays）＋人別容量（週末/祝日/休暇=0）で本日KPIを正確に（§土日祝ギャップ）
+  // 営業日割り（holidays）＋人別容量（週末/祝日/休暇=0）で今日KPIを正確に（§土日祝ギャップ）
   const capacityFor = (m, d) => capacityOn(m, d, { holidays: holidaysSet, unavailabilityByMember, capH: CAP });
   const rows = loadByMember(tasks, members, day, CAP, plansByTask, { holidays: holidaysSet, capacityFor }).sort((a, b) => b.freeH - a.freeH);
   const totCap = rows.reduce((s, r) => s + r.capH, 0);
@@ -84,7 +84,7 @@ function renderStacked(body, data, day) {
       ${rows.length ? chartHtml(rows, { yMax, PLOT_H, FOOT_H, pxPerH, taskById, pjColor }) : empty()}
       ${rows.length ? legendHtml(usedPjs, projects, pjColor) : ""}
     </div>
-    ${rows.length ? `<div class="t54-hint">タイル＝本日のタスク（高さ＝工数）。容量線(${CAP}h)を超えた分が赤、線の下の点線が空き工数。</div>` : ""}`;
+    ${rows.length ? `<div class="t54-hint">タイル＝今日のタスク（高さ＝工数）。容量線(${CAP}h)を超えた分が赤、線の下の点線が空き工数。</div>` : ""}`;
 }
 
 function chartHtml(rows, g) {
@@ -127,7 +127,7 @@ function colHtml(r, i, g) {
         <div class="t54-tname">${esc(t.title)}</div><div class="t54-thrs"><b>${fmtH(t.h)}</b></div></div>`;
   }
   if (!r.tasks.length) {
-    inner += `<div class="t54-none" style="bottom:${FOOT_H}px">本日の予定なし</div>`;
+    inner += `<div class="t54-none" style="bottom:${FOOT_H}px">今日の予定なし</div>`;
   } else {
     inner += `<div class="t54-stack" style="bottom:${FOOT_H}px;height:${total * pxPerH}px">${segs}</div>`;
   }
@@ -160,7 +160,7 @@ function legendHtml(usedPjs, projects, pjColor) {
     </div>`;
 }
 
-const empty = () => `<div class="t54-empty">本日の予定工数を持つ担当タスクがありません。<br>タスクに担当・期限・見積り、または日別予定を設定してください。</div>`;
+const empty = () => `<div class="t54-empty">今日の予定工数を持つ担当タスクがありません。<br>タスクに担当・期限・見積り、または日別予定を設定してください。</div>`;
 
 function css() {
   return `

@@ -44,7 +44,7 @@ export function notifyEvents({ tasks, plansByTask, recurrences, meId, calStart =
     if (t.done || plannedTaskIds.has(t.id)) continue;
     if (!t.due_date || t.due_date.startsWith("0001") || dateOnly(t.due_date) !== dayISO) continue;
     if (!(t.assignees || []).some((a) => a.id === meId)) continue;
-    out.push({ key: `due:${t.id}:${dayISO}`, minute: calStart * 60, title: t.title, body: "本日が期限" });
+    out.push({ key: `due:${t.id}:${dayISO}`, minute: calStart * 60, title: t.title, body: "今日が期限" });
   }
   return out.sort((a, b) => a.minute - b.minute);
 }
