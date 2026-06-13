@@ -56,6 +56,20 @@ pkg/migration/20260609090000.go            ← backend-patch/pkg/migration/20260
 	}
 ```
 
+(c-2) **`Task.Update` の「ゼロ値を 0 に戻す」ブロックに `TimeEstimate` を追加**（fix10・**必須**）。
+Vikunja は受信タスクを mergo（ゼロ値は無視）で DB 既存値にマージするため、`Priority`/`DueDate` 等と
+同様に明示的に 0 へ戻さないと **見積りを 0 にクリアできない**（非ゼロは保存できるがクリアだけ不可）。
+`cover_image_attachment_id` のゼロ戻しブロック直後に追加:
+```go
+	// Time estimate (fork: native time tracking) — allow clearing back to 0
+	if t.TimeEstimate == 0 {
+		ot.TimeEstimate = 0
+	}
+```
+→ デプロイ: `go build -buildvcs=false -ldflags "-s -w" -o vikunja .` → `docker build -f backend-patch/Dockerfile.deploy
+-t leo-taskstation:0.24.6-fix10 .`（context=fork ルート）→ `~/apps/pm-trials/vikunja/docker-compose.yml` の
+image を fix10 に上げて `docker compose up -d`。
+
 ### 3-2. `pkg/routes/routes.go`
 
 comments のハンドラ登録ブロック（`/tasks/:task/comments` を登録している箇所）の直後に追加:

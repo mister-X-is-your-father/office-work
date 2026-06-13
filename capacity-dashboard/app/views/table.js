@@ -368,7 +368,7 @@ function openMenu(x, y, items, opts = {}) {
     if (dEl) {
       wireHourInput(m, "tb-est-direct");
       const applyEl = m.querySelector(".tb-hg-apply");
-      const applyHours = () => { const v = dEl.value.trim().replace(/^\./, "0."); const hf = v ? parseFloat(v) : 0; const it = its[+applyEl.dataset.i]; it.onHours && it.onHours(hf); repaint(); };
+      const applyHours = () => { const v = dEl.value.trim().replace(/^\./, "0."); const hf = v ? parseFloat(v) : 0; const it = its[+applyEl.dataset.i]; it.onHours && it.onHours(hf); closeRowMenu(); }; // 適用で閉じる（onClose→同期）
       dEl.addEventListener("click", (e) => e.stopPropagation());
       dEl.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); applyHours(); } });
       applyEl.onclick = (e) => { e.stopPropagation(); applyHours(); };
@@ -450,14 +450,15 @@ function openEstMenu(chipEl, id, tasks, root) {
   const t = (tasks || []).find((x) => x.id === id); if (!t) return;
   const cur = t.time_estimate || 0;
   const mBase = [0, 15, 30, 45];
-  const hOpts = Array.from({ length: 10 }, (_, k) => k + 1); // 1〜10時間（0は分ボタン/直接入力で）
+  const hOpts = Array.from({ length: 8 }, (_, k) => k + 1); // 1〜8時間（0/9以上は直接入力で）
   const toHv = (sec) => sec ? Math.round((sec / 3600) * 100) / 100 : "";
-  // 秒→グリッドの選択(時間/分)。0〜10時間かつ0.25h刻みに一致する時だけ選択、それ以外は無選択(null)。
-  const syncGrid = (sec) => { const hf = sec / 3600; if (sec && hf <= 10 && Number.isInteger(hf * 4)) { const hi = Math.floor(hf); return { h: hi, m: Math.round((hf - hi) * 60) }; } return { h: null, m: null }; };
+  // 秒→グリッドの選択(時間/分)。1〜8時間かつ0.25h刻みに一致する時だけ選択、それ以外は無選択(null)。
+  const syncGrid = (sec) => { const hf = sec / 3600; if (sec && hf >= 1 && hf <= 8 && Number.isInteger(hf * 4)) { const hi = Math.floor(hf); return { h: hi, m: Math.round((hf - hi) * 60) }; } return { h: null, m: null }; };
   let g = syncGrid(cur), h = g.h, mn = g.m;
   let hv = toHv(cur);
-  let dirty = false;
-  const commit = (sec) => { dirty = true; updateTask(id, { time_estimate: sec }).catch(() => {}); };
+  let dirty = false, chain = Promise.resolve();
+  // 連続操作を直列化し、閉じる時に最後の保存完了を待ってから再描画（適用直後のレース防止）。
+  const commit = (sec) => { dirty = true; chain = chain.then(() => updateTask(id, { time_estimate: sec }).catch(() => {})); };
   const build = () => [
     { input: "hmgrid", h, m: mn, hv, hOpts, mOpts: mBase,
       onPick: (nh, nm) => { h = (nh == null ? 0 : nh); mn = (nm == null ? 0 : nm); const sec = h * 3600 + mn * 60; hv = toHv(sec); commit(sec); },
@@ -466,7 +467,7 @@ function openEstMenu(chipEl, id, tasks, root) {
     { label: "クリア", danger: cur > 0, on: () => { updateTask(id, { time_estimate: 0 }).then(() => { invalidate(); render(root); }).catch(() => {}); } },
   ];
   const r = chipEl.getBoundingClientRect();
-  openMenu(r.left, r.bottom + 4, build(), { keepOpen: true, rebuild: build, onClose: () => { if (dirty) { invalidate(); render(root); } } });
+  openMenu(r.left, r.bottom + 4, build(), { keepOpen: true, rebuild: build, onClose: () => { if (dirty) chain.then(() => { invalidate(); render(root); }); } });
 }
 
 // 担当のワンクリック変更（メンバーを複数トグル・メニューは開いたまま即反映）。
@@ -729,17 +730,17 @@ function css() {
   .tb-ctx-inp input{font:inherit;font-size:12px;border:1px solid ${C.line};border-radius:6px;padding:3px 6px}
   .tb-ctx-unit{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:${C.muted}}
   .tb-ctx-unit input{width:66px;text-align:right}
-  .tb-hg{display:flex;flex-direction:column;gap:8px;padding:8px 10px}
-  .tb-hg-cols{display:flex;gap:16px;align-items:flex-start}
+  .tb-hg{display:flex;flex-direction:column;gap:8px;padding:8px 9px;min-width:0}
+  .tb-hg-cols{display:flex;gap:10px;align-items:flex-start}
   .tb-hg-col{display:flex;flex-direction:column;gap:5px}
   .tb-hg-lbl{font-size:11px;color:${C.muted};font-weight:600}
-  .tb-hg-wrap{display:grid;grid-auto-flow:column;grid-template-rows:repeat(5,auto);gap:4px}
+  .tb-hg-wrap{display:grid;grid-auto-flow:column;grid-template-rows:repeat(4,auto);gap:4px}
   .tb-hg-min{display:flex;flex-direction:column;gap:4px}
-  .tb-hg-b{font:inherit;font-size:12px;min-width:32px;padding:4px 7px;border:1px solid ${C.line};border-radius:6px;background:#fff;color:${C.ink};cursor:pointer;text-align:center}
+  .tb-hg-b{font:inherit;font-size:12px;width:30px;padding:4px 0;border:1px solid ${C.line};border-radius:6px;background:#fff;color:${C.ink};cursor:pointer;text-align:center}
   .tb-hg-b:hover{border-color:${C.fill};color:${C.fill}}
   .tb-hg-b.on{background:${C.fill};border-color:${C.fill};color:#fff;font-weight:700}
-  .tb-hg-direct{display:flex;align-items:center;gap:7px;margin-top:2px;padding-top:8px;border-top:1px solid ${C.line};font-size:12px;color:${C.muted}}
-  .tb-hg-direct .tf-step{flex:1;min-width:0}
+  .tb-hg-direct{display:flex;align-items:center;gap:6px;margin-top:2px;padding-top:8px;border-top:1px solid ${C.line};font-size:12px;color:${C.muted}}
+  .tb-hg-direct .tf-step{flex:none;width:96px}
   .tb-hg-apply{font:inherit;font-size:12px;font-weight:600;color:${C.fill};background:#eaf2ff;border:1px solid #cfe0ff;border-radius:6px;padding:5px 12px;cursor:pointer;flex:none}
   .tb-hg-apply:hover{background:#dbe9ff}
   .tb-ctx-it{font:inherit;font-size:13px;text-align:left;border:0;background:transparent;color:${C.ink};padding:8px 12px;border-radius:7px;cursor:pointer;white-space:nowrap}
