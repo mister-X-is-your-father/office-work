@@ -308,26 +308,35 @@ function wireDrag(root, rerender) {
         groupRows.forEach((r) => r.classList.add("tb-ph")); // 選択行＝影ギャップ
         document.body.classList.add("tb-dragging-body");
       };
-      const moveBlock = (beforeNode) => {
-        // 選択行群をDOM順のまま beforeNode の前へ連続配置
-        for (const tr of orderedSelected().length ? orderedSelected() : [dragRow]) tbody.insertBefore(tr, beforeNode);
-      };
+      // 掴んでる塊（選択行群 or 単行）と、その前後の非選択行を取るヘルパ
+      const inGroup = (tr) => groupSet.has(+tr.dataset.id);
+      const groupRowsNow = () => { const g = rowsArr().filter(inGroup); return g.length ? g : [dragRow]; };
+      const prevNon = (row) => { let p = row.previousElementSibling; while (p && (!p.dataset.id || inGroup(p))) p = p.previousElementSibling; return p; };
+      const nextNon = (row) => { let n = row.nextElementSibling; while (n && (!n.dataset.id || inGroup(n))) n = n.nextElementSibling; return n; };
+      const placeBefore = (node) => { for (const tr of groupRowsNow()) tbody.insertBefore(tr, node); };
       const move = (ev) => {
         if (!moved) {
           if (Math.abs(ev.clientY - startY) <= 4 && Math.abs(ev.clientX - startX) <= 4) return;
           moved = true; begin();
         }
         ghost.style.top = (ev.clientY - grabY - groupOffset) + "px"; // 掴んだ行がカーソル下に来るよう調整
-        // 落下位置はカーソルでなく“掴んでるカード(ゴースト)の中心”で判定（掴んだ位置に左右されない）
         const gr = ghost.getBoundingClientRect();
-        const refY = gr.top + gr.height / 2;
-        let target = null;
-        for (const tr of rowsArr()) {
-          if (groupSet.has(+tr.dataset.id)) continue;
-          const r = tr.getBoundingClientRect();
-          if (refY < r.top + r.height / 2) { target = tr; break; }
+        // 入れ替え判定＝塊の“外側の端”が隣カードの中心を越えたら（上端=上方向 / 下端=下方向）。
+        let guard = 0;
+        while (guard++ < 60) { // 上方向: 先頭の上端が、すぐ上の行の中心より上に出たら入れ替え
+          const prev = prevNon(groupRowsNow()[0]);
+          if (!prev) break;
+          const pr = prev.getBoundingClientRect();
+          if (gr.top < pr.top + pr.height / 2) placeBefore(prev); else break;
         }
-        moveBlock(target); // target=null なら末尾へ
+        guard = 0;
+        while (guard++ < 60) { // 下方向: 末尾の下端が、すぐ下の行の中心より下に出たら入れ替え
+          const g = groupRowsNow();
+          const next = nextNon(g[g.length - 1]);
+          if (!next) break;
+          const nr = next.getBoundingClientRect();
+          if (gr.bottom > nr.top + nr.height / 2) placeBefore(next.nextElementSibling); else break;
+        }
       };
       const up = () => {
         document.removeEventListener("pointermove", move);
