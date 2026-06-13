@@ -186,6 +186,12 @@ export async function render(root) {
   });
   const selClear = root.querySelector("#tb-selclear");
   if (selClear) selClear.onclick = () => { selectedIds.clear(); anchorId = null; render(root); };
+  // 余白（行・操作系以外）クリックで選択解除
+  root.onclick = (e) => {
+    if (!V.manualMode || !selectedIds.size) return;
+    if (e.target.closest("tr[data-id], button, select, input, a, label, .tb-chips, .tb-presets, .tb-selbar, .tb-sortwrap")) return;
+    selectedIds.clear(); anchorId = null; render(root);
+  };
 
   // プリセット: 適用は本人のV.sortsに反映（共有データは変えない）／保存・削除は全員に反映（要許可）
   root.querySelectorAll(".tb-pz-a").forEach((b) => {
