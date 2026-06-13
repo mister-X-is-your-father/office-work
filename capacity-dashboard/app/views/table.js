@@ -8,12 +8,15 @@ import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
 
 const HOUR = 3600;
+const MAX_SORTS = 5; // 組めるソート条件の上限（第1〜第5条件）
 const VKEY = (uid) => `ts.list.view.${uid ?? "anon"}`;
 function loadView(uid) {
   const def = { sorts: [{ key: "due", dir: 1 }], manualMode: false, order: [], hideDone: true, proj: "", cat: "" };
   try {
-    const v = { ...def, ...(JSON.parse(localStorage.getItem(VKEY(uid))) || {}) };
-    if (!Array.isArray(v.sorts) || !v.sorts.length) v.sorts = [{ key: "due", dir: 1 }];
+    const raw = JSON.parse(localStorage.getItem(VKEY(uid)) || "null");
+    if (!raw) return { ...def };                       // 初回のみ既定（期日）
+    const v = { ...def, ...raw };
+    if (!Array.isArray(v.sorts)) v.sorts = [];          // 壊れてる時だけ空に（空配列=意図的な「条件なし」は保持）
     return v;
   } catch { return { ...def }; }
 }
@@ -93,25 +96,25 @@ export async function render(root) {
   const catOpts = `<option value="">全分類</option>` +
     allCats.map((c) => `<option value="${esc(c.title)}"${c.title === V.cat ? " selected" : ""}>${esc(c.title)}</option>`).join("");
 
-  // ソート軸チップ＋「軸を追加」（既に使っている軸は候補から除外）
+  // ソート条件チップ＋「条件を追加」（既に使っている条件は候補から除外・最大5件）
   const usedKeys = new Set(V.sorts.map((s) => s.key));
-  const addOpts = `<option value="">＋ 軸を追加</option>` +
+  const addOpts = `<option value="">＋ 条件を追加</option>` +
     Object.entries(AXES).filter(([k]) => !usedKeys.has(k)).map(([k, ax]) => `<option value="${k}">${esc(ax.label)}</option>`).join("");
   const chips = V.sorts.map((s, i) => {
     const ax = AXES[s.key]; if (!ax) return "";
     return `<span class="tb-sc${manual ? " dim" : ""}" data-i="${i}">
-      <button class="tb-sc-k" data-i="${i}" title="向きを切替">${i ? "↳ " : ""}${esc(ax.label)} ${s.dir > 0 ? "↑" : "↓"}</button>
-      <button class="tb-sc-x" data-i="${i}" title="この軸を外す">×</button></span>`;
+      <span class="tb-sc-n">第${i + 1}</span><button class="tb-sc-k" data-i="${i}" title="クリックで昇順/降順を切替">${esc(ax.label)} ${s.dir > 0 ? "↑" : "↓"}</button>
+      <button class="tb-sc-x" data-i="${i}" title="この条件を外す">×</button></span>`;
   }).join("");
 
   root.innerHTML = `
     <style>${css()}</style>
-    <h1 class="vtitle">タスク一覧 <small>${rows.length}件 ${manual ? "・ ⠿ をドラッグで自分用に並べ替え" : "・ 軸を重ねて組み合わせソート（列ヘッダ: クリック=主キー / Shift+クリック=軸を追加）"}</small></h1>
+    <h1 class="vtitle">タスク一覧 <small>${rows.length}件 ${manual ? "・ 行をどこでもドラッグして自分用に並べ替え" : `・ ソート条件を重ねて並べ替え（列ヘッダ: クリック=第1条件 / Shift+クリック=条件を追加・最大${MAX_SORTS}）`}</small></h1>
     <div class="tb-tools">
       <button id="tb-add" class="tb-add">タスク追加</button>
       <button id="tb-manual" class="tb-manbtn${manual ? " on" : ""}" title="自分だけの手動ソート">✋ マイソート</button>
-      <span class="tb-sortwrap${manual ? " dim" : ""}">ソート: <span class="tb-chips">${chips || `<span class="tb-sc-none">既定</span>`}</span>
-        <select id="tb-addsort" class="tb-addsort">${addOpts}</select></span>
+      <span class="tb-sortwrap${manual ? " dim" : ""}">ソート条件: <span class="tb-chips">${chips || `<span class="tb-sc-none">なし（既定: 期日順）</span>`}</span>
+        ${V.sorts.length < MAX_SORTS ? `<select id="tb-addsort" class="tb-addsort">${addOpts}</select>` : `<span class="tb-sc-none">最大${MAX_SORTS}件</span>`}</span>
       <select id="tb-proj">${projOpts}</select>
       <select id="tb-cat">${catOpts}</select>
       <label class="tb-chk"><input type="checkbox" id="tb-hd" ${V.hideDone ? "checked" : ""}> 完了を隠す</label>
@@ -128,8 +131,8 @@ export async function render(root) {
       ${canEditPresets ? `<button class="tb-psave" id="tb-psave" title="今の組み合わせソートを共有プリセットとして保存">💾 現在のソートを保存</button>` : ""}
     </div>` : ""}
     <div class="card tb-wrap"><table class="tb">
-      <thead><tr>${cols(manual).map((c) => th(c, manual)).join("")}</tr></thead>
-      <tbody>${rows.length ? rows.map((r, i) => rowHtml(r, members, i, manual)).join("") : `<tr><td colspan="${manual ? 10 : 9}" class="tb-empty">該当なし</td></tr>`}</tbody>
+      <thead><tr>${cols().map((c) => th(c, manual)).join("")}</tr></thead>
+      <tbody>${rows.length ? rows.map((r, i) => rowHtml(r, members, i, manual)).join("") : `<tr><td colspan="9" class="tb-empty">該当なし</td></tr>`}</tbody>
     </table></div>`;
 
   const persist = () => saveView(UID, V);
@@ -140,22 +143,23 @@ export async function render(root) {
   root.querySelector("#tb-cat").onchange = (e) => { V.cat = e.target.value; reRender(); };
   root.querySelector("#tb-hd").onchange = (e) => { V.hideDone = e.target.checked; reRender(); };
   root.querySelector("#tb-add").onclick = () => openTaskForm({ onSaved: () => render(root) });
-  // 軸を追加（マイソート中でも触れるが、追加したら組み合わせソートに切替）
-  root.querySelector("#tb-addsort").onchange = (e) => {
-    const k = e.target.value; if (!k) return;
+  // 条件を追加（最大5件・5件到達時はセレクト自体を出さない）。マイソート中なら組み合わせソートに切替
+  const addSel = root.querySelector("#tb-addsort");
+  if (addSel) addSel.onchange = (e) => {
+    const k = e.target.value; if (!k || V.sorts.length >= MAX_SORTS) return;
     V.sorts.push({ key: k, dir: AXES[k].dir }); V.manualMode = false; reRender();
   };
-  // チップ: 向き切替 / 削除
+  // チップ: 向き切替 / 削除（最後の1件も外せる＝条件なし=既定の期日順）
   root.querySelectorAll(".tb-sc-k").forEach((b) => { b.onclick = () => { const s = V.sorts[+b.dataset.i]; if (s) { s.dir = -(s.dir || 1); V.manualMode = false; reRender(); } }; });
-  root.querySelectorAll(".tb-sc-x").forEach((b) => { b.onclick = () => { V.sorts.splice(+b.dataset.i, 1); if (!V.sorts.length) V.sorts = [{ key: "due", dir: 1 }]; reRender(); }; });
-  // 列ヘッダ: クリック=主キーに（単一化）・Shift+クリック=軸として追加/切替
+  root.querySelectorAll(".tb-sc-x").forEach((b) => { b.onclick = () => { V.sorts.splice(+b.dataset.i, 1); reRender(); }; });
+  // 列ヘッダ: クリック=第1条件に（単一化）・Shift+クリック=条件として追加/切替（最大5件）
   root.querySelectorAll("th[data-k]").forEach((h) => {
     h.onclick = (e) => {
       const k = h.dataset.k;
       V.manualMode = false;
       if (e.shiftKey) {
         const ex = V.sorts.find((s) => s.key === k);
-        if (ex) ex.dir = -(ex.dir || 1); else V.sorts.push({ key: k, dir: AXES[k] ? AXES[k].dir : 1 });
+        if (ex) ex.dir = -(ex.dir || 1); else if (V.sorts.length < MAX_SORTS) V.sorts.push({ key: k, dir: AXES[k] ? AXES[k].dir : 1 });
       } else {
         const cur = V.sorts[0];
         V.sorts = [{ key: k, dir: (cur && cur.key === k) ? -(cur.dir || 1) : (AXES[k] ? AXES[k].dir : 1) }];
@@ -164,7 +168,7 @@ export async function render(root) {
     };
   });
   root.querySelectorAll("tr[data-id]").forEach((tr) => {
-    tr.onclick = (e) => { if (e.target.closest(".tb-grip") || e.target.closest(".tb-fable")) return; openTaskForm({ taskId: +tr.dataset.id, onSaved: () => render(root) }); };
+    tr.onclick = (e) => { if (V.manualMode || e.target.closest(".tb-fable")) return; openTaskForm({ taskId: +tr.dataset.id, onSaved: () => render(root) }); };
   });
   root.querySelectorAll(".tb-fable").forEach((b) => {
     b.onclick = async (e) => {
@@ -228,21 +232,23 @@ function presetSuggest(sorts) {
 }
 
 // ポインタイベント方式の並べ替え（HTML5 DnDより確実・タッチ対応）。
-// グリップ(⠿)を掴んで上下、行の上半分/下半分で挿入位置を示し、離して確定。
+// マイソート中は**行のどこを掴んでもドラッグ**（かんばん風）。動かさず離せばタップ＝編集モーダル。
 function wireDrag(root, rerender) {
   const tbody = root.querySelector("tbody");
   const rowsArr = () => [...tbody.querySelectorAll("tr[data-id]")];
-  root.querySelectorAll(".tb-grip").forEach((g) => {
-    g.addEventListener("pointerdown", (e) => {
-      e.preventDefault();
-      const dragRow = g.closest("tr");
+  rowsArr().forEach((dragRow) => {
+    dragRow.addEventListener("pointerdown", (e) => {
+      if (e.button && e.button !== 0) return;                 // 左クリック/主ポインタのみ
+      if (e.target.closest("button, a, input, select")) return; // ▶やリンク等は各自のクリックに任せる
       const dragId = +dragRow.dataset.id;
-      let moved = false, insert = null; // insert={id, before}
-      dragRow.classList.add("tb-dragging");
-      try { g.setPointerCapture(e.pointerId); } catch { /* noop */ }
+      const startX = e.clientX, startY = e.clientY;
+      let moved = false, insert = null;
       const clearMarks = () => rowsArr().forEach((x) => x.classList.remove("tb-over", "tb-over-bottom"));
       const move = (ev) => {
-        if (Math.abs(ev.clientY - e.clientY) > 3) moved = true;
+        if (!moved && (Math.abs(ev.clientY - startY) > 4 || Math.abs(ev.clientX - startX) > 4)) {
+          moved = true; dragRow.classList.add("tb-dragging");
+        }
+        if (!moved) return;
         let target = null, before = true;
         for (const tr of rowsArr()) {
           if (tr === dragRow) continue;
@@ -255,11 +261,11 @@ function wireDrag(root, rerender) {
         else insert = null;
       };
       const up = () => {
-        g.removeEventListener("pointermove", move);
-        g.removeEventListener("pointerup", up);
-        try { g.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+        document.removeEventListener("pointermove", move);
+        document.removeEventListener("pointerup", up);
         clearMarks(); dragRow.classList.remove("tb-dragging");
-        if (!moved || !insert) return; // 動いてない/対象なし＝何もしない
+        if (!moved) { openTaskForm({ taskId: dragId, onSaved: rerender }); return; } // タップ＝編集
+        if (!insert) return;
         const vis = rowsArr().map((x) => +x.dataset.id);
         const from = vis.indexOf(dragId); if (from >= 0) vis.splice(from, 1);
         let idx = vis.indexOf(insert.id); if (!insert.before) idx += 1;
@@ -272,14 +278,13 @@ function wireDrag(root, rerender) {
         saveView(UID, V);
         rerender();
       };
-      g.addEventListener("pointermove", move);
-      g.addEventListener("pointerup", up);
+      document.addEventListener("pointermove", move);
+      document.addEventListener("pointerup", up);
     });
   });
 }
 
-const cols = (manual) => [
-  ...(manual ? [{ k: null, label: "" }] : []),
+const cols = () => [
   { k: "title", label: "タスク" }, { k: "who", label: "担当" }, { k: null, label: "種別" },
   { k: "cat", label: "分類" }, { k: "prio", label: "優先度" }, { k: "due", label: "期日" },
   { k: "est", label: "見積" }, { k: "pct", label: "進捗" }, { k: "state", label: "状態" },
@@ -304,9 +309,7 @@ function rowHtml(r, members, i, manual) {
   const prio = `<span class="tb-prio"><i style="background:${pc.c}"></i>${pc.n}</span>`;
   const dueCls = r.due && r.due < todayISO() && !r.done ? "over" : "";
   const st = `<span class="tb-st ${r.done ? "done" : (r.pct > 0 ? "doing" : "todo")}">${r.state}</span>`;
-  const grip = manual ? `<td class="tb-gripcell"><span class="tb-grip" title="ドラッグで並べ替え">⠿</span></td>` : "";
-  return `<tr data-id="${r.t.id}">
-    ${grip}
+  return `<tr data-id="${r.t.id}" class="${manual ? "tb-draggable" : ""}">
     <td class="tb-title">${esc(r.title)}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">🚩</span>` : ""}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${r.t.id}" data-title="${esc(r.title)}" title="Fableに実行させる">▶</button>` : ""}<div class="tb-sub">${esc(r.proj)}</div></td>
     <td>${ava}${esc(wn)}</td>
     <td>${kind}</td>
@@ -333,6 +336,7 @@ function css() {
   .tb-sortwrap.dim{opacity:.45}
   .tb-chips{display:inline-flex;gap:5px;flex-wrap:wrap}
   .tb-sc{display:inline-flex;align-items:center;border:1px solid #cfe0ff;background:#f3f8ff;border-radius:7px;overflow:hidden}
+  .tb-sc-n{font-size:9.5px;font-weight:700;color:#fff;background:${C.fill};padding:4px 5px;align-self:stretch;display:flex;align-items:center}
   .tb-sc-k{font:inherit;font-size:11.5px;font-weight:700;color:${C.fill};background:transparent;border:0;padding:4px 8px;cursor:pointer;white-space:nowrap}
   .tb-sc-k:hover{background:#e4eeff}
   .tb-sc-x{font:inherit;font-size:12px;color:${C.muted};background:transparent;border:0;border-left:1px solid #cfe0ff;padding:4px 7px;cursor:pointer}
@@ -357,9 +361,8 @@ function css() {
   .tb tbody tr.tb-dragging{opacity:.4}
   .tb tbody tr.tb-over td{box-shadow:inset 0 2px 0 ${C.fill}}
   .tb tbody tr.tb-over-bottom td{box-shadow:inset 0 -2px 0 ${C.fill}}
-  .tb-gripcell{width:26px;text-align:center;padding-left:6px!important;padding-right:0!important}
-  .tb-grip{display:inline-block;cursor:grab;color:${C.muted};font-size:15px;line-height:1;user-select:none;touch-action:none}
-  .tb-grip:hover{color:${C.fill}}.tb-grip:active{cursor:grabbing}
+  .tb tbody tr.tb-draggable{cursor:grab;user-select:none;touch-action:pan-y}
+  .tb tbody tr.tb-draggable.tb-dragging{cursor:grabbing;background:#eef5ff;opacity:.85}
   .tb-fav{font-size:11px;vertical-align:1px}
   .tb-fable{width:22px;height:22px;border-radius:50%;border:1px solid ${C.fill};background:#fff;color:${C.fill};cursor:pointer;font-size:9px;padding:0;vertical-align:1px;margin-left:4px}
   .tb-fable:hover{background:${C.fill};color:#fff}.tb-fable:disabled{opacity:.5;cursor:default}
