@@ -276,23 +276,30 @@ function wireDrag(root, rerender) {
       const startX = e.clientX, startY = e.clientY;
       // 掴んだ行が選択集合に含まれ複数あるなら、その全部をまとめて移動
       const groupSet = (selectedIds.has(dragId) && selectedIds.size > 1) ? new Set(selectedIds) : new Set([dragId]);
-      let moved = false, ghost = null, grabY = 0;
+      let moved = false, ghost = null, grabY = 0, groupOffset = 0;
 
       const begin = () => {
+        const groupRows = groupSet.size > 1 ? orderedSelected() : [dragRow];
         const rect = dragRow.getBoundingClientRect();
+        const rowH = rect.height;
         grabY = startY - rect.top;
+        groupOffset = Math.max(0, groupRows.indexOf(dragRow)) * rowH; // 掴んだ行がスタック内の何番目か
         const widths = [...dragRow.children].map((td) => td.getBoundingClientRect().width);
-        const clone = dragRow.cloneNode(true);
-        clone.classList.remove("tb-ph", "tb-sel");
-        [...clone.children].forEach((td, i) => { td.style.width = widths[i] + "px"; });
         ghost = document.createElement("div");
         ghost.className = "tb-ghost";
         ghost.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;z-index:9999;pointer-events:none`;
-        const badge = groupSet.size > 1 ? `<span class="tb-ghost-badge">${groupSet.size}</span>` : "";
+        const badge = groupRows.length > 1 ? `<span class="tb-ghost-badge">${groupRows.length}</span>` : "";
         ghost.innerHTML = `<table class="tb tb-ghost-tbl"><tbody></tbody></table>${badge}`;
-        ghost.querySelector("tbody").appendChild(clone);
+        const gtb = ghost.querySelector("tbody");
+        // 選択行を全部重ねて表示＝「複数掴んでる」のが分かる（多すぎる時は12行まで）
+        groupRows.slice(0, 12).forEach((r) => {
+          const c = r.cloneNode(true);
+          c.classList.remove("tb-ph", "tb-sel");
+          [...c.children].forEach((td, i) => { td.style.width = widths[i] + "px"; });
+          gtb.appendChild(c);
+        });
         document.body.appendChild(ghost);
-        rowsArr().forEach((tr) => { if (groupSet.has(+tr.dataset.id)) tr.classList.add("tb-ph"); }); // 選択行＝影ギャップ
+        groupRows.forEach((r) => r.classList.add("tb-ph")); // 選択行＝影ギャップ
         document.body.classList.add("tb-dragging-body");
       };
       const moveBlock = (beforeNode) => {
@@ -304,7 +311,7 @@ function wireDrag(root, rerender) {
           if (Math.abs(ev.clientY - startY) <= 4 && Math.abs(ev.clientX - startX) <= 4) return;
           moved = true; begin();
         }
-        ghost.style.top = (ev.clientY - grabY) + "px"; // カーソル追従（縦）
+        ghost.style.top = (ev.clientY - grabY - groupOffset) + "px"; // 掴んだ行がカーソル下に来るよう調整
         // 落下位置: 選択外の行の中点で判定
         let target = null;
         for (const tr of rowsArr()) {
@@ -419,12 +426,13 @@ function css() {
   .tb-selclear:hover{border-color:${C.fill};color:${C.fill}}
   .tb-ghost-badge{position:absolute;top:-8px;right:-8px;min-width:20px;height:20px;border-radius:10px;background:${C.over};color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 5px;box-shadow:0 2px 6px rgba(0,0,0,.3)}
   /* 元の場所＝ギャップ: 文字も枠も無く、ただ柔らかい影が落ちているだけに見せる */
-  .tb tbody tr.tb-ph td{background:rgba(20,30,50,.05)!important;border-bottom-color:transparent!important;box-shadow:inset 0 7px 9px -7px rgba(20,30,50,.5),inset 0 -7px 9px -7px rgba(20,30,50,.5)}
-  .tb tbody tr.tb-ph td > *{visibility:hidden}
+  .tb tbody tr.tb-ph td{background:rgba(20,30,50,.05)!important;color:transparent!important;border-bottom-color:transparent!important;box-shadow:inset 0 7px 9px -7px rgba(20,30,50,.5),inset 0 -7px 9px -7px rgba(20,30,50,.5)}
+  .tb tbody tr.tb-ph td *{visibility:hidden}
   /* カーソル追従の浮きカード（ゴースト） */
   .tb-ghost{filter:drop-shadow(0 10px 24px rgba(20,30,50,.28));transform:scale(1.01);opacity:.97}
   .tb-ghost-tbl{border-collapse:collapse;table-layout:fixed;background:#fff;border:1px solid ${C.line};border-radius:9px;overflow:hidden}
   .tb-ghost-tbl td{padding:10px 12px;border-bottom:0;font-size:13px;vertical-align:middle}
+  .tb-ghost-tbl tr + tr td{border-top:1px solid ${C.line}}
   body.tb-dragging-body{cursor:grabbing}
   body.tb-dragging-body .tb tbody tr:hover{background:transparent}
   /* 着地ハイライト: ドロップ直後にジワっと色が戻る（落ちた先を見失わない） */
