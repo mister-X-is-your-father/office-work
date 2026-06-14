@@ -14,12 +14,14 @@ const HOUR = 3600;
 const MAX_SORTS = 5; // 組めるソート条件の上限（第1〜第5条件）
 const VKEY = (uid) => `ts.list.view.${uid ?? "anon"}`;
 function loadView(uid) {
-  const def = { sorts: [{ key: "due", dir: 1 }], manualMode: false, order: [], hideDone: true, proj: "", cat: "", qaWho: "", qaDue: "" };
+  // doneMode: "show"=完了も表示 / "today"=完了は隠すが今日の完了は残す / "hide"=完了を隠す
+  const def = { sorts: [{ key: "due", dir: 1 }], manualMode: false, order: [], doneMode: "hide", proj: "", cat: "", qaWho: "", qaDue: "" };
   try {
     const raw = JSON.parse(localStorage.getItem(VKEY(uid)) || "null");
     if (!raw) return { ...def };                       // 初回のみ既定（期限）
     const v = { ...def, ...raw };
     if (!Array.isArray(v.sorts)) v.sorts = [];          // 壊れてる時だけ空に（空配列=意図的な「条件なし」は保持）
+    if (raw.doneMode === undefined) { v.doneMode = raw.hideDone === false ? "show" : "hide"; delete v.hideDone; } // 旧 hideDone(bool) からの移行
     return v;
   } catch { return { ...def }; }
 }
@@ -74,7 +76,9 @@ export async function render(root) {
     due: dueISO(t), est: (t.time_estimate || 0) / HOUR, pct: t.percent_done || 0,
     done: !!t.done, status: statusOf(t),
   }));
-  if (V.hideDone) rows = rows.filter((r) => !r.done);
+  const doneToday = (t) => t.done && t.done_at && !t.done_at.startsWith("0001") && t.done_at.slice(0, 10) === today;
+  if (V.doneMode === "hide") rows = rows.filter((r) => !r.done);
+  else if (V.doneMode === "today") rows = rows.filter((r) => !r.done || doneToday(r.t));
   if (V.proj) rows = rows.filter((r) => String(r.pid) === V.proj);
   if (V.cat) rows = rows.filter((r) => (r.cat ? r.cat.title : "") === V.cat);
   // クイック絞り込み（担当＝自分/担当なし/自分＋担当なし、期限＝今日＋期限なし/1週間以内/1ヶ月以内）。本人ごとに保存。
@@ -134,7 +138,11 @@ export async function render(root) {
         ${V.sorts.length < MAX_SORTS ? `<select id="tb-addsort" class="tb-addsort">${addOpts}</select>` : `<span class="tb-sc-none">最大${MAX_SORTS}件</span>`}</span>
       <select id="tb-proj">${projOpts}</select>
       <select id="tb-cat">${catOpts}</select>
-      <label class="tb-chk"><input type="checkbox" id="tb-hd" ${V.hideDone ? "checked" : ""}> 完了を隠す</label>
+      <select id="tb-done" title="完了タスクの表示">
+        <option value="show" ${V.doneMode === "show" ? "selected" : ""}>完了も表示</option>
+        <option value="today" ${V.doneMode === "today" ? "selected" : ""}>完了を隠す（今日の完了は残す）</option>
+        <option value="hide" ${V.doneMode === "hide" ? "selected" : ""}>完了を隠す</option>
+      </select>
     </div>
     <div class="tb-quick">
       <span class="tb-ql">クイック絞り込み</span>
@@ -178,7 +186,7 @@ export async function render(root) {
       reRender();
     };
   });
-  root.querySelector("#tb-hd").onchange = (e) => { V.hideDone = e.target.checked; reRender(); };
+  root.querySelector("#tb-done").onchange = (e) => { V.doneMode = e.target.value; reRender(); };
   root.querySelector("#tb-add").onclick = () => openTaskForm({ onSaved: () => render(root) });
   // 条件を追加（最大5件・5件到達時はセレクト自体を出さない）。マイソート中なら組み合わせソートに切替
   const addSel = root.querySelector("#tb-addsort");
