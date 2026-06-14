@@ -13,6 +13,10 @@ const DOW = ["日", "月", "火", "水", "木", "金", "土"];
 const projColor = (id) => ["#3a86ff", "#2fa66b", "#b657d6", "#e5772d", "#0ea5e9", "#f5a623"][((id || 0) % 6 + 6) % 6];
 const initial = (name) => (name ? String(name).trim().slice(0, 1) : "?");
 
+// 再描画（編集後の reload 等）をまたいで保持する表示状態。既定はプロジェクト別。
+// これが無いと、タスク行/人別で編集→render し直すたびに既定モードへ戻ってしまう。
+const gview = { mode: "project", collapsed: new Set() };
+
 export async function render(root) {
   const { tasks, members, projects } = await load();
   const today = todayISO();
@@ -30,19 +34,29 @@ export async function render(root) {
   const timesById = new Map(timesArr.map(([t, p]) => [t.id, p]));
   const rangeByTask = new Map(tasks.map((t) => [t.id, taskRanges(t, plansById.get(t.id) || [], timesById.get(t.id) || [])]));
   const edges = dependencyEdges(tasks);
+  // プロジェクト=親タスク（related_tasks.subtask の親）。子→親 / 親集合 を作る（プロジェクト別レーン用）。
+  // 階層: ワークスペース(project_id) ＞ プロジェクト(親タスク) ＞ タスク。
+  const byIdAll = new Map(tasks.map((t) => [t.id, t]));
+  const parentOf = new Map();
+  const hasChild = new Set();
+  for (const t of tasks) {
+    for (const s of (((t.related_tasks || {}).subtask) || [])) {
+      if (byIdAll.has(s.id) && s.id !== t.id) { parentOf.set(s.id, t.id); hasChild.add(t.id); }
+    }
+  }
   const planByMember = sumByMemberDay(toMemberDayEntries(plansArr, "plan"));
   const actByMember = sumByMemberDay(toMemberDayEntries(timesArr, "time"));
 
   const state = {
-    mode: "task",
+    mode: gview.mode,            // 再描画をまたいで保持（編集後も今のモードを維持）
     hideDone: false,
     projects: new Set(projects.map((p) => p.id)),
     members: new Set(members.map((m) => m.id)),
-    collapsed: new Set(),
+    collapsed: gview.collapsed,  // 同一参照＝折りたたみも保持
   };
   const memberIdx = new Map(members.map((m, i) => [m.id, i]));
 
-  root.innerHTML = shell(projects, members, memberIdx);
+  root.innerHTML = shell(projects, members, memberIdx, state.mode);
   const head = root.querySelector("#gv-head");
   const rowsEl = root.querySelector("#gv-rows");
   const ganttEl = root.querySelector("#gv-gantt");
@@ -52,7 +66,8 @@ export async function render(root) {
       const cls = (a.weekend ? " weekend" : "") + (a.iso === today ? " today" : "");
       return `<div class="gh-day${cls}"><div class="dom">${+a.iso.slice(8)}</div><div class="dow">${DOW[a.dow]}</div></div>`;
     }).join("");
-    return `<div class="gh-corner">${state.mode === "task" ? "タスク" : "メンバー"} / 日付</div>${days}`;
+    const corner = state.mode === "task" ? "タスク" : state.mode === "member" ? "人別" : "プロジェクト";
+    return `<div class="gh-corner">${corner} / 日付</div>${days}`;
   }
 
   // タスク1行ぶんのバー領域HTML（予定バー＋実績バー）。taskId を data 属性に載せてドラッグで参照。
@@ -141,14 +156,14 @@ export async function render(root) {
       const cap = 8 * Math.max(1, weekdays);
       const pct = cap ? Math.round((winH / cap) * 100) : 0;
       const capCol = pct > 100 ? C.over : pct >= 70 ? C.amber : C.free;
-      const collapsed = state.collapsed.has(m.id);
+      const collapsed = state.collapsed.has("m" + m.id);
       // グループ日セル: 予定>8hの日を赤帯
       const gcells = scale.axis.map((a) => {
         const over = (dayMap[a.iso] || 0) > 8;
         return `<div class="cell${a.weekend ? " weekend" : ""}" style="${over ? `background:rgba(229,72,77,.14)` : ""}"></div>`;
       }).join("");
       html += `<div class="grp${collapsed ? " collapsed" : ""}" data-mid="${m.id}">
-        <div class="grp-label" data-toggle="${m.id}">
+        <div class="grp-label" data-toggle="m${m.id}">
           <span class="caret">▾</span>
           <span class="avatar" style="background:${member_color(idx)}">${esc(initial(m.name))}</span>
           <span class="grp-text">
@@ -181,6 +196,91 @@ export async function render(root) {
     overlays(0, null, null, ROW_H, rowOffset, false);
   }
 
+  // プロジェクト別レーン（人別レーンと同型）。プロジェクト=親タスク(related_tasks.subtask)。
+  // プロジェクト見出し＋配下に子タスク（日付順）。親に属さない単独タスクは「プロジェクトなし」へ。折りたたみ可。
+  function paintProjectMode() {
+    ganttEl.style.setProperty("--label-w", LABEL_W_P + "px");
+    head.innerHTML = gridHead(LABEL_W_P);
+    // ベースフィルタ（WS/担当/完了）。予定の有無は問わない＝プロジェクト構造を見せる。
+    const passBase = (t) => {
+      if (!state.projects.has(t.project_id)) return false;
+      const aids = (t.assignees || []).map((a) => a.id);
+      if (aids.length && !aids.some((id) => state.members.has(id))) return false;
+      if (state.hideDone && rangeByTask.get(t.id).percent >= 100) return false;
+      return true;
+    };
+    const isScheduled = (t) => {
+      const r = rangeByTask.get(t.id);
+      return !!r.planned.source && scale.intersects(r.planned.start, r.planned.end);
+    };
+    // バケット化: 子→親プロジェクトへ。プロジェクト配下は未予定でも表示／単独は予定ありのみ。
+    const buckets = new Map(); // pid(親タスクid or 0) -> [task]
+    for (const t of tasks) {
+      if (!passBase(t)) continue;
+      const pid = parentOf.has(t.id) ? parentOf.get(t.id) : (hasChild.has(t.id) ? t.id : 0);
+      if (pid === t.id) continue;            // 親タスク自身は見出し（行にしない）
+      if (pid === 0 && !isScheduled(t)) continue; // プロジェクトなしは予定ありのみ（未予定の単独で溢れさせない）
+      if (!buckets.has(pid)) buckets.set(pid, []);
+      buckets.get(pid).push(t);
+    }
+    // 並び: 名前付きプロジェクトをタイトル順 → 「プロジェクトなし」(0) は末尾。
+    const groups = [...buckets.entries()]
+      .map(([pid, items]) => ({ pid, title: pid ? ((byIdAll.get(pid) || {}).title || "（不明なプロジェクト）") : "（プロジェクトなし）", ws: pid ? (byIdAll.get(pid) || {}).project_id : null, items }))
+      .sort((a, b) => (a.pid === 0 ? 1 : b.pid === 0 ? -1 : a.title.localeCompare(b.title, "ja")));
+
+    let html = "", rowOffset = 0;
+    for (const g of groups) {
+      const items = g.items.slice().sort((a, b) => {
+        // 予定ありを開始日順で先頭、未予定は末尾へ。
+        const sa = rangeByTask.get(a.id).planned.start || "9999", sb = rangeByTask.get(b.id).planned.start || "9999";
+        return sa < sb ? -1 : sa > sb ? 1 : a.id - b.id;
+      });
+      const agg = items.reduce((s, t) => {
+        const r = rangeByTask.get(t.id);
+        s.est += r.estH; s.spent += r.spentH; s.plan += r.planned.h; return s;
+      }, { est: 0, spent: 0, plan: 0 });
+      const collapsed = state.collapsed.has("p" + g.pid);
+      const gcells = scale.axis.map((a) => `<div class="cell${a.weekend ? " weekend" : ""}"></div>`).join("");
+      const band = g.pid ? projColor(g.ws) : C.muted;
+      html += `<div class="grp${collapsed ? " collapsed" : ""}" data-pid="${g.pid}">
+        <div class="grp-label" data-toggle="p${g.pid}">
+          <span class="caret">▾</span>
+          <span class="pj-band" style="background:${band}"></span>
+          <span class="grp-text">
+            <span class="grp-top"><span class="grp-name">${esc(g.title)}</span>
+              <span class="grp-sub">${items.length}タスク</span></span>
+            <span class="grp-sub">見${fmtH(agg.est)}・実${fmtH(agg.spent)}・予${fmtH(agg.plan)}</span>
+          </span>
+        </div>
+        <div class="grp-cells">${gcells}</div>
+      </div>`;
+      rowOffset += GRP_H;
+      if (collapsed) continue;
+      for (const t of items) {
+        const r = rangeByTask.get(t.id);
+        const asg = (t.assignees || []);
+        const avs = asg.slice(0, 2).map((a) => {
+          const idx = memberIdx.get(a.id) ?? a.id;
+          return `<span class="ava" style="background:${member_color(idx)}">${esc(initial(a.name || a.username))}</span>`;
+        }).join("") + (asg.length > 2 ? `<span class="more">+${asg.length - 2}</span>` : "");
+        const noplan = !r.planned.source && !r.actual.start;
+        html += `<div class="row${r.over ? " delayed" : ""}${noplan ? " noplan" : ""}">
+          <div class="r-label r-label-sub">
+            <span class="r-text"><span class="r-name">${esc(t.title)}</span>
+              <span class="r-meta">${avs ? `<span class="av">${avs}</span>` : ""}
+                <span>見${fmtH(r.estH)}・実${fmtH(r.spentH)}・予${fmtH(r.planned.h)}</span>
+                ${r.over ? `<span class="r-flag">超過</span>` : ""}
+                ${noplan ? `<span class="r-noplan">予定なし</span>` : ""}</span></span>
+          </div>
+          ${barsHTML(r, t.id)}
+        </div>`;
+        rowOffset += ROW_H;
+      }
+    }
+    rowsEl.innerHTML = html || `<div class="empty">表示できるタスクがありません（窓: ${startISO}〜${scale.axis[WINDOW_DAYS - 1].iso}）。</div>`;
+    overlays(0, null, null, ROW_H, rowOffset, false);
+  }
+
   // 今日線（＋タスクモードのみ依存矢印SVG）
   function overlays(rowCount, rowIndexById, list, rowH, totalHeightPx, withDeps) {
     const totalH = totalHeightPx || rowCount * rowH;
@@ -210,12 +310,16 @@ export async function render(root) {
     }
   }
 
-  function paint() { state.mode === "task" ? paintTaskMode() : paintMemberMode(); }
+  function paint() {
+    if (state.mode === "task") paintTaskMode();
+    else if (state.mode === "member") paintMemberMode();
+    else paintProjectMode();
+  }
 
   // ── ツールバー配線 ──
   root.querySelectorAll("[data-mode]").forEach((b) => {
     b.onclick = () => {
-      state.mode = b.dataset.mode;
+      state.mode = gview.mode = b.dataset.mode;   // 選択モードを保持
       root.querySelectorAll("[data-mode]").forEach((x) => x.classList.toggle("on", x.dataset.mode === state.mode));
       paint();
     };
@@ -231,8 +335,8 @@ export async function render(root) {
   rowsEl.addEventListener("click", (e) => {
     const lbl = e.target.closest("[data-toggle]");
     if (!lbl) return;
-    const id = +lbl.dataset.toggle;
-    state.collapsed.has(id) ? state.collapsed.delete(id) : state.collapsed.add(id);
+    const key = lbl.dataset.toggle; // "m{memberId}" / "p{projectId}"（モード間の id 衝突回避）
+    state.collapsed.has(key) ? state.collapsed.delete(key) : state.collapsed.add(key);
     paint();
   });
 
@@ -325,19 +429,19 @@ function toggleSet(set, id, btn) {
   else { set.add(id); btn.setAttribute("aria-pressed", "true"); }
 }
 
-function shell(projects, members, memberIdx) {
+function shell(projects, members, memberIdx, mode) {
   const projChips = projects.map((p) =>
     `<button class="chip" data-proj="${p.id}" aria-pressed="true">${esc(p.title)}</button>`).join("");
   const memChips = members.map((m) =>
     `<button class="chip" data-mem="${m.id}" aria-pressed="true"><span class="dot" style="background:${member_color(memberIdx.get(m.id))}"></span>${esc(m.name)}</button>`).join("")
     || `<span style="font-size:11px;color:${C.muted}">担当者なし</span>`;
+  const seg = (m, label) => `<button data-mode="${m}"${mode === m ? ' class="on"' : ""}>${label}</button>`;
   return `
   <h1 class="vtitle">予実ガント <small>予定×実績 ・ 21日窓</small></h1>
   <div class="card gv">
     <div class="gv-toolbar">
       <div class="seg">
-        <button data-mode="task" class="on">タスク行</button>
-        <button data-mode="member">人別レーン</button>
+        ${seg("project", "プロジェクト別")}${seg("task", "タスク行")}${seg("member", "人別")}
       </div>
       <div class="tbg"><span class="tbl">ワークスペース</span><div class="chips">${projChips}</div></div>
       <div class="tbg"><span class="tbl">担当者</span><div class="chips">${memChips}</div></div>
@@ -394,6 +498,8 @@ function shell(projects, members, memberIdx) {
   .gv .r-meta .more{font-size:9px}
   .gv .r-meta .r-pj{padding:0 5px;border-radius:4px;background:${C.track}}
   .gv .r-flag{font-size:9px;font-weight:700;color:#fff;background:${C.over};padding:1px 5px;border-radius:4px}
+  .gv .r-noplan{font-size:9px;color:${C.muted};border:1px dashed ${C.line};padding:0 5px;border-radius:4px}
+  .gv .row.noplan .r-name{color:${C.muted};font-weight:500}
   .gv .r-cells{position:absolute;left:var(--label-w);top:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(${WINDOW_DAYS}, ${COL_W}px);pointer-events:none}
   .gv .cell{border-right:1px solid ${C.track}}
   .gv .cell.weekend{background:rgba(0,0,0,.012)}
@@ -422,6 +528,7 @@ function shell(projects, members, memberIdx) {
   .gv .grp .caret{font-size:10px;color:${C.muted};transition:transform .15s}
   .gv .grp.collapsed .caret{transform:rotate(-90deg)}
   .gv .avatar{width:30px;height:30px;border-radius:50%;color:#fff;font-size:13px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex:none}
+  .gv .pj-band{width:14px;height:30px;border-radius:4px;flex:none}
   .gv .grp-text{min-width:0;display:flex;flex-direction:column;gap:3px;flex:1}
   .gv .grp-top{display:flex;align-items:center;gap:8px}
   .gv .grp-name{font-size:14px;font-weight:700;white-space:nowrap}
