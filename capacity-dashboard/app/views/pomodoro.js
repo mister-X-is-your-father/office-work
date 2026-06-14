@@ -35,17 +35,26 @@ const dispMs = (s) => s.mode === "countup"
   ? (s.paused ? s.elapsedMs : Date.now() - s.startedAt)
   : (s.paused ? s.remainMs : s.endsAt - Date.now());
 
-// ── 表示スキン カタログ（8種）＋色・透明度カスタム（localStorage 永続・スキーマ変更なし） ──
+// ── 表示スキン カタログ（6種・各々が別の進捗メタファ＝形で差別化）＋色・透明度カスタム（localStorage 永続） ──
+// 円(ring)/数字(giant)/直線(bar)/離散(dots)/面積(fill)/成長(bloom) — 形そのものが違うので一目で区別できる。
 const DISP_KEY = "ts.pomo.disp";
 const SKINS = [
-  { key: "card", name: "標準" }, { key: "minimal", name: "ミニマル" },
-  { key: "bar", name: "バー" }, { key: "ring", name: "リング" },
-  { key: "segments", name: "セグメント" }, { key: "jumbo", name: "特大" },
-  { key: "compact", name: "コンパクト" }, { key: "dots", name: "ドット" },
+  { key: "ring",  name: "リング" },   // 円周がほどける
+  { key: "giant", name: "数字" },     // 巨大数字のみ（小窓で最強の視認性）
+  { key: "bar",   name: "バー" },     // 直線が伸びる
+  { key: "dots",  name: "ドット" },   // 粒で表す
+  { key: "fill",  name: "ゲージ" },   // 下から満ちる（面積）
+  { key: "bloom", name: "ブルーム" }, // 中心の円が育つ
 ];
+const SKIN_KEYS = new Set(SKINS.map((s) => s.key));
+// 旧8スキン → 新6スキンへの移行（保存済み設定を壊さない）
+const SKIN_MIGRATE = { card: "giant", minimal: "giant", jumbo: "giant", compact: "bar", segments: "dots" };
 function dispCfg() {
-  try { return { skin: "card", accent: "#3a86ff", opacity: 1, ...(JSON.parse(localStorage.getItem(DISP_KEY)) || {}) }; }
-  catch { return { skin: "card", accent: "#3a86ff", opacity: 1 }; }
+  let c;
+  try { c = { skin: "ring", accent: "#3a86ff", opacity: 1, ...(JSON.parse(localStorage.getItem(DISP_KEY)) || {}) }; }
+  catch { c = { skin: "ring", accent: "#3a86ff", opacity: 1 }; }
+  if (!SKIN_KEYS.has(c.skin)) c.skin = SKIN_MIGRATE[c.skin] || "ring";
+  return c;
 }
 function saveDispCfg(c) { try { localStorage.setItem(DISP_KEY, JSON.stringify(c)); } catch { /* noop */ } }
 
@@ -60,37 +69,53 @@ function progressOf(s) {
 
 // 表示エリアのHTML（インラインstyle＝PiPの別ドキュメントでもそのまま使える）。
 // c: { timeText, label, taskTitle, progress(0..1|null), accent }
+// progress: 0=開始 … 1=満了（経過の割合・どのスキンも「満ちていく」向き）／countup は null=非確定。
 function renderDisplay(skin, c) {
   const ac = c.accent || "#3a86ff", t = esc(c.timeText), lbl = esc(c.label || "");
   const pr = c.progress;
   const pct = pr == null ? 100 : Math.round(pr * 100);
   const num = (px, col) => `<div style="font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:1px;line-height:1;font-size:${px}px${col ? `;color:${col}` : ""}">${t}</div>`;
-  const task = c.taskTitle ? `<div style="font-size:11px;opacity:.65;max-width:96%;margin:5px auto 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.taskTitle)}</div>` : "";
+  const cap = (txt, mt = 5) => txt ? `<div style="font-size:10.5px;opacity:.6;margin-top:${mt}px">${txt}</div>` : "";
+  const task = c.taskTitle ? `<div style="font-size:11px;opacity:.6;max-width:96%;margin:6px auto 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.taskTitle)}</div>` : "";
   const track = "rgba(127,135,150,.22)";
   switch (skin) {
-    case "minimal":
-      return `<div style="text-align:center;padding:8px 0">${num(48)}</div>`;
-    case "jumbo":
-      return `<div style="text-align:center;padding:10px 0">${num(66, ac)}${task}</div>`;
+    // 巨大数字: 進捗バー無し・テキスト主体（小窓でも一番読める）
+    case "giant":
+      return `<div style="text-align:center;padding:10px 0">${num(60, ac)}${cap(lbl, 7)}${task}</div>`;
+    // 線形バー: 太い直線が伸びる（円と直交＝混同しない）
     case "bar":
-      return `<div style="padding:4px 0">
-        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px"><span style="font-size:11px;opacity:.65">${lbl}</span>${num(30)}</div>
-        <div style="height:9px;border-radius:6px;background:${track};overflow:hidden"><div style="height:100%;width:${pct}%;background:${ac};border-radius:6px;transition:width .5s"></div></div>${task}</div>`;
-    case "compact":
-      return `<div style="display:flex;align-items:center;gap:11px;padding:2px 0">${num(26)}
-        <div style="flex:1"><div style="font-size:10px;opacity:.65;margin-bottom:4px">${lbl}</div>
-        <div style="height:6px;border-radius:5px;background:${track};overflow:hidden"><div style="height:100%;width:${pct}%;background:${ac};border-radius:5px;transition:width .5s"></div></div></div></div>`;
-    case "segments": {
-      const n = 12, on = pr == null ? n : Math.round(pr * n);
-      const segs = Array.from({ length: n }, (_, i) => `<div style="flex:1;height:11px;border-radius:2px;background:${i < on ? ac : track}"></div>`).join("");
-      return `<div style="padding:4px 0"><div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px"><span style="font-size:11px;opacity:.65">${lbl}</span>${num(28)}</div><div style="display:flex;gap:3px">${segs}</div>${task}</div>`;
-    }
+      return `<div style="padding:6px 0">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px"><span style="font-size:11px;opacity:.6">${lbl}</span>${num(30)}</div>
+        <div style="height:14px;border-radius:8px;background:${track};overflow:hidden"><div style="height:100%;width:${pct}%;background:${ac};border-radius:8px;transition:width .5s"></div></div>${task}</div>`;
+    // 離散ドット: 粒が点いていく（連続リングと別物に見える）
     case "dots": {
-      const n = 10, on = pr == null ? n : Math.round(pr * n);
-      const dots = Array.from({ length: n }, (_, i) => `<span style="width:9px;height:9px;border-radius:50%;background:${i < on ? ac : track}"></span>`).join("");
-      return `<div style="text-align:center;padding:4px 0">${num(32)}<div style="display:flex;gap:6px;justify-content:center;margin-top:9px">${dots}</div>${task}</div>`;
+      const n = 12, on = pr == null ? n : Math.round(pr * n);
+      const dots = Array.from({ length: n }, (_, i) => `<span style="width:11px;height:11px;border-radius:50%;background:${i < on ? ac : track};transition:background .4s"></span>`).join("");
+      return `<div style="text-align:center;padding:6px 0">${num(30)}<div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:184px;margin:12px auto 0">${dots}</div>${cap(lbl, 8)}${task}</div>`;
     }
-    case "ring": {
+    // ゲージ: バッテリー型・下から満ちる（面積メタファ・残り減少系と逆向きで識別容易）
+    case "fill": {
+      const h = pr == null ? 100 : Math.max(0, Math.min(100, pct));
+      return `<div style="display:flex;align-items:center;gap:15px;padding:6px 4px">
+        <div style="position:relative;width:48px;height:84px;border:3px solid ${track};border-radius:11px;overflow:hidden;flex:none;background:rgba(127,135,150,.06)">
+          <div style="position:absolute;left:0;right:0;bottom:0;height:${h}%;background:${ac};transition:height .5s"></div>
+        </div>
+        <div style="flex:1;text-align:left;min-width:0">${num(32)}${cap(lbl)}</div>
+      </div>${task}`;
+    }
+    // ブルーム: 中心の円が育つ（面積比＝√で半径を出す。唯一の"絵"的スキン）
+    case "bloom": {
+      const R = 47, r = pr == null ? R * 0.55 : Math.max(4, R * Math.sqrt(Math.max(0, Math.min(1, pr))));
+      return `<div style="text-align:center;padding:2px 0">
+        <svg width="120" height="96" viewBox="0 0 120 96">
+          <circle cx="60" cy="48" r="${R}" fill="none" stroke="${track}" stroke-width="2" stroke-dasharray="3 5"/>
+          <circle cx="60" cy="48" r="${r.toFixed(1)}" fill="${ac}" style="transition:r .6s ease-out"/>
+        </svg>
+        ${num(26)}${cap(lbl, 4)}${task}</div>`;
+    }
+    // リング: 円周がほどける（王道）
+    case "ring":
+    default: {
       const R = 46, CIRC = 2 * Math.PI * R, off = pr == null ? 0 : CIRC * (1 - pr);
       const prog = pr == null
         ? `<circle cx="60" cy="60" r="${R}" fill="none" stroke="${ac}" stroke-width="9" stroke-linecap="round" stroke-dasharray="5 9"/>`
@@ -98,12 +123,33 @@ function renderDisplay(skin, c) {
       return `<div style="display:flex;flex-direction:column;align-items:center;padding:4px 0">
         <div style="position:relative;width:120px;height:120px">
           <svg width="120" height="120" viewBox="0 0 120 120" style="transform:rotate(-90deg)"><circle cx="60" cy="60" r="${R}" fill="none" stroke="${track}" stroke-width="9"/>${prog}</svg>
-          <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">${num(24)}<div style="font-size:10px;opacity:.65;margin-top:3px">${lbl}</div></div>
+          <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">${num(24)}<div style="font-size:10px;opacity:.6;margin-top:3px">${lbl}</div></div>
         </div>${task}</div>`;
     }
-    case "card":
-    default:
-      return `<div style="text-align:center;padding:6px 0">${num(40, ac)}${task}</div>`;
+  }
+}
+
+// 設定パネルのカード用ミニサムネ（各スキンの"形"を小さく再現・アクセント色は即反映）。サンプル進捗62%。
+function skinThumb(skin, ac) {
+  const tr = "rgba(127,135,150,.28)";
+  switch (skin) {
+    case "giant":
+      return `<div style="font-weight:800;font-variant-numeric:tabular-nums;font-size:21px;letter-spacing:.5px;color:${ac}">12:34</div>`;
+    case "bar":
+      return `<div style="width:80px"><div style="font-size:11px;font-weight:700;text-align:center;margin-bottom:6px">12:34</div><div style="height:9px;border-radius:5px;background:${tr};overflow:hidden"><div style="height:100%;width:62%;background:${ac};border-radius:5px"></div></div></div>`;
+    case "dots": {
+      const dots = Array.from({ length: 8 }, (_, i) => `<span style="width:7px;height:7px;border-radius:50%;background:${i < 5 ? ac : tr}"></span>`).join("");
+      return `<div style="text-align:center"><div style="font-size:11px;font-weight:700;margin-bottom:6px">12:34</div><div style="display:flex;gap:5px;justify-content:center">${dots}</div></div>`;
+    }
+    case "fill":
+      return `<div style="display:flex;align-items:center;gap:8px"><div style="position:relative;width:20px;height:34px;border:2px solid ${tr};border-radius:5px;overflow:hidden"><div style="position:absolute;left:0;right:0;bottom:0;height:62%;background:${ac}"></div></div><span style="font-size:13px;font-weight:800;font-variant-numeric:tabular-nums">12:34</span></div>`;
+    case "bloom":
+      return `<svg width="46" height="38" viewBox="0 0 46 38"><circle cx="23" cy="19" r="16" fill="none" stroke="${tr}" stroke-width="1.5" stroke-dasharray="2 4"/><circle cx="23" cy="19" r="11" fill="${ac}"/></svg>`;
+    case "ring":
+    default: {
+      const R = 15, C = 2 * Math.PI * R, off = C * (1 - 0.62);
+      return `<svg width="42" height="42" viewBox="0 0 42 42" style="transform:rotate(-90deg)"><circle cx="21" cy="21" r="${R}" fill="none" stroke="${tr}" stroke-width="4"/><circle cx="21" cy="21" r="${R}" fill="none" stroke="${ac}" stroke-width="4" stroke-linecap="round" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"/></svg>`;
+    }
   }
 }
 
@@ -281,30 +327,47 @@ export function mountPomodoro(topbar) {
     c.style.setProperty("--pm-accent", cfg.accent || "#3a86ff");
   }
 
-  // 表示カスタムのピッカー（スキン8種＋色＋透明度）。実行カード下にトグル表示。
+  // 表示カスタムのピッカー（スキン6種＝ライブプレビュー・カード／色スウォッチ／透明度）。実行カード下にトグル表示。
+  const PRESET_COLORS = ["#3a86ff", "#2fa66b", "#e5484d", "#f5a524", "#8b5cf6", "#1d2430"];
   function buildPicker(panel) {
     const cfg = dispCfg();
+    const eqc = (a, b) => (a || "").toLowerCase() === (b || "").toLowerCase();
     panel.innerHTML = `
-      <div class="pm-pk-grid">
-        ${SKINS.map((sk) => `<button class="pm-pk-chip${cfg.skin === sk.key ? " on" : ""}" data-skin="${sk.key}">${esc(sk.name)}</button>`).join("")}
+      <div class="pm-pk-sec">スタイル</div>
+      <div class="pm-pk-grid" role="radiogroup" aria-label="表示スタイル">
+        ${SKINS.map((sk) => `<button class="pm-pk-card${cfg.skin === sk.key ? " on" : ""}" role="radio" aria-checked="${cfg.skin === sk.key}" data-skin="${sk.key}">
+          <span class="pm-pk-ck">✓</span>
+          <span class="pm-pk-th">${skinThumb(sk.key, cfg.accent)}</span>
+          <span class="pm-pk-nm">${esc(sk.name)}</span>
+        </button>`).join("")}
       </div>
-      <div class="pm-pk-row">
-        <label>色 <input type="color" id="pm-pk-color" value="${esc(cfg.accent)}"></label>
-        <label class="pm-pk-op">透明度 <input type="range" id="pm-pk-op" min="0.3" max="1" step="0.05" value="${cfg.opacity}"></label>
-      </div>`;
+      <div class="pm-pk-sec">色</div>
+      <div class="pm-pk-sw">
+        ${PRESET_COLORS.map((col) => `<button class="pm-pk-swatch${eqc(cfg.accent, col) ? " on" : ""}" data-color="${col}" style="background:${col}" title="${col}"></button>`).join("")}
+        <label class="pm-pk-cust" title="自由な色を選ぶ">＋<input type="color" id="pm-pk-color" value="${esc(cfg.accent)}"></label>
+      </div>
+      <div class="pm-pk-sec">透明度 <span class="pm-pk-opval" id="pm-pk-opval">${Math.round((cfg.opacity ?? 1) * 100)}%</span></div>
+      <input type="range" id="pm-pk-op" class="pm-pk-range" min="0.3" max="1" step="0.05" value="${cfg.opacity}">`;
     const apply = (patch) => {
       const next = { ...dispCfg(), ...patch };
       saveDispCfg(next);
       applyCardStyle(card, next);
-      // 即時プレビュー（次tickでも更新されるが待たずに反映）
+      // 本体ウィジェットへ即時プレビュー（次tickを待たずに反映）
       const s = st.get(); const disp = card.querySelector("#pm-disp");
       if (s && disp) {
         const label = { focus: "🍅 集中中", break: "☕ 休憩中", countdown: "⏲ カウントダウン", countup: "⏱ 計測中" }[s.mode];
         disp.innerHTML = renderDisplay(next.skin, { timeText: mmss(dispMs(s)), label, taskTitle: s.taskTitle, progress: progressOf(s), accent: next.accent });
       }
-      panel.querySelectorAll(".pm-pk-chip").forEach((b) => b.classList.toggle("on", b.dataset.skin === next.skin));
+      panel.querySelectorAll(".pm-pk-card").forEach((b) => { const on = b.dataset.skin === next.skin; b.classList.toggle("on", on); b.setAttribute("aria-checked", on); });
+      if (patch.accent != null) {                       // 色変更はサムネとスウォッチ選択も更新
+        panel.querySelectorAll(".pm-pk-card").forEach((b) => { b.querySelector(".pm-pk-th").innerHTML = skinThumb(b.dataset.skin, next.accent); });
+        panel.querySelectorAll(".pm-pk-swatch").forEach((b) => b.classList.toggle("on", eqc(b.dataset.color, next.accent)));
+        const ci = panel.querySelector("#pm-pk-color"); if (ci) ci.value = next.accent;
+      }
+      if (patch.opacity != null) { const ov = panel.querySelector("#pm-pk-opval"); if (ov) ov.textContent = Math.round(next.opacity * 100) + "%"; }
     };
-    panel.querySelectorAll(".pm-pk-chip").forEach((b) => { b.onclick = () => apply({ skin: b.dataset.skin }); });
+    panel.querySelectorAll(".pm-pk-card").forEach((b) => { b.onclick = () => apply({ skin: b.dataset.skin }); });
+    panel.querySelectorAll(".pm-pk-swatch").forEach((b) => { b.onclick = () => apply({ accent: b.dataset.color }); });
     panel.querySelector("#pm-pk-color").oninput = (e) => apply({ accent: e.target.value });
     panel.querySelector("#pm-pk-op").oninput = (e) => apply({ opacity: +e.target.value });
   }
@@ -418,7 +481,7 @@ export function mountPomodoro(topbar) {
       return;
     }
     try {
-      // ring/jumbo も収まるサイズ。スキンは選択中のものを反映。
+      // ring/bloom も収まるサイズ。スキンは選択中のものを反映。
       pip = await window.documentPictureInPicture.requestWindow({ width: 248, height: 210 });
     } catch (e) {
       notifyDone("最前面表示を開けません", e.message || "");
@@ -481,15 +544,25 @@ function ensureStyle() {
   .pm-gear:hover{opacity:1}
   .pm-picker{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
   .pm-picker[hidden]{display:none}
-  .pm-pk-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
-  .pm-pk-chip{font:inherit;font-size:10.5px;padding:6px 0;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--muted);cursor:pointer;white-space:nowrap}
-  .pm-pk-chip:hover{border-color:#b9d4ff;color:var(--ink)}
-  .pm-pk-chip.on{border-color:var(--fill);background:#f3f8ff;color:var(--fill);font-weight:700}
-  .pm-pk-row{display:flex;align-items:center;gap:14px;margin-top:10px;font-size:11px;color:var(--muted)}
-  .pm-pk-row label{display:flex;align-items:center;gap:6px}
-  .pm-pk-row input[type=color]{width:30px;height:24px;border:1px solid var(--line);border-radius:6px;background:#fff;padding:0;cursor:pointer}
-  .pm-pk-op{flex:1}
-  .pm-pk-op input[type=range]{flex:1;width:100%;accent-color:var(--fill)}
+  .pm-pk-sec{font-size:10.5px;font-weight:700;color:var(--muted);letter-spacing:.03em;margin:0 0 7px;display:flex;align-items:center;justify-content:space-between}
+  .pm-pk-grid + .pm-pk-sec,.pm-pk-sw + .pm-pk-sec,.pm-pk-range + .pm-pk-sec{margin-top:14px}
+  .pm-pk-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+  .pm-pk-card{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;min-height:76px;padding:10px 6px;border:1.5px solid var(--line);border-radius:10px;background:#fff;cursor:pointer;transition:border-color .12s,background .12s}
+  .pm-pk-card:hover{border-color:#b9d4ff}
+  .pm-pk-card.on{border-color:var(--pm-accent,var(--fill));background:#f6faff}
+  .pm-pk-th{display:flex;align-items:center;justify-content:center;height:42px}
+  .pm-pk-nm{font-size:10.5px;color:var(--muted);font-weight:600}
+  .pm-pk-card.on .pm-pk-nm{color:var(--ink)}
+  .pm-pk-ck{position:absolute;top:5px;right:7px;font-size:10px;font-weight:800;color:var(--pm-accent,var(--fill));opacity:0;transition:opacity .12s}
+  .pm-pk-card.on .pm-pk-ck{opacity:1}
+  .pm-pk-sw{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .pm-pk-swatch{width:24px;height:24px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px var(--line);cursor:pointer;padding:0}
+  .pm-pk-swatch:hover{box-shadow:0 0 0 1px var(--line-strong,#cad1dc)}
+  .pm-pk-swatch.on{box-shadow:0 0 0 2px var(--pm-accent,var(--fill))}
+  .pm-pk-cust{position:relative;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;border:1px dashed var(--line-strong,#cad1dc);color:var(--muted);font-size:13px;line-height:1;cursor:pointer}
+  .pm-pk-cust input[type=color]{position:absolute;inset:0;width:100%;height:100%;opacity:0;border:0;padding:0;cursor:pointer}
+  .pm-pk-range{width:100%;margin:0;accent-color:var(--pm-accent,var(--fill))}
+  .pm-pk-opval{font-weight:700;color:var(--ink)}
   .pm-time{font-size:42px;font-weight:800;text-align:center;font-variant-numeric:tabular-nums;letter-spacing:1px;margin:6px 0 2px;color:#1d2430}
   .pm-time.brk{color:#2fa66b}
   .pm-task{font-size:12px;color:var(--muted);text-align:center;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
