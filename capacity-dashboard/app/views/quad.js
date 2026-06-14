@@ -1,4 +1,4 @@
-// 四象限（アイゼンハワー・マトリクス。TickTickプレミアムの同等機能）。
+// 優先度マトリクス（アイゼンハワー・マトリクス。TickTickプレミアムの同等機能）。
 // 分類ルール（画面の凡例にも明記）:
 //   重要 = 重要度が「高」以上（priority>=3） / 緊急 = 期限が today+N日以内 or 超過（期限なし=緊急でない）。
 //   N（緊急しきい値）は画面で変更可・localStorage に個人保存（ts.quad.urgentDays・既定3日）。
@@ -10,7 +10,8 @@ import { openTaskForm } from "./taskform.js";
 
 const HOUR = 3600;
 const DAYS_KEY = "ts.quad.urgentDays";
-let FILTER = { who: "" };
+const WHO_KEY = "ts.quad.who"; // 担当者フィルタ選択を個人保存（再読込でも維持）
+let FILTER = { who: (() => { try { return localStorage.getItem(WHO_KEY) || ""; } catch { return ""; } })() };
 const urgentDays = () => Math.max(1, +(localStorage.getItem(DAYS_KEY) || 3));
 
 const addDays = (iso, n) => {
@@ -29,14 +30,14 @@ function quadOf(t, today, days) {
 }
 
 const QUADS = {
-  q1: { num: "Ⅰ", title: "重要 × 緊急", sub: "今すぐやる", color: "#e5484d", tint: "#fdf3f3" },
-  q2: { num: "Ⅱ", title: "重要 × 緊急でない", sub: "計画してやる", color: "#3a86ff", tint: "#f1f7ff" },
-  q3: { num: "Ⅲ", title: "重要でない × 緊急", sub: "任せる・さばく", color: "#f5872e", tint: "#fdf8f1" },
-  q4: { num: "Ⅳ", title: "重要でない × 緊急でない", sub: "やらない・あとで", color: "#8a93a0", tint: "#f6f7f9" },
+  q1: { title: "重要 × 緊急", sub: "今すぐやる", color: "#e5484d", tint: "#fdf3f3" },
+  q2: { title: "重要 × 緊急でない", sub: "計画してやる", color: "#3a86ff", tint: "#f1f7ff" },
+  q3: { title: "重要でない × 緊急", sub: "任せる・さばく・減らす", color: "#f5872e", tint: "#fdf8f1" },
+  q4: { title: "重要でない × 緊急でない", sub: "やらない・あとで", color: "#8a93a0", tint: "#f6f7f9" },
 };
 
 export async function render(root) {
-  const { tasks, projects, members } = await load();
+  const { tasks, projects, members, me } = await load();
   const today = todayISO();
   const days = urgentDays();
   let rows = (tasks || []).filter((t) => !t.done);
@@ -45,28 +46,37 @@ export async function render(root) {
   for (const t of rows) byQuad[quadOf(t, today, days)].push(t);
   for (const k of Object.keys(byQuad)) byQuad[k].sort((a, b) => (dueISO(a) || "9999").localeCompare(dueISO(b) || "9999"));
 
-  const whoOpts = `<option value="">全員</option>` + (members || []).map((m) =>
-    `<option value="${m.id}"${String(m.id) === FILTER.who ? " selected" : ""}>${esc(m.name || m.username)}</option>`).join("");
+  // 担当者切替=ワンタップのボタンタブ（全員 / 自分 / 各メンバー）。選択は localStorage 永続。
+  const meId = me && me.id;
+  const meMember = (members || []).find((m) => m.id === meId);
+  const others = (members || []).filter((m) => m.id !== meId);
+  const whoBtn = (val, label, color) => {
+    const on = String(FILTER.who) === String(val) ? " on" : "";
+    const av = color ? `<i class="qd-who-av" style="background:${color}">${esc(label[0] || "?")}</i>` : "";
+    return `<button class="qd-who-b${on}" data-who="${esc(String(val))}">${av}${esc(label)}</button>`;
+  };
+  const whoTabs = whoBtn("", "全員", "")
+    + (meMember ? whoBtn(meMember.id, "自分", member_color(meMember.id)) : "")
+    + others.map((m) => whoBtn(m.id, m.name || m.username, member_color(m.id))).join("");
   const dayOpts = [1, 2, 3, 5, 7].map((n) =>
     `<option value="${n}"${n === days ? " selected" : ""}>${n}日</option>`).join("");
 
   root.innerHTML = `
     <style>${css()}</style>
-    <h1 class="vtitle">四象限 <small>アイゼンハワー・マトリクス ・ ドラッグで再分類</small></h1>
+    <h1 class="vtitle">優先度マトリクス <small>アイゼンハワー・マトリクス ・ ドラッグで再分類</small></h1>
     <div class="qd-tools">
       <span class="qd-rule">📐 <b>重要</b> = 重要度が「高」以上 ／ <b>緊急</b> = 期限が
         <select id="qd-days">${dayOpts}</select>
         以内 または超過（期限なし＝緊急でない）</span>
-      <select id="qd-who">${whoOpts}</select>
+      <div class="qd-who" id="qd-who">${whoTabs}</div>
     </div>
     <div class="qd-matrix">
       <div class="qd-corner"></div>
       <div class="qd-ax-x"><span>◀ 緊急（期限が近い）</span><span>緊急でない ▶</span></div>
-      <div class="qd-ax-y"><span>重要（重要度 高〜） ▲</span><span>▼ 重要でない</span></div>
+      <div class="qd-ax-y"><span>▲ 重要（重要度 高〜）</span><span>重要でない ▼</span></div>
       <div class="qd-grid">
         ${Object.entries(QUADS).map(([k, q]) => `
           <div class="qd-cell" data-q="${k}" style="background:${q.tint};border-top-color:${q.color}">
-            <span class="qd-num" style="color:${q.color}">${q.num}</span>
             <div class="qd-h" style="color:${q.color}">${q.title} <span class="qd-sub">${q.sub} ・ ${byQuad[k].length}件</span></div>
             <div class="qd-list">${byQuad[k].map((t) => cardHtml(t, projects, today)).join("") || `<div class="qd-empty">なし</div>`}</div>
           </div>`).join("")}
@@ -75,7 +85,9 @@ export async function render(root) {
     <div class="qd-hint">ドラッグでの移動はタスクを書き換えます: 重要側へ=重要度を高に ／ 緊急側へ=期限を今日に ／ 緊急でない側へ=期限を＋7日（取り消しは移動直後の「元に戻す」）。</div>
     <div class="qd-undo" id="qd-undo" hidden></div>`;
 
-  root.querySelector("#qd-who").onchange = (e) => { FILTER.who = e.target.value; render(root); };
+  root.querySelectorAll("#qd-who [data-who]").forEach((b) => {
+    b.onclick = () => { FILTER.who = b.dataset.who; try { localStorage.setItem(WHO_KEY, FILTER.who); } catch {} render(root); };
+  });
   root.querySelector("#qd-days").onchange = (e) => { localStorage.setItem(DAYS_KEY, e.target.value); render(root); };
   root.querySelectorAll(".qd-card").forEach((el) => {
     el.onclick = () => openTaskForm({ taskId: +el.dataset.id, onSaved: async () => { invalidate(); await load(); render(root); } });
@@ -146,7 +158,12 @@ function css() {
   .qd-rule{font-size:12px;color:${C.muted};background:#fff;border:1px solid ${C.line};border-radius:9px;padding:7px 12px}
   .qd-rule b{color:${C.ink}}
   .qd-tools select{font:inherit;font-size:12.5px;padding:4px 8px;border:1px solid ${C.line};border-radius:7px;background:#fff}
-  .qd-tools > select{margin-left:auto;padding:6px 10px;font-size:13px}
+  .qd-who{margin-left:auto;display:flex;flex-wrap:wrap;gap:5px;justify-content:flex-end}
+  .qd-who-b{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:12.5px;padding:5px 11px;border:1px solid ${C.line};border-radius:18px;background:#fff;color:${C.muted};cursor:pointer;transition:border-color .12s,background .12s,color .12s}
+  .qd-who-b:hover{border-color:#cfd9e6}
+  .qd-who-b.on{background:${C.fill};border-color:${C.fill};color:#fff;font-weight:700}
+  .qd-who-av{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:50%;color:#fff;font-size:9px;font-weight:700}
+  .qd-who-b.on .qd-who-av{box-shadow:0 0 0 1.5px #fff}
   .qd-matrix{display:grid;grid-template-columns:24px 1fr;grid-template-rows:22px 1fr;gap:0 6px}
   .qd-ax-x{grid-column:2;grid-row:1;display:flex;justify-content:space-around;align-items:center;font-size:11px;font-weight:700;color:${C.muted};letter-spacing:.5px}
   .qd-ax-y{grid-column:1;grid-row:2;display:flex;flex-direction:column;justify-content:space-around;align-items:center;font-size:11px;font-weight:700;color:${C.muted};letter-spacing:.5px}
@@ -157,7 +174,6 @@ function css() {
   .qd-cell{position:relative;padding:13px 15px;min-height:190px;border:1px solid ${C.line};border-top:3px solid;border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
   .qd-cell .qd-list{flex:1;max-height:300px;overflow-y:auto} /* 1区画が膨らんでも他区画が間延びしない */
   .qd-cell.over{outline:2px dashed ${C.fill};outline-offset:-2px}
-  .qd-num{position:absolute;right:10px;bottom:2px;font-size:64px;font-weight:800;opacity:.08;line-height:1;pointer-events:none}
   .qd-h{font-size:13px;font-weight:800;margin-bottom:9px}
   .qd-sub{font-size:11px;color:${C.muted};font-weight:500}
   .qd-list{display:flex;flex-direction:column;gap:7px;position:relative}

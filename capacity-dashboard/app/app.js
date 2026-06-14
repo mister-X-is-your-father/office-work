@@ -7,7 +7,7 @@ const ROUTES = {
   smart:    { label: "スマートリスト", grp: "総合",   mod: "./views/smartlist.js" },
   today:    { label: "稼働予定",      grp: "今日",   mod: "./views/today.js" },
   triage:   { label: "トリアージ",    grp: "今日",   mod: "./views/triage.js" },
-  quad:     { label: "四象限",        grp: "今日",   mod: "./views/quad.js" },
+  quad:     { label: "優先度マトリクス", grp: "今日",   mod: "./views/quad.js" },
   habits:   { label: "習慣",          grp: "今日",   mod: "./views/habits.js" },
   review:   { label: "レビュー",      grp: "今日",   mod: "./views/review.js" },
   availability:{ label: "残容量",     grp: "今日",   mod: "./views/availability.js" },
