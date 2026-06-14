@@ -15,8 +15,9 @@
 <link rel="icon" type="image/svg+xml" href="./icons/icon.svg">
 <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
 <style>
-  :root{--bg:#f6f7f9;--card:#fff;--ink:#1d2430;--muted:#6b7480;--line:#e6e9ee;--track:#eef1f5;
+  :root{--bg:#e8ecf3;--card:#fff;--ink:#1d2430;--muted:#6b7480;--line:#dde2ea;--line-strong:#cad1dc;--track:#eef1f5;
     --fill:#3a86ff;--over:#e5484d;--free:#2fa66b;--full:#8a93a0;
+    --shadow:0 1px 2px rgba(20,30,50,.05),0 6px 18px rgba(20,30,50,.07);
     --font:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);
@@ -48,10 +49,10 @@
   /* shared view bits */
   .vtitle{font-size:20px;margin:0 0 16px}.vtitle small{font-weight:500;color:var(--muted);font-size:13px;margin-left:8px}
   .kpis{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
-  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px;min-width:120px;box-shadow:0 1px 2px rgba(20,30,50,.04)}
+  .kpi{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px;min-width:120px;box-shadow:0 1px 3px rgba(20,30,50,.06)}
   .kpi .l{font-size:11px;color:var(--muted);margin-bottom:5px}.kpi .v{font-size:20px;font-weight:700;line-height:1}.kpi .v small{font-size:12px;color:var(--muted);font-weight:600}
   .kpi.free .v{color:var(--free)}.kpi.over .v{color:var(--over)}.kpi.under .v{color:var(--free)}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 2px 10px rgba(20,30,50,.05);overflow:hidden}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);overflow:hidden}
   .legend{display:flex;gap:16px;margin-top:12px;font-size:11.5px;color:var(--muted)}
   .legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px}
   .loading{padding:40px;text-align:center;color:var(--muted)}
