@@ -76,7 +76,7 @@ export async function render(root) {
           ${sel("sl-prio", state.filter.prio, [["", "重要度：すべて"], ["top", "MUST"], ["high", "高+"], ["mid", "中+"], ["none", "なし"]])}
           ${sel("sl-cat", catTitle, [["", "分類：すべて"], ...catChoices(labels)])}
           ${sel("sl-ws", String(state.filter.ws || ""), [["", "WS：すべて"], ...(projects || []).map((p) => [String(p.id), p.title])])}
-          ${sel("sl-status", state.filter.status, [["undone", "未完了"], ["todo", "未着手"], ["doing", "進行中"], ["done", "完了"], ["", "すべて"]])}
+          ${sel("sl-status", state.filter.status, [["undone", "未完了"], ["todo", "未着手"], ["doing", "進行中"], ["waiting", "連絡待ち"], ["done", "完了"], ["", "すべて"]])}
           <button id="sl-flag" class="sl-flagbtn${state.filter.flag ? " on" : ""}" title="フラグ付きのみ">🚩</button>
           ${state.sel === "adhoc" ? `<button id="sl-save" class="sl-save">＋ 保存</button>` : ""}
           ${typeof state.sel === "number" ? `<button id="sl-del" class="sl-del">このリストを削除</button>` : ""}
@@ -107,7 +107,7 @@ function currentViewName(state, lists) {
   return cv ? `🔖 ${cv.name}` : "ビュー";
 }
 
-const catChoices = (labels) => [...new Set((labels || []).map((l) => l.title).filter((t) => t && t !== "レビュー"))]
+const catChoices = (labels) => [...new Set((labels || []).map((l) => l.title).filter((t) => t && t !== "レビュー" && t !== "連絡待ち"))]
   .sort((a, b) => a.localeCompare(b, "ja")).map((t) => [t, t]);
 
 function sel(id, val, opts) {

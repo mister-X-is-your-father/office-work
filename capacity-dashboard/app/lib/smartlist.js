@@ -15,6 +15,7 @@ export const BUILTIN_VIEWS = [
   { key: "important", label: "重要", icon: "⭐", filter: { prio: "high", status: "undone" } },
   { key: "flagged", label: "フラグ", icon: "🚩", filter: { flag: true, status: "undone" } },
   { key: "nodate", label: "期限なし", icon: "📭", filter: { due: "none", status: "undone" } },
+  { key: "waiting", label: "連絡待ち", icon: "⏳", filter: { status: "waiting" } },
   { key: "completed", label: "完了", icon: "✓", filter: { status: "done" } },
 ];
 
@@ -26,11 +27,14 @@ export const next7End = (todayISO) => shiftISO(todayISO, 6);
 export function taskMatches(t, f, ctx) {
   const due = hasDate(t.due_date) ? dateOnly(t.due_date) : "";
   const done = !!t.done, started = hasStarted(t), prio = t.priority || 0;
+  // 連絡待ち（GTD Waiting For）= 予約ラベル。kinds 非依存方針なので文字列はここでインライン判定。
+  const waiting = (t.labels || []).some((l) => (l.title || "") === "連絡待ち");
 
   if (f.status === "done" && !done) return false;
   if (f.status === "undone" && done) return false;
-  if (f.status === "todo" && (done || started)) return false;
-  if (f.status === "doing" && (done || !started)) return false;
+  if (f.status === "waiting" && (done || !waiting)) return false;
+  if (f.status === "todo" && (done || started || waiting)) return false;     // 連絡待ちは todo に含めない
+  if (f.status === "doing" && (done || !started || waiting)) return false;    // 連絡待ちは doing に含めない（待ち優先）
 
   if (f.due === "today" && due !== ctx.today) return false;
   if (f.due === "overdue" && !(due && due < ctx.today && !done)) return false;

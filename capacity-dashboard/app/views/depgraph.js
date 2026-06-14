@@ -83,6 +83,6 @@ function css() {
   .dg-meta{display:flex;align-items:center;gap:6px}
   .dg-ava{width:17px;height:17px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:9.5px;font-weight:700;flex:none}
   .dg-st{font-size:10px;font-weight:600;border-radius:20px;padding:0 7px}
-  .dg-st.todo{color:${C.muted};background:#f0f1f4}.dg-st.doing{color:${C.fill};background:#eaf2ff}.dg-st.done{color:${C.free};background:#eaf7ef}
+  .dg-st.todo{color:${C.muted};background:#f0f1f4}.dg-st.doing{color:${C.fill};background:#eaf2ff}.dg-st.waiting{color:#9a6a00;background:#fbf0d6}.dg-st.done{color:${C.free};background:#eaf7ef}
   .dg-pct{margin-left:auto;font-size:10.5px;color:${C.muted};font-variant-numeric:tabular-nums}`;
 }

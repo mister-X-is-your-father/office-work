@@ -3,8 +3,8 @@
 // 共有データ（DB）は一切変えないので、誰がどう並べても他メンバーの見え方に影響しない（衝突しない）。
 import { load, invalidate, projectName, isAiUser } from "../lib/store.js";
 import { savePresets } from "../lib/exec.js";
-import { updateTask, deleteTask, addAssignee, removeAssignee, addTaskLabel, removeTaskLabel, createLabel } from "../lib/api.js";
-import { PRIO, prioBucket, kindOf, isReviewTask, categoryLabels, categoryColor, REVIEW_LABEL, statusOf, STATUS } from "../lib/kinds.js";
+import { updateTask, deleteTask, addAssignee, removeAssignee, addTaskLabel, removeTaskLabel, createLabel, setTaskWaiting } from "../lib/api.js";
+import { PRIO, prioBucket, kindOf, isReviewTask, categoryLabels, categoryColor, REVIEW_LABEL, WAITING_LABEL, statusOf, STATUS } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 import { shiftISO } from "../lib/capacity.js";
 import { openTaskForm, ensureStyle as ensureFormStyle } from "./taskform.js";
@@ -408,16 +408,22 @@ function openStatusMenu(chipEl, id, tasks, root) {
   // 進行中＝着手時刻(started_at)を立てるだけ／未着手＝下ろすだけ（%には触らない=0のまま）。
   // 完了だけが唯一 %=100 を意味する（その逆＝未完了化で % を 0 に戻す）。
   const set = (key) => {
+    // 連絡待ち（GTD Waiting For）= 予約ラベルで表現。未完了化＋ラベル付与だけ（%・着手時刻は触らない）。
+    if (key === "waiting") {
+      Promise.all([updateTask(id, { done: false }), setTaskWaiting(t, true)]).then(reload).catch(() => {});
+      return;
+    }
     // 進行中: %は触らない（=既存値維持）。ただし完了(100%)からの復帰だけは100を0へ戻す（完了=100の逆）。
     const keepPct = (t.done || t.percent_done >= 100) ? 0 : (t.percent_done || 0);
     const patch = key === "done" ? { done: true, percent_done: 100 }
       : key === "doing" ? { done: false, percent_done: keepPct, started_at: new Date().toISOString() }
       : { done: false, percent_done: 0, started_at: null };
-    updateTask(id, patch).then(reload).catch(() => {});
+    // 連絡待ち以外に変えるときは待ちラベルを外す。
+    Promise.all([updateTask(id, patch), setTaskWaiting(t, false)]).then(reload).catch(() => {});
   };
   const it = (key, label) => ({ label, check: cur === key, on: () => set(key) });
   const r = chipEl.getBoundingClientRect();
-  openMenu(r.left, r.bottom + 4, [it("todo", "未着手"), it("doing", "進行中"), it("done", "完了")]);
+  openMenu(r.left, r.bottom + 4, [it("todo", "未着手"), it("doing", "進行中"), it("waiting", "連絡待ち"), it("done", "完了")]);
 }
 
 // 重要度のワンクリック変更（なし/低/中/高/MUST）。Vikunja priority を直接更新。
@@ -516,7 +522,7 @@ function openCategoryMenu(chipEl, id, tasks, labels, root) {
   const t = (tasks || []).find((x) => x.id === id); if (!t) return;
   if (!t.labels) t.labels = [];
   let dirty = false;
-  const cats = (labels || []).filter((l) => l.title !== REVIEW_LABEL);
+  const cats = (labels || []).filter((l) => l.title !== REVIEW_LABEL && l.title !== WAITING_LABEL);
   const build = () => {
     const items = cats.map((l) => ({
       label: l.title,
@@ -793,7 +799,7 @@ function css() {
   .tb-bar i{display:block;height:100%;background:${C.fill}}
   .tb-pct{font-size:11.5px;color:${C.muted};font-variant-numeric:tabular-nums}
   .tb-st{font-size:11px;font-weight:600;border-radius:20px;padding:2px 9px;white-space:nowrap}
-  .tb-st.todo{color:${C.muted};background:#f0f1f4}.tb-st.doing{color:${C.fill};background:#eaf2ff}.tb-st.done{color:${C.free};background:#eaf7ef}
+  .tb-st.todo{color:${C.muted};background:#f0f1f4}.tb-st.doing{color:${C.fill};background:#eaf2ff}.tb-st.waiting{color:#9a6a00;background:#fbf0d6}.tb-st.done{color:${C.free};background:#eaf7ef}
   /* ステータスはワンクリックで変更（押せる見た目＝枠＋▾＋hover） */
   .tb-stbtn{font-family:inherit;cursor:pointer;border:1px solid rgba(20,30,50,.12);display:inline-flex;align-items:center;gap:4px;transition:box-shadow .12s,border-color .12s}
   .tb-stbtn:hover{border-color:rgba(20,30,50,.24);box-shadow:0 1px 4px rgba(20,30,50,.16)}

@@ -7,9 +7,13 @@ import { hasStarted } from "./capacity.js"; // capacity.js は import 0 の末�
 export const REVIEW_LABEL = "レビュー";
 export const isReviewTask = (t) => (t.labels || []).some((l) => (l.title || "") === REVIEW_LABEL);
 
+// 連絡待ち（GTD の Waiting For）= 予約ラベルでステータスを表現（done/started 由来の状態とは別軸）。
+export const WAITING_LABEL = "連絡待ち";
+export const isWaiting = (t) => (t.labels || []).some((l) => (l.title || "") === WAITING_LABEL);
+
 // 分類 = ユーザー定義のラベル（例: エンジニア依頼/定常業務）。kind 軸とは独立。
-// 「レビュー」ラベルだけは kind 判定（上）に使う予約語なので分類からは除外する。
-export const categoryLabels = (t) => (t.labels || []).filter((l) => (l.title || "") !== REVIEW_LABEL);
+// 予約ラベル（レビュー・連絡待ち）は kind/ステータス判定に使うので分類からは除外する。
+export const categoryLabels = (t) => (t.labels || []).filter((l) => { const x = l.title || ""; return x !== REVIEW_LABEL && x !== WAITING_LABEL; });
 const CAT_PAL = ["#3a86ff", "#2fa66b", "#b657d6", "#e5772d", "#0ea5e9", "#f5a623", "#ef476f", "#14b8a6"];
 export const categoryColor = (label) => CAT_PAL[(label && label.id ? label.id : 0) % CAT_PAL.length];
 
@@ -48,10 +52,11 @@ export function prioBucket(p) { const n = p || 0; return n >= 4 ? 4 : n; }
 
 // ステータスの単一定義（SSoT）。キー=todo/doing/done、label=表示、rank=並び順（未着手<進行中<完了）。
 export const STATUS = {
-  todo:  { label: "未着手", rank: 0 },
-  doing: { label: "進行中", rank: 1 },
-  done:  { label: "完了",   rank: 2 },
+  todo:    { label: "未着手",   rank: 0 },
+  doing:   { label: "進行中",   rank: 1 },
+  waiting: { label: "連絡待ち", rank: 2 },
+  done:    { label: "完了",     rank: 3 },
 };
-// task → ステータスキー（done 優先 → 着手済み(hasStarted) → todo）。判定ロジックの SSoT。
-// hasStarted = started_at あり or percent_done>0（capacity.js）。
-export const statusOf = (t) => (t.done ? "done" : (hasStarted(t) ? "doing" : "todo"));
+// task → ステータスキー（done 優先 → 連絡待ち → 着手済み(hasStarted) → todo）。判定ロジックの SSoT。
+// hasStarted = started_at あり or percent_done>0（capacity.js）。連絡待ちは予約ラベルで判定。
+export const statusOf = (t) => (t.done ? "done" : (isWaiting(t) ? "waiting" : (hasStarted(t) ? "doing" : "todo")));

@@ -82,6 +82,6 @@ function css() {
   .ol-ava{width:19px;height:19px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:10px;font-weight:700}
   .ol-due{font-size:11.5px;color:${C.muted};font-variant-numeric:tabular-nums}
   .ol-st{font-size:10.5px;font-weight:600;border-radius:20px;padding:1px 8px}
-  .ol-st.todo{color:${C.muted};background:#f0f1f4}.ol-st.doing{color:${C.fill};background:#eaf2ff}.ol-st.done{color:${C.free};background:#eaf7ef}
+  .ol-st.todo{color:${C.muted};background:#f0f1f4}.ol-st.doing{color:${C.fill};background:#eaf2ff}.ol-st.waiting{color:#9a6a00;background:#fbf0d6}.ol-st.done{color:${C.free};background:#eaf7ef}
   .ol-empty{padding:30px;text-align:center;color:${C.muted}}`;
 }

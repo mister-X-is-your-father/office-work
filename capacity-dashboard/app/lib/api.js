@@ -134,6 +134,23 @@ export async function removeAssignee(taskId, userId) { return req(`/tasks/${task
 export async function addRelation(taskId, otherTaskId, kind = "related") { return req(`/tasks/${taskId}/relations`, { method: "PUT", body: { other_task_id: otherTaskId, relation_kind: kind } }); }
 export async function removeRelation(taskId, kind, otherTaskId) { return req(`/tasks/${taskId}/relations/${kind}/${otherTaskId}`, { method: "DELETE" }); }
 
+// 連絡待ち（GTD Waiting For）= 予約ラベル。付け外しでステータスを切り替える。
+export const WAITING_LABEL = "連絡待ち";
+let _waitingLabelId = null;
+export async function ensureWaitingLabel() {
+  if (_waitingLabelId) return _waitingLabelId;
+  const labels = await getLabels();
+  const found = (labels || []).find((l) => l.title === WAITING_LABEL);
+  _waitingLabelId = found ? found.id : (await createLabel(WAITING_LABEL)).id;
+  return _waitingLabelId;
+}
+// task の「連絡待ち」ラベルを on/off（現在の付与状況は task.labels から判定）。
+export async function setTaskWaiting(task, on) {
+  const cur = (task.labels || []).find((l) => (l.title || "") === WAITING_LABEL);
+  if (on && !cur) { await addTaskLabel(task.id, await ensureWaitingLabel()); }
+  else if (!on && cur) { await removeTaskLabel(task.id, cur.id); }
+}
+
 export const REVIEW_LABEL = "レビュー";
 let _reviewLabelId = null;
 export async function ensureReviewLabel() {

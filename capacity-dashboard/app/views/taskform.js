@@ -5,7 +5,7 @@
 // 階層: ワークスペース(=API project) ＞ プロジェクト(=親タスク) ＞ タスク。
 import { load, invalidate, TEMPLATE_WS } from "../lib/store.js";
 import { getTask, createTaskInProject, createProject, updateTask, addAssignee, removeAssignee, addRelation, removeRelation, createLabel, addTaskLabel, removeTaskLabel, getAttachments, uploadAttachments, deleteAttachment, fetchAttachmentBlob } from "../lib/api.js";
-import { categoryLabels, REVIEW_LABEL } from "../lib/kinds.js";
+import { categoryLabels, REVIEW_LABEL, WAITING_LABEL } from "../lib/kinds.js";
 import { C, esc, fmtH } from "../lib/ui.js";
 // 共有フォーム部品（スマート日付/[資料][ゴール]規約/時間ステッパー/資料チップ）は lib/form.js に集約
 import { parseSmartDate, fmtDisplay, fmtDisplayDow, splitMeta, joinMeta, hourInputHtml, wireHourInput, docChipsHtml, wireDocChips, checksHtml, wireChecks, attachDatePicker } from "../lib/form.js";
@@ -70,7 +70,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
   // 分類 = レビュー以外のラベル（単一運用）。レビューは種別(kind)の別軸なので分類とは独立に共存できる。
   const curCat = task ? (categoryLabels(task)[0] || null) : null;
   const curCatTitle = curCat ? curCat.title : "";
-  const catChoices = (labels || []).filter((l) => l.title !== REVIEW_LABEL);
+  const catChoices = (labels || []).filter((l) => l.title !== REVIEW_LABEL && l.title !== WAITING_LABEL);
   // 先行タスク（依存元）= related_tasks.follows（このタスクが follows する＝その前に完了が必要）
   const curPreds = (task && task.related_tasks && (task.related_tasks.follows || [])) || [];
   const taskById = new Map((tasks || []).map((t) => [t.id, t]));
