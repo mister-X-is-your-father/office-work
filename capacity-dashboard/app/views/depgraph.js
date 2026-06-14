@@ -1,10 +1,10 @@
 // 依存関係グラフ／クリティカルパス（mock65 相当・実データ）。dependencyEdges + depLayers。
 import { load } from "../lib/store.js";
 import { dependencyEdges, depLayers } from "../lib/capacity.js";
+import { statusOf, STATUS } from "../lib/kinds.js";
 import { C, esc, member_color } from "../lib/ui.js";
 
 const COLW = 196, ROWH = 92, NW = 168, NH = 66, PAD = 14;
-const stateOf = (t) => (t.done ? "done" : ((t.percent_done || 0) > 0 ? "doing" : "todo"));
 
 export async function render(root) {
   const { tasks } = await load();
@@ -57,14 +57,14 @@ export async function render(root) {
 }
 
 function nodeHtml(t, p, crit) {
-  const st = stateOf(t);
+  const st = statusOf(t);
   const who = (t.assignees || [])[0];
   const wn = who ? (who.name || who.username) : "";
   return `<div class="dg-node ${st} ${crit ? "crit" : ""}" style="left:${p.x}px;top:${p.y}px;width:${NW}px;height:${NH}px">
     <div class="dg-t">${esc(t.title)}</div>
     <div class="dg-meta">
       ${who ? `<span class="dg-ava" style="background:${member_color(who.id)}">${esc((wn[0] || "?"))}</span>` : ""}
-      <span class="dg-st ${st}">${st === "done" ? "完了" : st === "doing" ? "進行中" : "未着手"}</span>
+      <span class="dg-st ${st}">${STATUS[st].label}</span>
       <span class="dg-pct">${t.percent_done || 0}%</span>
     </div>
   </div>`;

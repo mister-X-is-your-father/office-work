@@ -114,7 +114,7 @@ function kpiStrip(states) {
   return `<div class="ck-strip">
     <div class="ck-kpi"><div class="l">チーム稼働</div><div class="v">${fmtH(usedAll)}<small>/ ${cap}h ・ ${rate}%</small></div><div class="ck-bar"><i style="width:${rate}%;background:#3a86ff"></i><i style="flex:1;background:#eef1f5"></i></div></div>
     <div class="ck-kpi over ${overH > 0 ? "" : "zero"}"><div class="l">要再配分（超過）</div><div class="v">${overH > 0 ? "+" + fmtH(overH) : "なし"}</div><div class="s">${overMembers.length ? esc(overMembers.map((m) => m.member.name || m.member.username).join("・")) + " → 移し先を検討" : "全員が容量内"}</div></div>
-    <div class="ck-kpi"><div class="l">今日の最優先</div><div class="v">${mustN}<small>件 ・ ${fmtH(mustH)}</small></div><div class="s">落とせない最優先（赤）。当日追加 ${adhocN}件</div></div>
+    <div class="ck-kpi"><div class="l">今日のMUST</div><div class="v">${mustN}<small>件 ・ ${fmtH(mustH)}</small></div><div class="s">落とせないMUST（赤）。当日追加 ${adhocN}件</div></div>
     <div class="ck-kpi"><div class="l">固定枠（会議・定例）</div><div class="v">${fmtH(fixedH)}</div><div class="s">会議${fmtH(mtgH)}・定例${fmtH(rtnH)}／実作業に使えるのは ${fmtH(realH)}</div></div>
   </div>`;
 }
@@ -122,7 +122,7 @@ function kpiStrip(states) {
 function legend() {
   return `<div class="ck-legend">
     <span class="grp"><span class="glbl">重要度</span>
-      <span class="it"><i class="sw" style="background:${PRIO[4].c}"></i>最優先</span>
+      <span class="it"><i class="sw" style="background:${PRIO[4].c}"></i>MUST</span>
       <span class="it"><i class="sw" style="background:${PRIO[3].c}"></i>高</span>
       <span class="it"><i class="sw" style="background:${PRIO[2].c}"></i>中</span>
       <span class="it"><i class="sw" style="background:${PRIO[1].c}"></i>低</span></span>

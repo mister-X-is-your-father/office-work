@@ -1,6 +1,6 @@
 // スマートリスト（TickTick の Smart List 相当・ブラッシュアップ）。純関数＋組み込みビュー定義。
 // フィルタはローカル保存（localStorage・スキーマ変更なし）。タスク判定は taskMatches。
-import { shiftISO, dateOnly, hasDate } from "./capacity.js";
+import { shiftISO, dateOnly, hasDate, hasStarted } from "./capacity.js";
 
 // フィルタの既定（空＝条件なし）
 export const EMPTY_FILTER = { text: "", due: "", prio: "", ws: 0, status: "undone", flag: false };
@@ -15,7 +15,7 @@ export const BUILTIN_VIEWS = [
   { key: "important", label: "重要", icon: "⭐", filter: { prio: "high", status: "undone" } },
   { key: "flagged", label: "フラグ", icon: "🚩", filter: { flag: true, status: "undone" } },
   { key: "nodate", label: "期限なし", icon: "📭", filter: { due: "none", status: "undone" } },
-  { key: "completed", label: "完了済み", icon: "✓", filter: { status: "done" } },
+  { key: "completed", label: "完了", icon: "✓", filter: { status: "done" } },
 ];
 
 // 「次の7日間」= 今日を含む7日（today .. today+6）
@@ -25,12 +25,12 @@ export const next7End = (todayISO) => shiftISO(todayISO, 6);
 // ctx: { today, next7 }（next7=next7End(today)）
 export function taskMatches(t, f, ctx) {
   const due = hasDate(t.due_date) ? dateOnly(t.due_date) : "";
-  const done = !!t.done, pct = t.percent_done || 0, prio = t.priority || 0;
+  const done = !!t.done, started = hasStarted(t), prio = t.priority || 0;
 
   if (f.status === "done" && !done) return false;
   if (f.status === "undone" && done) return false;
-  if (f.status === "todo" && (done || pct > 0)) return false;
-  if (f.status === "doing" && (done || pct <= 0)) return false;
+  if (f.status === "todo" && (done || started)) return false;
+  if (f.status === "doing" && (done || !started)) return false;
 
   if (f.due === "today" && due !== ctx.today) return false;
   if (f.due === "overdue" && !(due && due < ctx.today && !done)) return false;

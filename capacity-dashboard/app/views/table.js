@@ -4,7 +4,7 @@
 import { load, invalidate, projectName, isAiUser } from "../lib/store.js";
 import { savePresets } from "../lib/exec.js";
 import { updateTask, deleteTask, addAssignee, removeAssignee, addTaskLabel, removeTaskLabel, createLabel } from "../lib/api.js";
-import { PRIO, prioBucket, kindOf, isReviewTask, categoryLabels, categoryColor, REVIEW_LABEL } from "../lib/kinds.js";
+import { PRIO, prioBucket, kindOf, isReviewTask, categoryLabels, categoryColor, REVIEW_LABEL, statusOf, STATUS } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 import { shiftISO } from "../lib/capacity.js";
 import { openTaskForm, ensureStyle as ensureFormStyle } from "./taskform.js";
@@ -36,7 +36,6 @@ let selectedIds = new Set(); // まとめて移動用の複数選択（マイソ
 let anchorId = null;         // Shift範囲選択の起点
 let lastRoot = null, docDeselectWired = false; // 余白クリック解除（document全体・右側の地まで拾う）
 
-const stateOf = (t) => (t.done ? "完了" : ((t.percent_done || 0) > 0 ? "進行中" : "未着手"));
 const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(0, 10) : "");
 
 // 軸の定義: ラベル＋比較関数（行 r を受ける）＋セレクトで選んだ時の既定の向き。
@@ -53,7 +52,7 @@ const AXES = {
   created: { label: "追加日",    cmp: (a, b) => String(a.t.created || "").localeCompare(String(b.t.created || "")), dir: -1 },
   title:   { label: "タスク名",  cmp: (a, b) => a.title.localeCompare(b.title, "ja"), dir: 1 },
 };
-const stateRank = (r) => (r.done ? 2 : (r.pct > 0 ? 1 : 0)); // 未着手→進行中→完了
+const stateRank = (r) => STATUS[r.status].rank; // 未着手→進行中→完了（kinds.js が SSoT）
 const tieBreak = (a, b) => (a.due || "9999").localeCompare(b.due || "9999") || a.t.id - b.t.id;
 
 export async function render(root) {
@@ -73,7 +72,7 @@ export async function render(root) {
     proj: projectName(projects, t.project_id), pid: t.project_id,
     review: isReviewTask(t), prio: prioBucket(t.priority), cat: categoryLabels(t)[0] || null,
     due: dueISO(t), est: (t.time_estimate || 0) / HOUR, pct: t.percent_done || 0,
-    done: !!t.done, state: stateOf(t),
+    done: !!t.done, status: statusOf(t),
   }));
   if (V.hideDone) rows = rows.filter((r) => !r.done);
   if (V.proj) rows = rows.filter((r) => String(r.pid) === V.proj);
@@ -333,7 +332,7 @@ function openMenu(x, y, items, opts = {}) {
       if (it.input === "date") return `<label class="tb-ctx-inp">${esc(it.label)}<input type="date" data-i="${i}" value="${it.value || ""}"></label>`;
       if (it.input === "hmgrid") return `<div class="tb-hg">`
         + `<div class="tb-hg-cols">`
-        + `<div class="tb-hg-col"><span class="tb-hg-lbl">時間</span><div class="tb-hg-wrap">${it.hOpts.map((v) => `<button class="tb-hg-b${v === it.h ? " on" : ""}" data-i="${i}" data-hk="${v}">${v}</button>`).join("")}</div></div>`
+        + `<div class="tb-hg-col h"><span class="tb-hg-lbl">時間</span><div class="tb-hg-wrap">${it.hOpts.map((v) => `<button class="tb-hg-b${v === it.h ? " on" : ""}" data-i="${i}" data-hk="${v}">${v}</button>`).join("")}</div></div>`
         + `<div class="tb-hg-col"><span class="tb-hg-lbl">分</span><div class="tb-hg-min">${it.mOpts.map((v) => `<button class="tb-hg-b${v === it.m ? " on" : ""}" data-i="${i}" data-mk="${v}">${v}</button>`).join("")}</div></div>`
         + `</div>`
         + `<div class="tb-hg-direct"><span class="tb-hg-lbl">直接(h)</span>${hourInputHtml("tb-est-direct", { value: it.hv ?? "" })}<button class="tb-hg-apply" data-i="${i}">適用</button></div>`
@@ -373,6 +372,9 @@ function openMenu(x, y, items, opts = {}) {
       dEl.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); applyHours(); } });
       applyEl.onclick = (e) => { e.stopPropagation(); applyHours(); };
     }
+    // 時間カラムは縦スクロール。開いた／再描画時に選択中が見える位置へ寄せる。
+    const onH = m.querySelector(".tb-hg-wrap .tb-hg-b.on");
+    if (onH) onH.scrollIntoView({ block: "nearest" });
   };
   document.body.appendChild(m);
   _ctxEl = m;
@@ -382,7 +384,8 @@ function openMenu(x, y, items, opts = {}) {
   m.style.top = Math.max(6, Math.min(y, window.innerHeight - mh - 8)) + "px";
   const onDown = (ev) => { if (!m.contains(ev.target)) closeRowMenu(); };
   const onKey = (ev) => { if (ev.key === "Escape") closeRowMenu(); };
-  const onScroll = () => closeRowMenu();
+  // ページ側スクロールでは閉じるが、メニュー内（時間グリッド等）のスクロールでは閉じない。
+  const onScroll = (ev) => { if (ev && ev.target && ev.target.nodeType === 1 && m.contains(ev.target)) return; closeRowMenu(); };
   setTimeout(() => { document.addEventListener("pointerdown", onDown, true); document.addEventListener("keydown", onKey); window.addEventListener("scroll", onScroll, true); window.addEventListener("resize", onScroll); }, 0);
   _ctxCleanup = () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); window.removeEventListener("scroll", onScroll, true); window.removeEventListener("resize", onScroll); if (opts.onClose) opts.onClose(); };
 }
@@ -391,12 +394,17 @@ function openMenu(x, y, items, opts = {}) {
 function openStatusMenu(chipEl, id, tasks, root) {
   closeRowMenu();
   const t = (tasks || []).find((x) => x.id === id); if (!t) return;
-  const cur = t.done ? "done" : ((t.percent_done || 0) > 0 ? "doing" : "todo");
+  const cur = statusOf(t);
   const reload = () => { invalidate(); render(root); };
+  // ステータスと進捗%は別軸。状態変更は%を捏造しない。
+  // 進行中＝着手時刻(started_at)を立てるだけ／未着手＝下ろすだけ（%には触らない=0のまま）。
+  // 完了だけが唯一 %=100 を意味する（その逆＝未完了化で % を 0 に戻す）。
   const set = (key) => {
+    // 進行中: %は触らない（=既存値維持）。ただし完了(100%)からの復帰だけは100を0へ戻す（完了=100の逆）。
+    const keepPct = (t.done || t.percent_done >= 100) ? 0 : (t.percent_done || 0);
     const patch = key === "done" ? { done: true, percent_done: 100 }
-      : key === "doing" ? { done: false, percent_done: (t.percent_done > 0 && t.percent_done < 100) ? t.percent_done : 50 }
-      : { done: false, percent_done: 0 };
+      : key === "doing" ? { done: false, percent_done: keepPct, started_at: new Date().toISOString() }
+      : { done: false, percent_done: 0, started_at: null };
     updateTask(id, patch).then(reload).catch(() => {});
   };
   const it = (key, label) => ({ label, check: cur === key, on: () => set(key) });
@@ -404,14 +412,14 @@ function openStatusMenu(chipEl, id, tasks, root) {
   openMenu(r.left, r.bottom + 4, [it("todo", "未着手"), it("doing", "進行中"), it("done", "完了")]);
 }
 
-// 重要度のワンクリック変更（なし/低/中/高/最優先）。Vikunja priority を直接更新。
+// 重要度のワンクリック変更（なし/低/中/高/MUST）。Vikunja priority を直接更新。
 // ※「優先度」＝重要度×緊急度の合成（四象限/トリアージで算出）。この列は素の重要度。
 function openPrioMenu(chipEl, id, tasks, root) {
   closeRowMenu();
   const t = (tasks || []).find((x) => x.id === id); if (!t) return;
   const cur = t.priority || 0;
   const reload = () => { invalidate(); render(root); };
-  const opts = [[0, "なし"], [1, "低"], [2, "中"], [3, "高"], [4, "最優先"]];
+  const opts = [[0, "なし"], [1, "低"], [2, "中"], [3, "高"], [4, "MUST"]];
   const items = opts.map(([v, label]) => ({ label, check: (cur >= 4 ? 4 : cur) === v, on: () => updateTask(id, { priority: v }).then(reload).catch(() => {}) }));
   const r = chipEl.getBoundingClientRect();
   openMenu(r.left, r.bottom + 4, items);
@@ -662,7 +670,7 @@ function rowHtml(r, members, i, manual) {
   const dueCls = r.due && r.due < todayISO() && !r.done ? "over" : "";
   const dueBtn = `<button class="tb-cell tb-duebtn ${dueCls}" data-due="${id}" title="クリックで期限を変更">${r.due ? r.due.slice(5).replace("-", "/") : "—"}<span class="tb-cell-car">▾</span></button>`;
   const estBtn = `<button class="tb-cell tb-num tb-estbtn" data-est="${id}" title="クリックで見積を変更">${r.est ? fmtH(r.est) : "—"}<span class="tb-cell-car">▾</span></button>`;
-  const st = `<button class="tb-st tb-stbtn ${r.done ? "done" : (r.pct > 0 ? "doing" : "todo")}" data-st="${id}" title="クリックでステータス変更">${r.state}<span class="tb-st-car">▾</span></button>`;
+  const st = `<button class="tb-st tb-stbtn ${r.status}" data-st="${id}" title="クリックでステータス変更">${STATUS[r.status].label}<span class="tb-st-car">▾</span></button>`;
   return `<tr data-id="${id}" class="${manual ? "tb-draggable" : ""}${manual && selectedIds.has(id) ? " tb-sel" : ""}">
     <td class="tb-title">${esc(r.title)}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">🚩</span>` : ""}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">▶</button>` : ""}<div class="tb-sub">${esc(r.proj)}</div></td>
     <td>${whoBtn}</td>
@@ -731,10 +739,11 @@ function css() {
   .tb-ctx-unit{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:${C.muted}}
   .tb-ctx-unit input{width:66px;text-align:right}
   .tb-hg{display:flex;flex-direction:column;gap:8px;padding:8px 9px;min-width:0}
-  .tb-hg-cols{display:flex;gap:10px;align-items:flex-start}
-  .tb-hg-col{display:flex;flex-direction:column;gap:5px}
+  .tb-hg-cols{display:flex;gap:0;align-items:stretch}
+  .tb-hg-col{display:flex;flex-direction:column;gap:6px}
+  .tb-hg-col.h{padding-right:14px;border-right:1px solid ${C.line};margin-right:14px}
   .tb-hg-lbl{font-size:11px;color:${C.muted};font-weight:600}
-  .tb-hg-wrap{display:grid;grid-auto-flow:column;grid-template-rows:repeat(4,auto);gap:4px}
+  .tb-hg-wrap{display:flex;flex-direction:column;gap:4px;max-height:150px;overflow-y:auto;padding-right:6px;scrollbar-width:thin}
   .tb-hg-min{display:flex;flex-direction:column;gap:4px}
   .tb-hg-b{font:inherit;font-size:12px;width:30px;padding:4px 0;border:1px solid ${C.line};border-radius:6px;background:#fff;color:${C.ink};cursor:pointer;text-align:center}
   .tb-hg-b:hover{border-color:${C.fill};color:${C.fill}}
@@ -760,11 +769,12 @@ function css() {
   .tb th.sortable{cursor:pointer;user-select:none}.tb th.sortable:hover{color:${C.ink}}
   .tb-thord{font-size:9.5px;color:${C.fill};font-weight:700;background:#eaf2ff;border-radius:5px;padding:0 4px;vertical-align:1px}
   .tb td{padding:10px 12px;border-bottom:1px solid ${C.line};vertical-align:middle}
+  .tb th:last-child,.tb td:last-child{padding-right:20px}
   .tb tbody tr:hover{background:#f7fbff}
   .tb-title{font-weight:600;min-width:180px}
   .tb-sub{font-size:11px;color:${C.muted};font-weight:400;margin-top:2px}
   .tb-ava{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;color:#fff;font-size:10px;font-weight:700;margin-right:6px;vertical-align:-5px}
-  .tb-k{font-size:10.5px;color:${C.muted};border:1px solid ${C.line};border-radius:5px;padding:1px 6px}
+  .tb-k{font-size:10.5px;color:${C.muted};border:1px solid ${C.line};border-radius:5px;padding:1px 6px;white-space:nowrap}
   .tb-k.review{color:${C.fill};border-color:#cfe0ff}
   .tb-cat{font-size:10.5px;border:1px solid;border-radius:5px;padding:1px 7px;white-space:nowrap;font-weight:600}
   .tb-cat.none{color:${C.muted};border:0}
@@ -774,7 +784,7 @@ function css() {
   .tb-bar{display:inline-block;width:64px;height:7px;border-radius:5px;background:${C.track};overflow:hidden;vertical-align:middle;margin-right:7px}
   .tb-bar i{display:block;height:100%;background:${C.fill}}
   .tb-pct{font-size:11.5px;color:${C.muted};font-variant-numeric:tabular-nums}
-  .tb-st{font-size:11px;font-weight:600;border-radius:20px;padding:2px 9px}
+  .tb-st{font-size:11px;font-weight:600;border-radius:20px;padding:2px 9px;white-space:nowrap}
   .tb-st.todo{color:${C.muted};background:#f0f1f4}.tb-st.doing{color:${C.fill};background:#eaf2ff}.tb-st.done{color:${C.free};background:#eaf7ef}
   /* ステータスはワンクリックで変更（押せる見た目＝枠＋▾＋hover） */
   .tb-stbtn{font-family:inherit;cursor:pointer;border:1px solid rgba(20,30,50,.12);display:inline-flex;align-items:center;gap:4px;transition:box-shadow .12s,border-color .12s}

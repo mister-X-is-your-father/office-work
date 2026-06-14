@@ -27,7 +27,7 @@ export async function render(root) {
 }
 
 function cardHtml(t) {
-  const due = t.due ? `締切 ${t.due.slice(5)}${t.slack != null ? `（${t.slack <= 0 ? "超過/今日" : "あと" + t.slack + "日"}）` : ""}` : "締切なし";
+  const due = t.due ? `期限 ${t.due.slice(5)}${t.slack != null ? `（${t.slack <= 0 ? "超過/今日" : "あと" + t.slack + "日"}）` : ""}` : "期限なし";
   const pr = t.priority >= 4 ? `<span style="color:${C.over};font-weight:700">優先${t.priority}</span>` : `優先${t.priority}`;
   return `<div style="padding:11px 14px;border-bottom:1px solid ${C.line}">
     <div style="font-weight:600;font-size:13.5px">${esc(t.title)}</div>

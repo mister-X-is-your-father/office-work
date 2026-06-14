@@ -309,3 +309,47 @@ pkg/migration/20260613000000.go overrides 列追加（Sync・additive）
 ```
 v0.24.6 で S1(models+integrations green)→S2(隔離7011: overrides 作成/更新の往復)→本番 `leo-taskstation:0.24.6-fix9`（migration 自動・既存行は overrides=null）確認済み。
 入力UI: 時刻カレンダー([calendar.js](../app/views/calendar.js))の会議/定例ブロックをクリック→「この回だけ変更」モーダル（日付/開始時刻/所要・この回を休止・例外を解除。例外中は ✱＋破線枠）。
+
+---
+
+## フェーズ8: tasks.started_at（着手時刻 / 未着手↔進行中を percent_done と独立化）
+
+**背景**: 「未着手 / 進行中」をどこにも保存しておらず `percent_done` から逆算していた（0%=未着手 / 1-99%=進行中 / 100%=完了）。
+そのため「進行中にする」＝「%を非ゼロにする」しか手段がなく、UI が `percent_done=50` を**捏造**していた（ステータス操作が進捗%に
+影響＝設計上の歪み）。**ステータスと進捗%は別軸**にすべき、という要件（唯一の許容カップリングは「完了=100%」）。
+
+**解決**: `tasks` に `started_at`（着手時刻・nullable）を実カラムとして追加。`null`=未着手 / 非null=進行中。完了は `done` で別軸。
+SPA はステータス操作で **%を触らず** `started_at` だけを立て下げする（進行中=now / 未着手=null / 完了=done+100）。
+`start_date`（開始予定日）とは別物＝実際に着手した時刻。
+
+新規ファイル:
+```
+pkg/migration/20260614120000.go   (tasks に started_at 追加＋既存進行中=percent_done>0&未完了 を updated で backfill)
+```
+既存編集（`time_estimate` と同じ3箇所＝§3-1 と同型）:
+- `pkg/models/tasks.go`:
+  - (a) Task struct に `StartedAt time.Time xorm:"null 'started_at'" json:"started_at"`（`TimePlanned` の近く）。
+  - (b) `Task.Update` の `colsToUpdate` に `"started_at"` を追加（**必須**・無いと永続化されない）。
+  - (c) `Task.Update` の「ゼロ値を戻す」ブロックに `started_at` を追加（**必須**・mergo がゼロ時刻を無視するため、
+    これが無いと **進行中→未着手（null クリア）ができない**。`TimeEstimate` のゼロ戻し直後に）:
+    ```go
+    // Started at (fork: capacity-dashboard) — allow clearing back to null (進行中→未着手).
+    if t.StartedAt.IsZero() {
+        ot.StartedAt = time.Time{}
+    }
+    ```
+  - GetTables/routes の追加は不要（既存 `tasks` テーブルへの列追加のみ・新エンドポイント無し）。
+
+SPA 側（参考・本パッチと同一PR）:
+- `app/lib/api.js` TASK_SCALARS に `"started_at"`（full-send で維持）。
+- `app/lib/capacity.js` `hasStarted(t) = hasDate(started_at) || percent_done>0`（後者は外部編集/旧データの保険）。
+- `app/views/table.js` ステータスメニュー: 進行中=`{done:false, percent_done:keepPct, started_at:now}`（完了からの復帰のみ100→0、
+  それ以外は%維持＝**50捏造を廃止**）／未着手=`{…, started_at:null}`／完了=`{done:true, percent_done:100}`。
+  `stateOf`/`stateRank`/状態チップ＋ `outline.js`/`depgraph.js`/`smartlist.js` の逆算を `hasStarted` に統一。
+
+→ デプロイ: §3-1(c) と同じ手順で `go build` → `docker build -f Dockerfile.deploy -t leo-taskstation:0.24.6-fix11 .`
+→ `~/apps/pm-trials/vikunja/docker-compose.yml` の image を fix11 に上げて `docker compose up -d`（migration 自動・既存行は started_at=null、進行中相当は backfill 済）。
+
+v0.24.6 にて `go build` OK・migration 自動適用（started_at 列追加＋backfill 6件一致）・実API往復で
+**進行中=started_at立つ&percent=0（50捏造なし）/ 未着手=null戻し / 完了=100 / 完了→進行中=100→0 / 無関係full-send更新で started_at 維持** を確認・
+Playwright（leo:7010/app）で未着手→進行中クリックでバー0%維持（旧50%が消滅）・console アプリ由来0 を確認済み。配布 `leo-taskstation:0.24.6-fix11`。

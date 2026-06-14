@@ -60,8 +60,9 @@ test("見積: 30m / 2時間半 / 異常値は無視", () => {
   assert.equal(p("99h x").estimateH, 0); // 上限超→タイトル扱い
 });
 
-test("優先度: !最優先 と 全角！低", () => {
-  assert.equal(p("!最優先 x").priority, 4);
+test("優先度: !MUST / !最優先 と 全角！低", () => {
+  assert.equal(p("!MUST x").priority, 4);
+  assert.equal(p("!最優先 x").priority, 4); // 旧表記も後方互換で受理
   assert.equal(p("！低 x").priority, 1);
 });
 

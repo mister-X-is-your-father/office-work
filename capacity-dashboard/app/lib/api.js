@@ -53,7 +53,7 @@ export async function whoami() { return req("/user"); }
 // TaskStation の POST /tasks/:id はスカラ全置換（payload に無い＝クリア）なので、
 // 部分 POST すると start/end/due/priority 等が消える。full-send で非破壊にする。
 const TASK_SCALARS = ["title", "description", "done", "due_date", "start_date", "end_date",
-  "priority", "percent_done", "repeat_after", "repeat_mode", "hex_color", "time_estimate", "is_favorite"];
+  "priority", "percent_done", "repeat_after", "repeat_mode", "hex_color", "time_estimate", "is_favorite", "started_at"];
 
 // 現タスクを読み、全スカラを保ったまま patch を上書きして POST（非破壊な部分更新）。
 // 関連(assignees/reminders/labels)は payload に載せない＝#1(ADR-008)のガードで維持される。

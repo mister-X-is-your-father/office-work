@@ -65,7 +65,7 @@ export async function render(root) {
 }
 
 function section(title, rows, you) {
-  const head = `<div class="rq-sechdr"><h2>${title}</h2>${you ? `<span class="rq-pill">最優先</span>` : ""}<span class="rq-cnt">${rows.length} 件</span></div>`;
+  const head = `<div class="rq-sechdr"><h2>${title}</h2>${you ? `<span class="rq-pill">MUST</span>` : ""}<span class="rq-cnt">${rows.length} 件</span></div>`;
   return `<div class="rq-section">${head}<div class="rq-queue">${rows.map(rowHtml).join("")}</div></div>`;
 }
 

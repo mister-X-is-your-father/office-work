@@ -42,7 +42,7 @@ function mkDate(todayISO, mo, da) {
 }
 
 const DATE_WORDS = { "今日": 0, "明日": 1, "明後日": 2, "あさって": 2, "あした": 1 };
-const PRIO_WORDS = { "最優先": 4, "最": 4, "高": 3, "中": 2, "低": 1 };
+const PRIO_WORDS = { "MUST": 4, "must": 4, "最優先": 4, "最": 4, "高": 3, "中": 2, "低": 1 };
 
 // "15時"/"15時半"/"15:30" → 分（0..1439）。不正は null。
 function parseTime(h, mm, half) {
@@ -68,7 +68,7 @@ export function parseQuickAdd(raw, { today } = {}) {
     if ((m = tok.match(/^>(.+)$/))) { out.ws = m[1]; continue; }
     if ((m = tok.match(/^#(.+)$/))) { out.labels.push(m[1]); continue; }
     if ((m = tok.match(/^@(.+)$/))) { out.assignee = m[1]; continue; }
-    if ((m = tok.match(/^!(最優先|最|高|中|低)$/))) { out.priority = PRIO_WORDS[m[1]]; continue; }
+    if ((m = tok.match(/^!(MUST|must|最優先|最|高|中|低)$/))) { out.priority = PRIO_WORDS[m[1]]; continue; }
     if ((m = tok.match(/^(\d+(?:\.\d+)?)(h|時間)(半)?$/))) {
       const h = +m[1] + (m[3] ? 0.5 : 0);
       if (h > 0 && h <= 24) { out.estimateH = h; continue; }

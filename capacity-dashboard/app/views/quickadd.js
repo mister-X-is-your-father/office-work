@@ -10,7 +10,7 @@ import { joinMeta, DOW_JA } from "../lib/form.js";
 import { esc, fmtH } from "../lib/ui.js";
 
 export const INBOX_WS = "インボックス";
-const PRIO_NAME = { 4: "最優先", 3: "高", 2: "中", 1: "低" };
+const PRIO_NAME = { 4: "MUST", 3: "高", 2: "中", 1: "低" };
 
 // 解析結果を実データに照合（WS/担当の解決）。store.load はキャッシュ済み前提で軽い。
 function resolveParsed(parsed, { projects, members }) {

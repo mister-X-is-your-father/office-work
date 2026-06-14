@@ -11,7 +11,7 @@ const data = {
     { title: "棚卸し", kind: "task", rrule: "FREQ=WEEKLY;BYDAY=MO", dtstart: "2026-06-01T00:00:00Z", duration_seconds: 3600, assignee_ids: [1] },
   ],
   tasks: [
-    // 予定(plan)あり・期日先 → 前倒し。優先度5→最優先。
+    // 予定(plan)あり・期日先 → 前倒し。優先度5→MUST。
     { id: 10, title: "API設計", priority: 5, assignees: [{ id: 1 }], due_date: "2026-06-20T00:00:00Z", created: "2026-06-01T09:00:00Z" },
     // 本日作成・本日期日 → 当日追加(adhoc)・見積り日割り1h。
     { id: 11, title: "緊急修正", priority: 4, assignees: [{ id: 1 }], due_date: "2026-06-08T00:00:00Z", created: "2026-06-08T09:00:00Z", time_estimate: 3600 },
@@ -19,14 +19,14 @@ const data = {
   plansByTask: new Map([[10, [{ plan_date: "2026-06-08T00:00:00Z", seconds: 10800, user_id: 1 }]]]),
 };
 
-test("prioBucket: 0–5 → 4段", () => {
+test("prioBucket: 0–5 → 0(なし)..4(MUST)", () => {
   assert.equal(prioBucket(5), 4);
   assert.equal(prioBucket(4), 4);
   assert.equal(prioBucket(3), 3);
   assert.equal(prioBucket(2), 2);
   assert.equal(prioBucket(1), 1);
-  assert.equal(prioBucket(0), 1);
-  assert.equal(prioBucket(undefined), 1);
+  assert.equal(prioBucket(0), 0);          // なしは丸めず 0 のまま
+  assert.equal(prioBucket(undefined), 0);
 });
 
 test("todayItemsByMember: 種別(kind)分類・並び・集計", () => {
@@ -51,7 +51,7 @@ test("todayItemsByMember: 前倒し・当日追加(flags)・優先度", () => {
   assert.equal(api.kind, "task");
   assert.equal(api.flags.advanced, true);  // 期日6/20が先 → 前倒し
   assert.equal(api.flags.adhoc, false);    // 6/1作成
-  assert.equal(api.prio, 4);               // priority5 → 最優先
+  assert.equal(api.prio, 4);               // priority5 → MUST
   assert.equal(urgent.kind, "task");
   assert.equal(urgent.flags.adhoc, true);  // 本日作成
   assert.equal(urgent.flags.advanced, false); // 期日が本日

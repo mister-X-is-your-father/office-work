@@ -1,11 +1,10 @@
 // アウトライン階層リスト（mock68 相当・実データ）。related_tasks.subtask の親子を折りたたみ表示。
 import { load, projectName } from "../lib/store.js";
 import { buildTaskTree } from "../lib/capacity.js";
+import { statusOf, STATUS } from "../lib/kinds.js";
 import { C, esc, member_color } from "../lib/ui.js";
 
 const collapsed = new Set();
-const stateOf = (t) => (t.done ? "done" : ((t.percent_done || 0) > 0 ? "doing" : "todo"));
-const STLABEL = { done: "完了", doing: "進行中", todo: "未着手" };
 const dueLabel = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(5, 10).replace("-", "/") : "");
 
 export async function render(root) {
@@ -45,7 +44,7 @@ function rowHtml(node, depth, projects, counts) {
   const t = node.task;
   const has = node.children.length > 0;
   const open = !collapsed.has(t.id);
-  const st = stateOf(t);
+  const st = statusOf(t);
   const who = (t.assignees || [])[0];
   const wn = who ? (who.name || who.username) : "";
   const cc = counts.get(t.id);
@@ -60,7 +59,7 @@ function rowHtml(node, depth, projects, counts) {
     <span class="ol-meta">
       ${who ? `<span class="ol-ava" style="background:${member_color(who.id)}">${esc((wn[0] || "?"))}</span>` : ""}
       ${due ? `<span class="ol-due">${due}</span>` : ""}
-      <span class="ol-st ${st}">${STLABEL[st]}</span>
+      <span class="ol-st ${st}">${STATUS[st].label}</span>
     </span>
   </div>`;
 }

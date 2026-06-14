@@ -20,7 +20,7 @@ const ROUTES = {
   summary:  { label: "概要",          grp: "実績",   mod: "./views/summary.js" },
   estactual:{ label: "見積りvs実績",  grp: "実績",   mod: "./views/estactual.js" },
   kanban:   { label: "かんばん",      grp: "仕事",   mod: "./views/kanban.js" },
-  list:     { label: "一覧",          grp: "仕事",   mod: "./views/table.js" },
+  list:     { label: "一覧",          grp: "仕事",   mod: "./views/table.js", wide: true },
   outline:  { label: "アウトライン",  grp: "仕事",   mod: "./views/outline.js" },
   depgraph: { label: "依存グラフ",    grp: "仕事",   mod: "./views/depgraph.js" },
   gantt:    { label: "予実ガント",    grp: "仕事",   mod: "./views/gantt.js" },
@@ -128,6 +128,8 @@ async function route() {
   document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("active", a.dataset.k === key));
   const content = document.getElementById("content");
   if (!content) return;
+  content.classList.toggle("wide", !!r.wide);   // ワイドな表（一覧など）はコンテンツ幅を広げる
+
   if (r.soon || !r.mod) { content.innerHTML = `<h1 class="vtitle">${r.label}</h1><div class="card"><div class="loading">この画面は準備中です（モックは <a href="../index.html">ギャラリー</a> 参照）。</div></div>`; return; }
   content.innerHTML = `<div class="loading">読み込み中…</div>`;
   try {

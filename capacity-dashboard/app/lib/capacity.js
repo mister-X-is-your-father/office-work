@@ -7,6 +7,9 @@ export const HOUR = 3600;
 export const toH = (s) => (s || 0) / HOUR;
 export const dateOnly = (d) => (d && typeof d === "string") ? d.slice(0, 10) : "";
 export const hasDate = (d) => !!d && typeof d === "string" && !d.startsWith("0001");
+// 着手済み判定（=進行中）。started_at（着手時刻・BE実カラム）が立っていれば進行中。
+// percent_done>0 も OR で拾う（外部クライアント編集や旧データで進捗だけ入っているケースの保険）。
+export const hasStarted = (t) => hasDate(t.started_at) || (t.percent_done || 0) > 0;
 
 export function inclusiveDays(isoA, isoB) {
   const n = Math.round((Date.parse(isoB) - Date.parse(isoA)) / 86400000) + 1;
