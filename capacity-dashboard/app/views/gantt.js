@@ -162,7 +162,7 @@ export async function render(root) {
         return `<span class="ava" style="background:${member_color(idx)}">${esc(initial(a.name || a.username))}</span>`;
       }).join("") + (asg.length > 2 ? `<span class="more">+${asg.length - 2}</span>` : "");
       const pjName = (projects.find((p) => p.id === t.project_id) || {}).title || "—";
-      return `<div class="row${r.over ? " delayed" : ""}">
+      return `<div class="row${r.over ? " delayed" : ""}" data-task="${t.id}">
         <div class="r-label">
           <span class="r-pbar" style="background:${projColor(t.project_id)}"></span>
           <span class="r-text">
@@ -217,7 +217,7 @@ export async function render(root) {
       if (!collapsed) {
         for (const t of mtasks) {
           const r = rangeByTask.get(t.id);
-          html += `<div class="row${r.over ? " delayed" : ""}">
+          html += `<div class="row${r.over ? " delayed" : ""}" data-task="${t.id}">
             <div class="r-label r-label-sub">
               <span class="r-pbar" style="background:${projColor(t.project_id)}"></span>
               <span class="r-text"><span class="r-name">${esc(t.title)}</span>
@@ -304,7 +304,7 @@ export async function render(root) {
         const noplan = !r.planned.source && !r.actual.start;
         const isLast = t === items[items.length - 1];
         const treeCls = g.pid ? ` pj-child${isLast ? " last" : ""}` : "";  // 実プロジェクト配下のみツリー表示
-        html += `<div class="row${r.over ? " delayed" : ""}${noplan ? " noplan" : ""}${treeCls}"${g.pid ? ` style="--pj:${band}"` : ""}>
+        html += `<div class="row${r.over ? " delayed" : ""}${noplan ? " noplan" : ""}${treeCls}" data-task="${t.id}"${g.pid ? ` style="--pj:${band}"` : ""}>
           <div class="r-label r-label-sub">
             <span class="r-text"><span class="r-name">${esc(t.title)}</span>
               <span class="r-meta">${avs ? `<span class="av">${avs}</span>` : ""}
@@ -475,6 +475,71 @@ export async function render(root) {
     }
   }
 
+  // ── 日別予定の直接入力: タスク行の「日セル」をクリック→その日の実施予定時間を入力 ──
+  let dayPop = null;
+  const closeDayPop = () => { if (dayPop) { dayPop.remove(); dayPop = null; document.removeEventListener("pointerdown", onDocDown, true); } };
+  function onDocDown(e) { if (dayPop && !dayPop.contains(e.target)) closeDayPop(); }
+
+  function openDayPlanPopup(taskId, dayISO, x, y) {
+    closeDayPop();
+    const t = byIdAll.get(taskId); if (!t) return;
+    const entries = (plansById.get(taskId) || []).filter((p) => dateOnly(p.plan_date) === dayISO);
+    const curH = entries.reduce((s, p) => s + (p.seconds || 0), 0) / 3600;
+    const asg = (t.assignees || []);
+    const dow = DOW[(scale.axis.find((a) => a.iso === dayISO) || {}).dow ?? 0];
+    const memCtl = asg.length > 1
+      ? `<label class="dp-l">担当 <select id="dp-mem">${asg.map((a, i) => `<option value="${a.id}"${i === 0 ? " selected" : ""}>${esc(a.name || a.username)}</option>`).join("")}</select></label>`
+      : `<input type="hidden" id="dp-mem" value="${asg[0] ? asg[0].id : ""}">`;
+    dayPop = document.createElement("div");
+    dayPop.className = "gv-daypop";
+    dayPop.innerHTML = `
+      <div class="dp-h">${esc(t.title)}<small>${dayISO.slice(5).replace("-", "/")}（${dow}）にやる予定</small></div>
+      ${memCtl}
+      <div class="dp-row">
+        <button class="dp-q" data-h="0.5">0.5h</button><button class="dp-q" data-h="1">1h</button>
+        <button class="dp-q" data-h="2">2h</button><button class="dp-q" data-h="4">4h</button>
+        <span class="dp-in"><input id="dp-h" type="number" min="0" step="0.5" value="${curH || 2}">h</span>
+      </div>
+      <div class="dp-act">
+        <button class="dp-clear" id="dp-clear">${curH > 0 ? "クリア" : "閉じる"}</button>
+        <button class="dp-save" id="dp-save">保存</button>
+      </div>`;
+    document.body.appendChild(dayPop);
+    dayPop.style.left = Math.max(8, Math.min(x, window.innerWidth - 244)) + "px";
+    dayPop.style.top = Math.min(y + 10, window.innerHeight - 150) + "px";
+    const hIn = dayPop.querySelector("#dp-h");
+    dayPop.querySelectorAll(".dp-q").forEach((b) => b.onclick = () => { hIn.value = b.dataset.h; });
+    const commit = async (hours) => {
+      const memEl = dayPop.querySelector("#dp-mem");
+      const uid = memEl && memEl.value ? +memEl.value : null;
+      closeDayPop();
+      try {
+        for (const en of entries) await vik.deletePlan(taskId, en.id); // 既存の同日予定を消してから入れ直す
+        if (hours > 0) await vik.logPlan(taskId, Math.round(hours * 3600), dayISO, "", uid);
+        reload();
+      } catch (err) { alert("予定の保存に失敗: " + err.message); }
+    };
+    dayPop.querySelector("#dp-save").onclick = () => commit(parseFloat(hIn.value) || 0);
+    dayPop.querySelector("#dp-clear").onclick = () => commit(0);
+    hIn.onkeydown = (e) => { if (e.key === "Enter") commit(parseFloat(hIn.value) || 0); };
+    setTimeout(() => document.addEventListener("pointerdown", onDocDown, true), 0);
+    hIn.focus(); hIn.select();
+  }
+
+  rowsEl.addEventListener("click", (e) => {
+    if (drag) return;
+    if (e.target.closest(".bar") || e.target.closest(".r-label") || e.target.closest("[data-toggle]")) return;
+    const row = e.target.closest(".row[data-task]");
+    if (!row) return;
+    const area = row.querySelector(".bar-area");
+    if (!area) return;
+    const rect = area.getBoundingClientRect();
+    if (e.clientX < rect.left) return; // 左の固定ラベル領域は無視
+    const dayIdx = Math.floor((e.clientX - rect.left) / COL_W);
+    if (dayIdx < 0 || dayIdx >= WINDOW_DAYS) return;
+    openDayPlanPopup(+row.dataset.task, scale.axis[dayIdx].iso, e.clientX, e.clientY);
+  });
+
   paint();
 }
 
@@ -600,6 +665,21 @@ function shell(projects, members, memberIdx, mode) {
   .gv .bar-h{position:absolute;top:0;bottom:0;width:7px;cursor:ew-resize;z-index:1}
   .gv .bar-h.l{left:0}.gv .bar-h.r{right:0}
   .gv-draglabel{position:fixed;z-index:9999;background:${C.ink};color:#fff;font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px;pointer-events:none;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.25);display:none}
+  /* 日別予定 入力ポップアップ（日セルをクリックで出る） */
+  .gv-daypop{position:fixed;z-index:10000;width:228px;background:#fff;border:1px solid ${C.line};border-radius:12px;box-shadow:0 12px 34px rgba(20,30,50,.22);padding:12px;font-size:13px}
+  .gv-daypop .dp-h{font-weight:700;font-size:13px;line-height:1.3;margin-bottom:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .gv-daypop .dp-h small{display:block;font-weight:500;color:${C.muted};font-size:11px;margin-top:2px}
+  .gv-daypop .dp-l{display:flex;align-items:center;gap:6px;font-size:11.5px;color:${C.muted};margin-bottom:9px}
+  .gv-daypop .dp-l select{flex:1;font:inherit;font-size:12.5px;padding:5px 7px;border:1px solid ${C.line};border-radius:7px}
+  .gv-daypop .dp-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:11px}
+  .gv-daypop .dp-q{font:inherit;font-size:12px;font-weight:600;padding:5px 9px;border:1px solid ${C.line};border-radius:7px;background:#fff;color:${C.ink};cursor:pointer}
+  .gv-daypop .dp-q:hover{background:${C.track};border-color:#d7dde6}
+  .gv-daypop .dp-in{display:inline-flex;align-items:center;gap:3px;margin-left:auto;font-size:12px;color:${C.muted}}
+  .gv-daypop .dp-in input{width:56px;font:inherit;font-size:13px;font-weight:600;text-align:right;padding:5px 7px;border:1px solid ${C.line};border-radius:7px}
+  .gv-daypop .dp-act{display:flex;justify-content:space-between;gap:8px}
+  .gv-daypop .dp-clear{font:inherit;font-size:12px;font-weight:600;padding:7px 12px;border:1px solid ${C.line};border-radius:8px;background:#fff;color:${C.muted};cursor:pointer}
+  .gv-daypop .dp-save{font:inherit;font-size:12.5px;font-weight:700;padding:7px 18px;border:0;border-radius:8px;background:${C.fill};color:#fff;cursor:pointer}
+  .gv-daypop .dp-save:hover{filter:brightness(1.06)}
   .gv .today-line{position:absolute;top:0;width:0;border-left:2px dashed ${C.over};z-index:6;pointer-events:none}
   .gv .today-line .tl-cap{position:absolute;top:-1px;left:-15px;font-size:9px;color:#fff;background:${C.over};padding:1px 5px;border-radius:4px}
   .gv svg.deps{position:absolute;left:var(--label-w);top:0;pointer-events:none;z-index:4;overflow:visible}
