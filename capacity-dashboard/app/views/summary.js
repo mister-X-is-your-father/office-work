@@ -168,5 +168,11 @@ function css() {
   .sm-ev{font-size:12px;color:${C.muted};white-space:nowrap;flex:none}
   .sm-ediff{font-weight:700;margin-left:4px}
   .sm-ediff.over{color:${C.over}}.sm-ediff.under{color:${C.amber}}.sm-ediff.ok{color:${C.free}}
-  .sm-empty{font-size:12.5px;color:${C.muted};padding:18px 2px;text-align:center}`;
+  .sm-empty{font-size:12.5px;color:${C.muted};padding:18px 2px;text-align:center}
+
+  /* ── ダーク上書き：css()内のハードコード淡色だけ補正。ライト値は上で維持＝非回帰。
+     カード/罫線/track/ink/muted は C.* 経由で var() 参照済＝自動反転するので再指定不要。
+     ここで直す対象＝var()を介さず直書きした淡色のみ。アクセント色(青/緑/amber)は据え置き。 */
+  html[data-theme="dark"] .sm-bcol.wknd .sm-bx,
+  html[data-theme="dark"] .sm-bcol.wknd .sm-bw{color:var(--line-strong)}`;
 }
