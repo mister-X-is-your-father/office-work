@@ -7,20 +7,40 @@ import { fmtDisplayDow } from "../lib/form.js";
 import { openTaskForm } from "./taskform.js";
 import { C, member_color, fmtH, esc, todayISO } from "../lib/ui.js";
 
-const COL_W = 40, LABEL_W = 280, LABEL_W_P = 320, ROW_H = 42, GRP_H = 56, WINDOW_DAYS = 21;
+let COL_W = 40, WINDOW_DAYS = 21;   // 表示範囲プリセットで render ごとに上書き
+const LABEL_W = 280, LABEL_W_P = 320, ROW_H = 42, GRP_H = 56;
 const DOW = ["日", "月", "火", "水", "木", "金", "土"];
+
+// 表示範囲プリセット。days=表示日数 / back=今日より前に含める日数 / colW=1日の列幅(px)。
+// 長期はピクセルを詰めてヘッダを月バンド＋粗い日付に自動切替（gridHead）。
+const RANGE_PRESETS = [
+  { key: "2w", label: "2週間", days: 14, back: 3, colW: 42 },
+  { key: "1m", label: "1ヶ月", days: 31, back: 5, colW: 27 },
+  { key: "3m", label: "3ヶ月", days: 92, back: 10, colW: 12 },
+  { key: "6m", label: "6ヶ月", days: 184, back: 18, colW: 7 },
+];
 
 const projColor = (id) => ["#3a86ff", "#2fa66b", "#b657d6", "#e5772d", "#0ea5e9", "#f5a623"][((id || 0) % 6 + 6) % 6];
 const initial = (name) => (name ? String(name).trim().slice(0, 1) : "?");
 
 // 再描画（編集後の reload 等）をまたいで保持する表示状態。既定はプロジェクト別。
 // これが無いと、タスク行/人別で編集→render し直すたびに既定モードへ戻ってしまう。
-const gview = { mode: "project", collapsed: new Set() };
+// 表示範囲の選択は localStorage に記憶（再読込後も維持）。未保存/不正なら既定 3ヶ月。
+const RANGE_KEY = "gantt_range";
+const savedRange = (() => { try { return localStorage.getItem(RANGE_KEY); } catch { return null; } })();
+const gview = {
+  mode: "project", collapsed: new Set(),
+  range: RANGE_PRESETS.some((p) => p.key === savedRange) ? savedRange : "3m",
+};
 
 export async function render(root) {
   const { tasks, members, projects } = await load();
   const today = todayISO();
-  const startISO = shiftISO(today, -7);
+  // 表示範囲プリセットから 窓日数・列幅・起点 を決める（gview に保持＝再描画をまたぐ）
+  const preset = RANGE_PRESETS.find((p) => p.key === gview.range) || RANGE_PRESETS[1];
+  WINDOW_DAYS = preset.days;
+  COL_W = preset.colW;
+  const startISO = shiftISO(today, -preset.back);
   const scale = dayScale(startISO, WINDOW_DAYS);
 
   // N+1: plans/times を持つタスクだけ個別取得（planner.js と同方式）
@@ -61,13 +81,30 @@ export async function render(root) {
   const rowsEl = root.querySelector("#gv-rows");
   const ganttEl = root.querySelector("#gv-gantt");
 
+  // ヘッダは2段（月バンド＋日付）。列幅に応じて日付ラベルの粒度を自動調整。
+  // day(≥22px)=毎日 dom+曜日 / week(≥9px)=月曜だけ dom / month(<9px)=月初だけ dom。
   function gridHead(labelW) {
-    const days = scale.axis.map((a) => {
-      const cls = (a.weekend ? " weekend" : "") + (a.iso === today ? " today" : "");
-      return `<div class="gh-day${cls}"><div class="dom">${+a.iso.slice(8)}</div><div class="dow">${DOW[a.dow]}</div></div>`;
-    }).join("");
+    const tier = COL_W >= 22 ? "day" : COL_W >= 9 ? "week" : "month";
+    // 月バンド: 連続する同月をまとめて span
+    const months = [];
+    for (let i = 0; i < scale.axis.length;) {
+      const ym = scale.axis[i].iso.slice(0, 7);
+      let j = i; while (j < scale.axis.length && scale.axis[j].iso.slice(0, 7) === ym) j++;
+      months.push({ span: j - i, label: `${+ym.slice(0, 4)}年${+ym.slice(5, 7)}月` });
+      i = j;
+    }
+    const monthRow = `<div class="gh-corner gh-mc"></div>` +
+      months.map((m) => `<div class="gh-month" style="grid-column:span ${m.span}">${m.label}</div>`).join("");
     const corner = state.mode === "task" ? "タスク" : state.mode === "member" ? "人別" : "プロジェクト";
-    return `<div class="gh-corner">${corner} / 日付</div>${days}`;
+    const dayRow = `<div class="gh-corner">${corner} / 日付</div>` + scale.axis.map((a) => {
+      const cls = (a.weekend ? " weekend" : "") + (a.iso === today ? " today" : "");
+      const dom = a.iso.slice(8);
+      const showNum = tier === "day" || (tier === "week" && a.dow === 1) || (tier === "month" && dom === "01");
+      const numHtml = showNum ? `<div class="dom">${+dom}</div>` : "";
+      const dowHtml = tier === "day" ? `<div class="dow">${DOW[a.dow]}</div>` : "";
+      return `<div class="gh-day${cls}${tier !== "day" ? " sparse" : ""}">${numHtml}${dowHtml}</div>`;
+    }).join("");
+    return monthRow + dayRow;
   }
 
   // タスク1行ぶんのバー領域HTML（予定バー＋実績バー）。taskId を data 属性に載せてドラッグで参照。
@@ -335,6 +372,14 @@ export async function render(root) {
       paint();
     };
   });
+  // 表示範囲: 窓日数・列幅・グリッドが変わるので全再描画（データは store キャッシュ）
+  root.querySelectorAll("[data-range]").forEach((b) => {
+    b.onclick = () => {
+      gview.range = b.dataset.range;
+      try { localStorage.setItem(RANGE_KEY, gview.range); } catch { /* localStorage 不可でも続行 */ }
+      render(root);
+    };
+  });
   root.querySelectorAll("[data-proj]").forEach((b) => {
     b.onclick = () => { toggleSet(state.projects, +b.dataset.proj, b); paint(); };
   });
@@ -448,12 +493,13 @@ function shell(projects, members, memberIdx, mode) {
     || `<span style="font-size:11px;color:${C.muted}">担当者なし</span>`;
   const seg = (m, label) => `<button data-mode="${m}"${mode === m ? ' class="on"' : ""}>${label}</button>`;
   return `
-  <h1 class="vtitle">予実ガント <small>予定×実績 ・ 21日窓</small></h1>
+  <h1 class="vtitle">ガントチャート <small>予定×実績 ・ ${WINDOW_DAYS}日窓</small></h1>
   <div class="card gv">
     <div class="gv-toolbar">
       <div class="seg">
         ${seg("project", "プロジェクト別")}${seg("task", "タスク行")}${seg("member", "人別")}
       </div>
+      <div class="tbg"><span class="tbl">表示範囲</span><div class="seg rangeseg">${RANGE_PRESETS.map((p) => `<button data-range="${p.key}"${gview.range === p.key ? ' class="on"' : ""}>${p.label}</button>`).join("")}</div></div>
       <div class="tbg"><span class="tbl">ワークスペース</span><div class="chips">${projChips}</div></div>
       <div class="tbg"><span class="tbl">担当者</span><div class="chips">${memChips}</div></div>
       <label class="tbg chk"><input type="checkbox" id="gv-hidedone"> 完了を隠す</label>
@@ -486,11 +532,15 @@ function shell(projects, members, memberIdx, mode) {
   .gv .chk{font-size:12px;color:${C.ink};cursor:pointer}
   .gv-scroll{overflow-x:auto}
   .gv .gantt{min-width:calc(var(--label-w) + ${COL_W}px*${WINDOW_DAYS});position:relative}
-  .gv .grid-head{display:grid;grid-template-columns:var(--label-w) repeat(${WINDOW_DAYS}, ${COL_W}px);border-bottom:1px solid ${C.line};position:sticky;top:0;background:#fff;z-index:5}
+  .gv .grid-head{display:grid;grid-template-columns:var(--label-w) repeat(${WINDOW_DAYS}, ${COL_W}px);grid-auto-rows:auto;border-bottom:1px solid ${C.line};position:sticky;top:0;background:#fff;z-index:5}
   .gv .gh-corner{padding:9px 14px;font-size:11px;color:${C.muted};font-weight:600;border-right:1px solid ${C.line};display:flex;align-items:center}
+  .gv .gh-mc{padding:0;border-bottom:1px solid ${C.line}}
+  .gv .gh-month{font-size:10.5px;font-weight:700;color:${C.ink};padding:3px 8px;border-right:1px solid ${C.line};border-bottom:1px solid ${C.line};white-space:nowrap;overflow:hidden;background:#f7f9fc}
   .gv .gh-day{text-align:center;padding:6px 1px;border-right:1px solid ${C.line};font-size:11px;color:${C.muted}}
   .gv .gh-day .dom{font-size:12px;color:${C.ink};font-weight:600}
   .gv .gh-day .dow{font-size:9px}
+  .gv .gh-day.sparse{overflow:visible;position:relative}
+  .gv .gh-day.sparse .dom{font-size:10.5px;position:absolute;top:5px;left:50%;transform:translateX(-50%);white-space:nowrap;z-index:1}
   .gv .gh-day.weekend{background:#fafbfc}
   .gv .gh-day.today{background:rgba(229,72,77,.07)}
   .gv .gh-day.today .dom{color:${C.over};font-weight:700}

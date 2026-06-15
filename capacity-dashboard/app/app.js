@@ -23,7 +23,7 @@ const ROUTES = {
   list:     { label: "一覧",          grp: "仕事",   mod: "./views/table.js", wide: true },
   outline:  { label: "アウトライン",  grp: "仕事",   mod: "./views/outline.js" },
   depgraph: { label: "依存グラフ",    grp: "仕事",   mod: "./views/depgraph.js" },
-  gantt:    { label: "予実ガント",    grp: "仕事",   mod: "./views/gantt.js" },
+  gantt:    { label: "ガントチャート",    grp: "仕事",   mod: "./views/gantt.js" },
   manage:   { label: "予定の基礎データ", grp: "その他", mod: "./views/manage.js" },
   settings: { label: "設定",          grp: "その他", mod: "./views/settings.js" },
   // 隠しルート: ORDER に載せない＝通常ユーザーのナビには出ない。許可者のみ shell() がリンクを追加。
