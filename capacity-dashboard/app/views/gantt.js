@@ -448,6 +448,17 @@ export async function render(root) {
     paint();
   });
 
+  // 左の固定ラベル列（タスク名）クリックで編集モーダル。バーの有無に関わらず全タスク行で編集可能に。
+  // グループ見出し(.grp-label)は data-toggle で折り畳み専用なので .r-label のみを対象にし衝突回避。
+  rowsEl.addEventListener("click", (e) => {
+    if (drag) return;                               // ドラッグ直後のクリックは無視
+    const lbl = e.target.closest(".r-label");
+    if (!lbl) return;
+    const row = lbl.closest(".row[data-task]");
+    if (!row) return;
+    openTaskForm({ taskId: +row.dataset.task, onSaved: reload });
+  });
+
   // ── バーのドラッグ編集（移動／dates は端で伸縮）＋クリックで編集モーダル ──
   let drag = null, dlabel = null;
   const reload = () => { invalidate(); render(root); };
@@ -684,7 +695,8 @@ function shell(projects, members, memberIdx, mode) {
   .gv .row.delayed{background:rgba(229,72,77,.045)}
   .gv .row:hover .r-label{background:#fafbfc}
   .gv .row.delayed .r-label{background:#fdf2f2}
-  .gv .r-label{border-right:1px solid ${C.line};padding:0 12px;display:flex;align-items:center;gap:9px;overflow:hidden;position:sticky;left:0;z-index:7;background:#fff}
+  .gv .r-label{border-right:1px solid ${C.line};padding:0 12px;display:flex;align-items:center;gap:9px;overflow:hidden;position:sticky;left:0;z-index:7;background:#fff;cursor:pointer}
+  .gv .row:hover .r-name{text-decoration:underline;text-decoration-color:${C.line}}
   .gv .r-label-sub{padding-left:24px}
   .gv .r-pbar{width:4px;height:22px;border-radius:2px;flex:none}
   .gv .r-text{min-width:0}
