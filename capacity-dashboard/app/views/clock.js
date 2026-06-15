@@ -2,7 +2,7 @@
 // 色=重要度／模様=種別／外周=超過／空き=薄グレー／カテゴリ別の折りたたみセクション。
 import { todayItemsByMember, suggestDays } from "../lib/today_items.js";
 import { KINDS, KIND_ORDER, PRIO, NEUTRAL } from "../lib/kinds.js";
-import { fmtH, esc, member_color, todayISO } from "../lib/ui.js";
+import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 import { dateOnly, hasDate, shiftISO } from "../lib/capacity.js";
 import { deletePlan, logPlan, updateTask, requestReview } from "../lib/api.js";
 import { invalidate } from "../lib/store.js";
@@ -253,7 +253,7 @@ function css() {
   return `
   .ck-subtitle{font-size:12.5px;color:#6b7480;margin:-2px 0 16px}
   .ck-strip{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:22px}
-  .ck-kpi{background:#fff;border:1px solid #e6e9ee;border-radius:14px;padding:14px 18px;box-shadow:0 1px 2px rgba(20,30,50,.04);flex:1 1 200px}
+  .ck-kpi{background:#fff;border:1px solid ${C.line};border-radius:14px;padding:14px 18px;box-shadow:0 1px 2px rgba(20,30,50,.04);flex:1 1 200px}
   .ck-kpi .l{font-size:11.5px;color:#6b7480;margin-bottom:3px}
   .ck-kpi .v{font-size:23px;font-weight:700}
   .ck-kpi .v small{font-size:13px;color:#6b7480;font-weight:600;margin-left:3px}
@@ -262,7 +262,7 @@ function css() {
   .ck-bar{height:8px;border-radius:6px;background:#eef1f5;overflow:hidden;margin-top:9px;display:flex}
   .ck-bar i{display:block;height:100%}
   .ck-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(252px,1fr));gap:18px}
-  .ck-card{background:#fff;border:1px solid #e6e9ee;border-radius:16px;padding:18px 16px 16px;box-shadow:0 1px 3px rgba(20,30,50,.05);position:relative}
+  .ck-card{background:#fff;border:1px solid ${C.line};border-radius:16px;padding:18px 16px 16px;box-shadow:0 1px 3px rgba(20,30,50,.05);position:relative}
   .ck-card.is-over{border-color:#f3c9cb}
   .ck-h{display:flex;align-items:center;gap:10px;margin-bottom:2px}
   .ck-av{width:30px;height:30px;border-radius:50%;flex:none;display:grid;place-items:center;color:#fff;font-size:13px;font-weight:700}
@@ -271,7 +271,7 @@ function css() {
   .ck-badge.free{color:#2fa66b;background:#eaf7ef}.ck-badge.over{color:#e5484d;background:#fdecec}.ck-badge.just{color:#8a93a0;background:#f0f1f4}
   .ck-dial{display:block;margin:6px auto 4px}
   .ck-cn{font-size:23px;font-weight:700}.ck-cl{font-size:10.5px}
-  .ck-list{margin-top:8px;border-top:1px solid #e6e9ee;padding-top:8px}
+  .ck-list{margin-top:8px;border-top:1px solid ${C.line};padding-top:8px}
   details.ck-sec{margin-top:7px}details.ck-sec:first-of-type{margin-top:1px}
   details.ck-sec>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:7px;padding:4px 9px;background:#eef1f5;border-radius:7px;font-size:10.5px;font-weight:700;color:#54606e;user-select:none}
   details.ck-sec>summary::-webkit-details-marker{display:none}
@@ -295,7 +295,7 @@ function css() {
   .ck-more:hover{background:#eef1f5;color:#1d2430}
   .ck-row.free{padding:6px 4px 0 4px;font-weight:600}.ck-row.free .ck-tn{color:#2fa66b}
   .ck-empty{padding:20px;text-align:center;color:#6b7480;font-size:12px}
-  .ck-legend{display:flex;flex-wrap:wrap;gap:10px 16px;margin-top:26px;padding-top:16px;border-top:1px solid #e6e9ee;font-size:12px;color:#6b7480;align-items:center}
+  .ck-legend{display:flex;flex-wrap:wrap;gap:10px 16px;margin-top:26px;padding-top:16px;border-top:1px solid ${C.line};font-size:12px;color:#6b7480;align-items:center}
   .ck-legend .grp{display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap}
   .ck-legend .glbl{font-weight:600;color:#1d2430}
   .ck-legend .it{display:inline-flex;align-items:center;gap:6px}
@@ -304,7 +304,7 @@ function css() {
   .ck-legend .sw.dots{background-image:radial-gradient(rgba(255,255,255,.85) 1px,transparent 1.3px);background-size:4px 4px}
   .ck-legend .sw.review{background-image:radial-gradient(transparent 2.2px,#fff 2.4px,#fff 3.2px,transparent 3.4px)}
   .ck-legend .sw.pin{background-image:radial-gradient(#fff 0 2.4px,transparent 2.6px)}
-  .ck-legend .sep{width:1px;height:14px;background:#e6e9ee}
+  .ck-legend .sep{width:1px;height:14px;background:${C.line}}
   .ck-modal{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center}
   .ck-modal[hidden]{display:none}
   .ck-modal-bg{position:absolute;inset:0;background:rgba(20,30,50,.32)}
@@ -313,20 +313,20 @@ function css() {
   .ck-mh b{font-size:15px}.ck-msub{font-size:11.5px;color:#6b7480}
   .ck-mlbl{font-size:11px;color:#6b7480;margin:10px 0 7px}
   .ck-days{display:flex;flex-direction:column;gap:6px}
-  .ck-day{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid #e6e9ee;background:#fff;border-radius:9px;padding:9px 12px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;text-align:left}
+  .ck-day{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid ${C.line};background:#fff;border-radius:9px;padding:9px 12px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;text-align:left}
   .ck-day:hover{border-color:#cfe0ff;background:#f3f8ff}
   .ck-day .fh{font-size:11.5px;font-weight:600;color:#2fa66b}
   .ck-day.part .fh{color:#f5872e}
   .ck-none{font-size:12px;color:#6b7480;padding:8px 2px}
   .ck-macts{display:flex;gap:8px;margin-top:14px;justify-content:flex-end}
-  .ck-macts button{border:1px solid #e6e9ee;background:#fff;border-radius:8px;padding:7px 12px;font:inherit;font-size:12.5px;cursor:pointer}
+  .ck-macts button{border:1px solid ${C.line};background:#fff;border-radius:8px;padding:7px 12px;font:inherit;font-size:12.5px;cursor:pointer}
   .ck-drop,.ck-menu button.danger{color:#e5484d;border-color:#f3c9cb!important}
   .ck-drop:hover,.ck-menu button.danger:hover{background:#fdecec}
   .ck-cancel:hover,.ck-back:hover{background:#f3f5f8}
   .ck-menu{display:flex;flex-direction:column;gap:6px;margin-top:10px}
-  .ck-menu button{border:1px solid #e6e9ee;background:#fff;border-radius:9px;padding:10px 12px;font:inherit;font-size:13px;font-weight:600;text-align:left;cursor:pointer}
+  .ck-menu button{border:1px solid ${C.line};background:#fff;border-radius:9px;padding:10px 12px;font:inherit;font-size:13px;font-weight:600;text-align:left;cursor:pointer}
   .ck-menu button:hover{border-color:#cfe0ff;background:#f3f8ff}
   .ck-pwho{display:inline-flex;align-items:center;gap:8px}
   .ck-pav{width:22px;height:22px;border-radius:50%;display:inline-grid;place-items:center;color:#fff;font-size:11px;font-weight:700}
-  .ck-back{border:1px solid #e6e9ee;background:#fff;border-radius:8px;padding:7px 12px;font:inherit;font-size:12.5px;cursor:pointer}`;
+  .ck-back{border:1px solid ${C.line};background:#fff;border-radius:8px;padding:7px 12px;font:inherit;font-size:12.5px;cursor:pointer}`;
 }

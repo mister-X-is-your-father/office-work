@@ -1,6 +1,6 @@
 // 共有UIヘルパ（モックのデザイントークンを踏襲）
 export const C = {
-  bg:"#f6f7f9", card:"#fff", ink:"#1d2430", muted:"#6b7480", line:"#e6e9ee", track:"#eef1f5",
+  bg:"#e8ecf3", card:"#fff", ink:"#1d2430", muted:"#6b7480", line:"#dde2ea", lineStrong:"#cad1dc", track:"#eef1f5",
   fill:"#3a86ff", over:"#e5484d", free:"#2fa66b", full:"#8a93a0", amber:"#f5a623", capline:"#9aa3af",
   pj:{ Backend:"#3a86ff", Frontend:"#2fa66b", QA:"#b657d6", "共通":"#8a93a0" },
 };
