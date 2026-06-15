@@ -33,7 +33,7 @@ const QUADS = {
   q1: { title: "重要 × 緊急", sub: "今すぐやる", color: "#e5484d", tint: "#fdf3f3" },
   q2: { title: "重要 × 緊急でない", sub: "計画してやる", color: "#3a86ff", tint: "#f1f7ff" },
   q3: { title: "重要でない × 緊急", sub: "減らす・さばく・任せる", color: "#f5872e", tint: "#fdf8f1" },
-  q4: { title: "重要でない × 緊急でない", sub: "捨てる・まとめる・余力で", color: "#8a93a0", tint: "#f6f7f9" },
+  q4: { title: "重要でない × 緊急でない", sub: "捨てる・まとめる・合間で", color: "#8a93a0", tint: "#f6f7f9" },
 };
 
 export async function render(root) {
