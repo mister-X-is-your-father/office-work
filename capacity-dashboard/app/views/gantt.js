@@ -9,7 +9,7 @@ import { C, member_color, fmtH, esc, todayISO } from "../lib/ui.js";
 
 let COL_W = 40, WINDOW_DAYS = 21;   // 表示範囲プリセットで render ごとに上書き
 let COL_W_MIN = 9;                  // プリセット由来の最小列幅（fitColumns で実幅へ伸ばす起点）
-const LABEL_W = 280, LABEL_W_P = 320, ROW_H = 42, GRP_H = 56;
+const LABEL_W = 280, LABEL_W_P = 320, ROW_H = 58, GRP_H = 64;
 const DOW = ["日", "月", "火", "水", "木", "金", "土"];
 
 // 表示単位ごとのスパン。days=表示日数 / back=今日より前に含める日数 / colW=1日の列幅(px)。
@@ -700,7 +700,7 @@ function shell(projects, members, memberIdx, mode) {
   .gv .r-label-sub{padding-left:24px}
   .gv .r-pbar{width:4px;height:22px;border-radius:2px;flex:none}
   .gv .r-text{min-width:0}
-  .gv .r-name{font-size:13.5px;font-weight:600;color:${C.ink};letter-spacing:.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .gv .r-name{font-size:13.5px;font-weight:600;color:${C.ink};letter-spacing:.01em;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;line-height:1.25;word-break:break-word}
   .gv .r-meta{font-size:10.5px;color:${C.muted};display:flex;align-items:center;gap:6px;margin-top:1px;white-space:nowrap}
   .gv .r-meta .av{display:inline-flex;gap:3px}
   .gv .r-meta .ava{width:14px;height:14px;border-radius:50%;color:#fff;font-size:8px;display:inline-flex;align-items:center;justify-content:center;font-weight:700}
@@ -721,9 +721,9 @@ function shell(projects, members, memberIdx, mode) {
   .gv .gantt.tight .gh-day.wk{border-right:1px solid ${C.line}}
   .gv .bar-area{position:absolute;left:var(--label-w);top:0;right:0;height:${ROW_H}px}
   .gv .bar{position:absolute;border-radius:5px;overflow:hidden}
-  .gv .bar.plan{top:6px;height:11px;background:${C.track};box-shadow:inset 0 0 0 1px rgba(58,134,255,.35)}
+  .gv .bar.plan{top:14px;height:11px;background:${C.track};box-shadow:inset 0 0 0 1px rgba(58,134,255,.35)}
   .gv .bar.plan::after{content:"";position:absolute;inset:0;background:rgba(58,134,255,.16)}
-  .gv .bar.act{top:20px;height:15px;background:${C.track};box-shadow:inset 0 0 0 1px rgba(0,0,0,.05)}
+  .gv .bar.act{top:28px;height:15px;background:${C.track};box-shadow:inset 0 0 0 1px rgba(0,0,0,.05)}
   .gv .bar.act.over{box-shadow:inset 0 0 0 1.5px ${C.over}}
   .gv .bar.clipL{border-radius:0 5px 5px 0}
   .gv .bar.clipR{border-radius:5px 0 0 5px}
@@ -769,7 +769,7 @@ function shell(projects, members, memberIdx, mode) {
   .gv .row.pj-child .r-label::before{content:"";position:absolute;left:var(--pjrail,32px);top:0;bottom:0;width:2px;background:var(--pj);opacity:.5}
   .gv .row.pj-child.last .r-label::before{bottom:auto;height:50%}
   .gv .grp-top{display:flex;align-items:center;gap:8px;min-width:0}
-  .gv .grp-name{font-size:14px;font-weight:700;color:${C.ink};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .gv .grp-name{font-size:14px;font-weight:700;color:${C.ink};display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;line-height:1.25;word-break:break-word;min-width:0}
   .gv .grp-sub{font-size:10.5px;color:${C.muted};white-space:nowrap}
   .gv .cap-track{width:90px;height:7px;border-radius:5px;background:${C.track};overflow:hidden;position:relative;flex:none}
   .gv .cap-fill{position:absolute;left:0;top:0;bottom:0;border-radius:5px}
