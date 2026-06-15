@@ -521,8 +521,9 @@ function shell(projects, members, memberIdx, mode) {
   </div>
   </div>
   <style>
-  /* ガントを画面高にフィット＝行だけ内側スクロール。タイトル/ツールバー/日付軸/凡例は常時表示 */
-  .gv-view{display:flex;flex-direction:column;height:calc(100vh - 96px)}
+  /* ガントを画面高にフィット＝行だけ内側スクロール。タイトル/ツールバー/日付軸/凡例は常時表示。
+     高さ控除 = topbar(54) + content 余白上(24)+下(60) = 138px。ページ自体はスクロールさせない */
+  .gv-view{display:flex;flex-direction:column;height:calc(100vh - 138px)}
   .gv-view .vtitle{flex:none}
   .gv{padding:0;flex:1;min-height:0;display:flex;flex-direction:column}
   .gv-toolbar{flex:none}
