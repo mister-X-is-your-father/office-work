@@ -24,12 +24,13 @@ const ROUTES = {
   outline:  { label: "アウトライン",  grp: "仕事",   mod: "./views/outline.js" },
   depgraph: { label: "依存グラフ",    grp: "仕事",   mod: "./views/depgraph.js" },
   gantt:    { label: "ガントチャート",    grp: "仕事",   mod: "./views/gantt.js" },
+  recurring:{ label: "定期業務・定期MTG", grp: "その他", mod: "./views/recurring.js" },
   manage:   { label: "予定の基礎データ", grp: "その他", mod: "./views/manage.js" },
   settings: { label: "設定",          grp: "その他", mod: "./views/settings.js" },
   // 隠しルート: ORDER に載せない＝通常ユーザーのナビには出ない。許可者のみ shell() がリンクを追加。
   fable:    { label: "🤖 Fable",      grp: "AI",     mod: "./views/fable.js" },
 };
-const ORDER = ["home", "smart", "today", "triage", "quad", "habits", "review", "calendar", "monthcal", "week", "planner", "freefinder", "weekstack", "workplan", "summary", "estactual", "kanban", "list", "outline", "depgraph", "gantt", "manage", "settings"];
+const ORDER = ["home", "smart", "today", "triage", "quad", "habits", "review", "calendar", "monthcal", "week", "planner", "freefinder", "weekstack", "workplan", "summary", "estactual", "kanban", "list", "outline", "depgraph", "gantt", "recurring", "manage", "settings"];
 
 const app = document.getElementById("app");
 

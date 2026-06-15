@@ -1,17 +1,15 @@
-// 予定の基礎データ管理（定期・会議 / 祝日 / 個人休暇 の登録・編集・削除）。
+// 予定の基礎データ管理（祝日・休業日 / 個人休暇 の登録・編集・削除）。
 // これまで seed/API でしか入らなかったデータをSPAから運用できるようにする入力UI。
 // データはすべて TaskStation API のグローバルエンティティ（ログインユーザーがCRUD可）。
+// ※定期業務・定期MTGの管理は views/recurring.js（#/recurring）に分離済み。
 import { load, invalidate } from "../lib/store.js";
 import {
   getHolidays, createHoliday, deleteHoliday,
   getUnavailability, createUnavailability, deleteUnavailability,
-  deleteRecurrence,
 } from "../lib/api.js";
-import { openRecurrenceForm, summarizeRecurrence, recurrenceMode } from "./recurrenceform.js";
 import { parseSmartDate, fmtDisplayDow, attachDatePicker } from "../lib/form.js";
 import { C, esc } from "../lib/ui.js";
 
-const KIND_ICON = { mtg: "📅", rmtg: "🔁", rtask: "🔁" };
 const fmtDate = (iso) => fmtDisplayDow(iso);
 
 export async function render(root) {
@@ -20,73 +18,22 @@ export async function render(root) {
   const memberName = (id) => { const m = (members || []).find((x) => x.id === id); return m ? (m.name || m.username) : `user${id}`; };
 
   // 管理対象は id 付きの生データが要る（削除のため）。store のキャッシュとは別に直接取得。
-  const [recurrences, holidays, unavailability] = await Promise.all([
-    load().then((c) => c.recurrences || []),
+  const [holidays, unavailability] = await Promise.all([
     getHolidays().catch(() => []),
     getUnavailability().catch(() => []),
   ]);
 
   root.innerHTML = `
-    <h1 class="vtitle">予定の基礎データ <small>定期・会議／祝日・休業日／個人休暇の登録・編集</small></h1>
+    <h1 class="vtitle">予定の基礎データ <small>祝日・休業日／個人休暇の登録・編集</small></h1>
     <div class="mg-grid">
-      <div class="card mg-card" id="mg-rec"></div>
       <div class="card mg-card" id="mg-hol"></div>
       <div class="card mg-card" id="mg-una"></div>
     </div>`;
 
   const reload = () => { invalidate(); render(root); };
 
-  renderRecurrences(root.querySelector("#mg-rec"), recurrences, memberName, { members, holidaysByDate, reload });
   renderHolidays(root.querySelector("#mg-hol"), holidays, { holidaysByDate, reload });
   renderUnavailability(root.querySelector("#mg-una"), unavailability, memberName, { members, holidaysByDate, reload });
-}
-
-// ===== 定期・会議 =====
-function renderRecurrences(el, recurrences, memberName, { members, holidaysByDate, reload }) {
-  const sorted = [...(recurrences || [])].sort((a, b) => String(a.dtstart).localeCompare(String(b.dtstart)));
-  el.innerHTML = `
-    <div class="mg-h"><span>定期・会議 <span class="mg-cnt">${sorted.length}</span></span>
-      <button class="mg-add" id="rec-add">＋ 新規</button></div>
-    <div class="mg-hint">定例MTG・定期タスク・単発MTGをRRULEで管理。「持ち回り」は担当が順番に巡回します。</div>
-    <div class="mg-list">${sorted.length ? sorted.map((r) => recRow(r, memberName)).join("") : `<div class="mg-empty">まだありません</div>`}</div>`;
-
-  el.querySelector("#rec-add").onclick = () =>
-    openRecurrenceForm({ members, holidaysByDate, onSaved: reload });
-
-  el.querySelectorAll("[data-edit]").forEach((b) => {
-    b.onclick = () => {
-      const rec = sorted.find((r) => r.id === +b.dataset.edit);
-      if (rec) openRecurrenceForm({ existing: rec, members, holidaysByDate, onSaved: reload });
-    };
-  });
-  el.querySelectorAll("[data-del]").forEach((b) => {
-    b.onclick = async () => {
-      const rec = sorted.find((r) => r.id === +b.dataset.del);
-      if (!rec || !confirm(`「${rec.title}」を削除しますか？`)) return;
-      b.disabled = true;
-      try { await deleteRecurrence(rec.id); reload(); } catch (e) { b.disabled = false; alert("削除に失敗: " + e.message); }
-    };
-  });
-}
-
-function recRow(r, memberName) {
-  const s = summarizeRecurrence(r);
-  const names = (r.assignee_ids || []).map(memberName);
-  const who = r.rotation
-    ? `持ち回り: ${names.join(" → ") || "—"}`
-    : (names.join("・") || "—");
-  const meta = [s.rep, s.time, s.durTxt].filter(Boolean).join(" ・ ");
-  const until = s.untilISO ? ` <span class="mg-until">〜${s.untilISO.replace(/-/g, "/")}</span>` : "";
-  return `<div class="mg-row">
-    <div class="mg-row-main">
-      <div class="mg-row-t">${KIND_ICON[recurrenceMode(r)] || "🔁"} ${esc(r.title)}</div>
-      <div class="mg-row-sub">${esc(meta)}${until} ・ ${esc(who)}</div>
-    </div>
-    <div class="mg-row-acts">
-      <button class="mg-btn" data-edit="${r.id}">編集</button>
-      <button class="mg-btn mg-del" data-del="${r.id}">削除</button>
-    </div>
-  </div>`;
 }
 
 // ===== 祝日 =====
@@ -218,7 +165,6 @@ function ensureStyle() {
   .mg-row.mg-past{opacity:.5}
   .mg-row-t{font-size:13px;font-weight:600;color:${C.ink}}
   .mg-row-sub{font-size:11.5px;color:${C.muted};margin-top:2px}
-  .mg-until{color:${C.amber};font-weight:600}
   .mg-row-acts{display:flex;gap:5px;flex-shrink:0}
   .mg-btn{font:inherit;font-size:11.5px;padding:4px 10px;border-radius:7px;border:1px solid ${C.line};background:#fff;color:${C.muted};cursor:pointer}
   .mg-btn:hover{border-color:${C.fill};color:${C.fill}}
