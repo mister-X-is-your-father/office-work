@@ -242,7 +242,7 @@ export async function render(root) {
       const collapsed = state.collapsed.has("p" + g.pid);
       const gcells = scale.axis.map((a) => `<div class="cell${a.weekend ? " weekend" : ""}"></div>`).join("");
       const band = g.pid ? projColor(g.ws) : C.muted;
-      html += `<div class="grp${collapsed ? " collapsed" : ""}" data-pid="${g.pid}">
+      html += `<div class="grp${collapsed ? " collapsed" : ""}" data-pid="${g.pid}" style="--pj:${band}">
         <div class="grp-label" data-toggle="p${g.pid}">
           <span class="caret">▾</span>
           <span class="pj-band" style="background:${band}"></span>
@@ -264,7 +264,9 @@ export async function render(root) {
           return `<span class="ava" style="background:${member_color(idx)}">${esc(initial(a.name || a.username))}</span>`;
         }).join("") + (asg.length > 2 ? `<span class="more">+${asg.length - 2}</span>` : "");
         const noplan = !r.planned.source && !r.actual.start;
-        html += `<div class="row${r.over ? " delayed" : ""}${noplan ? " noplan" : ""}">
+        const isLast = t === items[items.length - 1];
+        const treeCls = g.pid ? ` pj-child${isLast ? " last" : ""}` : "";  // 実プロジェクト配下のみツリー表示
+        html += `<div class="row${r.over ? " delayed" : ""}${noplan ? " noplan" : ""}${treeCls}"${g.pid ? ` style="--pj:${band}"` : ""}>
           <div class="r-label r-label-sub">
             <span class="r-text"><span class="r-name">${esc(t.title)}</span>
               <span class="r-meta">${avs ? `<span class="av">${avs}</span>` : ""}
@@ -278,6 +280,15 @@ export async function render(root) {
       }
     }
     rowsEl.innerHTML = html || `<div class="empty">表示できるタスクがありません（窓: ${startISO}〜${scale.axis[WINDOW_DAYS - 1].iso}）。</div>`;
+    // 子タスクの縦線を、見出しの色四角(pj-band)の中心に正確に合わせる。
+    // 四角のx位置は caret(▾) の字幅に依存しフォントで変わるため、固定pxにせず実測して --pjrail に入れる。
+    const pb = rowsEl.querySelector('.grp[data-pid]:not([data-pid="0"]) .pj-band');
+    if (pb) {
+      const lab = pb.closest('.grp-label');
+      const bb = pb.getBoundingClientRect();
+      const off = bb.left + bb.width / 2 - lab.getBoundingClientRect().left; // ラベル左端からの四角中心
+      rowsEl.style.setProperty('--pjrail', (off - 1) + 'px'); // 2px線の左端＝中心-1
+    }
     overlays(0, null, null, ROW_H, rowOffset, false);
   }
 
@@ -530,6 +541,13 @@ function shell(projects, members, memberIdx, mode) {
   .gv .avatar{width:30px;height:30px;border-radius:50%;color:#fff;font-size:13px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex:none}
   .gv .pj-band{width:14px;height:30px;border-radius:4px;flex:none}
   .gv .grp-text{min-width:0;display:flex;flex-direction:column;gap:3px;flex:1}
+  /* プロジェクト別: 親→子はインデントで表現。縦線はヘッダから伸ばさず、紐づく子タスクの行にだけ引く */
+  .gv .grp[data-pid] .grp-name{font-weight:800}
+  .gv .row.pj-child .r-label{position:relative;padding-left:74px}   /* 親名(≈49px)よりはっきり右へ字下げ＝配下と一目で分かる */
+  .gv .row.pj-child .r-name{font-weight:600}
+  /* 縦線は子タスク行のみ。色四角の中心(ラベル左から33px)に揃える。最後の子の中央で止める */
+  .gv .row.pj-child .r-label::before{content:"";position:absolute;left:var(--pjrail,32px);top:0;bottom:0;width:2px;background:var(--pj);opacity:.5}
+  .gv .row.pj-child.last .r-label::before{bottom:auto;height:50%}
   .gv .grp-top{display:flex;align-items:center;gap:8px}
   .gv .grp-name{font-size:14px;font-weight:700;white-space:nowrap}
   .gv .grp-sub{font-size:10.5px;color:${C.muted};white-space:nowrap}
