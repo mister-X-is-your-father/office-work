@@ -47,7 +47,7 @@ export async function render(root) {
 
   root.innerHTML = `
     <style>${css()}</style>
-    <h1 class="vtitle">依存グラフ <small>${nodeIds.length}タスク ・ 赤=クリティカルパス（最長経路）</small></h1>
+    <h1 class="vtitle">依存グラフ <small>${nodeIds.length}タスク ・ 赤い実線＝クリティカルパス（最長経路）／灰の破線＝依存</small></h1>
     <div class="card dg-card"><div class="dg-scroll"><div class="dg-canvas" style="width:${W}px;height:${H}px">
       <svg class="dg-edges" width="${W}" height="${H}"><defs>
         <marker id="dg-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#c4ccd6"/></marker>

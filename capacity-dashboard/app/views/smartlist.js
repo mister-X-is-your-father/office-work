@@ -134,7 +134,7 @@ function rowHtml(t, projects, today) {
   const est = (t.time_estimate || 0) / 3600;
   return `<div class="sl-row${done ? " is-done" : ""}" data-id="${t.id}">
     <button class="sl-check${done ? " done" : ""}" data-check="${t.id}" title="${done ? "未完了に戻す" : "完了にする"}">${done ? "✓" : ""}</button>
-    <span class="sl-pdot${p ? "" : " none"}" style="${p ? `background:${p.c}` : ""}"></span>
+    <span class="sl-pdot${p ? "" : " none"}" title="重要度: ${esc(p ? p.n : "なし")}" style="${p ? `background:${p.c}` : ""}"></span>
     <span class="sl-rtitle">${esc(t.title)}</span>
     <span class="sl-meta">
       ${cat ? `<span class="sl-cat" style="color:${categoryColor(cat)};border-color:${categoryColor(cat)}55">${esc(cat.title)}</span>` : ""}
