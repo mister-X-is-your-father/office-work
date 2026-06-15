@@ -89,7 +89,9 @@ export async function render(root) {
   const selfMember = me ? (activeMembers.find((m) => m.id === meId) || { id: meId, name: me.name || me.username, username: me.username }) : null;
 
   // WHO 既定/正規化
-  if (WHO === "") WHO = selfMember ? "self" : (activeMembers[0] ? String(activeMembers[0].id) : "all");
+  if (WHO === "") WHO = (selfMember && activeMembers.some((m) => m.id === selfMember.id)) ? String(selfMember.id) : (activeMembers[0] ? String(activeMembers[0].id) : "all");
+  // 後方互換: 旧「自分」タブ(WHO==="self")は自分のmember idへ読み替え（タブ廃止のため）
+  if (WHO === "self") { WHO = (selfMember && activeMembers.some((m) => m.id === selfMember.id)) ? String(selfMember.id) : "all"; lsSet(WHO_KEY, WHO); }
 
   const bdays = bizDaysList(FROM, TO, holidaysSet);
   // 粒度: 保存値 "day"/"week" を優先。未設定("")なら期間長で自動。
@@ -115,7 +117,6 @@ export async function render(root) {
   const tab = (val, label, color, on) =>
     `<button class="wp-who-b${on ? " on" : ""}" data-who="${esc(String(val))}">${color ? `<i class="wp-who-av" style="background:${color}">${esc(label[0] || "?")}</i>` : ""}${esc(label)}</button>`;
   const whoTabs = tab("all", "全員", "", WHO === "all")
-    + (selfMember ? tab("self", "自分", "", WHO === "self") : "")
     + activeMembers.map((m) => tab(m.id, mName(m), member_color(m.id), WHO === String(m.id))).join("");
 
   const granLabel = granularity === "day" ? "日別" : "週別集計";
