@@ -8,38 +8,54 @@ import { openTaskForm } from "./taskform.js";
 import { C, member_color, fmtH, esc, todayISO } from "../lib/ui.js";
 
 let COL_W = 40, WINDOW_DAYS = 21;   // 表示範囲プリセットで render ごとに上書き
+let COL_W_MIN = 9;                  // プリセット由来の最小列幅（fitColumns で実幅へ伸ばす起点）
 const LABEL_W = 280, LABEL_W_P = 320, ROW_H = 42, GRP_H = 56;
 const DOW = ["日", "月", "火", "水", "木", "金", "土"];
 
-// 表示範囲プリセット。days=表示日数 / back=今日より前に含める日数 / colW=1日の列幅(px)。
-// 長期はピクセルを詰めてヘッダを月バンド＋粗い日付に自動切替（gridHead）。
-const RANGE_PRESETS = [
-  { key: "2w", label: "2週間", days: 14, back: 3, colW: 42 },
-  { key: "1m", label: "1ヶ月", days: 31, back: 5, colW: 27 },
-  { key: "3m", label: "3ヶ月", days: 92, back: 10, colW: 12 },
-  { key: "6m", label: "6ヶ月", days: 184, back: 18, colW: 7 },
-];
+// 表示単位ごとのスパン。days=表示日数 / back=今日より前に含める日数 / colW=1日の列幅(px)。
+// 日表示=列を広く日付を1日ずつ／週表示=列を詰めて週(開始曜日)ごとの罫線・ラベルに。
+const SPANS = {
+  day: [
+    { key: "2w", label: "2週間", days: 14, back: 3, colW: 42 },
+    { key: "1m", label: "1ヶ月", days: 31, back: 5, colW: 27 },
+  ],
+  week: [
+    { key: "1m", label: "1ヶ月", days: 35, back: 7, colW: 14 },
+    { key: "3m", label: "3ヶ月", days: 91, back: 7, colW: 9 },
+    { key: "6m", label: "6ヶ月", days: 182, back: 14, colW: 7 },
+  ],
+};
 
 const projColor = (id) => ["#3a86ff", "#2fa66b", "#b657d6", "#e5772d", "#0ea5e9", "#f5a623"][((id || 0) % 6 + 6) % 6];
 const initial = (name) => (name ? String(name).trim().slice(0, 1) : "?");
 
-// 再描画（編集後の reload 等）をまたいで保持する表示状態。既定はプロジェクト別。
-// これが無いと、タスク行/人別で編集→render し直すたびに既定モードへ戻ってしまう。
-// 表示範囲の選択は localStorage に記憶（再読込後も維持）。未保存/不正なら既定 3ヶ月。
-const RANGE_KEY = "gantt_range";
-const savedRange = (() => { try { return localStorage.getItem(RANGE_KEY); } catch { return null; } })();
+// 再描画（編集後の reload 等）をまたいで保持する表示状態。日表示/週表示・スパン・週開始曜日は
+// localStorage に記憶（再読込後も維持）。既定はプロジェクト別 / 週表示 3ヶ月 / 週開始=月。
+const GV_KEY = "gantt_view";
+const _gv = (() => { try { return JSON.parse(localStorage.getItem(GV_KEY) || "{}") || {}; } catch { return {}; } })();
 const gview = {
   mode: "project", collapsed: new Set(),
-  range: RANGE_PRESETS.some((p) => p.key === savedRange) ? savedRange : "3m",
+  unit: _gv.unit === "day" || _gv.unit === "week" ? _gv.unit : "week",
+  spanDay: SPANS.day.some((p) => p.key === _gv.spanDay) ? _gv.spanDay : "1m",
+  spanWeek: SPANS.week.some((p) => p.key === _gv.spanWeek) ? _gv.spanWeek : "3m",
+  weekStart: Number.isInteger(_gv.weekStart) && _gv.weekStart >= 0 && _gv.weekStart <= 6 ? _gv.weekStart : 1,
 };
+function saveGV() {
+  try { localStorage.setItem(GV_KEY, JSON.stringify({ unit: gview.unit, spanDay: gview.spanDay, spanWeek: gview.spanWeek, weekStart: gview.weekStart })); } catch { /* localStorage 不可でも続行 */ }
+}
 
 export async function render(root) {
   const { tasks, members, projects } = await load();
   const today = todayISO();
-  // 表示範囲プリセットから 窓日数・列幅・起点 を決める（gview に保持＝再描画をまたぐ）
-  const preset = RANGE_PRESETS.find((p) => p.key === gview.range) || RANGE_PRESETS[1];
+  // 表示単位(日/週)＋スパンから 窓日数・列幅・起点 を決める（gview に保持＝再描画をまたぐ）
+  const spanList = SPANS[gview.unit];
+  const spanKey = gview.unit === "day" ? gview.spanDay : gview.spanWeek;
+  const preset = spanList.find((p) => p.key === spanKey) || spanList[0];
   WINDOW_DAYS = preset.days;
   COL_W = preset.colW;
+  COL_W_MIN = preset.colW;   // プリセット列幅は「最小」。利用可能幅が広ければ fitColumns で伸ばす
+  const weekStart = gview.weekStart;                 // 週の開始曜日(0=日..6=土)
+  const tier = gview.unit === "day" ? "day" : "week"; // 日表示=毎日ラベル / 週表示=週ラベル
   const startISO = shiftISO(today, -preset.back);
   const scale = dayScale(startISO, WINDOW_DAYS);
 
@@ -80,12 +96,28 @@ export async function render(root) {
   const head = root.querySelector("#gv-head");
   const rowsEl = root.querySelector("#gv-rows");
   const ganttEl = root.querySelector("#gv-gantt");
-  ganttEl.classList.toggle("tight", COL_W < 22);   // 長期表示=日罫線を消し週(月曜)罫線だけにする
+  const scrollEl = root.querySelector(".gv-scroll");
+  ganttEl.classList.toggle("tight", tier === "week");   // 週表示=日罫線を消し週(開始曜日)罫線だけにする
 
-  // ヘッダは2段（月バンド＋日付）。列幅に応じて日付ラベルの粒度を自動調整。
-  // day(≥22px)=毎日 dom+曜日 / week(≥9px)=月曜だけ dom / month(<9px)=月初だけ dom。
+  // 列幅を「実際の表示幅」にフィットさせる。プリセット列幅(COL_W_MIN)を下限に、
+  // 余白が出るなら列を広げて右まで使い切る／溢れるならプリセット幅のまま横スクロール。
+  // CSS(grid)と JS(バー px 計算)の両方が参照する COL_W を一致させるため --col-w も書き換える。
+  function fitColumns() {
+    const labelW = state.mode === "task" ? LABEL_W : LABEL_W_P;
+    // clientWidth = 内側幅(縦スクロールバー除外済み)。利用可能なチャート幅 = 全幅 - ラベル列。
+    const avail = scrollEl.clientWidth - labelW;
+    if (avail > 0) {
+      // 端数切り捨てで整数px化（小数だと罫線がにじむ）。下限はプリセット列幅。
+      const fit = Math.floor(avail / WINDOW_DAYS);
+      COL_W = Math.max(COL_W_MIN, fit);
+    } else {
+      COL_W = COL_W_MIN;
+    }
+    ganttEl.style.setProperty("--col-w", COL_W + "px");
+  }
+
+  // ヘッダは2段（月バンド＋日付）。日表示=毎日 dom+曜日 / 週表示=週開始日だけ dom。
   function gridHead(labelW) {
-    const tier = COL_W >= 22 ? "day" : COL_W >= 9 ? "week" : "month";
     // 月バンド: 連続する同月をまとめて span
     const months = [];
     for (let i = 0; i < scale.axis.length;) {
@@ -100,17 +132,17 @@ export async function render(root) {
     const dayRow = `<div class="gh-corner">${corner} / 日付</div>` + scale.axis.map((a) => {
       const cls = (a.weekend ? " weekend" : "") + (a.iso === today ? " today" : "");
       const dom = a.iso.slice(8);
-      const showNum = tier === "day" || (tier === "week" && a.dow === 1) || (tier === "month" && dom === "01");
+      const showNum = tier === "day" || a.dow === weekStart;   // 週表示は週開始日だけ日付
       const numHtml = showNum ? `<div class="dom">${+dom}</div>` : "";
       const dowHtml = tier === "day" ? `<div class="dow">${DOW[a.dow]}</div>` : "";
-      return `<div class="gh-day${cls}${tier !== "day" ? " sparse" : ""}${a.dow === 1 ? " wk" : ""}">${numHtml}${dowHtml}</div>`;
+      return `<div class="gh-day${cls}${tier !== "day" ? " sparse" : ""}${a.dow === weekStart ? " wk" : ""}">${numHtml}${dowHtml}</div>`;
     }).join("");
     return monthRow + dayRow;
   }
 
   // タスク1行ぶんのバー領域HTML（予定バー＋実績バー）。taskId を data 属性に載せてドラッグで参照。
   function barsHTML(r, taskId) {
-    const cells = scale.axis.map((a) => `<div class="cell${a.weekend ? " weekend" : ""}${a.dow === 1 ? " wk" : ""}"></div>`).join("");
+    const cells = scale.axis.map((a) => `<div class="cell${a.weekend ? " weekend" : ""}${a.dow === weekStart ? " wk" : ""}"></div>`).join("");
     let bars = "";
     if (r.planned.source) {
       const pg = scale.range(r.planned.start, r.planned.end);
@@ -166,7 +198,7 @@ export async function render(root) {
         <div class="r-label">
           <span class="r-pbar" style="background:${projColor(t.project_id)}"></span>
           <span class="r-text">
-            <span class="r-name">${esc(t.title)}</span>
+            <span class="r-name" title="${esc(t.title)}">${esc(t.title)}</span>
             <span class="r-meta">${avs ? `<span class="av">${avs}</span>` : ""}
               <span>見${fmtH(r.estH)}・実${fmtH(r.spentH)}・予${fmtH(r.planned.h)}</span>
               ${r.over ? `<span class="r-flag">超過</span>` : ""}
@@ -198,14 +230,14 @@ export async function render(root) {
       // グループ日セル: 予定>8hの日を赤帯
       const gcells = scale.axis.map((a) => {
         const over = (dayMap[a.iso] || 0) > 8;
-        return `<div class="cell${a.weekend ? " weekend" : ""}${a.dow === 1 ? " wk" : ""}" style="${over ? `background:rgba(229,72,77,.14)` : ""}"></div>`;
+        return `<div class="cell${a.weekend ? " weekend" : ""}${a.dow === weekStart ? " wk" : ""}" style="${over ? `background:rgba(229,72,77,.14)` : ""}"></div>`;
       }).join("");
       html += `<div class="grp${collapsed ? " collapsed" : ""}" data-mid="${m.id}">
         <div class="grp-label" data-toggle="m${m.id}">
           <span class="caret">▾</span>
           <span class="avatar" style="background:${member_color(idx)}">${esc(initial(m.name))}</span>
           <span class="grp-text">
-            <span class="grp-top"><span class="grp-name">${esc(m.name)}</span>
+            <span class="grp-top"><span class="grp-name" title="${esc(m.name)}">${esc(m.name)}</span>
               <span class="cap-track"><span class="cap-fill" style="width:${Math.min(pct, 100)}%;background:${capCol}"></span></span>
               <span class="grp-sub">${pct}% ・ 予${fmtH(winH)}/${cap}h</span></span>
             <span class="grp-sub">${mtasks.length}タスク</span>
@@ -220,7 +252,7 @@ export async function render(root) {
           html += `<div class="row${r.over ? " delayed" : ""}" data-task="${t.id}">
             <div class="r-label r-label-sub">
               <span class="r-pbar" style="background:${projColor(t.project_id)}"></span>
-              <span class="r-text"><span class="r-name">${esc(t.title)}</span>
+              <span class="r-text"><span class="r-name" title="${esc(t.title)}">${esc(t.title)}</span>
                 <span class="r-meta"><span>見${fmtH(r.estH)}・実${fmtH(r.spentH)}・予${fmtH(r.planned.h)}</span>
                 ${r.over ? `<span class="r-flag">超過</span>` : ""}</span></span>
             </div>
@@ -278,14 +310,14 @@ export async function render(root) {
         s.est += r.estH; s.spent += r.spentH; s.plan += r.planned.h; return s;
       }, { est: 0, spent: 0, plan: 0 });
       const collapsed = state.collapsed.has("p" + g.pid);
-      const gcells = scale.axis.map((a) => `<div class="cell${a.weekend ? " weekend" : ""}${a.dow === 1 ? " wk" : ""}"></div>`).join("");
+      const gcells = scale.axis.map((a) => `<div class="cell${a.weekend ? " weekend" : ""}${a.dow === weekStart ? " wk" : ""}"></div>`).join("");
       const band = g.pid ? projColor(g.ws) : C.muted;
       html += `<div class="grp${collapsed ? " collapsed" : ""}" data-pid="${g.pid}" style="--pj:${band}">
         <div class="grp-label" data-toggle="p${g.pid}">
           <span class="caret">▾</span>
           <span class="pj-band" style="background:${band}"></span>
           <span class="grp-text">
-            <span class="grp-top"><span class="grp-name">${esc(g.title)}</span>
+            <span class="grp-top"><span class="grp-name" title="${esc(g.title)}">${esc(g.title)}</span>
               <span class="grp-sub">${items.length}タスク</span></span>
             <span class="grp-sub">見${fmtH(agg.est)}・実${fmtH(agg.spent)}・予${fmtH(agg.plan)}</span>
           </span>
@@ -306,7 +338,7 @@ export async function render(root) {
         const treeCls = g.pid ? ` pj-child${isLast ? " last" : ""}` : "";  // 実プロジェクト配下のみツリー表示
         html += `<div class="row${r.over ? " delayed" : ""}${noplan ? " noplan" : ""}${treeCls}" data-task="${t.id}"${g.pid ? ` style="--pj:${band}"` : ""}>
           <div class="r-label r-label-sub">
-            <span class="r-text"><span class="r-name">${esc(t.title)}</span>
+            <span class="r-text"><span class="r-name" title="${esc(t.title)}">${esc(t.title)}</span>
               <span class="r-meta">${avs ? `<span class="av">${avs}</span>` : ""}
                 <span class="r-who">${asg[0] ? esc(asg[0].name || asg[0].username) : "未割当"}</span>
                 <span>見${fmtH(r.estH)}・実${fmtH(r.spentH)}・予${fmtH(r.planned.h)}</span>
@@ -361,10 +393,27 @@ export async function render(root) {
   }
 
   function paint() {
+    fitColumns();   // 表示幅に合わせ列幅を再算出（モードでラベル幅が変わるので毎回）
     if (state.mode === "task") paintTaskMode();
     else if (state.mode === "member") paintMemberMode();
     else paintProjectMode();
   }
+
+  // ウィンドウ/サイドバー変化に追従して列幅を再フィット（バー px 位置も含め再描画）。
+  // 同一 render 内のみ有効化し、次 render 前に解除してリスナーの多重登録を防ぐ。
+  let resizeRaf = 0;
+  const onResize = () => {
+    cancelAnimationFrame(resizeRaf);
+    resizeRaf = requestAnimationFrame(() => { closeDayPop(); paint(); });
+  };
+  window.addEventListener("resize", onResize);
+  const ro = new ResizeObserver(onResize);
+  ro.observe(scrollEl);
+  // root が次の render で innerHTML 差し替えられたら（scrollEl が DOM から外れたら）後始末。
+  const cleanup = () => { if (!root.contains(scrollEl)) { window.removeEventListener("resize", onResize); ro.disconnect(); } };
+  // MutationObserver で root の子要素差し替えを検知して cleanup。
+  const mo = new MutationObserver(() => { cleanup(); if (!root.contains(scrollEl)) mo.disconnect(); });
+  mo.observe(root, { childList: true });
 
   // ── ツールバー配線 ──
   root.querySelectorAll("[data-mode]").forEach((b) => {
@@ -374,14 +423,15 @@ export async function render(root) {
       paint();
     };
   });
-  // 表示範囲: 窓日数・列幅・グリッドが変わるので全再描画（データは store キャッシュ）
-  root.querySelectorAll("[data-range]").forEach((b) => {
-    b.onclick = () => {
-      gview.range = b.dataset.range;
-      try { localStorage.setItem(RANGE_KEY, gview.range); } catch { /* localStorage 不可でも続行 */ }
-      render(root);
-    };
+  // 表示単位/スパン/週開始: 窓・列幅・グリッドが変わるので全再描画（データは store キャッシュ）。選択は記憶。
+  root.querySelectorAll("[data-unit]").forEach((b) => {
+    b.onclick = () => { gview.unit = b.dataset.unit; saveGV(); render(root); };
   });
+  root.querySelectorAll("[data-span]").forEach((b) => {
+    b.onclick = () => { if (gview.unit === "day") gview.spanDay = b.dataset.span; else gview.spanWeek = b.dataset.span; saveGV(); render(root); };
+  });
+  const wsel = root.querySelector("#gv-weekstart");
+  if (wsel) wsel.onchange = () => { gview.weekStart = +wsel.value; saveGV(); render(root); };
   root.querySelectorAll("[data-proj]").forEach((b) => {
     b.onclick = () => { toggleSet(state.projects, +b.dataset.proj, b); paint(); };
   });
@@ -528,6 +578,7 @@ export async function render(root) {
 
   rowsEl.addEventListener("click", (e) => {
     if (drag) return;
+    if (gview.unit !== "day") return;   // 日別入力は日付が1日ずつ出る「日表示」のときだけ
     if (e.target.closest(".bar") || e.target.closest(".r-label") || e.target.closest("[data-toggle]")) return;
     const row = e.target.closest(".row[data-task]");
     if (!row) return;
@@ -567,12 +618,16 @@ function shell(projects, members, memberIdx, mode) {
       <div class="seg">
         ${seg("project", "プロジェクト別")}${seg("task", "タスク行")}${seg("member", "人別")}
       </div>
-      <div class="tbg"><span class="tbl">表示範囲</span><div class="seg rangeseg">${RANGE_PRESETS.map((p) => `<button data-range="${p.key}"${gview.range === p.key ? ' class="on"' : ""}>${p.label}</button>`).join("")}</div></div>
+      <div class="tbg"><span class="tbl">表示</span>
+        <div class="seg">${["day", "week"].map((u) => `<button data-unit="${u}"${gview.unit === u ? ' class="on"' : ""}>${u === "day" ? "日" : "週"}</button>`).join("")}</div>
+        <div class="seg">${SPANS[gview.unit].map((p) => { const cur = gview.unit === "day" ? gview.spanDay : gview.spanWeek; return `<button data-span="${p.key}"${p.key === cur ? ' class="on"' : ""}>${p.label}</button>`; }).join("")}</div>
+        ${gview.unit === "week" ? `<select class="gv-wsel" id="gv-weekstart" title="週の開始曜日">${DOW.map((d, i) => `<option value="${i}"${i === gview.weekStart ? " selected" : ""}>${d}曜始まり</option>`).join("")}</select>` : ""}
+      </div>
       <div class="tbg"><span class="tbl">ワークスペース</span><div class="chips">${projChips}</div></div>
       <div class="tbg"><span class="tbl">担当者</span><div class="chips">${memChips}</div></div>
       <label class="tbg chk"><input type="checkbox" id="gv-hidedone"> 完了を隠す</label>
     </div>
-    <div class="gv-scroll"><div class="gantt" id="gv-gantt" style="--label-w:${LABEL_W}px">
+    <div class="gv-scroll"><div class="gantt" id="gv-gantt" style="--label-w:${LABEL_W}px;--col-w:${COL_W}px;--win:${WINDOW_DAYS}">
       <div class="grid-head" id="gv-head"></div>
       <div class="rows" id="gv-rows"></div>
     </div></div>
@@ -588,9 +643,11 @@ function shell(projects, members, memberIdx, mode) {
   </div>
   <style>
   /* ガントを画面高にフィット＝行だけ内側スクロール。タイトル/ツールバー/日付軸/凡例は常時表示。
-     高さ控除 = topbar(54) + content 余白上(24)+下(60) = 138px。ページ自体はスクロールさせない */
-  .gv-view{display:flex;flex-direction:column;height:calc(100vh - 138px)}
-  .gv-view .vtitle{flex:none}
+     高さ控除 = topbar(54) + content 余白上(24)。content 下 padding(60) は負 margin で食い込み、
+     行エリアをビューポート下端ぎりぎりまで使う（共有 content の padding は触らない）。
+     実効高 = 100vh - 78(=54+24) - 12(下の余白) = 100vh - 90px。 */
+  .gv-view{display:flex;flex-direction:column;height:calc(100vh - 90px);margin-bottom:-48px}
+  .gv-view .vtitle{flex:none;margin:0 0 10px}
   .gv{padding:0;flex:1;min-height:0;display:flex;flex-direction:column}
   .gv-toolbar{flex:none}
   .gv .legend{flex:none}
@@ -600,14 +657,15 @@ function shell(projects, members, memberIdx, mode) {
   .gv .seg button.on{background:${C.fill};color:#fff}
   .gv .tbg{display:flex;align-items:center;gap:8px}
   .gv .tbl{font-size:11px;color:${C.muted};font-weight:600}
+  .gv .gv-wsel{font:inherit;font-size:12px;font-weight:600;padding:6px 8px;border:1px solid ${C.line};border-radius:8px;background:#fff;color:${C.ink};cursor:pointer}
   .gv .chips{display:flex;flex-wrap:wrap;gap:6px}
   .gv .chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:5px 11px;border-radius:999px;border:1px solid ${C.line};background:#fff;color:${C.ink};cursor:pointer}
   .gv .chip[aria-pressed=false]{opacity:.4;text-decoration:line-through}
   .gv .chip .dot{width:9px;height:9px;border-radius:50%}
   .gv .chk{font-size:12px;color:${C.ink};cursor:pointer}
   .gv-scroll{flex:1;min-height:0;overflow:auto}
-  .gv .gantt{min-width:calc(var(--label-w) + ${COL_W}px*${WINDOW_DAYS});position:relative}
-  .gv .grid-head{display:grid;grid-template-columns:var(--label-w) repeat(${WINDOW_DAYS}, ${COL_W}px);grid-auto-rows:auto;border-bottom:1px solid ${C.line};position:sticky;top:0;background:#fff;z-index:8}
+  .gv .gantt{min-width:calc(var(--label-w) + var(--col-w)*var(--win));width:100%;position:relative}
+  .gv .grid-head{display:grid;grid-template-columns:var(--label-w) repeat(var(--win), var(--col-w));grid-auto-rows:auto;border-bottom:1px solid ${C.line};position:sticky;top:0;background:#fff;z-index:8}
   /* 左端のラベル列は横スクロールしても固定（フリーズ）。角は最前面 */
   .gv .gh-corner{padding:9px 14px;font-size:11px;color:${C.muted};font-weight:600;border-right:1px solid ${C.line};display:flex;align-items:center;position:sticky;left:0;z-index:2;background:#fff}
   .gv .gh-mc{padding:0;border-bottom:1px solid ${C.line};position:sticky;left:0;z-index:2;background:#fff}
@@ -621,7 +679,7 @@ function shell(projects, members, memberIdx, mode) {
   .gv .gh-day.today{background:rgba(229,72,77,.07)}
   .gv .gh-day.today .dom{color:${C.over};font-weight:700}
   .gv .rows{position:relative}
-  .gv .row{display:grid;grid-template-columns:var(--label-w) repeat(${WINDOW_DAYS}, ${COL_W}px);border-bottom:1px solid ${C.line};height:${ROW_H}px;position:relative}
+  .gv .row{display:grid;grid-template-columns:var(--label-w) repeat(var(--win), var(--col-w));border-bottom:1px solid ${C.line};height:${ROW_H}px;position:relative}
   .gv .row:hover{background:#fafbfc}
   .gv .row.delayed{background:rgba(229,72,77,.045)}
   .gv .row:hover .r-label{background:#fafbfc}
@@ -630,7 +688,7 @@ function shell(projects, members, memberIdx, mode) {
   .gv .r-label-sub{padding-left:24px}
   .gv .r-pbar{width:4px;height:22px;border-radius:2px;flex:none}
   .gv .r-text{min-width:0}
-  .gv .r-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .gv .r-name{font-size:13.5px;font-weight:600;color:${C.ink};letter-spacing:.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .gv .r-meta{font-size:10.5px;color:${C.muted};display:flex;align-items:center;gap:6px;margin-top:1px;white-space:nowrap}
   .gv .r-meta .av{display:inline-flex;gap:3px}
   .gv .r-meta .ava{width:14px;height:14px;border-radius:50%;color:#fff;font-size:8px;display:inline-flex;align-items:center;justify-content:center;font-weight:700}
@@ -641,7 +699,7 @@ function shell(projects, members, memberIdx, mode) {
   .gv .r-flag{font-size:9px;font-weight:700;color:#fff;background:${C.over};padding:1px 5px;border-radius:4px}
   .gv .r-noplan{font-size:9px;color:${C.muted};border:1px dashed ${C.line};padding:0 5px;border-radius:4px}
   .gv .row.noplan .r-name{color:${C.muted};font-weight:500}
-  .gv .r-cells{position:absolute;left:var(--label-w);top:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(${WINDOW_DAYS}, ${COL_W}px);pointer-events:none}
+  .gv .r-cells{position:absolute;left:var(--label-w);top:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(var(--win), var(--col-w));pointer-events:none}
   .gv .cell{border-right:1px solid ${C.track}}
   .gv .cell.weekend{background:rgba(0,0,0,.012)}
   /* 長期表示(tight): 日ごとの細罫線を消し、週(月曜)の罫線だけ残す＝1目盛り=1週間で見やすく */
@@ -683,7 +741,7 @@ function shell(projects, members, memberIdx, mode) {
   .gv .today-line{position:absolute;top:0;width:0;border-left:2px dashed ${C.over};z-index:6;pointer-events:none}
   .gv .today-line .tl-cap{position:absolute;top:-1px;left:-15px;font-size:9px;color:#fff;background:${C.over};padding:1px 5px;border-radius:4px}
   .gv svg.deps{position:absolute;left:var(--label-w);top:0;pointer-events:none;z-index:4;overflow:visible}
-  .gv .grp{display:grid;grid-template-columns:var(--label-w) repeat(${WINDOW_DAYS}, ${COL_W}px);height:${GRP_H}px;position:relative;background:#fbfcfd;border-bottom:1px solid ${C.line}}
+  .gv .grp{display:grid;grid-template-columns:var(--label-w) repeat(var(--win), var(--col-w));height:${GRP_H}px;position:relative;background:#fbfcfd;border-bottom:1px solid ${C.line}}
   .gv .grp-label{border-right:1px solid ${C.line};padding:0 12px;display:flex;align-items:center;gap:9px;cursor:pointer;overflow:hidden;position:sticky;left:0;z-index:7;background:#fbfcfd}
   .gv .grp-label:hover{background:#f3f5f8}
   .gv .grp .caret{font-size:10px;color:${C.muted};transition:transform .15s}
@@ -698,12 +756,12 @@ function shell(projects, members, memberIdx, mode) {
   /* 縦線は子タスク行のみ。色四角の中心(ラベル左から33px)に揃える。最後の子の中央で止める */
   .gv .row.pj-child .r-label::before{content:"";position:absolute;left:var(--pjrail,32px);top:0;bottom:0;width:2px;background:var(--pj);opacity:.5}
   .gv .row.pj-child.last .r-label::before{bottom:auto;height:50%}
-  .gv .grp-top{display:flex;align-items:center;gap:8px}
-  .gv .grp-name{font-size:14px;font-weight:700;white-space:nowrap}
+  .gv .grp-top{display:flex;align-items:center;gap:8px;min-width:0}
+  .gv .grp-name{font-size:14px;font-weight:700;color:${C.ink};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
   .gv .grp-sub{font-size:10.5px;color:${C.muted};white-space:nowrap}
   .gv .cap-track{width:90px;height:7px;border-radius:5px;background:${C.track};overflow:hidden;position:relative;flex:none}
   .gv .cap-fill{position:absolute;left:0;top:0;bottom:0;border-radius:5px}
-  .gv .grp-cells{position:absolute;left:var(--label-w);top:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(${WINDOW_DAYS}, ${COL_W}px);pointer-events:none}
+  .gv .grp-cells{position:absolute;left:var(--label-w);top:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(var(--win), var(--col-w));pointer-events:none}
   .gv .legend{display:flex;flex-wrap:wrap;gap:14px;padding:11px 16px;border-top:1px solid ${C.line};font-size:11px;color:${C.muted}}
   .gv .legend .li{display:inline-flex;align-items:center;gap:6px}
   .gv .legend .sw{width:20px;height:10px;border-radius:3px}
