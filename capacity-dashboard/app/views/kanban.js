@@ -183,5 +183,17 @@ function css() {
   .kb-due{font-size:11px;color:${C.muted};font-variant-numeric:tabular-nums}
   .kb-due.late{color:${C.over};font-weight:700}
   .kb-est{font-size:11px;color:${C.muted};margin-left:auto;font-variant-numeric:tabular-nums}
-  .kb-donetag{font-size:10px;color:${C.free};border:1px solid ${C.free};border-radius:8px;padding:0 6px}`;
+  .kb-donetag{font-size:10px;color:${C.free};border:1px solid ${C.free};border-radius:8px;padding:0 6px}
+
+  /* ---- ダークモード上書き（ライト値は上で維持。ここでハードコード淡色のみ反転） ---- */
+  html[data-theme="dark"] .kb-sel{background:var(--card)}
+  html[data-theme="dark"] .kb-newcol:focus{background:var(--card)}
+  html[data-theme="dark"] .kb-col{background:var(--track)}
+  html[data-theme="dark"] .kb-cnt{background:var(--card);border-color:var(--line)}
+  html[data-theme="dark"] .kb-del:hover{background:rgba(255,255,255,.06)}
+  html[data-theme="dark"] .kb-cards.over{background:rgba(255,255,255,.06)}
+  html[data-theme="dark"] .kb-card{background:var(--card);border-color:var(--line);box-shadow:0 1px 2px rgba(0,0,0,.35)}
+  html[data-theme="dark"] .kb-card:hover{border-color:${C.fill}}
+  html[data-theme="dark"] .kb-move{background:rgba(255,255,255,.05);border-color:var(--line)}
+  html[data-theme="dark"] .kb-move:hover{border-color:${C.fill}}`;
 }
