@@ -196,8 +196,11 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
   document.body.appendChild(wrap);
 
   const $ = (id) => wrap.querySelector(id);
-  const close = () => { wrap.remove(); };
-  // 外側クリックでは閉じない（誤クリックで入力が飛ぶため）。閉じる=×/キャンセルのみ。
+  // Escで閉じる（候補コンボが開いてる時はそちらが消費＝モーダルは閉じない）。document bubble で受け、閉じる時に解除。
+  const onEsc = (ev) => { if (ev.key === "Escape") { ev.preventDefault(); close(); } };
+  const close = () => { document.removeEventListener("keydown", onEsc); wrap.remove(); };
+  document.addEventListener("keydown", onEsc);
+  // 外側クリックでは閉じない（誤クリックで入力が飛ぶため）。閉じる=×/キャンセル/Escのみ。
   $("#tf-x").onclick = close;
   $("#tf-cancel").onclick = close;
   $("#tf-title").focus();
@@ -595,7 +598,7 @@ function attachCombobox(input, { items, createText, onPick }) {
   input.oninput = () => { typed = true; open(); };
   input.onblur = () => setTimeout(close, 120);
   input.onkeydown = (ev) => {
-    if (ev.key === "Escape") return close();
+    if (ev.key === "Escape") { if (!dd.hidden) ev.stopPropagation(); return close(); } // 候補が開いてる時だけ消費（モーダルEscへ伝播させない）
     if (dd.hidden) { if (ev.key === "ArrowDown") { ev.preventDefault(); open(); } return; }
     if (ev.key === "ArrowDown") { ev.preventDefault(); idx = (idx + 1) % list.length; paint(); }
     else if (ev.key === "ArrowUp") { ev.preventDefault(); idx = (idx - 1 + list.length) % list.length; paint(); }
