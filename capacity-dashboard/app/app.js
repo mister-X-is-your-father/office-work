@@ -82,13 +82,21 @@ function shell() {
       </aside>
       <div class="main">
         <div class="topbar">
+          <button class="sb-toggle" id="sb-toggle" aria-label="メニューを開閉" aria-expanded="false">☰</button>
           <span class="who" id="who"></span>
           <button id="refresh">↻ 再読込</button>
           <button id="logout">ログアウト</button>
         </div>
         <div class="content" id="content"><div class="loading">…</div></div>
       </div>
+      <div class="sb-backdrop" id="sb-backdrop"></div>
     </div>`;
+  // モバイル: サイドバーのドロワー開閉（デスクトップは常時表示＝CSSのmedia queryで切替）。
+  const _sb = document.querySelector(".sidebar"), _bd = document.getElementById("sb-backdrop"), _tg = document.getElementById("sb-toggle");
+  const setDrawer = (o) => { _sb.classList.toggle("open", o); _bd.classList.toggle("open", o); _tg.setAttribute("aria-expanded", o ? "true" : "false"); };
+  _tg.onclick = () => setDrawer(!_sb.classList.contains("open"));
+  _bd.onclick = () => setDrawer(false);
+  document.getElementById("nav").addEventListener("click", (e) => { if (e.target.closest("a")) setDrawer(false); });
   document.getElementById("refresh").onclick = async () => { store.invalidate(); route(); };
   document.getElementById("addtask").onclick = async () => {
     const { openTaskForm } = await import("./views/taskform.js");
