@@ -10,7 +10,6 @@ const ROUTES = {
   quad:     { label: "優先度マトリクス", grp: "今日",   mod: "./views/quad.js" },
   habits:   { label: "習慣",          grp: "今日",   mod: "./views/habits.js" },
   review:   { label: "レビュー",      grp: "今日",   mod: "./views/review.js" },
-  availability:{ label: "残容量",     grp: "今日",   mod: "./views/availability.js" },
   calendar: { label: "時刻カレンダー",grp: "今日",   mod: "./views/calendar.js" },
   monthcal: { label: "月カレンダー",  grp: "計画",   mod: "./views/monthcal.js" },
   week:     { label: "週プラン",      grp: "計画",   mod: "./views/week.js" },
@@ -29,7 +28,7 @@ const ROUTES = {
   // 隠しルート: ORDER に載せない＝通常ユーザーのナビには出ない。許可者のみ shell() がリンクを追加。
   fable:    { label: "🤖 Fable",      grp: "AI",     mod: "./views/fable.js" },
 };
-const ORDER = ["home", "smart", "today", "triage", "quad", "habits", "review", "availability", "calendar", "monthcal", "week", "planner", "freefinder", "weekstack", "summary", "estactual", "kanban", "list", "outline", "depgraph", "gantt", "manage", "settings"];
+const ORDER = ["home", "smart", "today", "triage", "quad", "habits", "review", "calendar", "monthcal", "week", "planner", "freefinder", "weekstack", "summary", "estactual", "kanban", "list", "outline", "depgraph", "gantt", "manage", "settings"];
 
 const app = document.getElementById("app");
 
