@@ -1,4 +1,4 @@
-// 週プラン（個人/全員）。担当者を1人 or 全員、FROM〜TO（最長3ヶ月）の稼働を「重要度別」に縦積み上げ。
+// 稼働プラン（個人/全員）。担当者を1人 or 全員、FROM〜TO（最長3ヶ月）の稼働を「重要度別」に縦積み上げ。
 // 「全員」はメンバーを合算せず、各メンバーのチャートを別々に並べる（共通Y軸で比較）。
 // 期間で粒度自動切替（≤14日=日別 / それ超=週別集計）。容量線は列ごと（=capH×営業日数）。
 // 集計は capacity.js を変更せず weekLoadByMember を重要度バケット×メンバーで呼んで再利用。重要度色は kinds.PRIO(SSoT)。
@@ -132,7 +132,7 @@ export async function render(root) {
 
   root.innerHTML = `
     <style>${css()}</style>
-    <h1 class="vtitle">${title} 週プラン <small>${FROM.slice(5)}〜${TO.slice(5)} ・ ${granLabel} ・ 容量 ${CAP}h/日 ・ 重要度別</small></h1>
+    <h1 class="vtitle">${title} 稼働プラン <small>${FROM.slice(5)}〜${TO.slice(5)} ・ ${granLabel} ・ 容量 ${CAP}h/日 ・ 重要度別</small></h1>
     <div class="wp-tools">
       <div class="wp-who" id="wp-who">${whoTabs || `<span class="wp-noone">メンバーがいません</span>`}</div>
       <div class="wp-range">期間
@@ -181,7 +181,7 @@ function css() {
   .wp-range input{font:inherit;font-size:12.5px;padding:4px 7px;border:1px solid ${C.line};border-radius:7px;background:#fff;color:${C.ink}}
   .wp-hint{font-size:11px;color:${C.muted}}
   .wp-card{padding:18px 20px 14px}
-  .wp-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px}
+  .wp-grid{display:grid;grid-template-columns:1fr;gap:16px}   /* 全員=メンバー別チャートを縦1列に積む */
   .wp-member{background:#fff;border:1px solid ${C.line};border-radius:14px;padding:14px 16px 10px}
   .wp-mname{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700;margin-bottom:6px}
   .wp-mname small{margin-left:auto;font-weight:600;color:${C.muted};font-size:11px}
