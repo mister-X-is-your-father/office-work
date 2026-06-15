@@ -32,8 +32,8 @@ function quadOf(t, today, days) {
 const QUADS = {
   q1: { title: "重要 × 緊急", sub: "今すぐやる", color: "#e5484d", tint: "#fdf3f3" },
   q2: { title: "重要 × 緊急でない", sub: "計画してやる", color: "#3a86ff", tint: "#f1f7ff" },
-  q3: { title: "重要でない × 緊急", sub: "任せる・さばく・減らす", color: "#f5872e", tint: "#fdf8f1" },
-  q4: { title: "重要でない × 緊急でない", sub: "やらない・あとで", color: "#8a93a0", tint: "#f6f7f9" },
+  q3: { title: "重要でない × 緊急", sub: "減らす・さばく・任せる", color: "#f5872e", tint: "#fdf8f1" },
+  q4: { title: "重要でない × 緊急でない", sub: "捨てる・まとめる・余力で", color: "#8a93a0", tint: "#f6f7f9" },
 };
 
 export async function render(root) {
@@ -65,10 +65,10 @@ export async function render(root) {
     <style>${css()}</style>
     <h1 class="vtitle">優先度マトリクス <small>アイゼンハワー・マトリクス ・ ドラッグで再分類</small></h1>
     <div class="qd-tools">
+      <div class="qd-who" id="qd-who">${whoTabs}</div>
       <span class="qd-rule">📐 <b>重要</b> = 重要度が「高」以上 ／ <b>緊急</b> = 期限が
         <select id="qd-days">${dayOpts}</select>
         以内 または超過（期限なし＝緊急でない）</span>
-      <div class="qd-who" id="qd-who">${whoTabs}</div>
     </div>
     <div class="qd-matrix">
       <div class="qd-corner"></div>
@@ -155,10 +155,10 @@ function cardHtml(t, projects, today) {
 function css() {
   return `
   .qd-tools{display:flex;align-items:center;gap:14px;margin:0 0 14px;flex-wrap:wrap}
-  .qd-rule{font-size:12px;color:${C.muted};background:#fff;border:1px solid ${C.line};border-radius:9px;padding:7px 12px}
+  .qd-rule{font-size:12px;color:${C.muted};background:#fff;border:1px solid ${C.line};border-radius:9px;padding:7px 12px;margin-left:auto}
   .qd-rule b{color:${C.ink}}
   .qd-tools select{font:inherit;font-size:12.5px;padding:4px 8px;border:1px solid ${C.line};border-radius:7px;background:#fff}
-  .qd-who{margin-left:auto;display:flex;flex-wrap:wrap;gap:5px;justify-content:flex-end}
+  .qd-who{display:flex;flex-wrap:wrap;gap:5px}
   .qd-who-b{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:12.5px;padding:5px 11px;border:1px solid ${C.line};border-radius:18px;background:#fff;color:${C.muted};cursor:pointer;transition:border-color .12s,background .12s,color .12s}
   .qd-who-b:hover{border-color:#cfd9e6}
   .qd-who-b.on{background:${C.fill};border-color:${C.fill};color:#fff;font-weight:700}
