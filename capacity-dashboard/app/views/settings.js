@@ -1,6 +1,6 @@
 // 設定（チーム共有＋個人設定）。チーム共有の保存先は taskstation-exec（許可ユーザーのみ書き込み可）。
 // 個人設定（リマインダー通知）は localStorage＝exec が落ちていても使える。
-// UI: 「個人設定 / チーム共有設定」の2グループに分け、各設定を行レイアウト＋アイコン＋明確な保存バーで構造化。
+// UI: 「個人設定 / チーム共有設定」の2グループに分け、各設定を行レイアウト＋明確な保存バーで構造化。
 import { load, invalidate, TEMPLATE_WS } from "../lib/store.js";
 import { getSettings, saveSettings } from "../lib/exec.js";
 import { notifyPrefs, saveNotifyPrefs } from "../lib/notify.js";
@@ -23,22 +23,19 @@ export async function render(root) {
 
   // 個人設定セクション（execDown でも使える＝localStorage）
   const personalSection = `
-    <section class="sx-group personal">
-      <div class="sx-ghd">
-        <span class="sx-ico">🔔</span>
-        <div>
-          <div class="sx-gtitle">個人設定</div>
-          <div class="sx-scope"><span class="dot" style="background:#6c63f2"></span>この端末のブラウザのみ・変更は即保存</div>
-        </div>
-      </div>
-      <div class="sx-panel">
+    <section class="sx-card">
+      <header class="sx-chd">
+        <div class="sx-ctitle">個人設定</div>
+        <span class="sx-scope"><span class="dot" style="background:${C.fill}"></span>この端末のみ・変更は即保存</span>
+      </header>
+      <div class="sx-body">
         <div class="sx-row">
-          <div><div class="sx-rt">リマインダー通知</div>
-            <div class="sx-rd">自分の予定・出席する会議/定例の開始前に通知。期限が今日のタスクは営業開始時刻にまとめて通知します（アプリを開いている間に動作）。</div></div>
+          <div class="sx-label"><div class="sx-rt">リマインダー通知</div>
+            <div class="sx-rd">自分の予定・会議の開始前と、期限が今日のタスクを通知します（アプリを開いている間）。</div></div>
           <div class="sx-rc"><label class="sx-tg"><input type="checkbox" id="st-ntf"${np.on ? " checked" : ""}><span class="sl"></span></label></div>
         </div>
         <div class="sx-row" id="st-ntf-leadrow">
-          <div><div class="sx-rt">通知タイミング</div><div class="sx-rd">予定の何分前に知らせるか。</div></div>
+          <div class="sx-label"><div class="sx-rt">通知タイミング</div><div class="sx-rd">予定の何分前に知らせるか。</div></div>
           <div class="sx-rc"><select id="st-ntf-lead" class="sx-in">${leadOpts}</select></div>
         </div>
         <div class="sx-note" id="st-ntf-msg"></div>
@@ -51,11 +48,12 @@ export async function render(root) {
       <div class="sx">
         ${topHtml()}
         ${personalSection}
-        <section class="sx-group team">
-          <div class="sx-ghd"><span class="sx-ico">👥</span>
-            <div><div class="sx-gtitle">チーム共有設定</div>
-              <div class="sx-scope"><span class="dot" style="background:${C.over}"></span>設定サービスに接続できません</div></div></div>
-          <div class="sx-panel"><div class="sx-note warn">設定サービス（taskstation-exec）に接続できません。既定値（8h/平日・全WS集計）で動作中です。復旧後にこの画面を開き直してください。</div></div>
+        <section class="sx-card">
+          <header class="sx-chd">
+            <div class="sx-ctitle">チーム共有設定</div>
+            <span class="sx-scope"><span class="dot" style="background:${C.over}"></span>サービスに接続できません</span>
+          </header>
+          <div class="sx-body"><div class="sx-note warn">設定サービス（taskstation-exec）に接続できません。既定値（8h/平日・全WS集計）で動作中です。復旧後にこの画面を開き直してください。</div></div>
         </section>
       </div>`;
     wireNotify(root, me);
@@ -73,25 +71,22 @@ export async function render(root) {
       ${topHtml()}
       ${personalSection}
 
-      <section class="sx-group team">
-        <div class="sx-ghd">
-          <span class="sx-ico">👥</span>
-          <div>
-            <div class="sx-gtitle">チーム共有設定</div>
-            <div class="sx-scope"><span class="dot" style="background:${C.fill}"></span>${canEdit ? "保存すると全員のビューに反映されます" : "閲覧のみ・変更は管理者に依頼してください"}</div>
-          </div>
-          ${canEdit ? "" : `<span class="sx-lock">🔒 ロック中</span>`}
-        </div>
-        <div class="sx-panel">
+      <section class="sx-card">
+        <header class="sx-chd">
+          <div class="sx-ctitle">チーム共有設定</div>
+          <span class="sx-scope"><span class="dot" style="background:${canEdit ? C.free : C.muted}"></span>${canEdit ? "保存すると全員に反映" : "閲覧のみ"}</span>
+          ${canEdit ? "" : `<span class="sx-lock">🔒 読み取り専用</span>`}
+        </header>
+        <div class="sx-body">
           <div class="sx-row">
-            <div><div class="sx-rt">1人あたりの容量</div>
+            <div class="sx-label"><div class="sx-rt">1人あたりの容量</div>
               <div class="sx-rd">空き・負荷・超過を判定する基準値。平日のみで計算（週末・祝日・休暇は0）。</div></div>
             <div class="sx-rc"><div class="sx-field">
               <input id="st-cap" class="sx-in sx-num" type="number" min="1" max="24" step="0.5" value="${cur.cap_hours}"${canEdit ? "" : " disabled"}>
               <span class="sx-unit">時間 / 日</span></div></div>
           </div>
           <div class="sx-row">
-            <div><div class="sx-rt">時刻カレンダーの表示時間帯</div>
+            <div class="sx-label"><div class="sx-rt">時刻カレンダーの表示時間帯</div>
               <div class="sx-rd">稼働予定・時刻カレンダーで表示する時間の範囲。</div></div>
             <div class="sx-rc"><div class="sx-field">
               <select id="st-cal0" class="sx-in"${canEdit ? "" : " disabled"}>${hourOpts(cur.cal_start)}</select>
@@ -99,8 +94,8 @@ export async function render(root) {
               <select id="st-cal1" class="sx-in"${canEdit ? "" : " disabled"}>${hourOpts(cur.cal_end)}</select></div></div>
           </div>
           <div class="sx-row col">
-            <div><div class="sx-rt">集計対象ワークスペース</div>
-              <div class="sx-rd">チェックを外したワークスペースのタスクは、負荷・空き・一覧から除外されます（デモ・アーカイブ向け）。「${esc(TEMPLATE_WS)}」は常に対象外です。</div></div>
+            <div class="sx-label"><div class="sx-rt">集計対象ワークスペース</div>
+              <div class="sx-rd">チェックを外したワークスペースは負荷・空き・一覧から除外されます。「${esc(TEMPLATE_WS)}」は常に対象外です。</div></div>
             <div class="sx-wsgrid">
               ${wsList.map((p) => `<label class="sx-chk"><input type="checkbox" data-ws="${p.id}"${excluded.has(p.id) ? "" : " checked"}${canEdit ? "" : " disabled"}><span>${esc(p.title)}</span></label>`).join("")}
             </div>
@@ -110,7 +105,7 @@ export async function render(root) {
 
       ${canEdit ? `
       <div class="sx-savebar">
-        <div class="sx-savemeta">チーム共有設定の変更は<br><b>保存するまで反映されません</b></div>
+        <span class="sx-savemeta">変更は<b>保存するまで反映されません</b></span>
         <span class="sx-msg" id="st-msg"></span>
         <button id="st-save" class="sx-save">変更を保存</button>
       </div>` : ""}
@@ -172,70 +167,78 @@ function wireNotify(root, me) {
 
 function css() {
   return `
-  .sx{max-width:760px}
-  .sx-top{margin:2px 0 24px}
-  .sx-title{font-size:25px;font-weight:800;letter-spacing:-.02em;margin:0}
-  .sx-sub{margin:7px 0 0;font-size:13px;color:${C.muted};line-height:1.65}
+  .sx{max-width:680px}
+  .sx-top{margin:2px 0 22px}
+  .sx-title{font-size:24px;font-weight:800;letter-spacing:-.02em;margin:0}
+  .sx-sub{margin:6px 0 0;font-size:13px;color:${C.muted};line-height:1.6;max-width:560px}
   .sx-sub b{color:${C.ink};font-weight:700}
 
-  .sx-group{margin-bottom:26px}
-  .sx-ghd{display:flex;align-items:center;gap:12px;margin:0 2px 13px}
-  .sx-ico{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;font-size:18px;flex:none;box-shadow:inset 0 0 0 1px rgba(20,30,50,.06)}
-  .sx-gtitle{font-size:16px;font-weight:800;letter-spacing:-.01em;line-height:1.2}
-  .sx-scope{display:inline-flex;align-items:center;gap:6px;margin-top:4px;font-size:11.5px;font-weight:600;color:${C.muted}}
+  /* セクション = フラットなカード。色帯やアイコンチップは廃し、見出し帯で整理 */
+  .sx-card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    box-shadow:var(--shadow);overflow:hidden;margin-bottom:18px}
+  .sx-chd{display:flex;align-items:center;gap:12px;padding:15px 20px;border-bottom:1px solid var(--line);background:#fcfdfe}
+  .sx-ctitle{font-size:15px;font-weight:800;letter-spacing:-.01em;color:${C.ink}}
+  .sx-scope{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;color:${C.muted}}
   .sx-scope .dot{width:6px;height:6px;border-radius:50%;flex:none}
-  .sx-lock{margin-left:auto;font-size:11px;font-weight:700;color:${C.muted};background:${C.track};border:1px solid var(--line);padding:5px 11px;border-radius:999px}
+  .sx-lock{margin-left:auto;font-size:11px;font-weight:700;color:${C.muted};
+    background:var(--track);border:1px solid var(--line);padding:4px 11px;border-radius:999px}
 
-  .sx-panel{background:#fff;border:1px solid var(--line);border-radius:15px;box-shadow:var(--shadow);overflow:hidden}
-  .sx-group.personal .sx-ico{background:#ecebfe;color:#5b54e6}
-  .sx-group.personal .sx-panel{border-top:3px solid #6c63f2}
-  .sx-group.team .sx-ico{background:#e7f0ff;color:${C.fill}}
-  .sx-group.team .sx-panel{border-top:3px solid ${C.fill}}
+  .sx-body{padding:4px 20px}
 
-  .sx-row{display:grid;grid-template-columns:1fr auto;gap:14px 24px;align-items:center;padding:16px 18px;border-top:1px solid var(--line);transition:opacity .15s}
+  /* 行: ラベル(左)＋コントロール(右)を上下中央で整列。十分な余白と細い区切り */
+  .sx-row{display:grid;grid-template-columns:1fr auto;gap:10px 28px;align-items:center;
+    padding:16px 0;border-top:1px solid var(--line);transition:opacity .15s}
   .sx-row:first-child{border-top:0}
   .sx-row.col{grid-template-columns:1fr;align-items:stretch}
   .sx-row.muted{opacity:.45}
+  .sx-label{min-width:0}
   .sx-rt{font-size:13.5px;font-weight:700;color:${C.ink}}
-  .sx-rd{font-size:11.5px;color:${C.muted};line-height:1.55;margin-top:4px;max-width:450px}
+  .sx-rd{font-size:11.5px;color:${C.muted};line-height:1.55;margin-top:3px;max-width:420px}
   .sx-rc{display:flex;align-items:center;gap:8px;justify-self:end}
 
-  .sx-in{font:inherit;font-size:14px;font-weight:600;color:${C.ink};padding:9px 11px;border:1px solid var(--line-strong);border-radius:10px;background:#fff;transition:border-color .15s,box-shadow .15s}
+  /* 入力・セレクトの体裁を統一 */
+  .sx-in{font:inherit;font-size:14px;font-weight:600;color:${C.ink};padding:9px 12px;
+    border:1px solid var(--line-strong);border-radius:9px;background:var(--card);
+    transition:border-color .15s,box-shadow .15s}
   .sx-in:focus{outline:0;border-color:${C.fill};box-shadow:0 0 0 3px rgba(58,134,255,.16)}
-  .sx-in:disabled{background:#f3f5f9;color:${C.muted};cursor:not-allowed;border-color:var(--line)}
-  .sx-num{width:88px;text-align:right}
+  .sx-in:disabled{background:var(--track);color:${C.muted};cursor:not-allowed;border-color:var(--line)}
+  .sx-num{width:84px;text-align:right}
   .sx-field{display:inline-flex;align-items:center;gap:8px}
   .sx-unit{font-size:12.5px;color:${C.muted};font-weight:600;white-space:nowrap}
   .sx-dash{color:${C.muted};font-weight:600}
 
   /* トグルスイッチ（チェックボックスより「効いている感」を出す） */
-  .sx-tg{position:relative;display:inline-block;width:46px;height:27px;flex:none;cursor:pointer}
+  .sx-tg{position:relative;display:inline-block;width:44px;height:26px;flex:none;cursor:pointer}
   .sx-tg input{position:absolute;opacity:0;width:0;height:0}
-  .sx-tg .sl{position:absolute;inset:0;background:#ccd2dd;border-radius:999px;transition:background .18s}
-  .sx-tg .sl::before{content:"";position:absolute;left:3px;top:3px;width:21px;height:21px;background:#fff;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.28);transition:transform .18s}
-  .sx-tg input:checked + .sl{background:#6c63f2}
-  .sx-tg input:checked + .sl::before{transform:translateX(19px)}
+  .sx-tg .sl{position:absolute;inset:0;background:var(--line-strong);border-radius:999px;transition:background .18s}
+  .sx-tg .sl::before{content:"";position:absolute;left:3px;top:3px;width:20px;height:20px;
+    background:#fff;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .18s}
+  .sx-tg input:checked + .sl{background:${C.fill}}
+  .sx-tg input:checked + .sl::before{transform:translateX(18px)}
 
-  .sx-wsgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:9px;margin-top:13px}
-  .sx-chk{display:flex;align-items:center;gap:10px;padding:11px 13px;border:1px solid var(--line-strong);border-radius:11px;background:#fbfcfe;font-size:13px;font-weight:600;cursor:pointer;transition:border-color .12s,background .12s}
-  .sx-chk:hover{border-color:#bcc6d4;background:#fff}
+  /* ワークスペース選択: 統一されたチップ */
+  .sx-wsgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:8px;margin-top:12px}
+  .sx-chk{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line-strong);
+    border-radius:10px;background:var(--card);font-size:13px;font-weight:600;cursor:pointer;
+    transition:border-color .12s,background .12s,opacity .12s}
+  .sx-chk:hover{border-color:${C.fill};background:#f7faff}
   .sx-chk:has(input:not(:checked)){opacity:.5}
-  .sx-chk input{width:17px;height:17px;accent-color:${C.fill};cursor:pointer;flex:none}
+  .sx-chk:has(input:disabled){cursor:not-allowed}
+  .sx-chk input{width:16px;height:16px;accent-color:${C.fill};cursor:pointer;flex:none}
 
-  .sx-note{padding:11px 18px 15px;font-size:11.5px;color:${C.muted};line-height:1.55}
+  .sx-note{padding:0 0 14px;font-size:11.5px;color:${C.muted};line-height:1.55}
   .sx-note.ok{color:${C.free};font-weight:600}
-  .sx-note.warn{color:${C.over};font-weight:600}
+  .sx-note.warn{color:${C.over};font-weight:600;padding:14px 0}
 
-  /* 保存バー（チーム設定の変更導線を明確に・セクション末尾の独立バー） */
-  .sx-savebar{display:flex;align-items:center;gap:14px;margin-top:8px;
-    padding:14px 16px 14px 20px;background:#fff;
-    border:1px solid var(--line-strong);border-radius:14px;box-shadow:var(--shadow)}
-  .sx-savemeta{font-size:11.5px;color:${C.muted};line-height:1.45}
+  /* 保存バー: カードに寄り添うシンプルな1本のバー */
+  .sx-savebar{display:flex;align-items:center;gap:14px;padding:13px 20px;
+    background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}
+  .sx-savemeta{font-size:11.5px;color:${C.muted}}
   .sx-savemeta b{color:${C.ink};font-weight:700}
   .sx-msg{margin-left:auto;font-size:12.5px;font-weight:700;min-height:16px}
   .sx-msg.ok{color:${C.free}}.sx-msg.err{color:${C.over}}
-  .sx-save{font:inherit;font-size:13.5px;font-weight:700;padding:11px 24px;border-radius:11px;border:0;
-    background:${C.fill};color:#fff;cursor:pointer;box-shadow:0 3px 10px rgba(58,134,255,.38);transition:filter .15s,transform .06s}
-  .sx-save:hover{filter:brightness(1.07)}.sx-save:active{transform:translateY(1px)}
-  .sx-save:disabled{opacity:.55;cursor:default;box-shadow:none}`;
+  .sx-save{font:inherit;font-size:13.5px;font-weight:700;padding:10px 22px;border-radius:10px;border:0;
+    background:${C.fill};color:#fff;cursor:pointer;transition:filter .15s,transform .06s}
+  .sx-save:hover{filter:brightness(1.06)}.sx-save:active{transform:translateY(1px)}
+  .sx-save:disabled{opacity:.55;cursor:default}`;
 }
