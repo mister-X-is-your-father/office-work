@@ -44,7 +44,7 @@ const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date
 const AXES = {
   due:     { label: "期限",      cmp: (a, b) => (a.due || "9999").localeCompare(b.due || "9999"), dir: 1 },
   prio:    { label: "重要度",    cmp: (a, b) => a.prio - b.prio, dir: -1 },
-  ws:      { label: "WS",        cmp: (a, b) => a.proj.localeCompare(b.proj, "ja"), dir: 1 },
+  ws:      { label: "プロジェクト", cmp: (a, b) => (a.proj || "").localeCompare(b.proj || "", "ja"), dir: 1 },
   cat:     { label: "分類",      cmp: (a, b) => ((a.cat && a.cat.title) || "～").localeCompare((b.cat && b.cat.title) || "～", "ja"), dir: 1 },
   who:     { label: "担当",      cmp: (a, b) => ((a.who && (a.who.name || a.who.username)) || "～").localeCompare((b.who && (b.who.name || b.who.username)) || "～", "ja"), dir: 1 },
   state:   { label: "ステータス",      cmp: (a, b) => stateRank(a) - stateRank(b), dir: 1 },
@@ -168,7 +168,7 @@ export async function render(root) {
     </div>` : ""}
     <div class="card tb-wrap"><table class="tb">
       <thead><tr>${cols().map((c) => th(c, manual)).join("")}</tr></thead>
-      <tbody>${rows.length ? rows.map((r, i) => rowHtml(r, members, i, manual)).join("") : `<tr><td colspan="9" class="tb-empty">該当なし</td></tr>`}</tbody>
+      <tbody>${rows.length ? rows.map((r, i) => rowHtml(r, members, i, manual)).join("") : `<tr><td colspan="10" class="tb-empty">該当なし</td></tr>`}</tbody>
     </table></div>`;
 
   const persist = () => saveView(UID, V);
@@ -654,10 +654,13 @@ function wireDrag(root, rerender) {
 }
 
 const cols = () => [
-  { k: "title", label: "タスク" }, { k: "who", label: "担当" }, { k: null, label: "種別" },
+  { k: "ws", label: "プロジェクト" }, { k: "title", label: "タスク" }, { k: "who", label: "担当" }, { k: null, label: "種別" },
   { k: "cat", label: "分類" }, { k: "prio", label: "重要度" }, { k: "due", label: "期限" },
   { k: "est", label: "見積" }, { k: "pct", label: "進捗" }, { k: "state", label: "ステータス" },
 ];
+// プロジェクト別の色（pid からパレットを引く）。一覧のプロジェクトチップ用。
+const PROJ_PAL = ["#3a86ff", "#2fa66b", "#b657d6", "#e5772d", "#0ea5e9", "#f5a623", "#ef476f", "#14b8a6"];
+const projColor = (pid) => PROJ_PAL[(pid || 0) % PROJ_PAL.length];
 // ヘッダに何番目のソート軸かを小さく表示（組み合わせの見える化）
 const th = (c, manual) => {
   if (!c.k) return `<th>${c.label}</th>`;
@@ -686,7 +689,8 @@ function rowHtml(r, members, i, manual) {
   const estBtn = `<button class="tb-cell tb-num tb-estbtn" data-est="${id}" title="クリックで見積を変更">${r.est ? fmtH(r.est) : "—"}<span class="tb-cell-car">▾</span></button>`;
   const st = `<button class="tb-st tb-stbtn ${r.status}" data-st="${id}" title="クリックでステータス変更">${STATUS[r.status].label}<span class="tb-st-car">▾</span></button>`;
   return `<tr data-id="${id}" class="${manual ? "tb-draggable" : ""}${manual && selectedIds.has(id) ? " tb-sel" : ""}">
-    <td class="tb-title">${esc(r.title)}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">🚩</span>` : ""}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">▶</button>` : ""}<div class="tb-sub">${esc(r.proj)}</div></td>
+    <td>${r.proj ? `<span class="tb-pj"><i style="background:${projColor(r.pid)}"></i>${esc(r.proj)}</span>` : `<span class="tb-pj none">—</span>`}</td>
+    <td class="tb-title">${esc(r.title)}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">🚩</span>` : ""}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">▶</button>` : ""}</td>
     <td>${whoBtn}</td>
     <td>${kind}</td>
     <td>${catBtn}</td>
@@ -787,6 +791,9 @@ function css() {
   .tb tbody tr:hover{background:#f7fbff}
   .tb-title{font-weight:600;min-width:180px}
   .tb-sub{font-size:11px;color:${C.muted};font-weight:400;margin-top:2px}
+  .tb-pj{display:inline-flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap}
+  .tb-pj i{width:8px;height:8px;border-radius:50%;flex:none}
+  .tb-pj.none{color:${C.muted}}
   .tb-ava{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;color:#fff;font-size:10px;font-weight:700;margin-right:6px;vertical-align:-5px}
   .tb-k{font-size:10.5px;color:${C.muted};border:1px solid ${C.line};border-radius:5px;padding:1px 6px;white-space:nowrap}
   .tb-k.review{color:${C.fill};border-color:#cfe0ff}
