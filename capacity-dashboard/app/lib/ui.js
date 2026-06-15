@@ -1,6 +1,9 @@
 // 共有UIヘルパ（モックのデザイントークンを踏襲）
+// 構造色は CSS変数(index.html :root / [data-theme=dark])参照＝テーマで反転。
+// アクセント色(fill/over/free/full/amber/capline)とpj/memberは両テーマ共通のためhex据え置き
+// （SVGの stroke/fill 属性は var() が効かないが、SVGで使うのは over/capline のみ＝hexなので無事）。
 export const C = {
-  bg:"#e8ecf3", card:"#fff", ink:"#1d2430", muted:"#6b7480", line:"#dde2ea", lineStrong:"#cad1dc", track:"#eef1f5",
+  bg:"var(--bg)", card:"var(--card)", ink:"var(--ink)", muted:"var(--muted)", line:"var(--line)", lineStrong:"var(--line-strong)", track:"var(--track)",
   fill:"#3a86ff", over:"#e5484d", free:"#2fa66b", full:"#8a93a0", amber:"#f5a623", capline:"#9aa3af",
   pj:{ Backend:"#3a86ff", Frontend:"#2fa66b", QA:"#b657d6", "共通":"#8a93a0" },
 };
