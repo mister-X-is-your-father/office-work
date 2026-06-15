@@ -3,6 +3,7 @@ import { load } from "../lib/store.js";
 import { dependencyEdges, depLayers } from "../lib/capacity.js";
 import { statusOf, STATUS } from "../lib/kinds.js";
 import { C, esc, member_color } from "../lib/ui.js";
+import { openTaskForm } from "./taskform.js";
 
 const COLW = 196, ROWH = 92, NW = 168, NH = 66, PAD = 14;
 
@@ -54,13 +55,19 @@ export async function render(root) {
       </defs>${paths}</svg>
       ${nodes}
     </div></div></div>`;
+
+  // ノードクリックで編集モーダル（table.js と同じパターン: 保存後に再描画）。
+  // クリックはノード本体に限定（背景・SVGの線では発火しない）。
+  root.querySelectorAll(".dg-node[data-id]").forEach((el) => {
+    el.onclick = () => openTaskForm({ taskId: +el.dataset.id, onSaved: () => render(root) });
+  });
 }
 
 function nodeHtml(t, p, crit) {
   const st = statusOf(t);
   const who = (t.assignees || [])[0];
   const wn = who ? (who.name || who.username) : "";
-  return `<div class="dg-node ${st} ${crit ? "crit" : ""}" style="left:${p.x}px;top:${p.y}px;width:${NW}px;height:${NH}px">
+  return `<div class="dg-node ${st} ${crit ? "crit" : ""}" data-id="${t.id}" title="${esc(t.title)}" style="left:${p.x}px;top:${p.y}px;width:${NW}px;height:${NH}px">
     <div class="dg-t">${esc(t.title)}</div>
     <div class="dg-meta">
       ${who ? `<span class="dg-ava" style="background:${member_color(who.id)}">${esc((wn[0] || "?"))}</span>` : ""}
@@ -76,7 +83,7 @@ function css() {
   .dg-scroll{overflow:auto;padding:14px}
   .dg-canvas{position:relative}
   .dg-edges{position:absolute;inset:0;pointer-events:none}
-  .dg-node{position:absolute;background:#fff;border:1px solid ${C.line};border-radius:11px;padding:9px 11px;box-shadow:0 1px 3px rgba(20,30,50,.08);display:flex;flex-direction:column;justify-content:space-between;z-index:1}
+  .dg-node{position:absolute;background:#fff;border:1px solid ${C.line};border-radius:11px;padding:9px 11px;box-shadow:0 1px 3px rgba(20,30,50,.08);display:flex;flex-direction:column;justify-content:space-between;z-index:1;cursor:pointer}
   .dg-node.crit{border-color:${C.over};box-shadow:0 2px 8px rgba(229,72,77,.18)}
   .dg-node.done{background:#f7fbf8}
   .dg-t{font-size:12.5px;font-weight:600;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
