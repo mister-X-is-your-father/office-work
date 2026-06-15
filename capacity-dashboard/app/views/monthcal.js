@@ -9,12 +9,14 @@ import { C, esc, member_color, todayISO } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
 
 let VIEW = null; // {y, m}（表示中の月・セッション内で保持）
-let FILTER = { who: "" };
+const WHO_KEY = "ts.monthcal.who"; // 担当者フィルタ選択を個人保存（再読込でも維持）
+let FILTER = { who: (() => { try { return localStorage.getItem(WHO_KEY) || ""; } catch { return ""; } })() };
 
 const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(0, 10) : "");
 const hhmm = (min) => `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")}`;
 
 export async function render(root) {
+  closePopover(root); // 再描画前に開いていたポップオーバーと document リスナを掃除
   const { tasks, members, recurrences, holidaysByDate } = await load();
   const today = todayISO();
   if (!VIEW) VIEW = { y: +today.slice(0, 4), m: +today.slice(5, 7) };
@@ -62,12 +64,24 @@ export async function render(root) {
   root.querySelector("#mc-prev").onclick = () => { VIEW.m--; if (VIEW.m < 1) { VIEW.m = 12; VIEW.y--; } render(root); };
   root.querySelector("#mc-next").onclick = () => { VIEW.m++; if (VIEW.m > 12) { VIEW.m = 1; VIEW.y++; } render(root); };
   root.querySelector("#mc-today").onclick = () => { VIEW = null; render(root); };
-  root.querySelector("#mc-who").onchange = (e) => { FILTER.who = e.target.value; render(root); };
+  root.querySelector("#mc-who").onchange = (e) => { FILTER.who = e.target.value; try { localStorage.setItem(WHO_KEY, FILTER.who); } catch {} render(root); };
 
   root.querySelectorAll(".mc-task").forEach((el) => {
     el.onclick = () => openTaskForm({ taskId: +el.dataset.id, onSaved: async () => { invalidate(); await load(); render(root); } });
     el.ondragstart = (ev) => { ev.dataTransfer.setData("text/plain", el.dataset.id); ev.dataTransfer.effectAllowed = "move"; };
   });
+  // 「他N件」＝その日の全項目ポップオーバー。クリックで開閉・外側クリック/Escで閉じる。
+  root.querySelectorAll(".mc-more").forEach((btn) => {
+    btn.onclick = (ev) => {
+      ev.stopPropagation();
+      const iso = btn.dataset.iso;
+      const already = root.querySelector(".mc-pop");
+      closePopover(root);
+      if (already && already.dataset.iso === iso) return; // 同じ日のトグルは閉じるだけ
+      openPopover(root, btn, iso, byDay.get(iso) || []);
+    };
+  });
+
   root.querySelectorAll(".mc-day").forEach((cell) => {
     cell.ondragover = (ev) => { ev.preventDefault(); cell.classList.add("over"); };
     cell.ondragleave = () => cell.classList.remove("over");
@@ -86,6 +100,62 @@ export async function render(root) {
   });
 }
 
+// その日の全項目を出すポップオーバー。各タスクは既存と同様 openTaskForm で編集へ。
+function openPopover(root, anchor, iso, items) {
+  const pop = document.createElement("div");
+  pop.className = "mc-pop";
+  pop.dataset.iso = iso;
+  const dlabel = `${+iso.slice(5, 7)}/${+iso.slice(8, 10)}`;
+  pop.innerHTML = `
+    <div class="mc-pop-hd"><b>${dlabel}</b><span>${items.length}件</span><button type="button" class="mc-pop-x" aria-label="閉じる">×</button></div>
+    <div class="mc-pop-list">
+      ${items.length ? items.map((it) => it.kind === "rec"
+        ? `<div class="mc-rec" title="${esc(it.title)}">🔁${it.min != null ? ` ${hhmm(it.min)}` : ""} ${esc(it.title)}</div>`
+        : `<div class="mc-task${it.done ? " done" : ""}" data-id="${it.t.id}" title="${esc(it.title)}">
+             ${it.who ? `<i style="background:${member_color(it.who.id)}"></i>` : ""}${esc(it.title)}</div>`).join("")
+        : `<div class="mc-pop-empty">項目なし</div>`}
+    </div>`;
+
+  // セルの近くに配置（root 基準の絶対配置。grid の overflow:hidden で切れないよう外に出す）
+  if (getComputedStyle(root).position === "static") root.style.position = "relative";
+  root.appendChild(pop);
+  const rr = root.getBoundingClientRect();
+  const ar = anchor.getBoundingClientRect();
+  const W = pop.offsetWidth || 230;
+  let left = ar.left - rr.left;
+  if (left + W > rr.width) left = Math.max(0, rr.width - W);
+  let top = ar.bottom - rr.top + 2;
+  // 下にはみ出すなら上方向に出す
+  if (ar.bottom + (pop.offsetHeight || 0) > window.innerHeight) {
+    top = Math.max(0, ar.top - rr.top - (pop.offsetHeight || 0) - 2);
+  }
+  pop.style.left = left + "px";
+  pop.style.top = top + "px";
+
+  pop.querySelector(".mc-pop-x").onclick = (e) => { e.stopPropagation(); closePopover(root); };
+  pop.querySelectorAll(".mc-task").forEach((el) => {
+    el.onclick = (e) => {
+      e.stopPropagation();
+      const id = +el.dataset.id;
+      closePopover(root);
+      openTaskForm({ taskId: id, onSaved: async () => { invalidate(); await load(); render(root); } });
+    };
+  });
+
+  // 外側クリック / Esc で閉じる（次フレームで登録して自身のクリックを拾わない）
+  const onDoc = (e) => { if (!pop.contains(e.target) && e.target !== anchor) closePopover(root); };
+  const onKey = (e) => { if (e.key === "Escape") closePopover(root); };
+  pop._cleanup = () => { document.removeEventListener("mousedown", onDoc, true); document.removeEventListener("keydown", onKey, true); };
+  setTimeout(() => { document.addEventListener("mousedown", onDoc, true); document.addEventListener("keydown", onKey, true); }, 0);
+}
+
+function closePopover(root) {
+  const pop = root.querySelector(".mc-pop");
+  if (!pop) return;
+  if (pop._cleanup) pop._cleanup();
+  pop.remove();
+}
+
 function dayHtml(c, items, today, holidaysByDate) {
   const dow = new Date(c.iso + "T00:00:00Z").getUTCDay();
   const hol = holidaysByDate && holidaysByDate.get(c.iso);
@@ -102,7 +172,7 @@ function dayHtml(c, items, today, holidaysByDate) {
       ? `<div class="mc-rec" title="${esc(it.title)}">🔁${it.min != null ? ` ${hhmm(it.min)}` : ""} ${esc(it.title)}</div>`
       : `<div class="mc-task${it.done ? " done" : ""}" draggable="true" data-id="${it.t.id}" title="${esc(it.title)}">
            ${it.who ? `<i style="background:${member_color(it.who.id)}"></i>` : ""}${esc(it.title)}</div>`).join("")}
-    ${items.length > MAX ? `<div class="mc-more">他${items.length - MAX}件</div>` : ""}
+    ${items.length > MAX ? `<button type="button" class="mc-more" data-iso="${c.iso}">他${items.length - MAX}件</button>` : ""}
   </div>`;
 }
 
@@ -114,7 +184,7 @@ function css() {
   .mc-nav:hover{background:${C.track}}
   .mc-tdy{font-size:12.5px}
   .mc-tools select{font:inherit;font-size:13px;padding:6px 10px;border:1px solid ${C.line};border-radius:8px;background:#fff;margin-left:auto}
-  .mc-grid{display:grid;grid-template-columns:repeat(7,1fr);overflow:hidden;padding:0}
+  .mc-grid{display:grid;grid-template-columns:repeat(7,1fr);overflow:hidden;padding:0;position:relative}
   .mc-dow{font-size:11px;color:${C.muted};font-weight:700;text-align:center;padding:8px 0;border-bottom:1px solid ${C.line};background:#fafbfc}
   .mc-dow.sat{color:#3a86ff}.mc-dow.sun{color:#e5484d}
   .mc-day{min-height:96px;border-bottom:1px solid ${C.line};border-right:1px solid ${C.line};padding:5px 6px;background:#fff}
@@ -131,5 +201,15 @@ function css() {
   .mc-task.done{opacity:.45;text-decoration:line-through}
   .mc-task i{flex:none;width:7px;height:7px;border-radius:50%;display:inline-block}
   .mc-rec{background:#f2eefc;color:#6b4fa0}
-  .mc-more{font-size:10px;color:${C.muted};padding:1px 5px}`;
+  .mc-more{font:inherit;font-size:10px;color:${C.muted};padding:1px 5px;background:none;border:0;border-radius:4px;cursor:pointer;display:block;text-align:left}
+  .mc-more:hover{background:${C.track};color:${C.fill}}
+  .mc-pop{position:absolute;z-index:30;width:230px;max-height:300px;overflow:auto;background:#fff;border:1px solid ${C.line};border-radius:10px;box-shadow:0 8px 28px rgba(20,30,50,.18);padding:8px}
+  .mc-pop-hd{display:flex;align-items:center;gap:8px;margin:0 0 6px;padding:0 2px}
+  .mc-pop-hd b{font-size:12.5px}
+  .mc-pop-hd span{font-size:11px;color:${C.muted}}
+  .mc-pop-x{margin-left:auto;font:inherit;font-size:15px;line-height:1;border:0;background:none;color:${C.muted};cursor:pointer;padding:0 2px}
+  .mc-pop-x:hover{color:${C.fill}}
+  .mc-pop-list .mc-task{white-space:normal;cursor:pointer}
+  .mc-pop-list .mc-rec{white-space:normal}
+  .mc-pop-empty{font-size:11px;color:${C.muted};padding:4px 2px}`;
 }
