@@ -114,7 +114,7 @@ export async function render(root) {
       try {
         await updateTask(id, patch);
         invalidate(); await load(); render(root);
-        showUndo(`「${t.title}」を ${QUADS[dst].num} ${QUADS[dst].title} へ移動しました`, async () => {
+        showUndo(`「${t.title}」を「${QUADS[dst].title}」へ移動しました`, async () => {
           await updateTask(id, prev.due_date ? prev : { ...prev, due_date: "0001-01-01T00:00:00Z" });
           invalidate(); await load(); render(root);
         });
