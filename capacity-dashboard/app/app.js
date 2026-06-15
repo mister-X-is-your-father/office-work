@@ -16,6 +16,7 @@ const ROUTES = {
   planner:  { label: "週プランナー",  grp: "計画",   mod: "./views/planner.js" },
   freefinder:{ label: "月次空き",     grp: "計画",   mod: "./views/freefinder.js" },
   weekstack:{ label: "週日別負荷",    grp: "計画",   mod: "./views/weekstack.js" },
+  weekpersonal:{ label: "個人別週プラン", grp: "計画", mod: "./views/weekpersonal.js" },
   summary:  { label: "概要",          grp: "実績",   mod: "./views/summary.js" },
   estactual:{ label: "見積りvs実績",  grp: "実績",   mod: "./views/estactual.js" },
   kanban:   { label: "かんばん",      grp: "仕事",   mod: "./views/kanban.js" },
@@ -28,7 +29,7 @@ const ROUTES = {
   // 隠しルート: ORDER に載せない＝通常ユーザーのナビには出ない。許可者のみ shell() がリンクを追加。
   fable:    { label: "🤖 Fable",      grp: "AI",     mod: "./views/fable.js" },
 };
-const ORDER = ["home", "smart", "today", "triage", "quad", "habits", "review", "calendar", "monthcal", "week", "planner", "freefinder", "weekstack", "summary", "estactual", "kanban", "list", "outline", "depgraph", "gantt", "manage", "settings"];
+const ORDER = ["home", "smart", "today", "triage", "quad", "habits", "review", "calendar", "monthcal", "week", "planner", "freefinder", "weekstack", "weekpersonal", "summary", "estactual", "kanban", "list", "outline", "depgraph", "gantt", "manage", "settings"];
 
 const app = document.getElementById("app");
 
