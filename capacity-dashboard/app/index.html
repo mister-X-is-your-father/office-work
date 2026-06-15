@@ -94,6 +94,18 @@
   html[data-theme="dark"] .nav a.active{background:rgba(58,134,255,.22)}
   html[data-theme="dark"] .addbtn:hover{border-color:var(--line-strong)}
   html[data-theme="dark"] .login input:hover{border-color:var(--line-strong)}
+  /* 主力(一覧/アウトライン/依存グラフ)の淡色を暗側へ: 表ヘッダ・hover・ステータスチップ */
+  html[data-theme="dark"] .tb th{background:#222932}
+  html[data-theme="dark"] .tb tbody tr:hover{background:rgba(255,255,255,.05)}
+  html[data-theme="dark"] .tb-cell:hover{background:rgba(255,255,255,.07);border-color:var(--line-strong)}
+  html[data-theme="dark"] .tb-st.todo,html[data-theme="dark"] .ol-st.todo,html[data-theme="dark"] .dg-st.todo{background:rgba(255,255,255,.08)}
+  html[data-theme="dark"] .tb-st.doing,html[data-theme="dark"] .ol-st.doing,html[data-theme="dark"] .dg-st.doing{background:rgba(58,134,255,.20);color:#8db8ff}
+  html[data-theme="dark"] .tb-st.waiting,html[data-theme="dark"] .ol-st.waiting,html[data-theme="dark"] .dg-st.waiting{background:rgba(245,166,36,.20);color:#e9b765}
+  html[data-theme="dark"] .tb-st.done,html[data-theme="dark"] .ol-st.done,html[data-theme="dark"] .dg-st.done{background:rgba(47,166,107,.20);color:#63cf95}
+  /* フォーム部品(白背景ハードコード含む)を一括ダーク化 */
+  html[data-theme="dark"] input:not([type="color"]),html[data-theme="dark"] select,html[data-theme="dark"] textarea{background:var(--card);color:var(--ink);border-color:var(--line)}
+  /* 主力ツールバーの白ボタン/チップ */
+  html[data-theme="dark"] .tb-add,html[data-theme="dark"] .tb-manbtn,html[data-theme="dark"] .tb-qa,html[data-theme="dark"] .tb-sc-k{background:var(--card);color:var(--ink)}
   /* テーマ切替トグル（サイドバー下部） */
   .theme-tg{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;margin-top:14px;padding:8px 11px;
     border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--muted);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s,color .12s}
