@@ -7,7 +7,7 @@ import { weekLoadByMember, shiftISO, isBusinessDay, daysUntil } from "../lib/cap
 import { PRIO, prioBucket } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color } from "../lib/ui.js";
 
-const WHO_KEY = "ts.workplan.who", PRESET_KEY = "ts.workplan.preset", FROM_KEY = "ts.workplan.from", TO_KEY = "ts.workplan.to";
+const WHO_KEY = "ts.workplan.who", PRESET_KEY = "ts.workplan.preset", FROM_KEY = "ts.workplan.from", TO_KEY = "ts.workplan.to", GRAIN_KEY = "ts.workplan.grain";
 const WD = ["日", "月", "火", "水", "木", "金", "土"];
 const BUCKETS = [4, 3, 2, 1, 0]; // 積む順（column-reverse で下から MUST→なし）
 const MAX_SPAN = 92;             // 最長3ヶ月
@@ -26,6 +26,7 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 let WHO = lsGet(WHO_KEY, "");   // ""→自分既定 / "all"=全員(メンバー別) / "self"=自分 / memberId
 let PRESET = lsGet(PRESET_KEY, "1w");   // 既定=今日から1週間。"custom"=日付指定
 let FROM = lsGet(FROM_KEY, ""), TO = lsGet(TO_KEY, "");
+let GRAIN = lsGet(GRAIN_KEY, "");   // ""=自動(期間長で日/週) / "day"=日表示 / "week"=週表示
 
 const round1 = (n) => Math.round(n * 10) / 10;
 const dowOf = (iso) => new Date(iso + "T00:00:00Z").getUTCDay();
@@ -91,7 +92,9 @@ export async function render(root) {
   if (WHO === "") WHO = selfMember ? "self" : (activeMembers[0] ? String(activeMembers[0].id) : "all");
 
   const bdays = bizDaysList(FROM, TO, holidaysSet);
-  const granularity = daysUntil(FROM, TO) <= DAY_GRAIN_MAX ? "day" : "week";
+  // 粒度: 保存値 "day"/"week" を優先。未設定("")なら期間長で自動。
+  const autoGrain = daysUntil(FROM, TO) <= DAY_GRAIN_MAX ? "day" : "week";
+  const granularity = (GRAIN === "day" || GRAIN === "week") ? GRAIN : autoGrain;
 
   // 対象メンバー（全員=各メンバー別 / self / 指定）
   const mode = WHO === "all" ? "all" : "one";
@@ -143,6 +146,10 @@ export async function render(root) {
     <div class="wp-tools">
       <div class="wp-who" id="wp-who">${whoTabs || `<span class="wp-noone">メンバーがいません</span>`}</div>
       <div class="wp-presets" id="wp-presets">${PRESETS.map((p) => `<button class="wp-pchip${PRESET === p.key ? " on" : ""}" data-preset="${p.key}">${p.label}</button>`).join("")}</div>
+      <div class="wp-grain" id="wp-grain">
+        <button class="wp-gseg${granularity === "day" ? " on" : ""}" data-grain="day">日</button>
+        <button class="wp-gseg${granularity === "week" ? " on" : ""}" data-grain="week">週</button>
+      </div>
       <div class="wp-range">期間
         <input type="date" id="wp-from" value="${FROM}">〜<input type="date" id="wp-to" value="${TO}">
         <span class="wp-hint">最長3ヶ月</span>
@@ -161,6 +168,9 @@ export async function render(root) {
   });
   root.querySelectorAll("#wp-presets [data-preset]").forEach((b) => {
     b.onclick = () => { PRESET = b.dataset.preset; lsSet(PRESET_KEY, PRESET); render(root); };
+  });
+  root.querySelectorAll("#wp-grain [data-grain]").forEach((b) => {
+    b.onclick = () => { GRAIN = b.dataset.grain; lsSet(GRAIN_KEY, GRAIN); render(root); };
   });
   const setCustom = () => { PRESET = "custom"; lsSet(PRESET_KEY, "custom"); };  // 日付指定したらプリセット解除
   const fromEl = root.querySelector("#wp-from"), toEl = root.querySelector("#wp-to");
@@ -193,6 +203,11 @@ function css() {
   .wp-pchip{font:inherit;font-size:12px;padding:5px 12px;border:1px solid ${C.line};border-radius:18px;background:#fff;color:${C.muted};cursor:pointer;transition:border-color .12s,background .12s,color .12s}
   .wp-pchip:hover{border-color:#cfd9e6;color:${C.ink}}
   .wp-pchip.on{background:${C.fill};border-color:${C.fill};color:#fff;font-weight:700}
+  .wp-grain{display:inline-flex;border:1px solid ${C.line};border-radius:18px;overflow:hidden;background:#fff}
+  .wp-gseg{font:inherit;font-size:12px;padding:5px 14px;border:0;border-left:1px solid ${C.line};background:transparent;color:${C.muted};cursor:pointer;transition:background .12s,color .12s}
+  .wp-gseg:first-child{border-left:0}
+  .wp-gseg:hover{color:${C.ink}}
+  .wp-gseg.on{background:${C.fill};color:#fff;font-weight:700}
   .wp-range{display:flex;align-items:center;gap:6px;font-size:12.5px;color:${C.muted};margin-left:auto}
   .wp-range input{font:inherit;font-size:12.5px;padding:4px 7px;border:1px solid ${C.line};border-radius:7px;background:#fff;color:${C.ink}}
   .wp-hint{font-size:11px;color:${C.muted}}
