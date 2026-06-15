@@ -23,7 +23,7 @@ export function openSearch() {
   overlay = document.createElement("div");
   overlay.className = "sp-ov";
   overlay.innerHTML = `
-    <div class="sp-box" role="dialog" aria-label="タスク検索">
+    <div class="sp-box" role="dialog" aria-modal="true" aria-label="タスク検索">
       <input id="sp-in" autocomplete="off" placeholder="タスクを検索（タイトル・説明・分類・ワークスペース）" aria-label="検索語">
       <div class="sp-list" id="sp-list"><div class="sp-hint">入力で検索 ・ ↑↓ 選択 ・ Enter 開く ・ Esc 閉じる</div></div>
     </div>`;
