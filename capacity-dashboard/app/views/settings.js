@@ -240,5 +240,9 @@ function css() {
   .sx-save{font:inherit;font-size:13.5px;font-weight:700;padding:10px 22px;border-radius:10px;border:0;
     background:${C.fill};color:#fff;cursor:pointer;transition:filter .15s,transform .06s}
   .sx-save:hover{filter:brightness(1.06)}.sx-save:active{transform:translateY(1px)}
-  .sx-save:disabled{opacity:.55;cursor:default}`;
+  .sx-save:disabled{opacity:.55;cursor:default}
+
+  /* ダークモード: ハードコードした淡色面/tintを反転（ライト値は不変） */
+  html[data-theme="dark"] .sx-chd{background:var(--track)}
+  html[data-theme="dark"] .sx-chk:hover{background:rgba(255,255,255,.06)}`;
 }

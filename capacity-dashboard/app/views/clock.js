@@ -49,18 +49,21 @@ function clockSVG(m) {
     if (over > 0) { out.push(seg(OR, accOver / CAP, Math.min(1, (accOver + over) / CAP), col, it.kind, adhoc, OVERW)); accOver += over; }
     acc += it.h;
   }
-  if (m.freeH > 0) out.push(`<path d="${arc(R, m.usedH / CAP, 1)}" fill="none" stroke="${FREECOL}" stroke-width="${STROKE}" stroke-linecap="butt"/>`);
+  if (m.freeH > 0) out.push(`<path class="ck-freearc" d="${arc(R, m.usedH / CAP, 1)}" fill="none" stroke="${FREECOL}" stroke-width="${STROKE}" stroke-linecap="butt"/>`);
   const capInner = R - STROKE / 2 - 6, capOuter = (m.overH > 0 ? 99 : R + STROKE / 2 + 5);
   out.push(`<line x1="${CX}" y1="${(CY - capInner).toFixed(1)}" x2="${CX}" y2="${(CY - capOuter).toFixed(1)}" stroke="#9aa3af" stroke-width="2"/>`);
   // 中央の大きい数字＝今日の稼働予定(used)。空き/超過はサブに（予定ゼロ＝大きく0h・サブ「空き8h」）。
   const big = fmtH(m.usedH);
-  const bigcol = m.overH > 0 ? "#e5484d" : (m.usedH > 1e-6 ? "#1d2430" : "#9aa3af");
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  const inkCol = isDark ? "#e7eaef" : "#1d2430";   // 中央大数字の通常色（テーマ追従）
+  const subCol = isDark ? "#9aa3af" : "#6b7480";   // サブ行（空き/超過）テキスト
+  const bigcol = m.overH > 0 ? "#e5484d" : (m.usedH > 1e-6 ? inkCol : "#9aa3af");
   const sub = m.overH > 0 ? `超過 +${fmtH(m.overH)}`
     : (m.status === "off" ? "休（非稼働日）" : (m.freeH > 0 ? `空き ${fmtH(m.freeH)}` : "満稼働"));
   return `<svg class="ck-dial" width="200" height="200" viewBox="0 0 200 200" role="img" aria-label="${esc(m.member.name || "")} 予定${big} ${sub}">
     ${out.join("\n    ")}
     <text x="${CX}" y="${CY - 1}" text-anchor="middle" class="ck-cn" fill="${bigcol}" style="font-variant-numeric:tabular-nums">${big}</text>
-    <text x="${CX}" y="${CY + 15}" text-anchor="middle" class="ck-cl" fill="#6b7480">${sub}</text>
+    <text x="${CX}" y="${CY + 15}" text-anchor="middle" class="ck-cl" fill="${subCol}">${sub}</text>
   </svg>`;
 }
 
@@ -87,7 +90,7 @@ function cardHTML(m, idx) {
       ${rows}
     </details>`;
   }
-  if (m.freeH > 0) sections += `<div class="ck-row free"><i class="ck-dot" style="background:${FREECOL}"></i><span class="ck-tn">空き工数</span><span class="ck-th">${fmtH(m.freeH)}</span></div>`;
+  if (m.freeH > 0) sections += `<div class="ck-row free"><i class="ck-dot ck-freedot" style="background:${FREECOL}"></i><span class="ck-tn">空き工数</span><span class="ck-th">${fmtH(m.freeH)}</span></div>`;
   if (!m.items.length) sections = `<div class="ck-empty">今日の予定なし</div>` + sections;
 
   return `<div class="ck-card ${m.overH > 0 ? "is-over" : ""}">
@@ -138,7 +141,7 @@ function legend() {
       <span class="it"><span class="ck-tag" style="margin:0">前倒し</span></span></span>
     <span class="sep"></span>
     <span class="grp">
-      <span class="it"><i class="sw" style="background:${FREECOL}"></i>空き工数</span>
+      <span class="it"><i class="sw ck-freedot" style="background:${FREECOL}"></i>空き工数</span>
       <span class="it"><i class="sw" style="background:linear-gradient(90deg,${PRIO[4].c},${PRIO[2].c})"></i>外周=超過</span></span>
   </div>`;
 }
@@ -328,5 +331,44 @@ function css() {
   .ck-menu button:hover{border-color:#cfe0ff;background:#f3f8ff}
   .ck-pwho{display:inline-flex;align-items:center;gap:8px}
   .ck-pav{width:22px;height:22px;border-radius:50%;display:inline-grid;place-items:center;color:#fff;font-size:11px;font-weight:700}
-  .ck-back{border:1px solid ${C.line};background:#fff;border-radius:8px;padding:7px 12px;font:inherit;font-size:12.5px;cursor:pointer}`;
+  .ck-back{border:1px solid ${C.line};background:#fff;border-radius:8px;padding:7px 12px;font:inherit;font-size:12.5px;cursor:pointer}
+  /* ===== ダーク上書き（ライト値は上で維持＝非回帰） ===== */
+  /* 白カード/パネル → card 変数へ */
+  html[data-theme="dark"] .ck-kpi,
+  html[data-theme="dark"] .ck-card,
+  html[data-theme="dark"] .ck-day,
+  html[data-theme="dark"] .ck-modal-card,
+  html[data-theme="dark"] .ck-macts button,
+  html[data-theme="dark"] .ck-menu button,
+  html[data-theme="dark"] .ck-back{background:var(--card);color:var(--ink)}
+  /* 淡色tintの面（バー余白/セクション見出し/hover）→ track へ */
+  html[data-theme="dark"] .ck-bar{background:var(--track)}
+  html[data-theme="dark"] .ck-bar i:last-child{background:var(--track)!important}
+  html[data-theme="dark"] details.ck-sec>summary{background:var(--track);color:var(--ink)}
+  html[data-theme="dark"] details.ck-sec>summary:hover{background:var(--line)}
+  html[data-theme="dark"] .ck-more:hover{background:var(--track);color:var(--ink)}
+  /* 本文/見出しの近黒テキスト → ink へ */
+  html[data-theme="dark"] .ck-tn{color:var(--ink)}
+  html[data-theme="dark"] .ck-n{color:var(--ink)}
+  html[data-theme="dark"] .ck-legend .glbl{color:var(--ink)}
+  /* バッジ（淡色tint面 + 濃色文字）→ 半透明アクセント面へ */
+  html[data-theme="dark"] .ck-badge.free{background:rgba(47,166,107,.20);color:#63cf95}
+  html[data-theme="dark"] .ck-badge.over{background:rgba(229,72,77,.20);color:#f08a8d}
+  html[data-theme="dark"] .ck-badge.just{background:rgba(255,255,255,.08);color:var(--muted)}
+  html[data-theme="dark"] .ck-row.free .ck-tn{color:#63cf95}
+  /* 超過カード枠の淡ピンク → 半透明赤 */
+  html[data-theme="dark"] .ck-card.is-over{border-color:rgba(229,72,77,.45)}
+  /* hover系の淡青/淡灰 → 半透明アクセント/track */
+  html[data-theme="dark"] .ck-day:hover,
+  html[data-theme="dark"] .ck-menu button:hover{border-color:rgba(58,134,255,.5);background:rgba(58,134,255,.12)}
+  html[data-theme="dark"] .ck-cancel:hover,
+  html[data-theme="dark"] .ck-back:hover{background:var(--track)}
+  html[data-theme="dark"] .ck-drop:hover,
+  html[data-theme="dark"] .ck-menu button.danger:hover{background:rgba(229,72,77,.15)}
+  /* タグ枠線の淡色 → 半透明アクセント */
+  html[data-theme="dark"] .ck-tag{border-color:rgba(245,135,46,.45)}
+  html[data-theme="dark"] .ck-tag.adhoc{border-color:rgba(58,134,255,.5)}
+  /* 空き=薄グレー：時計外周アーク/凡例/行ドットを暗側のニュートラルへ */
+  html[data-theme="dark"] .ck-freearc{stroke:#3b434f}
+  html[data-theme="dark"] .ck-freedot{background:#3b434f!important}`;
 }

@@ -29,7 +29,8 @@ export async function render(root) {
   root.innerHTML = `
     <style>.t-seg{display:inline-flex;background:#fff;border:1px solid ${C.line};border-radius:10px;padding:3px;margin:0 0 16px;box-shadow:0 1px 2px rgba(20,30,50,.04)}
     .t-seg button{border:0;background:transparent;color:${C.muted};font:inherit;font-size:13px;font-weight:600;padding:5px 14px;border-radius:8px;cursor:pointer}
-    .t-seg button.on{background:${C.fill};color:#fff}</style>
+    .t-seg button.on{background:${C.fill};color:#fff}
+    html[data-theme="dark"] .t-seg{background:var(--card)}</style>
     <h1 class="vtitle">今日の稼働予定 <small>${day}</small></h1>
     <div class="t-seg">
       <button data-m="stacked" class="${MODE === "stacked" ? "on" : ""}">積み上げ</button>
@@ -156,7 +157,7 @@ function legendHtml(usedPjs, projects, pjColor) {
       ${pj}
       <span class="item"><span class="rule"></span>容量線 ${CAP}h</span>
       <span class="item"><span class="oversw"></span>容量超過</span>
-      <span class="item"><span class="sw" style="background:#fff;border:1.5px dashed #c4d6c9"></span>空き工数</span>
+      <span class="item"><span class="sw freesw" style="background:#fff;border:1.5px dashed #c4d6c9"></span>空き工数</span>
     </div>`;
 }
 
@@ -201,5 +202,9 @@ function css() {
   .t54-legend .oversw{width:11px;height:11px;border-radius:3px;display:inline-block;background:rgba(229,72,77,.22);border:1.5px solid ${C.over}}
   .t54-hint{font-size:11px;color:${C.muted};text-align:right;margin-top:10px}
   .t54-empty{padding:34px;text-align:center;color:${C.muted}}
-  @media(max-width:760px){.t54-chart{gap:14px;padding-left:38px}.t54-tname{font-size:10.5px}.t54-area{max-width:none}}`;
+  @media(max-width:760px){.t54-chart{gap:14px;padding-left:38px}.t54-tname{font-size:10.5px}.t54-area{max-width:none}}
+  /* ===== ダーク上書き（ライト値は上で維持＝非回帰）。淡色の面/ボーダーのみ暗側へ ===== */
+  html[data-theme="dark"] .t54-freezone{border-color:rgba(47,166,107,.45)}
+  html[data-theme="dark"] .t54-freezone span{border-color:rgba(47,166,107,.40)}
+  html[data-theme="dark"] .t54-legend .sw.freesw{background:var(--track)!important;border-color:rgba(47,166,107,.45)!important}`;
 }

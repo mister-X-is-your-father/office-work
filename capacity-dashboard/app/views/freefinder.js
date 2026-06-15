@@ -79,5 +79,8 @@ export async function render(root) {
     .fftable .ff-tot{font-weight:700}
     .fftable .empty{padding:28px;color:${C.muted}}
     .legend{display:flex;flex-direction:column;gap:4px;font-size:11px;margin-top:8px}
+    html[data-theme="dark"] .fftable th{background:var(--card)}
+    html[data-theme="dark"] .fftable .ff-m{background:var(--card)}
+    html[data-theme="dark"] .fftable th.off,html[data-theme="dark"] .fftable td.off{background:rgba(255,255,255,.05)}
     </style>`;
 }

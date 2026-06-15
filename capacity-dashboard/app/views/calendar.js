@@ -439,5 +439,12 @@ function css() {
   .cal-ovm-ghost{font:inherit;font-size:12.5px;padding:7px 12px;border-radius:8px;border:1px solid ${C.line};background:#fff;color:${C.muted};cursor:pointer}
   .cal-ovm-ghost:hover{color:${C.ink}}
   .cal-ovm-save{font:inherit;font-size:12.5px;font-weight:700;padding:7px 14px;border-radius:8px;border:1px solid ${C.fill};background:${C.fill};color:#fff;cursor:pointer}
-  .cal-ovm-save:hover{filter:brightness(1.05)}`;
+  .cal-ovm-save:hover{filter:brightness(1.05)}
+  /* ===== ダーク: ハードコード淡色を構造色へ（ライトは非変更・アクセントは維持） ===== */
+  html[data-theme="dark"] .cal-tray-list{background:var(--track)}
+  html[data-theme="dark"] .cal-chip{background:var(--card)}
+  html[data-theme="dark"] .cal-pool-q{background:var(--card);color:var(--ink)}
+  html[data-theme="dark"] .cal-colbody.over{background:rgba(58,134,255,.13)}
+  html[data-theme="dark"] .cal-ovm-card{background:var(--card)}
+  html[data-theme="dark"] .cal-ovm-ghost{background:var(--card)}`;
 }

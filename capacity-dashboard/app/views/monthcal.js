@@ -211,5 +211,17 @@ function css() {
   .mc-pop-x:hover{color:${C.fill}}
   .mc-pop-list .mc-task{white-space:normal;cursor:pointer}
   .mc-pop-list .mc-rec{white-space:normal}
-  .mc-pop-empty{font-size:11px;color:${C.muted};padding:4px 2px}`;
+  .mc-pop-empty{font-size:11px;color:${C.muted};padding:4px 2px}
+  /* ===== ダーク: ハードコード淡色を構造色へ（ライトは非変更） ===== */
+  html[data-theme="dark"] .mc-nav{background:var(--card);color:var(--ink)}
+  html[data-theme="dark"] .mc-tools select{background:var(--card);color:var(--ink)}
+  html[data-theme="dark"] .mc-dow{background:var(--track)}
+  html[data-theme="dark"] .mc-day{background:var(--card)}
+  html[data-theme="dark"] .mc-day.out{background:var(--track)}
+  html[data-theme="dark"] .mc-day.out .mc-num{color:var(--muted)}
+  html[data-theme="dark"] .mc-day.today{background:rgba(58,134,255,.13)}
+  html[data-theme="dark"] .mc-task{background:rgba(58,134,255,.18);color:var(--ink)}
+  html[data-theme="dark"] .mc-task:hover{background:rgba(58,134,255,.28)}
+  html[data-theme="dark"] .mc-rec{background:rgba(124,77,200,.22);color:#c4a9f0}
+  html[data-theme="dark"] .mc-pop{background:var(--card)}`;
 }

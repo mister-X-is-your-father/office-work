@@ -188,5 +188,20 @@ function css() {
   .qd-undo{position:fixed;left:50%;transform:translateX(-50%);bottom:26px;z-index:55;display:flex;align-items:center;gap:12px;
     background:#1d2430;color:#fff;border-radius:11px;padding:10px 16px;font-size:12.5px;box-shadow:0 10px 30px rgba(10,18,35,.35)}
   .qd-undo[hidden]{display:none}
-  .qd-undo button{font:inherit;font-size:12px;font-weight:700;border:1px solid #5b6470;background:transparent;color:#9cc3ff;border-radius:7px;padding:4px 12px;cursor:pointer}`;
+  .qd-undo button{font:inherit;font-size:12px;font-weight:700;border:1px solid #5b6470;background:transparent;color:#9cc3ff;border-radius:7px;padding:4px 12px;cursor:pointer}
+
+  /* ダークモード: 面=card / 区画罫線=line / 文字=ink。四象限tintは同系の暗いtintへ。アクセント/PRIO色は維持 */
+  html[data-theme="dark"] .qd-rule,
+  html[data-theme="dark"] .qd-tools select,
+  html[data-theme="dark"] .qd-who-b,
+  html[data-theme="dark"] .qd-card{background:var(--card);color:var(--muted)}
+  html[data-theme="dark"] .qd-card{color:var(--ink)}
+  html[data-theme="dark"] .qd-who-b:hover,
+  html[data-theme="dark"] .qd-card:hover{border-color:${C.fill}}
+  html[data-theme="dark"] .qd-card:hover{box-shadow:0 2px 8px rgba(0,0,0,.35)}
+  html[data-theme="dark"] .qd-cell{background:var(--card)!important}
+  html[data-theme="dark"] .qd-cell[data-q="q1"]{background:rgba(229,72,77,.12)!important}
+  html[data-theme="dark"] .qd-cell[data-q="q2"]{background:rgba(58,134,255,.12)!important}
+  html[data-theme="dark"] .qd-cell[data-q="q3"]{background:rgba(245,135,46,.12)!important}
+  html[data-theme="dark"] .qd-cell[data-q="q4"]{background:rgba(138,147,160,.12)!important}`;
 }

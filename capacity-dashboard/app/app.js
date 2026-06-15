@@ -111,6 +111,7 @@ function shell() {
     else document.documentElement.removeAttribute("data-theme");
     try { localStorage.setItem("ts.theme", next); } catch { /* noop */ }
     paintThemeBtn();
+    route(); // 現在ビューを再描画（SVG等でJS算出した色＝円時計の中央数字などを即反映）
   };
   document.getElementById("refresh").onclick = async () => { store.invalidate(); route(); };
   document.getElementById("addtask").onclick = async () => {

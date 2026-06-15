@@ -112,5 +112,11 @@ function css() {
   .hb-c.today.on{background:#2fa66b;border-color:#2fa66b;color:#fff}
   .hb-x{border:0;background:transparent;color:${C.muted};font-size:15px;cursor:pointer;opacity:.35;padding:4px;transition:opacity .12s}
   .hb-row:hover .hb-x{opacity:1}
-  .hb-x:focus-visible{opacity:1}`;
+  .hb-x:focus-visible{opacity:1}
+
+  /* ダークモード: 入力面=card / 未チェックの○=track / 今日ボタン面=card。済(.on)の緑は維持 */
+  html[data-theme="dark"] .hb-input{background:var(--card);color:var(--ink)}
+  html[data-theme="dark"] .hb-c{background:var(--track);color:var(--muted)}
+  html[data-theme="dark"] .hb-c.today{background:var(--card);color:${C.fill}}
+  html[data-theme="dark"] .hb-c.today:hover{background:rgba(58,134,255,.16)}`;
 }

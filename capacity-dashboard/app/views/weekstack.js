@@ -96,5 +96,8 @@ function css() {
   .ws-legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:14px;font-size:11.5px;color:${C.muted}}
   .ws-legend .it{display:inline-flex;align-items:center;gap:6px}
   .ws-legend .it i{width:11px;height:11px;border-radius:3px;display:inline-block}
-  .ws-legend .rule{width:18px;border-top:2px dashed ${C.capline};display:inline-block}`;
+  .ws-legend .rule{width:18px;border-top:2px dashed ${C.capline};display:inline-block}
+  html[data-theme="dark"] .ws-seg{background:var(--card);box-shadow:0 1px 2px rgba(0,0,0,.35)}
+  html[data-theme="dark"] .ws-cap span{background:var(--card)}
+  html[data-theme="dark"] .ws-seg-i{border-bottom-color:rgba(0,0,0,.35)}`;
 }

@@ -168,6 +168,10 @@ function ensureStyle() {
   .mg-row-acts{display:flex;gap:5px;flex-shrink:0}
   .mg-btn{font:inherit;font-size:11.5px;padding:4px 10px;border-radius:7px;border:1px solid ${C.line};background:#fff;color:${C.muted};cursor:pointer}
   .mg-btn:hover{border-color:${C.fill};color:${C.fill}}
-  .mg-del:hover{border-color:${C.over};color:${C.over}}`;
+  .mg-del:hover{border-color:${C.over};color:${C.over}}
+
+  /* ダークモード: 白背景の入力・ボタンを面色に（ライト値は不変） */
+  html[data-theme="dark"] .mg-in{background:var(--card);color:var(--ink)}
+  html[data-theme="dark"] .mg-btn{background:var(--card)}`;
   document.head.appendChild(s);
 }

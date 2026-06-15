@@ -121,5 +121,12 @@ function css() {
   .rq-btn.appr{background:${C.free};border-color:${C.free};color:#fff}
   .rq-btn.appr:hover{filter:brightness(.95)}
   .rq-empty{padding:30px;text-align:center;color:${C.muted};background:${C.card};border:1px solid ${C.line};border-radius:14px}
-  @media(max-width:760px){.rq-qhead{display:none}.rq-row{grid-template-columns:1fr;gap:6px}}`;
+  @media(max-width:760px){.rq-qhead{display:none}.rq-row{grid-template-columns:1fr;gap:6px}}
+
+  /* ダークモード: あなた宛の淡色ハイライトは暗い青tintへ / ボタン面=card / レビューバッジtintも暗系。アクセント色は維持 */
+  html[data-theme="dark"] .rq-kpi.you{background:rgba(58,134,255,.12);border-color:rgba(58,134,255,.4)}
+  html[data-theme="dark"] .rq-row.you{background:rgba(58,134,255,.08)}
+  html[data-theme="dark"] .rq-kind{background:rgba(58,134,255,.16);border-color:rgba(58,134,255,.35)}
+  html[data-theme="dark"] .rq-btn{background:var(--card);color:var(--ink)}
+  html[data-theme="dark"] .rq-btn:hover{background:var(--track)}`;
 }

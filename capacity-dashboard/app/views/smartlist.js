@@ -350,5 +350,13 @@ function css() {
   .sl-flagrow.on{filter:none}
   .sl-empty{text-align:center;color:${C.muted};padding:50px 0;font-size:13px}
   .sl-empty-i{font-size:34px;margin-bottom:8px;filter:grayscale(.3) opacity(.6)}
-  @media(max-width:720px){.sl{grid-template-columns:1fr}.sl-rail{flex-direction:row;flex-wrap:wrap;position:static}}`;
+  @media(max-width:720px){.sl{grid-template-columns:1fr}.sl-rail{flex-direction:row;flex-wrap:wrap;position:static}}
+  /* ===== ダークモード（ハードコード淡色を暗側に上書き。ライト不変） ===== */
+  html[data-theme="dark"] .sl-rcnt{background:rgba(255,255,255,.1)}
+  html[data-theme="dark"] .sl-sort select,html[data-theme="dark"] .sl-in{background:${C.card};color:${C.ink}}
+  html[data-theme="dark"] .sl-flagbtn{background:${C.card}}
+  html[data-theme="dark"] .sl-flagbtn.on{background:rgba(229,72,77,.18)}
+  html[data-theme="dark"] .sl-del{background:${C.card}}
+  html[data-theme="dark"] .sl-row:hover{box-shadow:0 2px 10px rgba(0,0,0,.4);border-color:${C.lineStrong}}
+  html[data-theme="dark"] .sl-check{background:${C.card}}`;
 }
