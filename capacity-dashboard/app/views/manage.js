@@ -27,7 +27,7 @@ export async function render(root) {
   ]);
 
   root.innerHTML = `
-    <h1 class="vtitle">予定の基礎データ <small>定期・会議／祝日／個人休暇の登録・編集</small></h1>
+    <h1 class="vtitle">予定の基礎データ <small>定期・会議／祝日・休業日／個人休暇の登録・編集</small></h1>
     <div class="mg-grid">
       <div class="card mg-card" id="mg-rec"></div>
       <div class="card mg-card" id="mg-hol"></div>
@@ -94,7 +94,7 @@ function renderHolidays(el, holidays, { holidaysByDate, reload }) {
   const sorted = [...(holidays || [])].sort((a, b) => String(a.date).localeCompare(String(b.date)));
   const todayISO = new Date().toISOString().slice(0, 10);
   el.innerHTML = `
-    <div class="mg-h"><span>祝日 <span class="mg-cnt">${sorted.length}</span></span></div>
+    <div class="mg-h"><span>祝日・休業日 <span class="mg-cnt">${sorted.length}</span></span></div>
     <div class="mg-hint">国民の祝日は自動同期（週1）。会社独自の休業日などはここで手動追加できます。</div>
     <div class="mg-form">
       <input id="hol-date" class="mg-in mg-in-date" inputmode="numeric" autocomplete="off" placeholder="日付（例: 1112）">
