@@ -308,6 +308,7 @@ export async function render(root) {
           <div class="r-label r-label-sub">
             <span class="r-text"><span class="r-name">${esc(t.title)}</span>
               <span class="r-meta">${avs ? `<span class="av">${avs}</span>` : ""}
+                <span class="r-who">${asg[0] ? esc(asg[0].name || asg[0].username) : "未割当"}</span>
                 <span>見${fmtH(r.estH)}・実${fmtH(r.spentH)}・予${fmtH(r.planned.h)}</span>
                 ${r.over ? `<span class="r-flag">超過</span>` : ""}
                 ${noplan ? `<span class="r-noplan">予定なし</span>` : ""}</span></span>
@@ -568,6 +569,8 @@ function shell(projects, members, memberIdx, mode) {
   .gv .r-meta{font-size:10.5px;color:${C.muted};display:flex;align-items:center;gap:6px;margin-top:1px;white-space:nowrap}
   .gv .r-meta .av{display:inline-flex;gap:3px}
   .gv .r-meta .ava{width:14px;height:14px;border-radius:50%;color:#fff;font-size:8px;display:inline-flex;align-items:center;justify-content:center;font-weight:700}
+  .gv .r-who{color:${C.ink};font-weight:600}
+  .gv .row.noplan .r-who{color:${C.muted}}
   .gv .r-meta .more{font-size:9px}
   .gv .r-meta .r-pj{padding:0 5px;border-radius:4px;background:${C.track}}
   .gv .r-flag{font-size:9px;font-weight:700;color:#fff;background:${C.over};padding:1px 5px;border-radius:4px}
