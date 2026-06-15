@@ -44,7 +44,8 @@ const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date
 const AXES = {
   due:     { label: "期限",      cmp: (a, b) => (a.due || "9999").localeCompare(b.due || "9999"), dir: 1 },
   prio:    { label: "重要度",    cmp: (a, b) => a.prio - b.prio, dir: -1 },
-  ws:      { label: "プロジェクト", cmp: (a, b) => (a.proj || "").localeCompare(b.proj || "", "ja"), dir: 1 },
+  ws:      { label: "WS",        cmp: (a, b) => (a.proj || "").localeCompare(b.proj || "", "ja"), dir: 1 },
+  proj:    { label: "プロジェクト", cmp: (a, b) => { const pa = (a.parent && a.parent.title) || "", pb = (b.parent && b.parent.title) || ""; if (!pa !== !pb) return pa ? -1 : 1; return pa.localeCompare(pb, "ja"); }, dir: 1 },
   cat:     { label: "分類",      cmp: (a, b) => ((a.cat && a.cat.title) || "～").localeCompare((b.cat && b.cat.title) || "～", "ja"), dir: 1 },
   who:     { label: "担当",      cmp: (a, b) => ((a.who && (a.who.name || a.who.username)) || "～").localeCompare((b.who && (b.who.name || b.who.username)) || "～", "ja"), dir: 1 },
   state:   { label: "ステータス",      cmp: (a, b) => stateRank(a) - stateRank(b), dir: 1 },
@@ -72,6 +73,7 @@ export async function render(root) {
     fable: execOk && !t.done && (t.assignees || []).some((a) => isAiUser(a))
       && ((t.created_by || {}).id || 0) === ((me && me.id) || -1),
     proj: projectName(projects, t.project_id), pid: t.project_id,
+    parent: (((t.related_tasks || {}).parenttask) || [])[0] || null,   // プロジェクト＝親タスク（related_tasks.parenttask）
     review: isReviewTask(t), prio: prioBucket(t.priority), cat: categoryLabels(t)[0] || null,
     due: dueISO(t), est: (t.time_estimate || 0) / HOUR, pct: t.percent_done || 0,
     done: !!t.done, status: statusOf(t),
@@ -654,11 +656,11 @@ function wireDrag(root, rerender) {
 }
 
 const cols = () => [
-  { k: "ws", label: "プロジェクト" }, { k: "title", label: "タスク" }, { k: "who", label: "担当" }, { k: null, label: "種別" },
+  { k: "proj", label: "プロジェクト" }, { k: "title", label: "タスク" }, { k: "who", label: "担当" }, { k: null, label: "種別" },
   { k: "cat", label: "分類" }, { k: "prio", label: "重要度" }, { k: "due", label: "期限" },
   { k: "est", label: "見積" }, { k: "pct", label: "進捗" }, { k: "state", label: "ステータス" },
 ];
-// プロジェクト別の色（pid からパレットを引く）。一覧のプロジェクトチップ用。
+// プロジェクト(=親タスク)別の色（親タスクidからパレットを引く）。一覧のプロジェクトチップ用。
 const PROJ_PAL = ["#3a86ff", "#2fa66b", "#b657d6", "#e5772d", "#0ea5e9", "#f5a623", "#ef476f", "#14b8a6"];
 const projColor = (pid) => PROJ_PAL[(pid || 0) % PROJ_PAL.length];
 // ヘッダに何番目のソート軸かを小さく表示（組み合わせの見える化）
@@ -689,7 +691,7 @@ function rowHtml(r, members, i, manual) {
   const estBtn = `<button class="tb-cell tb-num tb-estbtn" data-est="${id}" title="クリックで見積を変更">${r.est ? fmtH(r.est) : "—"}<span class="tb-cell-car">▾</span></button>`;
   const st = `<button class="tb-st tb-stbtn ${r.status}" data-st="${id}" title="クリックでステータス変更">${STATUS[r.status].label}<span class="tb-st-car">▾</span></button>`;
   return `<tr data-id="${id}" class="${manual ? "tb-draggable" : ""}${manual && selectedIds.has(id) ? " tb-sel" : ""}">
-    <td>${r.proj ? `<span class="tb-pj"><i style="background:${projColor(r.pid)}"></i>${esc(r.proj)}</span>` : `<span class="tb-pj none">—</span>`}</td>
+    <td>${r.parent ? `<span class="tb-pj"><i style="background:${projColor(r.parent.id)}"></i>${esc(r.parent.title)}</span>` : `<span class="tb-pj none">—</span>`}</td>
     <td class="tb-title">${esc(r.title)}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">🚩</span>` : ""}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">▶</button>` : ""}</td>
     <td>${whoBtn}</td>
     <td>${kind}</td>
