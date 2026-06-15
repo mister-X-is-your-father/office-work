@@ -2,6 +2,7 @@
 import { load } from "../lib/store.js";
 import { estimateVsActual } from "../lib/capacity.js";
 import { C, fmtH, esc } from "../lib/ui.js";
+import { openTaskForm } from "./taskform.js";
 
 export async function render(root) {
   const { tasks } = await load();
@@ -18,6 +19,13 @@ export async function render(root) {
     </div>
     <div class="card">${r.rows.length ? r.rows.map(x => rowHtml(x, maxH)).join("") : empty()}</div>
     <div class="legend"><span><i style="background:${C.full}"></i>見積り</span><span><i style="background:${C.fill}"></i>実績(見積内)</span><span><i style="background:${C.over}"></i>実績(超過)</span></div>`;
+
+  // 行クリックで編集（保存後 再描画）。他画面（一覧/かんばん）と挙動を揃える。
+  root.querySelectorAll(".ea-row[data-id]").forEach((el) => {
+    el.onclick = () => openTaskForm({ taskId: +el.dataset.id, onSaved: () => render(root) });
+    el.onmouseenter = () => { el.style.background = C.track; };
+    el.onmouseleave = () => { el.style.background = ""; };
+  });
 }
 
 function rowHtml(x, maxH) {
@@ -25,7 +33,7 @@ function rowHtml(x, maxH) {
   const cls = x.status === "over" ? C.over : x.status === "under" ? C.free : C.muted;
   const actColor = x.actH > x.estH ? C.over : C.fill;
   const bar = (val, color) => `<div style="flex:1;height:14px;background:${C.track};border-radius:5px;overflow:hidden"><div style="height:100%;width:${val / maxH * 100}%;background:${color};border-radius:5px"></div></div>`;
-  return `<div style="padding:13px 16px;border-bottom:1px solid ${C.line}">
+  return `<div class="ea-row" data-id="${x.id}" title="クリックで編集" style="padding:13px 16px;border-bottom:1px solid ${C.line};cursor:pointer;transition:background .12s">
     <div style="display:flex;justify-content:space-between;margin-bottom:7px"><b style="font-size:14px">${esc(x.title)}</b>
       <span style="font-weight:700;color:${cls}">${diffTxt} <span style="color:${C.muted};font-weight:400">${fmtH(x.estH)} → ${fmtH(x.actH)}</span></span></div>
     <div style="display:flex;align-items:center;gap:8px;margin:3px 0"><span style="width:40px;font-size:10.5px;color:${C.muted};text-align:right">見積</span>${bar(x.estH, C.full)}<span style="width:42px;font-size:11.5px;font-weight:600">${fmtH(x.estH)}</span></div>
