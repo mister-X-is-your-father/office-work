@@ -29,6 +29,8 @@
   *::-webkit-scrollbar-thumb{background:rgba(20,30,50,.22);border-radius:8px;border:2px solid transparent;background-clip:padding-box}
   *::-webkit-scrollbar-thumb:hover{background:rgba(20,30,50,.36);background-clip:padding-box}
   *::-webkit-scrollbar-corner{background:transparent}
+  /* キーボード操作時のフォーカス可視（全画面共通・マウス時は出ない）。各要素の独自focus指定があればそちら優先 */
+  :focus-visible{outline:2px solid var(--fill);outline-offset:2px}
   /* shell */
   .shell{display:flex;min-height:100vh}
   .sidebar{width:208px;flex:none;background:var(--card);border-right:1px solid var(--line);
