@@ -821,6 +821,7 @@ function css() {
   .tb-cell.over{color:${C.over};font-weight:600}
   .tb-cell-car{font-size:8px;opacity:0;color:${C.muted};transition:opacity .1s;margin-left:auto;padding-left:2px}
   .tb-cell:hover .tb-cell-car{opacity:.6}
+  @media (hover:none){.tb-cell-car{opacity:.45}}  /* タッチ端末はhoverが無いので▾を常時薄く表示＝編集可能と分かる */
   .tb-prio-none{color:${C.muted}}
   /* クイック絞り込みのチップ列 */
   .tb-quick{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:-4px 0 14px}

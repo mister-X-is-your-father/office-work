@@ -110,6 +110,7 @@ function css() {
   .hb-c.today{border:1.5px solid ${C.fill};background:#fff;color:${C.fill};cursor:pointer;font-weight:700}
   .hb-c.today:hover{background:#eef4ff}
   .hb-c.today.on{background:#2fa66b;border-color:#2fa66b;color:#fff}
-  .hb-x{border:0;background:transparent;color:${C.muted};font-size:15px;cursor:pointer;opacity:0;padding:4px}
-  .hb-row:hover .hb-x{opacity:1}`;
+  .hb-x{border:0;background:transparent;color:${C.muted};font-size:15px;cursor:pointer;opacity:.35;padding:4px;transition:opacity .12s}
+  .hb-row:hover .hb-x{opacity:1}
+  .hb-x:focus-visible{opacity:1}`;
 }
