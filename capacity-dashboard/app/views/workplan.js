@@ -112,7 +112,7 @@ export async function render(root) {
   const tab = (val, label, color, on) =>
     `<button class="wp-who-b${on ? " on" : ""}" data-who="${esc(String(val))}">${color ? `<i class="wp-who-av" style="background:${color}">${esc(label[0] || "?")}</i>` : ""}${esc(label)}</button>`;
   const whoTabs = tab("all", "全員", "", WHO === "all")
-    + (selfMember ? tab("self", "自分", member_color(selfMember.id), WHO === "self") : "")
+    + (selfMember ? tab("self", "自分", "", WHO === "self") : "")
     + activeMembers.map((m) => tab(m.id, mName(m), member_color(m.id), WHO === String(m.id))).join("");
 
   const granLabel = granularity === "day" ? "日別" : "週別集計";
