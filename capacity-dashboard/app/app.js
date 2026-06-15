@@ -81,6 +81,7 @@ function shell() {
         <div class="brand">TaskStation</div>
         <button class="addbtn" id="addtask">タスク追加</button>
         <nav class="nav" id="nav">${nav}</nav>
+        <button class="theme-tg" id="theme-tg" aria-label="テーマ切替"></button>
       </aside>
       <div class="main">
         <div class="topbar">
@@ -99,6 +100,18 @@ function shell() {
   _tg.onclick = () => setDrawer(!_sb.classList.contains("open"));
   _bd.onclick = () => setDrawer(false);
   document.getElementById("nav").addEventListener("click", (e) => { if (e.target.closest("a")) setDrawer(false); });
+  // ダーク/ライト切替（CSS変数を html[data-theme] で反転＝再描画不要・localStorage永続）
+  const themeTg = document.getElementById("theme-tg");
+  const curTheme = () => document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+  const paintThemeBtn = () => { themeTg.textContent = curTheme() === "dark" ? "☀ ライトモード" : "🌙 ダークモード"; };
+  paintThemeBtn();
+  themeTg.onclick = () => {
+    const next = curTheme() === "dark" ? "light" : "dark";
+    if (next === "dark") document.documentElement.setAttribute("data-theme", "dark");
+    else document.documentElement.removeAttribute("data-theme");
+    try { localStorage.setItem("ts.theme", next); } catch { /* noop */ }
+    paintThemeBtn();
+  };
   document.getElementById("refresh").onclick = async () => { store.invalidate(); route(); };
   document.getElementById("addtask").onclick = async () => {
     const { openTaskForm } = await import("./views/taskform.js");
