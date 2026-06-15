@@ -92,6 +92,9 @@ export async function render(root) {
   else if (V.qaDue === "7d") rows = rows.filter((r) => r.due && r.due <= shiftISO(today, 7));
   else if (V.qaDue === "30d") rows = rows.filter((r) => r.due && r.due <= shiftISO(today, 30));
 
+  // 絞り込み（プロジェクト/分類/担当/期限/完了表示）のいずれかがアクティブか。0件時の空状態出し分け用。
+  const filtersActive = !!(V.proj || V.cat || V.qaWho || V.qaDue || V.doneMode !== "hide");
+
   const manual = V.manualMode;
   // 選択はマイソート中のみ有効。表示中のタスクに限定（フィルタ/モード変更で掃除）
   if (!manual) { selectedIds.clear(); anchorId = null; }
@@ -170,7 +173,7 @@ export async function render(root) {
     </div>` : ""}
     <div class="card tb-wrap"><table class="tb">
       <thead><tr>${cols().map((c) => th(c, manual)).join("")}</tr></thead>
-      <tbody>${rows.length ? rows.map((r, i) => rowHtml(r, members, i, manual)).join("") : `<tr><td colspan="10" class="tb-empty">該当なし</td></tr>`}</tbody>
+      <tbody>${rows.length ? rows.map((r, i) => rowHtml(r, members, i, manual)).join("") : emptyRow(filtersActive)}</tbody>
     </table></div>`;
 
   const persist = () => saveView(UID, V);
@@ -189,6 +192,9 @@ export async function render(root) {
     };
   });
   root.querySelector("#tb-done").onchange = (e) => { V.doneMode = e.target.value; reRender(); };
+  // 0件の空状態にある「絞り込みを解除」: 全フィルタをクリア＋完了表示を既定(hide)に戻して再描画
+  const emptyClr = root.querySelector("#tb-empty-clr");
+  if (emptyClr) emptyClr.onclick = () => { V.proj = ""; V.cat = ""; V.qaWho = ""; V.qaDue = ""; V.doneMode = "hide"; reRender(); };
   root.querySelector("#tb-add").onclick = () => openTaskForm({ onSaved: () => render(root) });
   // 条件を追加（最大5件・5件到達時はセレクト自体を出さない）。マイソート中なら組み合わせソートに切替
   const addSel = root.querySelector("#tb-addsort");
@@ -660,6 +666,12 @@ const cols = () => [
   { k: "cat", label: "分類" }, { k: "prio", label: "重要度" }, { k: "due", label: "期限" },
   { k: "est", label: "見積" }, { k: "pct", label: "進捗" }, { k: "state", label: "ステータス" },
 ];
+// 0件時の空状態行。フィルタがアクティブなら「条件に一致するタスクがありません」＋解除ボタン、無ければ「タスクがありません」のみ。
+const emptyRow = (filtersActive) => `<tr><td colspan="${cols().length}" class="tb-empty">`
+  + (filtersActive
+    ? `条件に一致するタスクがありません <button id="tb-empty-clr" class="tb-qa tb-qclr" type="button">絞り込みを解除</button>`
+    : `タスクがありません`)
+  + `</td></tr>`;
 // プロジェクト(=親タスク)別の色（親タスクidからパレットを引く）。一覧のプロジェクトチップ用。
 const PROJ_PAL = ["#3a86ff", "#2fa66b", "#b657d6", "#e5772d", "#0ea5e9", "#f5a623", "#ef476f", "#14b8a6"];
 const projColor = (pid) => PROJ_PAL[(pid || 0) % PROJ_PAL.length];
