@@ -7,16 +7,24 @@ import { weekLoadByMember, shiftISO, isBusinessDay, daysUntil } from "../lib/cap
 import { PRIO, prioBucket } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color } from "../lib/ui.js";
 
-const WHO_KEY = "ts.weekpersonal.who", FROM_KEY = "ts.weekpersonal.from", TO_KEY = "ts.weekpersonal.to";
+const WHO_KEY = "ts.workplan.who", PRESET_KEY = "ts.workplan.preset", FROM_KEY = "ts.workplan.from", TO_KEY = "ts.workplan.to";
 const WD = ["日", "月", "火", "水", "木", "金", "土"];
 const BUCKETS = [4, 3, 2, 1, 0]; // 積む順（column-reverse で下から MUST→なし）
 const MAX_SPAN = 92;             // 最長3ヶ月
 const DAY_GRAIN_MAX = 14;        // この日数以下は日別、超は週別集計
+// 表示期間プリセット（今日からの相対日数）。既定=1週間。チップで切替・日付指定=custom。
+const PRESETS = [
+  { key: "1w", label: "1週間", days: 7 },
+  { key: "2w", label: "2週間", days: 14 },
+  { key: "1m", label: "1ヶ月", days: 30 },
+  { key: "3m", label: "3ヶ月", days: 90 },
+];
 let CAP = 8;
 
 const lsGet = (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 let WHO = lsGet(WHO_KEY, "");   // ""→自分既定 / "all"=全員(メンバー別) / "self"=自分 / memberId
+let PRESET = lsGet(PRESET_KEY, "1w");   // 既定=今日から1週間。"custom"=日付指定
 let FROM = lsGet(FROM_KEY, ""), TO = lsGet(TO_KEY, "");
 
 const round1 = (n) => Math.round(n * 10) / 10;
@@ -24,12 +32,6 @@ const dowOf = (iso) => new Date(iso + "T00:00:00Z").getUTCDay();
 const weekStartOf = (iso) => { const d = dowOf(iso); return shiftISO(iso, d === 0 ? -6 : 1 - d); };
 const mName = (m) => m.name || m.username || "?";
 
-function thisWeek() {
-  const today = new Date().toISOString().slice(0, 10);
-  const dow = new Date(today + "T00:00:00Z").getUTCDay();
-  const mon = shiftISO(today, dow === 0 ? -6 : 1 - dow);
-  return [mon, shiftISO(mon, 4)];
-}
 function bizDaysList(from, to, holidays) {
   const out = [];
   for (let cur = from, i = 0; cur <= to && i < 400; cur = shiftISO(cur, 1), i++) {
@@ -70,10 +72,15 @@ export async function render(root) {
   const { tasks, members, plansByTask, settings, holidaysSet, me } = await load();
   CAP = settings.capH;
 
-  // 期間の既定=今週／正規化（from<=to、span<=92）
-  if (!FROM || !TO) { const [a, b] = thisWeek(); FROM = FROM || a; TO = TO || b; }
-  if (FROM > TO) { const t = FROM; FROM = TO; TO = t; }
-  if (daysUntil(FROM, TO) > MAX_SPAN) TO = shiftISO(FROM, MAX_SPAN);
+  // 期間: プリセット(今日からの相対)を既定とし、custom のときだけ日付指定を使う。
+  const today = new Date().toISOString().slice(0, 10);
+  const presetDef = PRESETS.find((p) => p.key === PRESET);
+  if (presetDef) { FROM = today; TO = shiftISO(today, presetDef.days - 1); }
+  else {
+    if (!FROM || !TO) { FROM = today; TO = shiftISO(today, 6); }
+    if (FROM > TO) { const t = FROM; FROM = TO; TO = t; }
+    if (daysUntil(FROM, TO) > MAX_SPAN) TO = shiftISO(FROM, MAX_SPAN);
+  }
 
   const meId = me && me.id;
   const activeMembers = members || [];
@@ -135,6 +142,7 @@ export async function render(root) {
     <h1 class="vtitle">${title} 稼働プラン <small>${FROM.slice(5)}〜${TO.slice(5)} ・ ${granLabel} ・ 容量 ${CAP}h/日 ・ 重要度別</small></h1>
     <div class="wp-tools">
       <div class="wp-who" id="wp-who">${whoTabs || `<span class="wp-noone">メンバーがいません</span>`}</div>
+      <div class="wp-presets" id="wp-presets">${PRESETS.map((p) => `<button class="wp-pchip${PRESET === p.key ? " on" : ""}" data-preset="${p.key}">${p.label}</button>`).join("")}</div>
       <div class="wp-range">期間
         <input type="date" id="wp-from" value="${FROM}">〜<input type="date" id="wp-to" value="${TO}">
         <span class="wp-hint">最長3ヶ月</span>
@@ -151,9 +159,13 @@ export async function render(root) {
   root.querySelectorAll("#wp-who [data-who]").forEach((b) => {
     b.onclick = () => { WHO = b.dataset.who; lsSet(WHO_KEY, WHO); render(root); };
   });
+  root.querySelectorAll("#wp-presets [data-preset]").forEach((b) => {
+    b.onclick = () => { PRESET = b.dataset.preset; lsSet(PRESET_KEY, PRESET); render(root); };
+  });
+  const setCustom = () => { PRESET = "custom"; lsSet(PRESET_KEY, "custom"); };  // 日付指定したらプリセット解除
   const fromEl = root.querySelector("#wp-from"), toEl = root.querySelector("#wp-to");
-  if (fromEl) fromEl.onchange = () => { FROM = fromEl.value || FROM; lsSet(FROM_KEY, FROM); render(root); };
-  if (toEl) toEl.onchange = () => { TO = toEl.value || TO; lsSet(TO_KEY, TO); render(root); };
+  if (fromEl) fromEl.onchange = () => { setCustom(); FROM = fromEl.value || FROM; lsSet(FROM_KEY, FROM); render(root); };
+  if (toEl) toEl.onchange = () => { setCustom(); TO = toEl.value || TO; lsSet(TO_KEY, TO); render(root); };
 }
 
 function colHtml(c, pxPerH) {
@@ -177,6 +189,10 @@ function css() {
   .wp-who-av{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:50%;color:#fff;font-size:9px;font-weight:700;flex:none}
   .wp-who-b.on .wp-who-av{box-shadow:0 0 0 1.5px #fff}
   .wp-noone{color:${C.muted};font-size:12px}
+  .wp-presets{display:flex;gap:5px;flex-wrap:wrap}
+  .wp-pchip{font:inherit;font-size:12px;padding:5px 12px;border:1px solid ${C.line};border-radius:18px;background:#fff;color:${C.muted};cursor:pointer;transition:border-color .12s,background .12s,color .12s}
+  .wp-pchip:hover{border-color:#cfd9e6;color:${C.ink}}
+  .wp-pchip.on{background:${C.fill};border-color:${C.fill};color:#fff;font-weight:700}
   .wp-range{display:flex;align-items:center;gap:6px;font-size:12.5px;color:${C.muted};margin-left:auto}
   .wp-range input{font:inherit;font-size:12.5px;padding:4px 7px;border:1px solid ${C.line};border-radius:7px;background:#fff;color:${C.ink}}
   .wp-hint{font-size:11px;color:${C.muted}}
