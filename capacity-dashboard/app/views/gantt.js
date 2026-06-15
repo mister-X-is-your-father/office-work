@@ -541,9 +541,10 @@ function shell(projects, members, memberIdx, mode) {
   .gv .chk{font-size:12px;color:${C.ink};cursor:pointer}
   .gv-scroll{flex:1;min-height:0;overflow:auto}
   .gv .gantt{min-width:calc(var(--label-w) + ${COL_W}px*${WINDOW_DAYS});position:relative}
-  .gv .grid-head{display:grid;grid-template-columns:var(--label-w) repeat(${WINDOW_DAYS}, ${COL_W}px);grid-auto-rows:auto;border-bottom:1px solid ${C.line};position:sticky;top:0;background:#fff;z-index:5}
-  .gv .gh-corner{padding:9px 14px;font-size:11px;color:${C.muted};font-weight:600;border-right:1px solid ${C.line};display:flex;align-items:center}
-  .gv .gh-mc{padding:0;border-bottom:1px solid ${C.line}}
+  .gv .grid-head{display:grid;grid-template-columns:var(--label-w) repeat(${WINDOW_DAYS}, ${COL_W}px);grid-auto-rows:auto;border-bottom:1px solid ${C.line};position:sticky;top:0;background:#fff;z-index:8}
+  /* 左端のラベル列は横スクロールしても固定（フリーズ）。角は最前面 */
+  .gv .gh-corner{padding:9px 14px;font-size:11px;color:${C.muted};font-weight:600;border-right:1px solid ${C.line};display:flex;align-items:center;position:sticky;left:0;z-index:2;background:#fff}
+  .gv .gh-mc{padding:0;border-bottom:1px solid ${C.line};position:sticky;left:0;z-index:2;background:#fff}
   .gv .gh-month{font-size:10.5px;font-weight:700;color:${C.ink};padding:3px 8px;border-right:1px solid ${C.line};border-bottom:1px solid ${C.line};white-space:nowrap;overflow:hidden;background:#f7f9fc}
   .gv .gh-day{text-align:center;padding:6px 1px;border-right:1px solid ${C.line};font-size:11px;color:${C.muted}}
   .gv .gh-day .dom{font-size:12px;color:${C.ink};font-weight:600}
@@ -557,7 +558,9 @@ function shell(projects, members, memberIdx, mode) {
   .gv .row{display:grid;grid-template-columns:var(--label-w) repeat(${WINDOW_DAYS}, ${COL_W}px);border-bottom:1px solid ${C.line};height:${ROW_H}px;position:relative}
   .gv .row:hover{background:#fafbfc}
   .gv .row.delayed{background:rgba(229,72,77,.045)}
-  .gv .r-label{border-right:1px solid ${C.line};padding:0 12px;display:flex;align-items:center;gap:9px;overflow:hidden}
+  .gv .row:hover .r-label{background:#fafbfc}
+  .gv .row.delayed .r-label{background:#fdf2f2}
+  .gv .r-label{border-right:1px solid ${C.line};padding:0 12px;display:flex;align-items:center;gap:9px;overflow:hidden;position:sticky;left:0;z-index:7;background:#fff}
   .gv .r-label-sub{padding-left:24px}
   .gv .r-pbar{width:4px;height:22px;border-radius:2px;flex:none}
   .gv .r-text{min-width:0}
@@ -598,7 +601,7 @@ function shell(projects, members, memberIdx, mode) {
   .gv .today-line .tl-cap{position:absolute;top:-1px;left:-15px;font-size:9px;color:#fff;background:${C.over};padding:1px 5px;border-radius:4px}
   .gv svg.deps{position:absolute;left:var(--label-w);top:0;pointer-events:none;z-index:4;overflow:visible}
   .gv .grp{display:grid;grid-template-columns:var(--label-w) repeat(${WINDOW_DAYS}, ${COL_W}px);height:${GRP_H}px;position:relative;background:#fbfcfd;border-bottom:1px solid ${C.line}}
-  .gv .grp-label{border-right:1px solid ${C.line};padding:0 12px;display:flex;align-items:center;gap:9px;cursor:pointer;overflow:hidden}
+  .gv .grp-label{border-right:1px solid ${C.line};padding:0 12px;display:flex;align-items:center;gap:9px;cursor:pointer;overflow:hidden;position:sticky;left:0;z-index:7;background:#fbfcfd}
   .gv .grp-label:hover{background:#f3f5f8}
   .gv .grp .caret{font-size:10px;color:${C.muted};transition:transform .15s}
   .gv .grp.collapsed .caret{transform:rotate(-90deg)}
@@ -607,7 +610,7 @@ function shell(projects, members, memberIdx, mode) {
   .gv .grp-text{min-width:0;display:flex;flex-direction:column;gap:3px;flex:1}
   /* プロジェクト別: 親→子はインデントで表現。縦線はヘッダから伸ばさず、紐づく子タスクの行にだけ引く */
   .gv .grp[data-pid] .grp-name{font-weight:800}
-  .gv .row.pj-child .r-label{position:relative;padding-left:74px}   /* 親名(≈49px)よりはっきり右へ字下げ＝配下と一目で分かる */
+  .gv .row.pj-child .r-label{padding-left:74px}   /* 親名(≈49px)よりはっきり右へ字下げ＝配下と一目で分かる。position は基底の sticky を継承 */
   .gv .row.pj-child .r-name{font-weight:600}
   /* 縦線は子タスク行のみ。色四角の中心(ラベル左から33px)に揃える。最後の子の中央で止める */
   .gv .row.pj-child .r-label::before{content:"";position:absolute;left:var(--pjrail,32px);top:0;bottom:0;width:2px;background:var(--pj);opacity:.5}
