@@ -6,8 +6,9 @@ import { load, invalidate } from "../lib/store.js";
 import { deleteRecurrence } from "../lib/api.js";
 import { openRecurrenceForm, summarizeRecurrence, recurrenceMode } from "./recurrenceform.js";
 import { C, esc } from "../lib/ui.js";
+import { icon } from "../lib/icons.js";
 
-const KIND_ICON = { mtg: "📅", rmtg: "🔁", rtask: "🔁" };
+const KIND_ICON = { mtg: icon("calendar"), rmtg: icon("repeat"), rtask: icon("repeat") };
 
 // URLハッシュから有効なkindフィルタを判定。
 //  ...recurring-task...    → "task"    （定期業務のみ）
@@ -84,7 +85,7 @@ function recRow(r, memberName) {
   const until = s.untilISO ? ` <span class="rc-until">〜${s.untilISO.replace(/-/g, "/")}</span>` : "";
   return `<div class="rc-row">
     <div class="rc-row-main">
-      <div class="rc-row-t">${KIND_ICON[recurrenceMode(r)] || "🔁"} ${esc(r.title)}</div>
+      <div class="rc-row-t">${KIND_ICON[recurrenceMode(r)] || icon("repeat")} ${esc(r.title)}</div>
       <div class="rc-row-sub">${esc(meta)}${until} ・ ${esc(who)}</div>
     </div>
     <div class="rc-row-acts">

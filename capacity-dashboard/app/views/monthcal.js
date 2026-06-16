@@ -6,6 +6,7 @@ import { updateTask } from "../lib/api.js";
 import { expandRecurrences } from "../lib/recurrence.js";
 import { monthMatrix, DOW_JA } from "../lib/form.js";
 import { C, esc, member_color, todayISO } from "../lib/ui.js";
+import { icon } from "../lib/icons.js";
 import { openTaskForm } from "./taskform.js";
 
 let VIEW = null; // {y, m}（表示中の月・セッション内で保持）
@@ -110,7 +111,7 @@ function openPopover(root, anchor, iso, items) {
     <div class="mc-pop-hd"><b>${dlabel}</b><span>${items.length}件</span><button type="button" class="mc-pop-x" aria-label="閉じる">×</button></div>
     <div class="mc-pop-list">
       ${items.length ? items.map((it) => it.kind === "rec"
-        ? `<div class="mc-rec" title="${esc(it.title)}">🔁${it.min != null ? ` ${hhmm(it.min)}` : ""} ${esc(it.title)}</div>`
+        ? `<div class="mc-rec" title="${esc(it.title)}">${icon("repeat", { size: 12 })}${it.min != null ? ` ${hhmm(it.min)}` : ""} ${esc(it.title)}</div>`
         : `<div class="mc-task${it.done ? " done" : ""}" data-id="${it.t.id}" title="${esc(it.title)}">
              ${it.who ? `<i style="background:${member_color(it.who.id)}"></i>` : ""}${esc(it.title)}</div>`).join("")
         : `<div class="mc-pop-empty">項目なし</div>`}
@@ -169,7 +170,7 @@ function dayHtml(c, items, today, holidaysByDate) {
   return `<div class="${cls.join(" ")}" data-iso="${c.iso}">
     <div class="mc-num">${+c.iso.slice(8, 10)}${hol ? `<span class="mc-hol" title="${esc(hol)}">${esc(hol)}</span>` : ""}</div>
     ${shown.map((it) => it.kind === "rec"
-      ? `<div class="mc-rec" title="${esc(it.title)}">🔁${it.min != null ? ` ${hhmm(it.min)}` : ""} ${esc(it.title)}</div>`
+      ? `<div class="mc-rec" title="${esc(it.title)}">${icon("repeat", { size: 12 })}${it.min != null ? ` ${hhmm(it.min)}` : ""} ${esc(it.title)}</div>`
       : `<div class="mc-task${it.done ? " done" : ""}" draggable="true" data-id="${it.t.id}" title="${esc(it.title)}">
            ${it.who ? `<i style="background:${member_color(it.who.id)}"></i>` : ""}${esc(it.title)}</div>`).join("")}
     ${items.length > MAX ? `<button type="button" class="mc-more" data-iso="${c.iso}">他${items.length - MAX}件</button>` : ""}

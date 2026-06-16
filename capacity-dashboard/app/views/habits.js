@@ -8,6 +8,7 @@ import { habitStreak, lastDays, HABIT_WS } from "../lib/habits.js";
 import { dateOnly } from "../lib/capacity.js";
 import { DOW_JA } from "../lib/form.js";
 import { C, esc, todayISO } from "../lib/ui.js";
+import { icon } from "../lib/icons.js";
 
 export async function render(root) {
   const { habitTasks, habitProject, me } = await load();
@@ -74,7 +75,7 @@ function rowHtml(t, dates, total, today) {
   const week = lastDays(dates, today, 7);
   return `<div class="hb-row">
     <div class="hb-name">${esc(t.title)}
-      <span class="hb-meta">${streak ? `🔥 ${streak}日連続` : "—"} ・ 計${total}回</span>
+      <span class="hb-meta">${streak ? `${icon("flame", { size: 14 })} ${streak}日連続` : "—"} ・ 計${total}回</span>
     </div>
     <div class="hb-week">
       ${week.map((d, i) => {
@@ -83,8 +84,8 @@ function rowHtml(t, dates, total, today) {
         return `<div class="hb-day">
           <span class="hb-dw">${isToday ? "今日" : dow}</span>
           ${isToday
-            ? `<button class="hb-c today${d.done ? " on" : ""}" data-check="${t.id}" title="${d.done ? "チェックを取り消す" : "今日の分をチェック"}">${d.done ? "✓" : "○"}</button>`
-            : `<span class="hb-c${d.done ? " on" : ""}">${d.done ? "✓" : "·"}</span>`}
+            ? `<button class="hb-c today${d.done ? " on" : ""}" data-check="${t.id}" title="${d.done ? "チェックを取り消す" : "今日の分をチェック"}">${d.done ? icon("check", { size: 14 }) : "○"}</button>`
+            : `<span class="hb-c${d.done ? " on" : ""}">${d.done ? icon("check", { size: 14 }) : "·"}</span>`}
         </div>`;
       }).join("")}
     </div>

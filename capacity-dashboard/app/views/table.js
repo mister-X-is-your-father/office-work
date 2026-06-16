@@ -9,6 +9,7 @@ import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 import { shiftISO } from "../lib/capacity.js";
 import { openTaskForm, ensureStyle as ensureFormStyle } from "./taskform.js";
 import { hourInputHtml, wireHourInput } from "../lib/form.js";
+import { icon } from "../lib/icons.js";
 
 const HOUR = 3600;
 const MAX_SORTS = 5; // 組めるソート条件の上限（第1〜第5条件）
@@ -138,7 +139,7 @@ export async function render(root) {
     <h1 class="vtitle">タスク一覧 <small>${rows.length}件 ${manual ? "・ 行をどこでもドラッグして自分用に並べ替え" : `・ ソート条件を重ねて並べ替え（列ヘッダ: クリック=第1条件 / Shift+クリック=条件を追加・最大${MAX_SORTS}）`}</small></h1>
     <div class="tb-tools">
       <button id="tb-add" class="tb-add">タスク追加</button>
-      <button id="tb-manual" class="tb-manbtn${manual ? " on" : ""}" title="自分だけの手動ソート">✋ マイソート</button>
+      <button id="tb-manual" class="tb-manbtn${manual ? " on" : ""}" title="自分だけの手動ソート">${icon("hand")} マイソート</button>
       <span class="tb-sortwrap${manual ? " dim" : ""}">ソート条件: <span class="tb-chips">${chips || `<span class="tb-sc-none">なし（既定: 期限順）</span>`}</span>
         ${V.sorts.length < MAX_SORTS ? `<select id="tb-addsort" class="tb-addsort">${addOpts}</select>` : `<span class="tb-sc-none">最大${MAX_SORTS}件</span>`}</span>
       <select id="tb-proj">${projOpts}</select>
@@ -162,14 +163,14 @@ export async function render(root) {
     </div>
     ${manual ? `<div class="tb-mynote">「マイソート」はあなただけの順番です（この端末に保存・他のメンバーには影響しません）。Ctrl/⌘・Shift＋クリックで複数選択→まとめてドラッグ移動。</div>
     <div class="tb-presets">
-      <span class="tb-pl">保存したマイソート<span class="tb-pl-g" title="あなた専用・この端末">👤</span></span>
+      <span class="tb-pl">保存したマイソート<span class="tb-pl-g" title="あなた専用・この端末">${icon("user", { size: 12 })}</span></span>
       ${mysorts.map((m, i) => `<span class="tb-pz"><button class="tb-mz-a" data-mi="${i}" title="この手動順を適用">${esc(m.name)}</button><button class="tb-mz-x" data-mi="${i}" title="削除">×</button></span>`).join("") || `<span class="tb-sc-none">まだありません</span>`}
-      <button class="tb-psave" id="tb-msave" title="今の手動のソート順に名前を付けて保存">💾 今のソートを保存</button>
+      <button class="tb-psave" id="tb-msave" title="今の手動のソート順に名前を付けて保存">${icon("save")} 今のソートを保存</button>
     </div>` : ""}
     ${(presets.length || canEditPresets) && !manual ? `<div class="tb-presets">
-      <span class="tb-pl">プリセット<span class="tb-pl-g" title="チーム全員で共有">🌐</span></span>
+      <span class="tb-pl">プリセット<span class="tb-pl-g" title="チーム全員で共有">${icon("globe", { size: 12 })}</span></span>
       ${presets.map((p, i) => `<span class="tb-pz" data-pi="${i}"><button class="tb-pz-a" data-pi="${i}" title="このソートを適用">${esc(p.name)}</button>${canEditPresets ? `<button class="tb-pz-x" data-pi="${i}" title="削除（全員に反映）">×</button>` : ""}</span>`).join("") || `<span class="tb-sc-none">まだありません</span>`}
-      ${canEditPresets ? `<button class="tb-psave" id="tb-psave" title="今の組み合わせソートを共有プリセットとして保存">💾 現在のソートを保存</button>` : ""}
+      ${canEditPresets ? `<button class="tb-psave" id="tb-psave" title="今の組み合わせソートを共有プリセットとして保存">${icon("save")} 現在のソートを保存</button>` : ""}
     </div>` : ""}
     <div class="card tb-wrap"><table class="tb">
       <thead><tr>${cols().map((c) => th(c, manual)).join("")}</tr></thead>
@@ -236,7 +237,7 @@ export async function render(root) {
   root.querySelectorAll(".tb-fable").forEach((b) => {
     b.onclick = async (e) => {
       e.stopPropagation(); b.disabled = true;
-      try { const { runAi } = await import("../lib/exec.js"); const j = await runAi(+b.dataset.fable, b.dataset.title); b.textContent = "⏵…"; b.title = `キュー #${j.job.id} に追加済み`; }
+      try { const { runAi } = await import("../lib/exec.js"); const j = await runAi(+b.dataset.fable, b.dataset.title); b.innerHTML = `${icon("play", { size: 11 })}…`; b.title = `キュー #${j.job.id} に追加済み`; }
       catch { b.disabled = false; }
     };
   });
@@ -353,7 +354,7 @@ function openMenu(x, y, items, opts = {}) {
         + `</div>`
         + `<div class="tb-hg-direct"><span class="tb-hg-lbl">直接(h)</span>${hourInputHtml("tb-est-direct", { value: it.hv ?? "" })}<button class="tb-hg-apply" data-i="${i}">適用</button></div>`
         + `</div>`;
-      return `<button class="tb-ctx-it${it.danger ? " danger" : ""}" data-i="${i}">${it.check !== undefined ? `<span class="tb-ctx-ck">${it.check ? "✓" : ""}</span>` : ""}${esc(it.label)}</button>`;
+      return `<button class="tb-ctx-it${it.danger ? " danger" : ""}" data-i="${i}">${it.check !== undefined ? `<span class="tb-ctx-ck">${it.check ? icon("check", { size: 13 }) : ""}</span>` : ""}${esc(it.label)}</button>`;
     }).join("");
     m.querySelectorAll(".tb-ctx-it").forEach((b) => {
       b.onclick = () => {
@@ -704,7 +705,7 @@ function rowHtml(r, members, i, manual) {
   const st = `<button class="tb-st tb-stbtn ${r.status}" data-st="${id}" title="クリックでステータス変更">${STATUS[r.status].label}<span class="tb-st-car">▾</span></button>`;
   return `<tr data-id="${id}" class="${manual ? "tb-draggable" : ""}${manual && selectedIds.has(id) ? " tb-sel" : ""}">
     <td>${r.parent ? `<span class="tb-pj"><i style="background:${projColor(r.parent.id)}"></i>${esc(r.parent.title)}</span>` : `<span class="tb-pj none">—</span>`}</td>
-    <td class="tb-title">${esc(r.title)}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">🚩</span>` : ""}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">▶</button>` : ""}</td>
+    <td class="tb-title">${esc(r.title)}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">${icon("flag", { size: 12 })}</span>` : ""}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">${icon("play", { size: 11 })}</button>` : ""}</td>
     <td>${whoBtn}</td>
     <td>${kind}</td>
     <td>${catBtn}</td>

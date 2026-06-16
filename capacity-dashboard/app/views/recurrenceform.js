@@ -4,6 +4,7 @@
 import { createRecurrence, updateRecurrence } from "../lib/api.js";
 import { invalidate } from "../lib/store.js";
 import { C, esc } from "../lib/ui.js";
+import { icon } from "../lib/icons.js";
 import { parseSmartDate, fmtDisplay, fmtDisplayDow, joinMeta, splitMeta, hourInputHtml, wireHourInput, docChipsHtml, wireDocChips, attachDatePicker } from "../lib/form.js";
 
 const BYDAY = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"]; // getUTCDay() の並び
@@ -222,7 +223,7 @@ export function renderRecurrencePanel(el, mode, { members, onSaved, close, holid
     $("#rf-dows").hidden = st.unit !== "weekly";
     $("#rf-monthly").hidden = st.unit !== "monthly";
     const prev = $("#rf-prev");
-    if (prev) prev.textContent = "🔁 " + rruleText(st);
+    if (prev) prev.innerHTML = icon("repeat") + " " + esc(rruleText(st));
   };
 
   if (unitEl) {
@@ -384,7 +385,7 @@ export async function openRecurrenceForm({ existing = null, members = [], holida
   wrap.innerHTML = `
     <div class="tf-bg"></div>
     <div class="tf-card">
-      <div class="tf-h"><b>${isEdit ? "定期・会議を編集" : "定期・会議を追加"}</b><button class="tf-x" id="rf-x" aria-label="閉じる">✕</button></div>
+      <div class="tf-h"><b>${isEdit ? "定期・会議を編集" : "定期・会議を追加"}</b><button class="tf-x" id="rf-x" aria-label="閉じる">${icon("x")}</button></div>
       ${isEdit ? "" : `<div class="tf-tabs" id="rf-tabs">${TABS.map(([v, n], i) =>
         `<button type="button" data-tab="${v}" class="${i === 0 ? "on" : ""}">${n}</button>`).join("")}</div>`}
       <div class="tf-body tf-alt" id="rf-pane" style="padding:14px 22px 18px"></div>

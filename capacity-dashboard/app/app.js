@@ -1,6 +1,7 @@
 // SPA シェル: ログイン / サイドナビ / ハッシュルータ
 import * as vik from "./lib/api.js";
 import * as store from "./lib/store.js";
+import { icon } from "./lib/icons.js";
 
 const ROUTES = {
   home:     { label: "ホーム",        grp: "総合",   mod: "./views/home.js", wide: true },
@@ -33,7 +34,7 @@ const ROUTES = {
   export:   { label: "バックアップ",   grp: "その他", mod: "./views/export.js" },
   settings: { label: "設定",          grp: "その他", mod: "./views/settings.js" },
   // 隠しルート: ORDER に載せない＝通常ユーザーのナビには出ない。許可者のみ shell() がリンクを追加。
-  fable:    { label: "🤖 Fable",      grp: "AI",     mod: "./views/fable.js" },
+  fable:    { label: "Fable",         grp: "AI",     mod: "./views/fable.js" },
 };
 const ORDER = ["home", "smart", "today", "triage", "quad", "habits", "review", "calendar", "monthcal", "week", "planner", "freefinder", "weekstack", "workplan", "summary", "estactual", "kanban", "list", "outline", "depgraph", "gantt", "recurring-task", "recurring-meeting", "leave", "export", "settings"];
 
@@ -96,7 +97,7 @@ function shell() {
       </aside>
       <div class="main">
         <div class="topbar">
-          <button class="sb-toggle" id="sb-toggle" aria-label="メニューを開閉" aria-expanded="false">☰</button>
+          <button class="sb-toggle" id="sb-toggle" aria-label="メニューを開閉" aria-expanded="false">${icon("menu", { size: 18 })}</button>
           <span class="who" id="who"></span>
           <button id="refresh">↻ 再読込</button>
           <button id="logout">ログアウト</button>
@@ -114,7 +115,7 @@ function shell() {
   // ダーク/ライト切替（CSS変数を html[data-theme] で反転＝再描画不要・localStorage永続）
   const themeTg = document.getElementById("theme-tg");
   const curTheme = () => document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
-  const paintThemeBtn = () => { themeTg.textContent = curTheme() === "dark" ? "☀ ライトモード" : "🌙 ダークモード"; };
+  const paintThemeBtn = () => { themeTg.innerHTML = curTheme() === "dark" ? `${icon("sun", { size: 15 })} ライト` : `${icon("moon", { size: 15 })} ダーク`; };
   paintThemeBtn();
   themeTg.onclick = () => {
     const next = curTheme() === "dark" ? "light" : "dark";
@@ -155,7 +156,7 @@ function shell() {
     if (!uid) return;
     const nav = document.getElementById("nav");
     if (nav) nav.insertAdjacentHTML("beforeend",
-      `<div class="navgrp">AI</div><a href="#/fable" data-k="fable">${ROUTES.fable.label}</a>`);
+      `<div class="navgrp">AI</div><a href="#/fable" data-k="fable">${icon("bot", { cls: "nav-ic" })} ${ROUTES.fable.label}</a>`);
   }).catch(() => {});
 }
 
@@ -202,7 +203,7 @@ function ensureNetBanner() {
   if (!b) {
     b = document.createElement("div");
     b.id = "ts-offline";
-    b.textContent = "⚠ オフライン — 表示は直近のキャッシュです（追加・編集はオンライン復帰後に）";
+    b.innerHTML = `${icon("alertTriangle", { size: 14 })} オフライン — 表示は直近のキャッシュです（追加・編集はオンライン復帰後に）`;
     b.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:9998;background:#e5484d;color:#fff;font:600 12.5px/1.4 system-ui,sans-serif;text-align:center;padding:8px 12px";
     document.body.appendChild(b);
   }
@@ -220,7 +221,7 @@ window.addEventListener("beforeinstallprompt", (e) => {
   if (document.getElementById("ts-install")) return;
   const b = document.createElement("button");
   b.id = "ts-install";
-  b.textContent = "📲 アプリをインストール";
+  b.innerHTML = `${icon("download", { size: 15 })} アプリをインストール`;
   b.style.cssText = "position:fixed;right:18px;bottom:18px;z-index:9999;background:#3a86ff;color:#fff;border:0;border-radius:24px;padding:11px 18px;font:700 13px system-ui,sans-serif;box-shadow:0 6px 20px rgba(58,134,255,.4);cursor:pointer";
   b.onclick = async () => {
     if (!_deferredPrompt) return;

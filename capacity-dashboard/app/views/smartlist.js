@@ -9,6 +9,7 @@ import { PRIO, categoryLabels, categoryColor } from "../lib/kinds.js";
 import { INBOX_WS } from "./quickadd.js";
 import { openTaskForm } from "./taskform.js";
 import { C, esc, fmtH, member_color, todayISO } from "../lib/ui.js";
+import { icon } from "../lib/icons.js";
 
 const DOW_JA = ["日", "月", "火", "水", "木", "金", "土"];
 
@@ -59,25 +60,25 @@ export async function render(root) {
     <div class="sl">
       <aside class="sl-rail">
         <div class="sl-rgrp">ビュー</div>
-        ${BUILTIN_VIEWS.map((v) => railItem(v.key, v.icon, v.label, countOf(v), state.sel === v.key)).join("")}
+        ${BUILTIN_VIEWS.map((v) => railItem(v.key, icon(v.icon, { size: 16 }), v.label, countOf(v), state.sel === v.key)).join("")}
         <div class="sl-rgrp">スマートリスト ${lists.length ? "" : `<span class="sl-rhint">条件を保存</span>`}</div>
-        ${lists.map((l) => railItem(l.id, "🔖", l.name, null, state.sel === l.id, true)).join("") || `<div class="sl-rempty">右で条件を作って「保存」</div>`}
+        ${lists.map((l) => railItem(l.id, icon("bookmark", { size: 16 }), l.name, null, state.sel === l.id, true)).join("") || `<div class="sl-rempty">右で条件を作って「保存」</div>`}
       </aside>
       <section class="sl-main">
         <div class="sl-head">
-          <div class="sl-title">${esc(curName)} <span class="sl-count" id="sl-count">${sorted.length}</span></div>
+          <div class="sl-title">${curName.icon ? icon(curName.icon, { size: 20, cls: "sl-titic" }) + " " : ""}${esc(curName.label)} <span class="sl-count" id="sl-count">${sorted.length}</span></div>
           <div class="sl-sort">並べ替え
             <select id="sl-sort">${SORTS.map(([k, n]) => `<option value="${k}"${state.sort === k ? " selected" : ""}>${n}</option>`).join("")}</select>
           </div>
         </div>
         <div class="sl-bar">
-          <input id="sl-text" class="sl-in sl-text" placeholder="🔍 このビュー内を検索" value="${esc(state.filter.text || "")}">
+          <span class="sl-textwrap">${icon("search", { size: 14, cls: "sl-searchic" })}<input id="sl-text" class="sl-in sl-text" placeholder="このビュー内を検索" value="${esc(state.filter.text || "")}"></span>
           ${sel("sl-due", state.filter.due, [["", "期限：すべて"], ["today", "今日"], ["next7", "次の7日間"], ["overdue", "期限切れ"], ["hasdue", "期限あり"], ["none", "期限なし"]])}
           ${sel("sl-prio", state.filter.prio, [["", "重要度：すべて"], ["top", "MUST"], ["high", "高+"], ["mid", "中+"], ["none", "なし"]])}
           ${sel("sl-cat", catTitle, [["", "分類：すべて"], ...catChoices(labels)])}
           ${sel("sl-ws", String(state.filter.ws || ""), [["", "WS：すべて"], ...(projects || []).map((p) => [String(p.id), p.title])])}
           ${sel("sl-status", state.filter.status, [["undone", "未完了"], ["todo", "未着手"], ["doing", "進行中"], ["waiting", "連絡待ち"], ["done", "完了"], ["", "すべて"]])}
-          <button id="sl-flag" class="sl-flagbtn${state.filter.flag ? " on" : ""}" title="フラグ付きのみ">🚩</button>
+          <button id="sl-flag" class="sl-flagbtn${state.filter.flag ? " on" : ""}" title="フラグ付きのみ">${icon("flag", { size: 15 })}</button>
           ${state.sel === "adhoc" ? `<button id="sl-save" class="sl-save">＋ 保存</button>` : ""}
           ${typeof state.sel === "number" ? `<button id="sl-del" class="sl-del">このリストを削除</button>` : ""}
         </div>
@@ -99,12 +100,13 @@ function sortTasks(arr, sort, today) {
   return [...arr].sort(cmp);
 }
 
+// 現在ビューの { icon: アイコン名, label } を返す（adhoc/未知は icon 空）。
 function currentViewName(state, lists) {
-  if (state.sel === "adhoc") return "カスタム条件";
+  if (state.sel === "adhoc") return { icon: "", label: "カスタム条件" };
   const bv = BUILTIN_VIEWS.find((v) => v.key === state.sel);
-  if (bv) return `${bv.icon} ${bv.label}`;
+  if (bv) return { icon: bv.icon, label: bv.label };
   const cv = lists.find((l) => l.id === state.sel);
-  return cv ? `🔖 ${cv.name}` : "ビュー";
+  return cv ? { icon: "bookmark", label: cv.name } : { icon: "", label: "ビュー" };
 }
 
 const catChoices = (labels) => [...new Set((labels || []).map((l) => l.title).filter((t) => t && t !== "レビュー" && t !== "連絡待ち"))]
@@ -133,7 +135,7 @@ function rowHtml(t, projects, today) {
   const cat = categoryLabels(t)[0] || null;
   const est = (t.time_estimate || 0) / 3600;
   return `<div class="sl-row${done ? " is-done" : ""}" data-id="${t.id}">
-    <button class="sl-check${done ? " done" : ""}" data-check="${t.id}" title="${done ? "未完了に戻す" : "完了にする"}">${done ? "✓" : ""}</button>
+    <button class="sl-check${done ? " done" : ""}" data-check="${t.id}" title="${done ? "未完了に戻す" : "完了にする"}">${done ? icon("check", { size: 13 }) : ""}</button>
     <span class="sl-pdot${p ? "" : " none"}" title="重要度: ${esc(p ? p.n : "なし")}" style="${p ? `background:${p.c}` : ""}"></span>
     <span class="sl-rtitle">${esc(t.title)}</span>
     <span class="sl-meta">
@@ -142,11 +144,11 @@ function rowHtml(t, projects, today) {
       ${est ? `<span class="sl-est">${fmtH(est)}</span>` : ""}
     </span>
     ${dueTxt ? `<span class="sl-due ${dueCls}">${dueTxt}</span>` : `<span class="sl-due none"></span>`}
-    <button class="sl-flagrow${t.is_favorite ? " on" : ""}" data-flag="${t.id}" title="フラグ">🚩</button>
+    <button class="sl-flagrow${t.is_favorite ? " on" : ""}" data-flag="${t.id}" title="フラグ">${icon("flag", { size: 15 })}</button>
   </div>`;
 }
 
-const emptyHtml = () => `<div class="sl-empty"><div class="sl-empty-i">🗂️</div>このビューに該当するタスクはありません。</div>`;
+const emptyHtml = () => `<div class="sl-empty"><div class="sl-empty-i">${icon("folders", { size: 34 })}</div>このビューに該当するタスクはありません。</div>`;
 
 // 期限ソート時はアジェンダ風に日別グルーピング（期限切れ/今日/明日/日付/期限なし）。
 function resultsHtml(sorted, projects, today, sort) {
@@ -318,9 +320,11 @@ function css() {
   .sl-sort{font-size:12px;color:${C.muted};display:flex;align-items:center;gap:6px}
   .sl-sort select,.sl-in{font:inherit;font-size:12.5px;padding:7px 9px;border:1px solid ${C.line};border-radius:9px;background:#fff;color:${C.ink}}
   .sl-bar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;align-items:center}
-  .sl-text{flex:1;min-width:200px}
-  .sl-flagbtn{font:inherit;font-size:14px;padding:6px 11px;border:1px solid ${C.line};border-radius:9px;background:#fff;cursor:pointer;filter:grayscale(1) opacity(.55)}
-  .sl-flagbtn.on{filter:none;border-color:${C.over};background:#fff5f5}
+  .sl-textwrap{position:relative;flex:1;min-width:200px;display:flex;align-items:center}
+  .sl-searchic{position:absolute;left:10px;color:${C.muted};pointer-events:none}
+  .sl-text{flex:1;min-width:0;width:100%;padding-left:30px}
+  .sl-flagbtn{font:inherit;display:inline-flex;align-items:center;padding:7px 11px;border:1px solid ${C.line};border-radius:9px;background:#fff;cursor:pointer;color:${C.muted}}
+  .sl-flagbtn.on{border-color:${C.over};background:#fff5f5;color:${C.over}}
   .sl-save,.sl-del{font:inherit;font-size:12.5px;font-weight:700;padding:7px 14px;border-radius:9px;cursor:pointer}
   .sl-save{border:1px solid ${C.fill};background:${C.fill};color:#fff}
   .sl-del{border:1px solid ${C.line};background:#fff;color:${C.over}}
@@ -345,9 +349,9 @@ function css() {
   .sl-est{font-size:11px;color:${C.muted};font-variant-numeric:tabular-nums}
   .sl-due{font-size:11.5px;font-weight:700;color:${C.muted};min-width:42px;text-align:right;flex:none;font-variant-numeric:tabular-nums}
   .sl-due.over{color:${C.over}}.sl-due.today{color:${C.amber}}.sl-due.none{min-width:42px}
-  .sl-flagrow{border:0;background:transparent;cursor:pointer;font-size:14px;flex:none;filter:grayscale(1) opacity(.3);padding:0 2px}
-  .sl-flagrow:hover{filter:grayscale(.3) opacity(.7)}
-  .sl-flagrow.on{filter:none}
+  .sl-flagrow{border:0;background:transparent;cursor:pointer;flex:none;display:inline-flex;align-items:center;padding:0 2px;color:${C.line}}
+  .sl-flagrow:hover{color:${C.muted}}
+  .sl-flagrow.on{color:${C.over}}
   .sl-empty{text-align:center;color:${C.muted};padding:50px 0;font-size:13px}
   .sl-empty-i{font-size:34px;margin-bottom:8px;filter:grayscale(.3) opacity(.6)}
   @media(max-width:720px){.sl{grid-template-columns:1fr}.sl-rail{flex-direction:row;flex-wrap:wrap;position:static}}

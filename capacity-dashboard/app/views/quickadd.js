@@ -8,6 +8,7 @@ import { load, invalidate } from "../lib/store.js";
 import { parseQuickAdd } from "../lib/quickadd.js";
 import { joinMeta, DOW_JA } from "../lib/form.js";
 import { esc, fmtH } from "../lib/ui.js";
+import { icon } from "../lib/icons.js";
 
 export const INBOX_WS = "インボックス";
 const PRIO_NAME = { 4: "MUST", 3: "高", 2: "中", 1: "低" };
@@ -41,18 +42,18 @@ function chipsHtml(r) {
   const c = [];
   if (!r.title) c.push(`<span class="qa-chip warn">タイトルを入力</span>`);
   else c.push(`<span class="qa-chip title">${esc(r.title)}</span>`);
-  if (r.dateISO) c.push(`<span class="qa-chip">📅 ${fmtDateChip(r.dateISO, r.startMinute)}</span>`);
-  if (r.estimateH) c.push(`<span class="qa-chip">⏱ ${fmtH(r.estimateH)}</span>`);
+  if (r.dateISO) c.push(`<span class="qa-chip">${icon("calendar", { size: 13 })} ${fmtDateChip(r.dateISO, r.startMinute)}</span>`);
+  if (r.estimateH) c.push(`<span class="qa-chip">${icon("stopwatch", { size: 13 })} ${fmtH(r.estimateH)}</span>`);
   if (r.priority) c.push(`<span class="qa-chip">重要度: ${PRIO_NAME[r.priority]}</span>`);
   for (const l of r.labels) c.push(`<span class="qa-chip">#${esc(l)}</span>`);
   if (r.assignee) c.push(r.member
-    ? `<span class="qa-chip">👤 ${esc(r.member.name || r.member.username)}</span>`
+    ? `<span class="qa-chip">${icon("user", { size: 13 })} ${esc(r.member.name || r.member.username)}</span>`
     : `<span class="qa-chip warn">@${esc(r.assignee)} 見つかりません</span>`);
-  for (const u of r.links) c.push(`<span class="qa-chip">🔗 ${esc(u.length > 30 ? u.slice(0, 28) + "…" : u)}</span>`);
+  for (const u of r.links) c.push(`<span class="qa-chip">${icon("link", { size: 13 })} ${esc(u.length > 30 ? u.slice(0, 28) + "…" : u)}</span>`);
   c.push(r.ws
-    ? (r.wsProject ? `<span class="qa-chip ws">📁 ${esc(r.wsProject.title)}</span>`
+    ? (r.wsProject ? `<span class="qa-chip ws">${icon("folder", { size: 13 })} ${esc(r.wsProject.title)}</span>`
        : `<span class="qa-chip warn">>${esc(r.ws)} 不明 → ${INBOX_WS}へ</span>`)
-    : `<span class="qa-chip ws">📁 ${INBOX_WS}</span>`);
+    : `<span class="qa-chip ws">${icon("folder", { size: 13 })} ${INBOX_WS}</span>`);
   return c.join("") +
     `<div class="qa-help">構文: 明日15時 / 6/20 / 月曜 / #分類 / !高 / 1.5h / @担当 / &gt;ワークスペース / URL→資料</div>`;
 }
@@ -127,7 +128,7 @@ export function mountQuickAdd(topbar, { onCreated } = {}) {
       await createFromParsed(resolved, data);
       data = null; resolved = null;
       input.value = "";
-      pop.innerHTML = `<span class="qa-chip ok">✓ 追加しました</span>`;
+      pop.innerHTML = `<span class="qa-chip ok">${icon("check", { size: 13 })} 追加しました</span>`;
       setTimeout(() => { if (!input.value) pop.hidden = true; }, 1200);
       if (onCreated) onCreated();
     } catch (e) {

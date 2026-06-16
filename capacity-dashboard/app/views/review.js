@@ -4,6 +4,7 @@ import { whoami, updateTask, createComment, getComments } from "../lib/api.js";
 import { isReviewTask } from "../lib/kinds.js";
 import { C, esc, member_color } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
+import { icon } from "../lib/icons.js";
 
 const WARN_MS = 4 * 3600000; // 半日(4h)以上で要注意
 
@@ -213,7 +214,7 @@ function rowHtml(r) {
         <span class="rq-wait ${warn ? "warn" : "ok"}"><span class="wdot"></span>${waitLabel(r.wait)}${warn ? " 要対応" : ""}</span>
       </div>
     </div>
-    <div class="rq-acts">${open}<button class="rq-btn rq-hist" data-id="${r.id}" title="コメント履歴">💬 履歴</button><button class="rq-btn rq-reject" data-id="${r.id}" data-title="${esc(r.title)}">差し戻し</button><button class="rq-btn appr rq-appr" data-id="${r.id}" data-title="${esc(r.title)}">承認</button></div>
+    <div class="rq-acts">${open}<button class="rq-btn rq-hist" data-id="${r.id}" title="コメント履歴">${icon("message", { size: 14 })} 履歴</button><button class="rq-btn rq-reject" data-id="${r.id}" data-title="${esc(r.title)}">差し戻し</button><button class="rq-btn appr rq-appr" data-id="${r.id}" data-title="${esc(r.title)}">承認</button></div>
   </div>
   <div class="rq-inline" data-for="${r.id}" hidden></div>
   <div class="rq-histbox" data-for="${r.id}" hidden></div>`;

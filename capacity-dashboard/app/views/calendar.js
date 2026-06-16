@@ -10,6 +10,7 @@ import { dateOnly } from "../lib/capacity.js";
 import { deletePlan, logPlan, updateRecurrence } from "../lib/api.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 import { splitMeta } from "../lib/form.js"; // note の "[資料] URL" 行を抽出
+import { icon } from "../lib/icons.js";
 
 let H0 = 8, H1 = 20;                      // 営業時間（設定で上書き）
 const HOURH = 46;
@@ -171,8 +172,8 @@ function blockHtml(b) {
   if (b.fixed) {
     // 会議/定例: ドラッグ移動・リサイズ不可。クリックで「この回だけ変更」。資料リンクは 📎 で開ける。
     const links = (b.links || []).map((u) => /^https?:\/\//i.test(u)
-      ? `<a href="${esc(u)}" target="_blank" rel="noopener" title="${esc(u)}" style="color:#fff;text-decoration:none">📎</a>`
-      : `<span title="${esc(u)}">📎</span>`).join(" ");
+      ? `<a href="${esc(u)}" target="_blank" rel="noopener" title="${esc(u)}" style="color:#fff;text-decoration:none">${icon("paperclip", { size: 13 })}</a>`
+      : `<span title="${esc(u)}">${icon("paperclip", { size: 13 })}</span>`).join(" ");
     return `<div class="cal-block cal-fixed ${hatch}${b.hasOverride ? " cal-ovr" : ""}" data-rec="${b.recId}" data-orig="${b.origISO}"
         style="top:${top}px;height:${h}px;background:${itemColor(b)}" title="${esc(b.title)}（${KINDS[b.kind] ? KINDS[b.kind].label : "会議"}・クリックでこの回だけ変更）">
       <div class="cal-bt">${b.hasOverride ? "✱ " : ""}${esc(b.title)}${links ? " " + links : ""}</div><div class="cal-bh">${timeLabel}</div>

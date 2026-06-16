@@ -7,6 +7,7 @@ import { getHolidays, createHoliday, deleteHoliday } from "../lib/api.js";
 import { parseSmartDate, fmtDisplayDow, attachDatePicker } from "../lib/form.js";
 import { notifyPrefs, saveNotifyPrefs } from "../lib/notify.js";
 import { C, esc } from "../lib/ui.js";
+import { icon } from "../lib/icons.js";
 
 export async function render(root) {
   const { projects, templateProject, me, holidaysByDate } = await load();
@@ -80,7 +81,7 @@ export async function render(root) {
         <header class="sx-chd">
           <div class="sx-ctitle">チーム共有設定</div>
           <span class="sx-scope"><span class="dot" style="background:${canEdit ? C.free : C.muted}"></span>${canEdit ? "保存すると全員に反映" : "閲覧のみ"}</span>
-          ${canEdit ? "" : `<span class="sx-lock">🔒 読み取り専用</span>`}
+          ${canEdit ? "" : `<span class="sx-lock">${icon("lock", { size: 13 })} 読み取り専用</span>`}
         </header>
         <div class="sx-body">
           <div class="sx-row">
@@ -133,7 +134,7 @@ export async function render(root) {
     try {
       await saveSettings({ cap_hours: cap, cal_start: c0, cal_end: c1, excluded_project_ids: excludedIds });
       invalidate(); // 全ビューに即反映
-      msg.className = "sx-msg ok"; msg.textContent = "✓ 保存しました（全員のビューに反映）";
+      msg.className = "sx-msg ok"; msg.innerHTML = `${icon("check", { size: 14 })} 保存しました（全員のビューに反映）`;
     } catch (e) {
       msg.className = "sx-msg err"; msg.textContent = "× " + e.message;
     }
@@ -166,9 +167,11 @@ function wireNotify(root, me) {
     let perm = Notification.permission;
     if (perm === "default") { try { perm = await Notification.requestPermission(); } catch { perm = "denied"; } }
     msg.className = perm === "granted" ? "sx-note ok" : "sx-note";
-    msg.textContent = perm === "granted"
-      ? "✓ デスクトップ通知が有効です。"
-      : "ブラウザ通知が許可されていません（アプリ内トーストで通知します）。";
+    if (perm === "granted") {
+      msg.innerHTML = `${icon("check", { size: 14 })} デスクトップ通知が有効です。`;
+    } else {
+      msg.textContent = "ブラウザ通知が許可されていません（アプリ内トーストで通知します）。";
+    }
   };
   lead.onchange = save;
 }

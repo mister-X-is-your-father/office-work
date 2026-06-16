@@ -6,6 +6,7 @@ import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 import { dateOnly, hasDate, shiftISO } from "../lib/capacity.js";
 import { deletePlan, logPlan, updateTask, requestReview } from "../lib/api.js";
 import { invalidate } from "../lib/store.js";
+import { icon } from "../lib/icons.js";
 
 let CAP = 8; // 設定（容量 h/日）で上書き
 const FREECOL = "#e7ebf0";   // 空き=薄グレー
@@ -210,8 +211,8 @@ function wireInteractions(container, data, day, rerender, states) {
     const planBased = todayPlans(data, ctx.taskId, ctx.memberId, day, ctx.aids).length > 0;
     card.innerHTML = head(ctx.title, fmtH(ctx.neededH)) + `
       <div class="ck-menu">
-        <button data-a="move">📅 別日へ移す</button>
-        <button data-a="review">👀 レビュー依頼</button>
+        <button data-a="move">${icon("calendar", { size: 14 })} 別日へ移す</button>
+        <button data-a="review">${icon("eye", { size: 14 })} レビュー依頼</button>
         ${planBased ? `<button data-a="drop" class="danger">今日から外す</button>` : ""}
       </div>
       <div class="ck-macts"><button class="ck-cancel">キャンセル</button></div>`;

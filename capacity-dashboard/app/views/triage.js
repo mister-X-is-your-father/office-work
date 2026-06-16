@@ -2,12 +2,13 @@
 import { load } from "../lib/store.js";
 import { triage } from "../lib/capacity.js";
 import { C, fmtH, esc, todayISO } from "../lib/ui.js";
+import { dot } from "../lib/icons.js";
 import { openTaskForm } from "./taskform.js";
 
 const COLS = [
-  { key: "must", label: "🔴 今日必須", color: C.over },
-  { key: "should", label: "🟠 今日着手", color: C.amber },
-  { key: "movable", label: "🟢 後日可", color: C.free },
+  { key: "must", label: "今日必須", color: C.over },
+  { key: "should", label: "今日着手", color: C.amber },
+  { key: "movable", label: "後日可", color: C.free },
 ];
 
 export async function render(root) {
@@ -18,7 +19,7 @@ export async function render(root) {
   const col = (c) => {
     const list = items.filter(i => i.cls === c.key);
     return `<div class="card" style="flex:1;min-width:220px">
-      <div style="padding:11px 14px;border-bottom:1px solid ${C.line};font-weight:700;color:${c.color}">${c.label} <span style="color:${C.muted};font-weight:400">${list.length}</span></div>
+      <div style="padding:11px 14px;border-bottom:1px solid ${C.line};font-weight:700;color:${c.color}">${dot(c.color, 10)} ${esc(c.label)} <span style="color:${C.muted};font-weight:400">${list.length}</span></div>
       ${list.length ? list.map(cardHtml).join("") : `<div style="padding:22px;text-align:center;color:${C.muted};font-size:12px">なし</div>`}
     </div>`;
   };

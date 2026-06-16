@@ -4,6 +4,7 @@
 import { load } from "../lib/store.js";
 import { execMe, getQueue, getScripts, runAi, planAi, runScript, cancelJob, streamUrl, loadRunOpts, saveRunOpts, getFiles, fileUrl } from "../lib/exec.js";
 import { C, esc } from "../lib/ui.js";
+import { icon } from "../lib/icons.js";
 
 let _root, _es = null, _timer = null, _watching = null;
 
@@ -23,7 +24,7 @@ export async function render(root) {
 
   root.innerHTML = `
     <style>${css()}</style>
-    <h1 class="vtitle">🤖 Fable <small>直列キュー ・ Claude Code（MAXプラン）で実行</small></h1>
+    <h1 class="vtitle">${icon("bot", { size: 20 })} Fable <small>直列キュー ・ Claude Code（MAXプラン）で実行</small></h1>
     <div class="fb-grid">
       <div>
         <div class="card fb-card">
@@ -45,15 +46,15 @@ export async function render(root) {
           ${fableTasks.length ? fableTasks.map((t) => `
             <div class="fb-row">
               <span class="fb-t">${esc(t.title)}</span>
-              <button class="fb-plan" data-plan-task="${t.id}" data-title="${esc(t.title)}" title="計画だけ立てさせる（読み取り専用・承認してから▶）">📝</button>
-              <button class="fb-play" data-run-task="${t.id}" data-title="${esc(t.title)}" title="Fableに実行させる（計画があれば沿って実行）">▶</button>
+              <button class="fb-plan" data-plan-task="${t.id}" data-title="${esc(t.title)}" title="計画だけ立てさせる（読み取り専用・承認してから▶）">${icon("pencil", { size: 14 })}</button>
+              <button class="fb-play" data-run-task="${t.id}" data-title="${esc(t.title)}" title="Fableに実行させる（計画があれば沿って実行）">${icon("play", { size: 13 })}</button>
             </div>`).join("") : `<div class="fb-empty">Fableが副担当のタスクはありません（タスクの副担当で fable を検索）</div>`}
         </div>
         <div class="card fb-card">
           <div class="fb-h">スクリプト <span class="fb-hint">（~/.config/taskstation/scripts/・▶でワンポチ起動）</span></div>
           ${(sc.scripts || []).length ? sc.scripts.map((s) => `
-            <div class="fb-row"><span class="fb-t">⚙ ${esc(s)}</span>
-              <button class="fb-play" data-run-script="${esc(s)}" title="実行">▶</button></div>`).join("")
+            <div class="fb-row"><span class="fb-t">${icon("settings", { size: 14 })} ${esc(s)}</span>
+              <button class="fb-play" data-run-script="${esc(s)}" title="実行">${icon("play", { size: 13 })}</button></div>`).join("")
           : `<div class="fb-empty">スクリプトがありません</div>`}
         </div>
         <div class="card fb-card">
@@ -88,7 +89,7 @@ export async function render(root) {
       const d = new Date(f.mtime * 1000);
       const when = `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
       return `<div class="fb-row">
-        <a class="fb-t fb-file" href="${fileUrl(f.path)}" target="_blank" rel="noopener">📄 ${esc(f.path)}</a>
+        <a class="fb-t fb-file" href="${fileUrl(f.path)}" target="_blank" rel="noopener">${icon("file", { size: 14 })} ${esc(f.path)}</a>
         <span class="fb-meta">${fmtSize(f.size)} ・ ${when}</span>
       </div>`;
     }).join("") : `<div class="fb-empty">まだありません（▶実行でファイルが作られるとここに出ます）</div>`;
@@ -98,8 +99,8 @@ export async function render(root) {
     if (!el) return;
     const row = (j, extra = "") => `
       <div class="fb-row fb-${j.status}">
-        <span class="fb-st">${{ running: "⏵ 実行中", queued: "… 待機", done: "✔", error: "✖", cancelled: "−" }[j.status] || j.status}</span>
-        <span class="fb-t fb-link" data-watch="${j.id}" data-title="${esc(j.title)}">${j.kind === "ai" ? "🤖" : "⚙"} ${esc(j.title)}</span>
+        <span class="fb-st">${{ running: `${icon("play", { size: 11 })} 実行中`, queued: "… 待機", done: icon("check", { size: 13 }), error: icon("x", { size: 13 }), cancelled: "−" }[j.status] || esc(j.status)}</span>
+        <span class="fb-t fb-link" data-watch="${j.id}" data-title="${esc(j.title)}">${j.kind === "ai" ? icon("bot", { size: 14 }) : icon("settings", { size: 14 })} ${esc(j.title)}</span>
         ${extra}
       </div>`;
     el.innerHTML = (qq.running ? row(qq.running) : "")

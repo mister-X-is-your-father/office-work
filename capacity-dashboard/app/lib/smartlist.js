@@ -7,16 +7,17 @@ export const EMPTY_FILTER = { text: "", due: "", prio: "", ws: 0, status: "undon
 
 // 組み込みビュー: TickTick の左レール相当。preset は taskMatches に渡すフィルタ。
 // ws=Inbox は呼び出し側で inboxWsId を differ で埋める（id は環境依存のため）。
+// icon は共通アイコン名（views/smartlist.js が icon(name) で SVG 描画する）。
 export const BUILTIN_VIEWS = [
-  { key: "inbox", label: "インボックス", icon: "📥", inbox: true, filter: { status: "undone" } },
-  { key: "today", label: "今日", icon: "📅", filter: { due: "today", status: "undone" } },
-  { key: "next7", label: "次の7日間", icon: "🗓️", filter: { due: "next7", status: "undone" } },
-  { key: "overdue", label: "期限切れ", icon: "⚠️", filter: { due: "overdue", status: "undone" } },
-  { key: "important", label: "重要", icon: "⭐", filter: { prio: "high", status: "undone" } },
-  { key: "flagged", label: "フラグ", icon: "🚩", filter: { flag: true, status: "undone" } },
-  { key: "nodate", label: "期限なし", icon: "📭", filter: { due: "none", status: "undone" } },
-  { key: "waiting", label: "連絡待ち", icon: "⏳", filter: { status: "waiting" } },
-  { key: "completed", label: "完了", icon: "✓", filter: { status: "done" } },
+  { key: "inbox", label: "インボックス", icon: "inbox", inbox: true, filter: { status: "undone" } },
+  { key: "today", label: "今日", icon: "calendar", filter: { due: "today", status: "undone" } },
+  { key: "next7", label: "次の7日間", icon: "calendarDays", filter: { due: "next7", status: "undone" } },
+  { key: "overdue", label: "期限切れ", icon: "alertTriangle", filter: { due: "overdue", status: "undone" } },
+  { key: "important", label: "重要", icon: "star", filter: { prio: "high", status: "undone" } },
+  { key: "flagged", label: "フラグ", icon: "flag", filter: { flag: true, status: "undone" } },
+  { key: "nodate", label: "期限なし", icon: "inbox", filter: { due: "none", status: "undone" } },
+  { key: "waiting", label: "連絡待ち", icon: "hourglass", filter: { status: "waiting" } },
+  { key: "completed", label: "完了", icon: "check", filter: { status: "done" } },
 ];
 
 // 「次の7日間」= 今日を含む7日（today .. today+6）

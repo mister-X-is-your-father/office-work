@@ -8,6 +8,7 @@
 import { load } from "../lib/store.js";
 import { logTime } from "../lib/api.js";
 import { esc } from "../lib/ui.js";
+import { icon } from "../lib/icons.js";
 
 const KEY = "ts.pomo";            // 実行中状態（下記 st 形）
 const CNT = "ts.pomo.count.";     // 今日の完了集中回数（日付キー）
@@ -29,7 +30,14 @@ const mmss = (ms) => {
   return h ? `${h}:${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`
            : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
-const MODE_ICON = { focus: "🍅", break: "☕", countdown: "⏲", countup: "⏱" };
+const MODE_ICON = { focus: "timer", break: "coffee", countdown: "alarm", countup: "stopwatch" };
+const modeIcon = (m, size = 15) => icon(MODE_ICON[m] || "timer", { size });
+// タブタイトル用（document.title は文字列＝SVG不可なので絵文字のまま残す）
+const MODE_TITLE_EMOJI = { focus: "🍅", break: "☕", countdown: "⏲", countup: "⏱" };
+const MODE_TEXT = { focus: "集中中", break: "休憩中", countdown: "カウントダウン", countup: "計測中" };
+// 表示エリア用ラベルHTML（アイコンSVG＋テキスト）。size 12、テキストとの間に隙間。
+const modeLabel = (m, suffix = "") =>
+  `${icon(MODE_ICON[m] || "timer", { size: 12 })} <span style="vertical-align:middle">${esc(MODE_TEXT[m] || "")}${esc(suffix)}</span>`;
 // 表示用の残り/経過（countup は経過・他は残り）
 const dispMs = (s) => s.mode === "countup"
   ? (s.paused ? s.elapsedMs : Date.now() - s.startedAt)
@@ -69,9 +77,10 @@ function progressOf(s) {
 
 // 表示エリアのHTML（インラインstyle＝PiPの別ドキュメントでもそのまま使える）。
 // c: { timeText, label, taskTitle, progress(0..1|null), accent }
+// label は modeLabel() が組むHTML（アイコンSVG＋esc済みテキスト）＝そのまま差す。
 // progress: 0=開始 … 1=満了（経過の割合・どのスキンも「満ちていく」向き）／countup は null=非確定。
 function renderDisplay(skin, c) {
-  const ac = c.accent || "#3a86ff", t = esc(c.timeText), lbl = esc(c.label || "");
+  const ac = c.accent || "#3a86ff", t = esc(c.timeText), lbl = c.label || "";
   const pr = c.progress;
   const pct = pr == null ? 100 : Math.round(pr * 100);
   const num = (px, col) => `<div style="font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:1px;line-height:1;font-size:${px}px${col ? `;color:${col}` : ""}">${t}</div>`;
@@ -236,7 +245,7 @@ export function mountPomodoro(topbar) {
 
   const tickTitle = () => {
     const s = st.get();
-    document.title = s && !s.paused ? `(${mmss(dispMs(s))}) ${MODE_ICON[s.mode]} ${BASE_TITLE}` : BASE_TITLE;
+    document.title = s && !s.paused ? `(${mmss(dispMs(s))}) ${MODE_TITLE_EMOJI[s.mode]} ${BASE_TITLE}` : BASE_TITLE;
   };
 
   const loop = () => {
@@ -340,7 +349,7 @@ export function mountPomodoro(topbar) {
       <div class="pm-pk-sec">スタイル</div>
       <div class="pm-pk-grid" role="radiogroup" aria-label="表示スタイル">
         ${SKINS.map((sk) => `<button class="pm-pk-card${cfg.skin === sk.key ? " on" : ""}" role="radio" aria-checked="${cfg.skin === sk.key}" data-skin="${sk.key}">
-          <span class="pm-pk-ck">✓</span>
+          <span class="pm-pk-ck">${icon("check", { size: 12 })}</span>
           <span class="pm-pk-th">${skinThumb(sk.key, cfg.accent)}</span>
           <span class="pm-pk-nm">${esc(sk.name)}</span>
         </button>`).join("")}
@@ -359,7 +368,7 @@ export function mountPomodoro(topbar) {
       // 本体ウィジェットへ即時プレビュー（次tickを待たずに反映）
       const s = st.get(); const disp = card.querySelector("#pm-disp");
       if (s && disp) {
-        const label = { focus: "🍅 集中中", break: "☕ 休憩中", countdown: "⏲ カウントダウン", countup: "⏱ 計測中" }[s.mode];
+        const label = modeLabel(s.mode);
         disp.innerHTML = renderDisplay(next.skin, { timeText: mmss(dispMs(s)), label, taskTitle: s.taskTitle, progress: progressOf(s), accent: next.accent });
       }
       panel.querySelectorAll(".pm-pk-card").forEach((b) => { const on = b.dataset.skin === next.skin; b.classList.toggle("on", on); b.setAttribute("aria-checked", on); });
@@ -389,11 +398,11 @@ export function mountPomodoro(topbar) {
         og("自分の担当", card._mine || []) + og("その他のタスク", card._others || []);
       const m = card._mode;
       card.innerHTML = `
-        <div class="pm-h">${MODE_ICON[m === "focus" ? "focus" : m]} 集中タイマー <span class="pm-cnt">今日 ${countToday()} 回</span><button class="pm-x" id="pm-x">×</button></div>
+        <div class="pm-h">${modeIcon(m === "focus" ? "focus" : m)} 集中タイマー <span class="pm-cnt">今日 ${countToday()} 回</span><button class="pm-x" id="pm-x">×</button></div>
         <div class="pm-tabs">
-          <button data-m="focus" class="${m === "focus" ? "on" : ""}">🍅 ポモドーロ</button>
-          <button data-m="countdown" class="${m === "countdown" ? "on" : ""}">⏲ ダウン</button>
-          <button data-m="countup" class="${m === "countup" ? "on" : ""}">⏱ アップ</button>
+          <button data-m="focus" class="${m === "focus" ? "on" : ""}">${icon("timer", { size: 12 })} ポモドーロ</button>
+          <button data-m="countdown" class="${m === "countdown" ? "on" : ""}">${icon("alarm", { size: 12 })} ダウン</button>
+          <button data-m="countup" class="${m === "countup" ? "on" : ""}">${icon("stopwatch", { size: 12 })} アップ</button>
         </div>
         <select id="pm-task" class="pm-in">${opts}</select>
         <div class="pm-modebox">
@@ -406,7 +415,7 @@ export function mountPomodoro(topbar) {
         </div>` : ""}
         ${m === "countup" ? `<div class="pm-hint" style="margin:0">ストップウォッチ。停止したときの経過時間を実績に記録します。</div>` : ""}
         </div>
-        <button class="pm-go" id="pm-go">▶ 開始</button>
+        <button class="pm-go" id="pm-go">${icon("play", { size: 14 })} 開始</button>
         <div class="pm-hint">終了/中断時に選択タスクの実績へ自動記録（90秒未満は記録しません）</div>`;
       card.querySelector("#pm-x").onclick = open;
       card.querySelectorAll(".pm-tabs button").forEach((b) => {
@@ -441,20 +450,20 @@ export function mountPomodoro(topbar) {
       return;
     }
     card._idle = false;
-    const label = { focus: "🍅 集中中", break: "☕ 休憩中", countdown: "⏲ カウントダウン", countup: "⏱ 計測中" }[s.mode];
+    const label = modeLabel(s.mode);
     // シェルは1回だけ構築（毎秒は表示エリアのみ更新＝ピッカー入力やフォーカスが消えない・チラつかない）
     if (!card._running || card._runMode !== s.mode) {
       card._running = true; card._runMode = s.mode;
       card.innerHTML = `
         <div class="pm-h">${label} <span class="pm-cnt">今日 ${countToday()} 回</span>
-          <button class="pm-gear" id="pm-gear" title="表示をカスタム">🎨</button>
+          <button class="pm-gear" id="pm-gear" title="表示をカスタム">${icon("palette", { size: 14 })}</button>
           <button class="pm-x" id="pm-x">×</button></div>
         <div class="pm-disp" id="pm-disp"></div>
         <div class="pm-row">
           <button class="pm-go sub" id="pm-pause"></button>
           <button class="pm-go sub stop" id="pm-stop">■ ${s.mode === "break" ? "休憩を終わる" : "停止"}</button>
         </div>
-        <button class="pm-pip" id="pm-pip" title="常に最前面の小窓にタイマーを表示（Chrome系・PWA/HTTPS）">⬆ 最前面に表示</button>
+        <button class="pm-pip" id="pm-pip" title="常に最前面の小窓にタイマーを表示（Chrome系・PWA/HTTPS）">${icon("arrowUp", { size: 13 })} 最前面に表示</button>
         <div class="pm-picker" id="pm-picker" hidden></div>`;
       card.querySelector("#pm-x").onclick = open;
       card.querySelector("#pm-pause").onclick = doPause;
@@ -471,7 +480,7 @@ export function mountPomodoro(topbar) {
     const cfg = dispCfg();
     const disp = card.querySelector("#pm-disp");
     if (disp) disp.innerHTML = renderDisplay(cfg.skin, { timeText: mmss(dispMs(s)), label, taskTitle: s.taskTitle, progress: progressOf(s), accent: cfg.accent });
-    const pb = card.querySelector("#pm-pause"); if (pb) pb.textContent = s.paused ? "▶ 再開" : "⏸ 一時停止";
+    const pb = card.querySelector("#pm-pause"); if (pb) pb.innerHTML = s.paused ? `${icon("play", { size: 13 })} 再開` : `${icon("pause", { size: 13 })} 一時停止`;
     return;
   }
 
@@ -495,7 +504,7 @@ export function mountPomodoro(topbar) {
     pip.document.body.innerHTML = `
       <div id="pp-disp"></div>
       <div style="display:flex;gap:8px;margin-top:2px;justify-content:center">
-        <button id="pp-pause" style="font:inherit;font-size:11px;border:1px solid #5b6470;border-radius:7px;background:transparent;color:#fff;padding:4px 14px;cursor:pointer">⏸</button>
+        <button id="pp-pause" style="font:inherit;font-size:11px;border:1px solid #5b6470;border-radius:7px;background:transparent;color:#fff;padding:4px 14px;cursor:pointer">${icon("pause", { size: 13 })}</button>
         <button id="pp-stop" style="font:inherit;font-size:11px;border:1px solid #8a5054;border-radius:7px;background:transparent;color:#ff9b9b;padding:4px 14px;cursor:pointer">■</button>
       </div>`;
     pip.document.getElementById("pp-pause").onclick = doPause;
@@ -508,10 +517,10 @@ export function mountPomodoro(topbar) {
     const s = st.get();
     if (!s) { closePip(); return; }
     const d = pip.document, cfg = dispCfg();
-    const label = { focus: "🍅 集中中", break: "☕ 休憩中", countdown: "⏲ カウントダウン", countup: "⏱ 計測中" }[s.mode] + (s.paused ? "（一時停止）" : "");
+    const label = modeLabel(s.mode, s.paused ? "（一時停止）" : "");
     const disp = d.getElementById("pp-disp");
     if (disp) disp.innerHTML = renderDisplay(cfg.skin, { timeText: mmss(dispMs(s)), label, taskTitle: s.taskTitle, progress: progressOf(s), accent: cfg.accent });
-    d.getElementById("pp-pause").textContent = s.paused ? "▶" : "⏸";
+    d.getElementById("pp-pause").innerHTML = s.paused ? icon("play", { size: 13 }) : icon("pause", { size: 13 });
   }
   function closePip() { if (pip) { try { pip.close(); } catch { /* noop */ } pip = null; } }
 

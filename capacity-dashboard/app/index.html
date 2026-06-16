@@ -18,7 +18,9 @@
   :root{--bg:#e8ecf3;--card:#fff;--ink:#1d2430;--muted:#6b7480;--line:#dde2ea;--line-strong:#cad1dc;--track:#eef1f5;
     --fill:#3a86ff;--over:#e5484d;--free:#2fa66b;--full:#8a93a0;
     --shadow:0 1px 2px rgba(20,30,50,.05),0 6px 18px rgba(20,30,50,.07);
-    --font:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif}
+    --font:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    /* Lucide settings（ナビ「設定」のギア用マスク。fill黒=mask不透明部、色は背景の currentColor で着く）。 */
+    --ic-settings:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>')}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);
     -webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
@@ -53,7 +55,9 @@
   .nav-rule{height:1px;background:var(--line);margin:10px 8px 6px}
   /* 設定リンクの強調（最下部・目立たせる）。 */
   .nav a[data-k="settings"]{font-weight:700}
-  .nav a[data-k="settings"]::before{content:"⚙ "}
+  /* 設定リンクのギア＝Lucide settings をマスクで currentColor 追従の単色アイコンに（旧 content:"⚙"）。 */
+  .nav a[data-k="settings"]::before{content:"";display:inline-block;width:15px;height:15px;margin-right:7px;vertical-align:-2px;background:currentColor;
+    -webkit-mask:var(--ic-settings) center/contain no-repeat;mask:var(--ic-settings) center/contain no-repeat}
   .main{flex:1;min-width:0;display:flex;flex-direction:column}
   .topbar{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:10px 22px;
     border-bottom:1px solid var(--line);background:var(--card);position:sticky;top:0;z-index:5}

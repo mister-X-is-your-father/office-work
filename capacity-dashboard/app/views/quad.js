@@ -7,6 +7,7 @@ import { load, invalidate, projectName, isAiUser } from "../lib/store.js";
 import { updateTask } from "../lib/api.js";
 import { C, esc, fmtH, member_color, todayISO } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
+import { icon } from "../lib/icons.js";
 
 const HOUR = 3600;
 const DAYS_KEY = "ts.quad.urgentDays";
@@ -66,7 +67,7 @@ export async function render(root) {
     <h1 class="vtitle">優先度マトリクス <small>アイゼンハワー・マトリクス ・ ドラッグで再分類</small></h1>
     <div class="qd-tools">
       <div class="qd-who" id="qd-who">${whoTabs}</div>
-      <span class="qd-rule">📐 <b>重要</b> = 重要度が「高」以上 ／ <b>緊急</b> = 期限が
+      <span class="qd-rule">${icon("ruler", { size: 14 })} <b>重要</b> = 重要度が「高」以上 ／ <b>緊急</b> = 期限が
         <select id="qd-days">${dayOpts}</select>
         以内 または超過（期限なし＝緊急でない）</span>
     </div>

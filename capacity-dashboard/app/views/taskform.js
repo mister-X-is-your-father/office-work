@@ -7,6 +7,7 @@ import { load, invalidate, TEMPLATE_WS } from "../lib/store.js";
 import { getTask, createTaskInProject, createProject, updateTask, addAssignee, removeAssignee, addRelation, removeRelation, createLabel, addTaskLabel, removeTaskLabel, getAttachments, uploadAttachments, deleteAttachment, fetchAttachmentBlob } from "../lib/api.js";
 import { categoryLabels, REVIEW_LABEL, WAITING_LABEL } from "../lib/kinds.js";
 import { C, esc, fmtH } from "../lib/ui.js";
+import { icon } from "../lib/icons.js";
 // 共有フォーム部品（スマート日付/[資料][ゴール]規約/時間ステッパー/資料チップ）は lib/form.js に集約
 import { parseSmartDate, fmtDisplay, fmtDisplayDow, splitMeta, joinMeta, hourInputHtml, wireHourInput, docChipsHtml, wireDocChips, checksHtml, wireChecks, attachDatePicker } from "../lib/form.js";
 import { renderRecurrencePanel, ensureRecurrenceStyle } from "./recurrenceform.js";
@@ -95,7 +96,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     <div class="tf-card" role="dialog" aria-modal="true">
       <div class="tf-h"><b>${isEdit ? "タスクを編集" : "タスクを追加"}</b>
         <span style="flex:1"></span>
-        ${isEdit && curAi ? `<button type="button" class="tf-fable-run" id="tf-fable-run" title="Fableに実行させる（キューに追加・Fable画面でコンソール表示）">▶ Fable</button>` : ""}
+        ${isEdit && curAi ? `<button type="button" class="tf-fable-run" id="tf-fable-run" title="Fableに実行させる（キューに追加・Fable画面でコンソール表示）">${icon("play", { size: 12 })} Fable</button>` : ""}
         <button type="button" class="tf-x" id="tf-x" aria-label="閉じる">×</button></div>
       ${!isEdit ? `
       <div class="tf-tabs" id="tf-tabs">
@@ -352,7 +353,11 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
 
   // AIコメント（隠しノート・作成者のみ）: Fable の計画/進捗/結果。説明の下に遅延ロードで表示。
   if (isEdit && curAi) {
-    const KIND_JA = { plan: "📝 計画", progress: "進捗", result: "✔ 結果", script: "⚙ スクリプト", proposal: "💡 提案" };
+    const KIND_JA = {
+      plan: `${icon("pencil", { size: 12 })} 計画`, progress: "進捗",
+      result: `${icon("check", { size: 12 })} 結果`, script: `${icon("settings", { size: 12 })} スクリプト`,
+      proposal: `${icon("lightbulb", { size: 12 })} 提案`,
+    };
     const box = document.createElement("div");
     box.innerHTML = `<label class="tf-l">AIコメント <span class="tf-hint">（自分のみ閲覧）</span></label><div class="tf-ainotes" id="tf-ainotes"><span class="tf-hint">読み込み中…</span></div>`;
     wrap.querySelector(".tf-main").appendChild(box);
@@ -363,7 +368,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
         const dt = new Date(n.ts * 1000);
         const when = `${dt.getMonth() + 1}/${dt.getDate()} ${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}`;
         return `<div class="tf-ainote"><div class="tf-ainote-h">${KIND_JA[n.kind] || n.kind} ・ ${when}</div><div class="tf-ainote-b">${esc(n.text)}</div></div>`;
-      }).join("") : `<span class="tf-hint">まだありません（📝計画 や ▶実行 で溜まります）</span>`;
+      }).join("") : `<span class="tf-hint">まだありません（${icon("pencil", { size: 11 })}計画 や ${icon("play", { size: 11 })}実行 で溜まります）</span>`;
     }).catch(() => { const el = $("#tf-ainotes"); if (el) el.innerHTML = `<span class="tf-hint">実行サービスに接続できません</span>`; });
   }
 
@@ -376,7 +381,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
       const { runAi } = await import("../lib/exec.js");
       const j = await runAi(task.id, task.title);
       err.className = "tf-err ok";
-      err.textContent = `✓ Fableのキューに追加しました（#${j.job.id}）。コンソールは 🤖 Fable 画面で。`;
+      err.innerHTML = `${icon("check", { size: 13 })} Fableのキューに追加しました（#${j.job.id}）。コンソールは ${icon("bot", { size: 13 })} Fable 画面で。`;
     } catch (e) {
       err.className = "tf-err";
       err.textContent = "× 実行サービスに接続できません: " + e.message;
@@ -435,7 +440,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
       }
       invalidate();
       err.className = "tf-err ok";
-      err.textContent = `✓ テンプレートに保存しました${catRaw ? `（分類: ${catRaw}）` : ""}`;
+      err.innerHTML = `${icon("check", { size: 13 })} テンプレートに保存しました${catRaw ? `（分類: ${esc(catRaw)}）` : ""}`;
     } catch (e) { err.textContent = "× " + e.message; }
     btn.disabled = false;
   };
