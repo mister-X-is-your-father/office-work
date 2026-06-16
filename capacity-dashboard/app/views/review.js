@@ -3,8 +3,8 @@ import { load, projectName, invalidate } from "../lib/store.js";
 import { whoami, updateTask } from "../lib/api.js";
 import { isReviewTask } from "../lib/kinds.js";
 import { C, esc, member_color } from "../lib/ui.js";
+import { openTaskForm } from "./taskform.js";
 
-const TS_BASE = "http://leo:7005";
 const WARN_MS = 4 * 3600000; // 半日(4h)以上で要注意
 
 function waitLabel(ms) {
@@ -55,13 +55,82 @@ export async function render(root) {
     ${mine.length ? section(`${esc(meName)} 宛のレビュー待ち`, mine, true) : ""}
     ${others.length ? section("その他のレビュー／承認待ち", others, false) : ""}`;
 
+  const onSaved = async () => { invalidate(); render(root); };
+
+  // 元タスクを SPA モーダルで開く（外部ページへ飛ばない）
+  root.querySelectorAll(".rq-open").forEach((b) => {
+    b.onclick = () => openTaskForm({ taskId: +b.dataset.src, onSaved });
+  });
+
+  // レビュータスク自体もタイトルセルクリックで編集
+  root.querySelectorAll(".rq-titlecell[data-id]").forEach((el) => {
+    el.onclick = () => openTaskForm({ taskId: +el.dataset.id, onSaved });
+  });
+
   root.querySelectorAll(".rq-appr").forEach((b) => {
     b.onclick = async () => {
+      const id = +b.dataset.id;
+      const title = b.dataset.title || "タスク";
       b.disabled = true; b.textContent = "…";
-      await updateTask(+b.dataset.id, { done: true });
+      try {
+        await updateTask(id, { done: true });
+      } catch {
+        b.disabled = false; b.textContent = "承認";
+        showUndoToast("承認に失敗しました", null, { error: true });
+        return;
+      }
       invalidate(); render(root);
+      showUndoToast(`「${title}」を承認しました`, async () => {
+        await updateTask(id, { done: false });
+        invalidate(); render(root);
+      });
     };
   });
+}
+
+// 承認の取り消し（Undo）スナックバー。画面下中央に固定・約6秒で自動消滅・新しい呼び出しで置換。
+let _toastTimer = null;
+function showUndoToast(message, onUndo, opts = {}) {
+  const old = document.getElementById("rq-toast");
+  if (old) old.remove();
+  if (_toastTimer) { clearTimeout(_toastTimer); _toastTimer = null; }
+
+  const el = document.createElement("div");
+  el.id = "rq-toast";
+  el.className = "rq-toast" + (opts.error ? " error" : "");
+  el.innerHTML = `<style>${toastCss()}</style>
+    <span class="rq-toast-msg">${esc(message)}</span>
+    ${onUndo ? `<button class="rq-toast-undo" type="button">元に戻す</button>` : ""}`;
+  document.body.appendChild(el);
+  // フェードイン
+  requestAnimationFrame(() => el.classList.add("show"));
+
+  const close = () => {
+    if (_toastTimer) { clearTimeout(_toastTimer); _toastTimer = null; }
+    el.classList.remove("show");
+    setTimeout(() => el.remove(), 200);
+  };
+  if (onUndo) {
+    const u = el.querySelector(".rq-toast-undo");
+    u.onclick = async () => { close(); try { await onUndo(); } catch { /* noop */ } };
+  }
+  _toastTimer = setTimeout(close, 6000);
+}
+
+function toastCss() {
+  return `
+  .rq-toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,12px);z-index:9999;
+    display:flex;align-items:center;gap:14px;max-width:90vw;
+    background:${C.card};color:${C.ink};border:1px solid ${C.line};border-radius:12px;
+    padding:11px 16px;font-size:13px;font-weight:600;
+    box-shadow:0 8px 24px rgba(20,30,50,.22);opacity:0;transition:opacity .2s,transform .2s}
+  .rq-toast.show{opacity:1;transform:translate(-50%,0)}
+  .rq-toast.error{border-color:${C.over};color:${C.over}}
+  .rq-toast-msg{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rq-toast-undo{flex:none;border:1px solid ${C.line};background:transparent;color:${C.fill};
+    border-radius:8px;padding:5px 12px;font:inherit;font-size:12px;font-weight:700;cursor:pointer}
+  .rq-toast-undo:hover{background:rgba(58,134,255,.1)}
+  html[data-theme="dark"] .rq-toast{box-shadow:0 8px 24px rgba(0,0,0,.5)}`;
 }
 
 function section(title, rows, you) {
@@ -72,10 +141,10 @@ function section(title, rows, you) {
 function rowHtml(r) {
   const rn = r.reviewer ? (r.reviewer.name || r.reviewer.username) : "未割当";
   const warn = r.wait >= WARN_MS;
-  const open = r.srcId ? `<a class="rq-btn" href="${TS_BASE}/tasks/${r.srcId}" target="_blank" rel="noopener" title="元タスクを開く">↗</a>` : "";
+  const open = r.srcId ? `<button class="rq-btn rq-open" data-src="${r.srcId}" title="元タスクを開く">↗</button>` : "";
   return `<div class="rq-row ${r.mine ? "you" : ""}">
     <span class="rq-kind">レビュー</span>
-    <div class="rq-titlecell">
+    <div class="rq-titlecell" data-id="${r.id}" title="このレビュータスクを編集">
       <div class="t">${esc(r.title)}</div>
       <div class="meta">
         ${r.srcTitle ? `<span class="src">元: ${esc(r.srcTitle)}</span>` : ""}<span class="proj">${esc(r.proj)}</span>
@@ -83,7 +152,7 @@ function rowHtml(r) {
         <span class="rq-wait ${warn ? "warn" : "ok"}"><span class="wdot"></span>${waitLabel(r.wait)}${warn ? " 要対応" : ""}</span>
       </div>
     </div>
-    <div class="rq-acts">${open}<button class="rq-btn appr rq-appr" data-id="${r.id}">承認</button></div>
+    <div class="rq-acts">${open}<button class="rq-btn appr rq-appr" data-id="${r.id}" data-title="${esc(r.title)}">承認</button></div>
   </div>`;
 }
 
@@ -107,6 +176,8 @@ function css() {
   .rq-row.you{background:#f7fbff}
   .rq-kind{flex:none;font-size:10.5px;font-weight:700;color:${C.fill};background:#eaf2ff;border:1px solid #d5e6ff;border-radius:6px;padding:2px 8px;align-self:flex-start;margin-top:1px}
   .rq-titlecell{flex:1;min-width:0}
+  .rq-titlecell[data-id]{cursor:pointer}
+  .rq-titlecell[data-id]:hover .t{text-decoration:underline;text-decoration-color:${C.line}}
   .rq-titlecell .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .rq-titlecell .meta{font-size:11px;color:${C.muted};margin-top:3px;display:flex;gap:6px 10px;flex-wrap:wrap;align-items:center}
   .rq-titlecell .src{color:${C.ink}}
