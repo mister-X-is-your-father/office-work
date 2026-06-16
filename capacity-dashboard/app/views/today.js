@@ -16,6 +16,22 @@ const modeKey = (uid) => `ts.today.mode.${uid ?? "anon"}`;
 let MODE = null;     // 未確定=null。初回 render で localStorage から確定
 let MODE_UID = null; // モード保存先のユーザー id
 
+const segCss = () => `<style>.t-seg{display:inline-flex;background:#fff;border:1px solid ${C.line};border-radius:10px;padding:3px;margin:0 0 16px;box-shadow:0 1px 2px rgba(20,30,50,.04)}
+    .t-seg button{border:0;background:transparent;color:${C.muted};font:inherit;font-size:13px;font-weight:600;padding:5px 14px;border-radius:8px;cursor:pointer}
+    .t-seg button.on{background:${C.fill};color:#fff}
+    html[data-theme="dark"] .t-seg{background:var(--card)}</style>`;
+
+const segHtml = (mode) => `<div class="t-seg">
+      <button data-m="stacked" class="${mode === "stacked" ? "on" : ""}">積み上げ</button>
+      <button data-m="clock" class="${mode === "clock" ? "on" : ""}">円時計</button>
+    </div>`;
+
+// body 要素に指定モードで描画（全画面/埋め込み 共通）。rerender はモード切替/clock 再描画用。
+function paintBody(body, data, day, mode, rerender) {
+  if (mode === "clock") renderClock(body, data, day, rerender);
+  else renderStacked(body, data, day);
+}
+
 export async function render(root) {
   const data = await load();
   CAP = data.settings.capH;
@@ -27,15 +43,9 @@ export async function render(root) {
     MODE = saved === "clock" || saved === "stacked" ? saved : DEFAULT_MODE;
   }
   root.innerHTML = `
-    <style>.t-seg{display:inline-flex;background:#fff;border:1px solid ${C.line};border-radius:10px;padding:3px;margin:0 0 16px;box-shadow:0 1px 2px rgba(20,30,50,.04)}
-    .t-seg button{border:0;background:transparent;color:${C.muted};font:inherit;font-size:13px;font-weight:600;padding:5px 14px;border-radius:8px;cursor:pointer}
-    .t-seg button.on{background:${C.fill};color:#fff}
-    html[data-theme="dark"] .t-seg{background:var(--card)}</style>
+    ${segCss()}
     <h1 class="vtitle">今日の稼働予定 <small>${day}</small></h1>
-    <div class="t-seg">
-      <button data-m="stacked" class="${MODE === "stacked" ? "on" : ""}">積み上げ</button>
-      <button data-m="clock" class="${MODE === "clock" ? "on" : ""}">円時計</button>
-    </div>
+    ${segHtml(MODE)}
     <div id="t-body"></div>`;
   root.querySelectorAll(".t-seg button").forEach((b) => {
     b.onclick = () => {
@@ -44,9 +54,40 @@ export async function render(root) {
       render(root);
     };
   });
-  const body = root.querySelector("#t-body");
-  if (MODE === "clock") renderClock(body, data, day, () => render(root));
-  else renderStacked(body, data, day);
+  paintBody(root.querySelector("#t-body"), data, day, MODE, () => render(root));
+}
+
+// ホーム画面のサブコンテナへ埋め込む入口。
+// 全画面の MODE/MODE_UID には一切触れず、ローカル変数でモードを保持する（状態衝突回避）。
+// opts: { compact?: boolean, showToggle?: boolean, mode?: 'stacked'|'clock', title?: boolean }
+//   compact   余白を圧縮（既定 true）
+//   showToggle モード切替ボタンを出すか（既定 false＝安定優先・既定モード固定）
+//   mode      初期モード（既定 'stacked'）
+//   title     見出しを出すか（既定 false）
+export async function renderInto(container, opts = {}) {
+  if (!container) return;
+  const { compact = true, showToggle = false, title = false } = opts;
+  let localMode = opts.mode === "clock" ? "clock" : DEFAULT_MODE; // 全画面 MODE と独立
+  const data = await load();          // store.js のキャッシュ経由（二重 fetch なし）
+  CAP = data.settings.capH;
+  const day = todayISO();
+
+  const draw = () => {
+    container.innerHTML = `
+      ${showToggle ? segCss() : ""}
+      ${title ? `<h2 class="vtitle" style="margin-top:0">今日の稼働予定 <small>${day}</small></h2>` : ""}
+      ${showToggle ? segHtml(localMode) : ""}
+      <div class="t-embed${compact ? " compact" : ""}"></div>`;
+    if (showToggle) {
+      container.querySelectorAll(".t-seg button").forEach((b) => {
+        b.onclick = () => { localMode = b.dataset.m; draw(); };
+      });
+    }
+    const body = container.querySelector(".t-embed");
+    // 埋め込み内のモード切替/clock 再描画はサブコンテナ内で完結（全画面に波及しない）。
+    paintBody(body, data, day, localMode, draw);
+  };
+  draw();
 }
 
 function renderStacked(body, data, day) {
@@ -203,6 +244,11 @@ function css() {
   .t54-hint{font-size:11px;color:${C.muted};text-align:right;margin-top:10px}
   .t54-empty{padding:34px;text-align:center;color:${C.muted}}
   @media(max-width:760px){.t54-chart{gap:14px;padding-left:38px}.t54-tname{font-size:10.5px}.t54-area{max-width:none}}
+  /* ===== 埋め込み(compact)：余白を圧縮。高さは固定 chart 高に依存し 100vh 不使用 ===== */
+  .t-embed.compact .t54-sub{margin:-2px 0 10px}
+  .t-embed.compact .t54-card{padding:20px 18px 12px}
+  .t-embed.compact .kpis{margin-bottom:12px}
+  .t-embed.compact .t54-hint{margin-top:8px}
   /* ===== ダーク上書き（ライト値は上で維持＝非回帰）。淡色の面/ボーダーのみ暗側へ ===== */
   html[data-theme="dark"] .t54-freezone{border-color:rgba(47,166,107,.45)}
   html[data-theme="dark"] .t54-freezone span{border-color:rgba(47,166,107,.40)}

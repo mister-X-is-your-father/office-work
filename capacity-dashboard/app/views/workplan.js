@@ -23,10 +23,37 @@ let CAP = 8;
 
 const lsGet = (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
-let WHO = lsGet(WHO_KEY, "");   // ""→自分既定 / "all"=全員(メンバー別) / "self"=自分 / memberId
-let PRESET = lsGet(PRESET_KEY, "1w");   // 既定=今日から1週間。"custom"=日付指定
-let FROM = lsGet(FROM_KEY, ""), TO = lsGet(TO_KEY, "");
-let GRAIN = lsGet(GRAIN_KEY, "");   // ""=自動(期間長で日/週) / "day"=日表示 / "week"=週表示
+
+// 全画面(#/workplan)用の状態: localStorage を読み書きする。
+// 埋め込み(renderInto)用は makeLocalState() で別インスタンスを持ち、ここを汚染しない。
+function makeGlobalState() {
+  return {
+    persistent: true,
+    WHO: lsGet(WHO_KEY, ""),       // ""→自分既定 / "all"=全員(メンバー別) / "self"=自分 / memberId
+    PRESET: lsGet(PRESET_KEY, "1w"),// 既定=今日から1週間。"custom"=日付指定
+    FROM: lsGet(FROM_KEY, ""),
+    TO: lsGet(TO_KEY, ""),
+    GRAIN: lsGet(GRAIN_KEY, ""),    // ""=自動(期間長で日/週) / "day"=日表示 / "week"=週表示
+    save(k, v) { lsSet(k, v); },
+  };
+}
+
+// 埋め込み用ローカル状態。opts で初期 preset/grain/who を上書き可（任意）。
+// localStorage には一切書かない（全画面側の状態を壊さない）。
+function makeLocalState(opts = {}) {
+  return {
+    persistent: false,
+    WHO: opts.who != null ? String(opts.who) : "all",      // 既定=全員
+    PRESET: opts.preset != null ? String(opts.preset) : "1m", // 既定=1ヶ月
+    FROM: "",
+    TO: "",
+    GRAIN: opts.grain != null ? String(opts.grain) : "",   // ""=自動
+    save() { /* no-op: 埋め込みは永続化しない */ },
+  };
+}
+
+// この単一の共有インスタンスが全画面 render(root) の状態を保持する（従来の挙動を温存）。
+const GLOBAL = makeGlobalState();
 
 const round1 = (n) => Math.round(n * 10) / 10;
 const dowOf = (iso) => new Date(iso + "T00:00:00Z").getUTCDay();
@@ -69,19 +96,35 @@ function colsForMember(member, bdays, granularity, tasks, plans, holidays) {
   });
 }
 
+// 全画面エントリ: #/workplan。共有 GLOBAL 状態(=localStorage 連動)で従来通り描画。
 export async function render(root) {
+  return renderState(root, GLOBAL, () => render(root), { embedded: false });
+}
+
+// 埋め込みエントリ: ホームのサブコンテナに「稼働プラン」を描画。
+// container=既存DOM要素。opts={ preset, grain, who } で初期表示を上書き可（任意）。
+// 全画面側の localStorage 状態は一切触らない（makeLocalState がローカル状態を持つ）。
+export async function renderInto(container, opts = {}) {
+  const state = makeLocalState(opts);
+  const rerender = () => renderState(container, state, rerender, { embedded: true });
+  return rerender();
+}
+
+async function renderState(root, state, rerender, view = {}) {
+  const embedded = !!view.embedded;
   const { tasks, members, plansByTask, settings, holidaysSet, me } = await load();
   CAP = settings.capH;
 
   // 期間: プリセット(今日からの相対)を既定とし、custom のときだけ日付指定を使う。
   const today = new Date().toISOString().slice(0, 10);
-  const presetDef = PRESETS.find((p) => p.key === PRESET);
-  if (presetDef) { FROM = today; TO = shiftISO(today, presetDef.days - 1); }
+  const presetDef = PRESETS.find((p) => p.key === state.PRESET);
+  if (presetDef) { state.FROM = today; state.TO = shiftISO(today, presetDef.days - 1); }
   else {
-    if (!FROM || !TO) { FROM = today; TO = shiftISO(today, 6); }
-    if (FROM > TO) { const t = FROM; FROM = TO; TO = t; }
-    if (daysUntil(FROM, TO) > MAX_SPAN) TO = shiftISO(FROM, MAX_SPAN);
+    if (!state.FROM || !state.TO) { state.FROM = today; state.TO = shiftISO(today, 6); }
+    if (state.FROM > state.TO) { const t = state.FROM; state.FROM = state.TO; state.TO = t; }
+    if (daysUntil(state.FROM, state.TO) > MAX_SPAN) state.TO = shiftISO(state.FROM, MAX_SPAN);
   }
+  const FROM = state.FROM, TO = state.TO;
 
   const meId = me && me.id;
   const activeMembers = members || [];
@@ -89,14 +132,15 @@ export async function render(root) {
   const selfMember = me ? (activeMembers.find((m) => m.id === meId) || { id: meId, name: me.name || me.username, username: me.username }) : null;
 
   // WHO 既定/正規化
-  if (WHO === "") WHO = (selfMember && activeMembers.some((m) => m.id === selfMember.id)) ? String(selfMember.id) : (activeMembers[0] ? String(activeMembers[0].id) : "all");
+  if (state.WHO === "") state.WHO = (selfMember && activeMembers.some((m) => m.id === selfMember.id)) ? String(selfMember.id) : (activeMembers[0] ? String(activeMembers[0].id) : "all");
   // 後方互換: 旧「自分」タブ(WHO==="self")は自分のmember idへ読み替え（タブ廃止のため）
-  if (WHO === "self") { WHO = (selfMember && activeMembers.some((m) => m.id === selfMember.id)) ? String(selfMember.id) : "all"; lsSet(WHO_KEY, WHO); }
+  if (state.WHO === "self") { state.WHO = (selfMember && activeMembers.some((m) => m.id === selfMember.id)) ? String(selfMember.id) : "all"; state.save(WHO_KEY, state.WHO); }
+  const WHO = state.WHO;
 
   const bdays = bizDaysList(FROM, TO, holidaysSet);
   // 粒度: 保存値 "day"/"week" を優先。未設定("")なら期間長で自動。
   const autoGrain = daysUntil(FROM, TO) <= DAY_GRAIN_MAX ? "day" : "week";
-  const granularity = (GRAIN === "day" || GRAIN === "week") ? GRAIN : autoGrain;
+  const granularity = (state.GRAIN === "day" || state.GRAIN === "week") ? state.GRAIN : autoGrain;
 
   // 対象メンバー（全員=各メンバー別 / self / 指定）
   const mode = WHO === "all" ? "all" : "one";
@@ -141,12 +185,18 @@ export async function render(root) {
   }
   const sumH = round1(allCols.reduce((s, c) => s + c.total, 0));
 
+  // 見出し: 全画面は h1.vtitle、埋め込みは控えめな h2（100vh前提にせず自然高）。
+  const heading = embedded
+    ? `<h2 class="wp-embed-title">${title} 稼働プラン <small>${FROM.slice(5)}〜${TO.slice(5)} ・ ${granLabel} ・ 容量 ${CAP}h/日</small></h2>`
+    : `<h1 class="vtitle">${title} 稼働プラン <small>${FROM.slice(5)}〜${TO.slice(5)} ・ ${granLabel} ・ 容量 ${CAP}h/日 ・ 重要度別</small></h1>`;
+
   root.innerHTML = `
     <style>${css()}</style>
-    <h1 class="vtitle">${title} 稼働プラン <small>${FROM.slice(5)}〜${TO.slice(5)} ・ ${granLabel} ・ 容量 ${CAP}h/日 ・ 重要度別</small></h1>
+    <div class="${embedded ? "wp-embed" : "wp-full"}">
+    ${heading}
     <div class="wp-tools">
       <div class="wp-who" id="wp-who">${whoTabs || `<span class="wp-noone">メンバーがいません</span>`}</div>
-      <div class="wp-presets" id="wp-presets">${PRESETS.map((p) => `<button class="wp-pchip${PRESET === p.key ? " on" : ""}" data-preset="${p.key}">${p.label}</button>`).join("")}</div>
+      <div class="wp-presets" id="wp-presets">${PRESETS.map((p) => `<button class="wp-pchip${state.PRESET === p.key ? " on" : ""}" data-preset="${p.key}">${p.label}</button>`).join("")}</div>
       <div class="wp-grain" id="wp-grain">
         <button class="wp-gseg${granularity === "day" ? " on" : ""}" data-grain="day">日</button>
         <button class="wp-gseg${granularity === "week" ? " on" : ""}" data-grain="week">週</button>
@@ -162,21 +212,24 @@ export async function render(root) {
       <span class="it"><span class="gap"></span>空き</span>
       <span class="it"><span class="rule"></span>容量線</span>
       <span class="it wp-sum">期間合計 ${fmtH(sumH)}</span>
+    </div>
     </div>`;
 
+  // イベントは root(=container) スコープに限定。document/window には漏らさない。
+  // 状態変更は state を更新し state.save(...)（全画面=localStorage / 埋め込み=no-op）→ rerender。
   root.querySelectorAll("#wp-who [data-who]").forEach((b) => {
-    b.onclick = () => { WHO = b.dataset.who; lsSet(WHO_KEY, WHO); render(root); };
+    b.onclick = () => { state.WHO = b.dataset.who; state.save(WHO_KEY, state.WHO); rerender(); };
   });
   root.querySelectorAll("#wp-presets [data-preset]").forEach((b) => {
-    b.onclick = () => { PRESET = b.dataset.preset; lsSet(PRESET_KEY, PRESET); render(root); };
+    b.onclick = () => { state.PRESET = b.dataset.preset; state.save(PRESET_KEY, state.PRESET); rerender(); };
   });
   root.querySelectorAll("#wp-grain [data-grain]").forEach((b) => {
-    b.onclick = () => { GRAIN = b.dataset.grain; lsSet(GRAIN_KEY, GRAIN); render(root); };
+    b.onclick = () => { state.GRAIN = b.dataset.grain; state.save(GRAIN_KEY, state.GRAIN); rerender(); };
   });
-  const setCustom = () => { PRESET = "custom"; lsSet(PRESET_KEY, "custom"); };  // 日付指定したらプリセット解除
+  const setCustom = () => { state.PRESET = "custom"; state.save(PRESET_KEY, "custom"); };  // 日付指定したらプリセット解除
   const fromEl = root.querySelector("#wp-from"), toEl = root.querySelector("#wp-to");
-  if (fromEl) fromEl.onchange = () => { setCustom(); FROM = fromEl.value || FROM; lsSet(FROM_KEY, FROM); render(root); };
-  if (toEl) toEl.onchange = () => { setCustom(); TO = toEl.value || TO; lsSet(TO_KEY, TO); render(root); };
+  if (fromEl) fromEl.onchange = () => { setCustom(); state.FROM = fromEl.value || state.FROM; state.save(FROM_KEY, state.FROM); rerender(); };
+  if (toEl) toEl.onchange = () => { setCustom(); state.TO = toEl.value || state.TO; state.save(TO_KEY, state.TO); rerender(); };
 }
 
 function colHtml(c, pxPerH) {
@@ -192,6 +245,9 @@ function colHtml(c, pxPerH) {
 
 function css() {
   return `
+  .wp-embed{display:block}   /* 埋め込みは自然高（100vh前提にしない） */
+  .wp-embed-title{margin:0 0 12px;font-size:15px;font-weight:700;color:${C.ink}}
+  .wp-embed-title small{margin-left:8px;font-weight:600;color:${C.muted};font-size:11.5px}
   .wp-tools{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:14px}
   .wp-who{display:flex;flex-wrap:wrap;gap:5px}
   .wp-who-b{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:12.5px;padding:5px 11px;border:1px solid ${C.line};border-radius:18px;background:#fff;color:${C.muted};cursor:pointer;transition:border-color .12s,background .12s,color .12s}

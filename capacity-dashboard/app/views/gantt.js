@@ -3,6 +3,7 @@
 import { load, invalidate } from "../lib/store.js";
 import * as vik from "../lib/api.js";
 import { taskRanges, dependencyEdges, dayScale, toMemberDayEntries, sumByMemberDay, shiftISO, applyBarDrag, dateOnly, hasDate } from "../lib/capacity.js";
+import { capacityOn } from "../lib/recurrence.js";
 import { fmtDisplayDow } from "../lib/form.js";
 import { openTaskForm } from "./taskform.js";
 import { C, member_color, fmtH, esc, todayISO } from "../lib/ui.js";
@@ -44,19 +45,46 @@ function saveGV() {
   try { localStorage.setItem(GV_KEY, JSON.stringify({ unit: gview.unit, spanDay: gview.spanDay, spanWeek: gview.spanWeek, weekStart: gview.weekStart })); } catch { /* localStorage 不可でも続行 */ }
 }
 
+// 全画面エントリ（#/gantt）。従来どおり root.innerHTML をシェルで差し替え、編集可・全機能。
 export async function render(root) {
-  const { tasks, members, projects } = await load();
+  return mount(root, {});
+}
+
+// 埋め込みエントリ。ホーム等のサブコンテナに「1ヶ月幅・人別レーン」のガントを差し込む。
+// 返り値 = cleanup 関数（リスナー/observer を即解除）。container 消滅時の自動解除も併設。
+// opts: { months=1, mode='member', editable=false, maxHeight } — 既定で1ヶ月・人別・閲覧主体。
+export async function renderInto(container, opts = {}) {
+  return mount(container, { embedded: true, mode: opts.mode || "member", months: opts.months || 1,
+                            editable: !!opts.editable, maxHeight: opts.maxHeight, ...opts });
+}
+
+async function mount(root, opts) {
+  const embedded = !!opts.embedded;
+  const editable = embedded ? !!opts.editable : true;   // 全画面=編集可。埋め込み=既定で閲覧主体。
+  const { tasks, members, projects, settings, holidaysSet, unavailabilityByMember } = await load();
+  const capH = (settings && settings.capH) || 8;
   const today = todayISO();
-  // 表示単位(日/週)＋スパンから 窓日数・列幅・起点 を決める（gview に保持＝再描画をまたぐ）
-  const spanList = SPANS[gview.unit];
-  const spanKey = gview.unit === "day" ? gview.spanDay : gview.spanWeek;
-  const preset = spanList.find((p) => p.key === spanKey) || spanList[0];
-  WINDOW_DAYS = preset.days;
-  COL_W = preset.colW;
-  COL_W_MIN = preset.colW;   // プリセット列幅は「最小」。利用可能幅が広ければ fitColumns で伸ばす
-  const weekStart = gview.weekStart;                 // 週の開始曜日(0=日..6=土)
-  const tier = gview.unit === "day" ? "day" : "week"; // 日表示=毎日ラベル / 週表示=週ラベル
-  const startISO = shiftISO(today, -preset.back);
+  // 全画面=gview（保存された表示状態）。埋め込み=固定の日表示・1ヶ月（gview に依存しない）。
+  let tier, weekStart, startISO;
+  if (embedded) {
+    // 埋め込みは「日表示・約1ヶ月（months×31日）」固定。週開始は月曜。
+    WINDOW_DAYS = Math.max(7, Math.round((opts.months || 1) * 31));
+    COL_W = 24; COL_W_MIN = 9;
+    weekStart = 1;
+    tier = "day";
+    startISO = shiftISO(today, -3);          // 今日の少し手前から
+  } else {
+    // 表示単位(日/週)＋スパンから 窓日数・列幅・起点 を決める（gview に保持＝再描画をまたぐ）
+    const spanList = SPANS[gview.unit];
+    const spanKey = gview.unit === "day" ? gview.spanDay : gview.spanWeek;
+    const preset = spanList.find((p) => p.key === spanKey) || spanList[0];
+    WINDOW_DAYS = preset.days;
+    COL_W = preset.colW;
+    COL_W_MIN = preset.colW;   // プリセット列幅は「最小」。利用可能幅が広ければ fitColumns で伸ばす
+    weekStart = gview.weekStart;                 // 週の開始曜日(0=日..6=土)
+    tier = gview.unit === "day" ? "day" : "week"; // 日表示=毎日ラベル / 週表示=週ラベル
+    startISO = shiftISO(today, -preset.back);
+  }
   const scale = dayScale(startISO, WINDOW_DAYS);
 
   // N+1: plans/times を持つタスクだけ個別取得（planner.js と同方式）
@@ -84,15 +112,16 @@ export async function render(root) {
   const actByMember = sumByMemberDay(toMemberDayEntries(timesArr, "time"));
 
   const state = {
-    mode: gview.mode,            // 再描画をまたいで保持（編集後も今のモードを維持）
+    mode: embedded ? (opts.mode || "member") : gview.mode, // 全画面=保持／埋め込み=固定
     hideDone: false,
     projects: new Set(projects.map((p) => p.id)),
     members: new Set(members.map((m) => m.id)),
-    collapsed: gview.collapsed,  // 同一参照＝折りたたみも保持
+    // 埋め込みは描画ごとに使い捨ての Set（gview の共有状態を汚さない）
+    collapsed: embedded ? new Set() : gview.collapsed,
   };
   const memberIdx = new Map(members.map((m, i) => [m.id, i]));
 
-  root.innerHTML = shell(projects, members, memberIdx, state.mode);
+  root.innerHTML = shell(projects, members, memberIdx, state.mode, embedded, opts.maxHeight);
   const head = root.querySelector("#gv-head");
   const rowsEl = root.querySelector("#gv-rows");
   const ganttEl = root.querySelector("#gv-gantt");
@@ -215,22 +244,28 @@ export async function render(root) {
   function paintMemberMode() {
     ganttEl.style.setProperty("--label-w", LABEL_W_P + "px");
     head.innerHTML = gridHead(LABEL_W_P);
-    const weekdays = scale.axis.filter((a) => !a.weekend).length;
     let html = "", rowOffset = 0;
     const offsets = []; // {y, taskId} は今回不要（人別は依存矢印なし）
     for (const m of members.filter((m) => state.members.has(m.id))) {
       const idx = memberIdx.get(m.id);
       const mtasks = visibleTasks().filter((t) => (t.assignees || []).some((a) => a.id === m.id));
       const dayMap = planByMember[m.id] || {};
+      // 日別の正確な容量（週末/祝日/休暇=0、平日=capH）。窓内容量は日別の合計。
+      const capOf = (iso) => capacityOn(m, iso, { holidays: holidaysSet, unavailabilityByMember, capH });
       const winH = scale.axis.reduce((s, a) => s + (dayMap[a.iso] || 0), 0);
-      const cap = 8 * Math.max(1, weekdays);
+      const cap = scale.axis.reduce((s, a) => s + capOf(a.iso), 0);
       const pct = cap ? Math.round((winH / cap) * 100) : 0;
       const capCol = pct > 100 ? C.over : pct >= 70 ? C.amber : C.free;
       const collapsed = state.collapsed.has("m" + m.id);
-      // グループ日セル: 予定>8hの日を赤帯
+      // グループ日セル＝日別容量の可視化: 容量0(週末/祝日/休暇)=淡色、予定が容量超過=赤帯、
+      // それ以外で予定ありは負荷比に応じた薄い帯。負荷バー(下の各タスク行)と容量を読み比べられる。
       const gcells = scale.axis.map((a) => {
-        const over = (dayMap[a.iso] || 0) > 8;
-        return `<div class="cell${a.weekend ? " weekend" : ""}${a.dow === weekStart ? " wk" : ""}" style="${over ? `background:rgba(229,72,77,.14)` : ""}"></div>`;
+        const c = capOf(a.iso), planH = dayMap[a.iso] || 0;
+        let bg = "";
+        if (c <= 0) bg = "background:rgba(120,130,150,.10)";                 // 容量0（休み）=淡色
+        else if (planH > c + 1e-6) bg = "background:rgba(229,72,77,.16)";    // 容量超過=赤
+        else if (planH > 1e-6) bg = `background:rgba(58,134,255,${(0.05 + 0.13 * Math.min(1, planH / c)).toFixed(3)})`; // 負荷比で青みを濃く
+        return `<div class="cell${a.weekend ? " weekend" : ""}${a.dow === weekStart ? " wk" : ""}${c <= 0 ? " capoff" : ""}" style="${bg}"></div>`;
       }).join("");
       html += `<div class="grp${collapsed ? " collapsed" : ""}" data-mid="${m.id}">
         <div class="grp-label" data-toggle="m${m.id}">
@@ -399,6 +434,10 @@ export async function render(root) {
     else paintProjectMode();
   }
 
+  // closeDayPop は編集系（日別予定ポップアップ）が editable のとき本体を差し込む。
+  // 非 editable（埋め込み閲覧）では no-op のまま＝onResize から安全に呼べる。
+  let closeDayPop = () => {};
+
   // ウィンドウ/サイドバー変化に追従して列幅を再フィット（バー px 位置も含め再描画）。
   // 同一 render 内のみ有効化し、次 render 前に解除してリスナーの多重登録を防ぐ。
   let resizeRaf = 0;
@@ -409,13 +448,23 @@ export async function render(root) {
   window.addEventListener("resize", onResize);
   const ro = new ResizeObserver(onResize);
   ro.observe(scrollEl);
-  // root が次の render で innerHTML 差し替えられたら（scrollEl が DOM から外れたら）後始末。
-  const cleanup = () => { if (!root.contains(scrollEl)) { window.removeEventListener("resize", onResize); ro.disconnect(); } };
-  // MutationObserver で root の子要素差し替えを検知して cleanup。
-  const mo = new MutationObserver(() => { cleanup(); if (!root.contains(scrollEl)) mo.disconnect(); });
+  // 全リスナー/observer を確実に解除する（多重呼び出し安全）。埋め込みは renderInto の返り値から、
+  // 全画面は MutationObserver(scrollEl が DOM から外れたら) から呼ぶ。
+  let torndown = false;
+  const teardown = () => {
+    if (torndown) return; torndown = true;
+    window.removeEventListener("resize", onResize);
+    ro.disconnect();
+    try { mo.disconnect(); } catch {}
+    closeDayPop();
+  };
+  // MutationObserver で root の子要素差し替え（＝再描画/画面遷移）を検知して自動 teardown。
+  // 埋め込みでもホーム再描画でコンテナが空にされた瞬間に解除＝リスナー漏れ防止。
+  const mo = new MutationObserver(() => { if (!root.contains(scrollEl)) teardown(); });
   mo.observe(root, { childList: true });
 
-  // ── ツールバー配線 ──
+  // ── ツールバー配線（全画面のみ。埋め込みはツールバー無し＝スキップ） ──
+  if (!embedded) {
   root.querySelectorAll("[data-mode]").forEach((b) => {
     b.onclick = () => {
       state.mode = gview.mode = b.dataset.mode;   // 選択モードを保持
@@ -439,7 +488,8 @@ export async function render(root) {
     b.onclick = () => { toggleSet(state.members, +b.dataset.mem, b); paint(); };
   });
   root.querySelector("#gv-hidedone").onchange = (e) => { state.hideDone = e.target.checked; paint(); };
-  // 人別ヘッダの折り畳みは再描画後に張り直すのでイベント委譲
+  } // end if(!embedded) — toolbar wiring
+  // 人別ヘッダの折り畳みは再描画後に張り直すのでイベント委譲（埋め込みでも有効）
   rowsEl.addEventListener("click", (e) => {
     const lbl = e.target.closest("[data-toggle]");
     if (!lbl) return;
@@ -448,6 +498,11 @@ export async function render(root) {
     paint();
   });
 
+  // 編集系ハンドラ（ラベルクリックで編集／バードラッグ／日別予定ポップアップ）は editable のときだけ配線。
+  // 埋め込み(閲覧主体)では一切張らず、リスナーもポップアップ DOM も生成しない＝安定・無副作用。
+  let drag = null, dlabel = null;
+  const reload = () => { invalidate(); render(root); };
+  if (editable) {
   // 左の固定ラベル列（タスク名）クリックで編集モーダル。バーの有無に関わらず全タスク行で編集可能に。
   // グループ見出し(.grp-label)は data-toggle で折り畳み専用なので .r-label のみを対象にし衝突回避。
   rowsEl.addEventListener("click", (e) => {
@@ -458,10 +513,6 @@ export async function render(root) {
     if (!row) return;
     openTaskForm({ taskId: +row.dataset.task, onSaved: reload });
   });
-
-  // ── バーのドラッグ編集（移動／dates は端で伸縮）＋クリックで編集モーダル ──
-  let drag = null, dlabel = null;
-  const reload = () => { invalidate(); render(root); };
   const isoZ = (d) => d + "T00:00:00Z";
   const showLabel = (text, x, y) => {
     if (!dlabel) { dlabel = document.createElement("div"); dlabel.className = "gv-draglabel"; document.body.appendChild(dlabel); }
@@ -538,7 +589,7 @@ export async function render(root) {
 
   // ── 日別予定の直接入力: タスク行の「日セル」をクリック→その日の実施予定時間を入力 ──
   let dayPop = null;
-  const closeDayPop = () => { if (dayPop) { dayPop.remove(); dayPop = null; document.removeEventListener("pointerdown", onDocDown, true); } };
+  closeDayPop = () => { if (dayPop) { dayPop.remove(); dayPop = null; document.removeEventListener("pointerdown", onDocDown, true); } };
   function onDocDown(e) { if (dayPop && !dayPop.contains(e.target)) closeDayPop(); }
 
   function openDayPlanPopup(taskId, dayISO, x, y) {
@@ -601,8 +652,11 @@ export async function render(root) {
     if (dayIdx < 0 || dayIdx >= WINDOW_DAYS) return;
     openDayPlanPopup(+row.dataset.task, scale.axis[dayIdx].iso, e.clientX, e.clientY);
   });
+  } // end if(editable) — 編集系ハンドラ
 
   paint();
+  // 埋め込みは cleanup 関数を返す（呼び出し側が破棄時に呼ぶ／呼ばなくても MutationObserver が自動解除）。
+  return teardown;
 }
 
 function srcLabel(source) {
@@ -614,7 +668,22 @@ function toggleSet(set, id, btn) {
   else { set.add(id); btn.setAttribute("aria-pressed", "true"); }
 }
 
-function shell(projects, members, memberIdx, mode) {
+function shell(projects, members, memberIdx, mode, embedded = false, maxHeight) {
+  // 埋め込み: ツールバー/凡例/タイトル無し・100vh前提なしの最小シェル。高さはコンテナ駆動
+  // （人別レーンの自然高で伸びる）。maxHeight 指定時のみ内側スクロール。
+  if (embedded) {
+    const scrollStyle = maxHeight ? `style="max-height:${typeof maxHeight === "number" ? maxHeight + "px" : maxHeight};overflow:auto"` : "";
+    return `
+    <div class="gv-view gv-embed">
+    <div class="card gv gv-embed-card">
+      <div class="gv-scroll" ${scrollStyle}><div class="gantt" id="gv-gantt" style="--label-w:${LABEL_W_P}px;--col-w:${COL_W}px;--win:${WINDOW_DAYS}">
+        <div class="grid-head" id="gv-head"></div>
+        <div class="rows" id="gv-rows"></div>
+      </div></div>
+    </div>
+    </div>
+    ${ganttStyles()}`;
+  }
   const projChips = projects.map((p) =>
     `<button class="chip" data-proj="${p.id}" aria-pressed="true">${esc(p.title)}</button>`).join("");
   const memChips = members.map((m) =>
@@ -652,7 +721,17 @@ function shell(projects, members, memberIdx, mode) {
     </div>
   </div>
   </div>
+  ${ganttStyles()}`;
+}
+
+function ganttStyles() {
+  return `
   <style>
+  /* 埋め込み(gv-embed): 100vh前提を外しコンテナ駆動の自然高に。ツールバー/凡例/タイトルは無し。 */
+  .gv-view.gv-embed{display:block;height:auto;margin-bottom:0}
+  .gv-embed .gv-embed-card{padding:0;display:block}
+  .gv-embed .gv-scroll{overflow:auto}
+  .gv-embed .gantt{min-width:calc(var(--label-w) + var(--col-w)*var(--win))}
   /* ガントを画面高にフィット＝行だけ内側スクロール。タイトル/ツールバー/日付軸/凡例は常時表示。
      高さ控除 = topbar(54) + content 余白上(24)。content 下 padding(60) は負 margin で食い込み、
      行エリアをビューポート下端ぎりぎりまで使う（共有 content の padding は触らない）。
