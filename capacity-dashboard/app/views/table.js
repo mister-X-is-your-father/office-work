@@ -6,8 +6,9 @@ import { savePresets } from "../lib/exec.js";
 import { updateTask, deleteTask, addAssignee, removeAssignee, addTaskLabel, removeTaskLabel, createLabel, setTaskWaiting } from "../lib/api.js";
 import { PRIO, prioBucket, kindOf, isReviewTask, categoryLabels, categoryColor, REVIEW_LABEL, WAITING_LABEL, statusOf, STATUS } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
-import { shiftISO } from "../lib/capacity.js";
+import { shiftISO, buildTaskTree } from "../lib/capacity.js";
 import { openTaskForm, ensureStyle as ensureFormStyle } from "./taskform.js";
+import { summarizeRecurrence, openRecurrenceForm } from "./recurrenceform.js";
 import { hourInputHtml, wireHourInput } from "../lib/form.js";
 import { icon } from "../lib/icons.js";
 
@@ -16,7 +17,7 @@ const MAX_SORTS = 5; // 組めるソート条件の上限（第1〜第5条件）
 const VKEY = (uid) => `ts.list.view.${uid ?? "anon"}`;
 function loadView(uid) {
   // doneMode: "show"=完了も表示 / "today"=完了は隠すが今日の完了は残す / "hide"=完了を隠す
-  const def = { sorts: [{ key: "due", dir: 1 }], manualMode: false, order: [], doneMode: "hide", proj: "", cat: "", qaWho: "", qaDue: "" };
+  const def = { sorts: [{ key: "due", dir: 1 }], manualMode: false, order: [], doneMode: "hide", proj: "", cat: "", qaWho: "", qaDue: "", mode: "table" };
   try {
     const raw = JSON.parse(localStorage.getItem(VKEY(uid)) || "null");
     if (!raw) return { ...def };                       // 初回のみ既定（期限）
@@ -34,6 +35,7 @@ function loadMySorts(uid) { try { return JSON.parse(localStorage.getItem(MSKEY(u
 function saveMySorts(uid, list) { try { localStorage.setItem(MSKEY(uid), JSON.stringify(list)); } catch { /* noop */ } }
 
 let V = null, UID = null;
+const olCollapsed = new Set(); // アウトライン表示の折りたたみ状態（task.id・モジュール変数で保持）
 let flashId = null;          // ドロップ直後にジワっと色が戻る着地ハイライト対象（再描画後に適用）
 let selectedIds = new Set(); // まとめて移動用の複数選択（マイソート中のみ・Ctrl/Shiftで操作）
 let anchorId = null;         // Shift範囲選択の起点
@@ -60,12 +62,15 @@ const stateRank = (r) => STATUS[r.status].rank; // 未着手→進行中→完�
 const tieBreak = (a, b) => (a.due || "9999").localeCompare(b.due || "9999") || a.t.id - b.t.id;
 
 export async function render(root) {
-  const { tasks, projects, members, me = null, settings = {}, labels = [] } = await load();
+  const { tasks, projects, members, me = null, settings = {}, labels = [], recurrences = [], holidaysByDate = null } = await load();
   const presets = settings.sortPresets || [];   // グローバル共有プリセット
   const canEditPresets = !!settings.canEdit;     // 保存/削除は許可ユーザーのみ（適用は全員可）
   const today = todayISO();
   UID = (me && me.id) || 0;
   V = loadView(UID);
+  // 後方互換: #/outline で来たら、Vを書き換えずこのロードだけアウトライン表示にする。
+  const mode = location.hash.includes("outline") ? "outline" : (V.mode === "outline" ? "outline" : "table");
+  const isOutline = mode === "outline";
   const mysorts = loadMySorts(UID); // 保存したマイソート（本人ごと）
   let execOk = false;
   try { const ex = await import("../lib/exec.js"); execOk = !!(await ex.execMe()); } catch { /* noop */ }
@@ -96,7 +101,7 @@ export async function render(root) {
   // 絞り込み（プロジェクト/分類/担当/期限/完了表示）のいずれかがアクティブか。0件時の空状態出し分け用。
   const filtersActive = !!(V.proj || V.cat || V.qaWho || V.qaDue || V.doneMode !== "hide");
 
-  const manual = V.manualMode;
+  const manual = V.manualMode && !isOutline; // アウトライン中はマイソート（手動順）を無効化（階層が順序）
   // 選択はマイソート中のみ有効。表示中のタスクに限定（フィルタ/モード変更で掃除）
   if (!manual) { selectedIds.clear(); anchorId = null; }
   else { const vis = new Set(rows.map((r) => r.t.id)); selectedIds.forEach((id) => { if (!vis.has(id)) selectedIds.delete(id); }); }
@@ -134,14 +139,26 @@ export async function render(root) {
       <button class="tb-sc-x" data-i="${i}" title="この条件を外す">×</button></span>`;
   }).join("");
 
+  // アウトライン本体（フィルタ後のタスク集合からツリーを構築。親が除外され子が残ったら子をルート扱い）。
+  const olBody = isOutline ? buildOutlineHtml(rows.map((r) => r.t)) : "";
+  // 最上部の定期帯（recurrences を要約して軽く一覧。両モード共通・0件なら出さない）
+  const recBand = recurrenceBandHtml(recurrences, members);
+
+  const subtitle = isOutline
+    ? "プロジェクト＞タスク階層"
+    : (manual ? "・ 行をどこでもドラッグして自分用に並べ替え" : `・ ソート条件を重ねて並べ替え（列ヘッダ: クリック=第1条件 / Shift+クリック=条件を追加・最大${MAX_SORTS}）`);
   root.innerHTML = `
     <style>${css()}</style>
-    <h1 class="vtitle">タスク一覧 <small>${rows.length}件 ${manual ? "・ 行をどこでもドラッグして自分用に並べ替え" : `・ ソート条件を重ねて並べ替え（列ヘッダ: クリック=第1条件 / Shift+クリック=条件を追加・最大${MAX_SORTS}）`}</small></h1>
+    <h1 class="vtitle">タスク一覧 <small>${rows.length}件 ${subtitle}</small></h1>
     <div class="tb-tools">
       <button id="tb-add" class="tb-add">タスク追加</button>
-      <button id="tb-manual" class="tb-manbtn${manual ? " on" : ""}" title="自分だけの手動ソート">${icon("hand")} マイソート</button>
-      <span class="tb-sortwrap${manual ? " dim" : ""}">ソート条件: <span class="tb-chips">${chips || `<span class="tb-sc-none">なし（既定: 期限順）</span>`}</span>
-        ${V.sorts.length < MAX_SORTS ? `<select id="tb-addsort" class="tb-addsort">${addOpts}</select>` : `<span class="tb-sc-none">最大${MAX_SORTS}件</span>`}</span>
+      <span class="tb-seg" role="tablist">
+        <button class="tb-seg-b${!isOutline ? " on" : ""}" data-mode="table">表</button>
+        <button class="tb-seg-b${isOutline ? " on" : ""}" data-mode="outline">アウトライン</button>
+      </span>
+      ${isOutline ? "" : `<button id="tb-manual" class="tb-manbtn${manual ? " on" : ""}" title="自分だけの手動ソート">${icon("hand")} マイソート</button>`}
+      ${isOutline ? "" : `<span class="tb-sortwrap${manual ? " dim" : ""}">ソート条件: <span class="tb-chips">${chips || `<span class="tb-sc-none">なし（既定: 期限順）</span>`}</span>
+        ${V.sorts.length < MAX_SORTS ? `<select id="tb-addsort" class="tb-addsort">${addOpts}</select>` : `<span class="tb-sc-none">最大${MAX_SORTS}件</span>`}</span>`}
       <select id="tb-proj">${projOpts}</select>
       <select id="tb-cat">${catOpts}</select>
       <select id="tb-done" title="完了タスクの表示">
@@ -167,20 +184,34 @@ export async function render(root) {
       ${mysorts.map((m, i) => `<span class="tb-pz"><button class="tb-mz-a" data-mi="${i}" title="この手動順を適用">${esc(m.name)}</button><button class="tb-mz-x" data-mi="${i}" title="削除">×</button></span>`).join("") || `<span class="tb-sc-none">まだありません</span>`}
       <button class="tb-psave" id="tb-msave" title="今の手動のソート順に名前を付けて保存">${icon("save")} 今のソートを保存</button>
     </div>` : ""}
-    ${(presets.length || canEditPresets) && !manual ? `<div class="tb-presets">
+    ${(presets.length || canEditPresets) && !manual && !isOutline ? `<div class="tb-presets">
       <span class="tb-pl">プリセット<span class="tb-pl-g" title="チーム全員で共有">${icon("globe", { size: 12 })}</span></span>
       ${presets.map((p, i) => `<span class="tb-pz" data-pi="${i}"><button class="tb-pz-a" data-pi="${i}" title="このソートを適用">${esc(p.name)}</button>${canEditPresets ? `<button class="tb-pz-x" data-pi="${i}" title="削除（全員に反映）">×</button>` : ""}</span>`).join("") || `<span class="tb-sc-none">まだありません</span>`}
       ${canEditPresets ? `<button class="tb-psave" id="tb-psave" title="今の組み合わせソートを共有プリセットとして保存">${icon("save")} 現在のソートを保存</button>` : ""}
     </div>` : ""}
-    <div class="card tb-wrap"><table class="tb">
+    ${recBand}
+    ${isOutline
+      ? `<div class="card ol-card">${olBody || `<div class="ol-empty">${filtersActive ? "条件に一致するタスクがありません。" : "タスクがありません。"}</div>`}</div>`
+      : `<div class="card tb-wrap"><table class="tb">
       <thead><tr>${cols().map((c) => th(c, manual)).join("")}</tr></thead>
       <tbody>${rows.length ? rows.map((r, i) => rowHtml(r, members, i, manual)).join("") : emptyRow(filtersActive)}</tbody>
-    </table></div>`;
+    </table></div>`}`;
 
   const persist = () => saveView(UID, V);
   const reRender = () => { persist(); render(root); };
 
-  root.querySelector("#tb-manual").onclick = () => { V.manualMode = !V.manualMode; reRender(); };
+  // 表/アウトライン セグメント切替: V.modeを保存。#/outline 経由で来ていても、ここで選んだら #/list 正規へ寄せる。
+  root.querySelectorAll(".tb-seg-b").forEach((b) => {
+    b.onclick = () => {
+      const next = b.dataset.mode === "outline" ? "outline" : "table";
+      if (next === mode) return;
+      V.mode = next; persist();
+      if (location.hash.includes("outline")) { location.hash = "#/list"; } // hash由来の強制を解除→hashchangeで再描画
+      else render(root);
+    };
+  });
+  const manBtn = root.querySelector("#tb-manual");
+  if (manBtn) manBtn.onclick = () => { V.manualMode = !V.manualMode; reRender(); };
   root.querySelector("#tb-proj").onchange = (e) => { V.proj = e.target.value; reRender(); };
   root.querySelector("#tb-cat").onchange = (e) => { V.cat = e.target.value; reRender(); };
   root.querySelectorAll(".tb-qa").forEach((b) => {
@@ -224,6 +255,26 @@ export async function render(root) {
   root.querySelectorAll("tr[data-id]").forEach((tr) => {
     tr.onclick = (e) => { if (V.manualMode || e.target.closest(".tb-fable")) return; openTaskForm({ taskId: +tr.dataset.id, onSaved: () => render(root) }); };
     tr.oncontextmenu = (e) => { e.preventDefault(); openRowMenu(e.clientX, e.clientY, +tr.dataset.id, tasks, root); };
+  });
+  // アウトライン: 折りたたみトグル（展開/折りたたみのみ）＋ 行クリックで編集
+  root.querySelectorAll(".ol-tw").forEach((tw) => {
+    if (!tw.dataset.id) return; // 子なしのプレースホルダは無反応
+    tw.onclick = (e) => { e.stopPropagation(); const id = +tw.dataset.id; olCollapsed.has(id) ? olCollapsed.delete(id) : olCollapsed.add(id); render(root); };
+  });
+  root.querySelectorAll(".ol-row").forEach((rowEl) => {
+    rowEl.onclick = (e) => {
+      if (e.target.closest(".ol-tw:not(.none)")) return; // 実トグルだけは展開/折りたたみ専用
+      openTaskForm({ taskId: +rowEl.dataset.id, onSaved: () => render(root) });
+    };
+  });
+  // 最上部の定期帯: ヘッダで折りたたみ（本人ごとに永続）＋ 行クリックで編集モーダル
+  const recHead = root.querySelector("#tb-rec-head");
+  if (recHead) recHead.onclick = () => { setRecCollapsed(UID, !loadRecCollapsed(UID)); render(root); };
+  root.querySelectorAll(".tb-rec-row").forEach((rowEl) => {
+    rowEl.onclick = () => {
+      const rec = (recurrences || []).find((x) => x.id === +rowEl.dataset.rid);
+      if (rec) openRecurrenceForm({ existing: rec, members, holidaysByDate, onSaved: () => { invalidate(); render(root); } });
+    };
   });
   root.querySelectorAll(".tb-stbtn").forEach((b) => {
     b.onclick = (e) => { e.stopPropagation(); openStatusMenu(b, +b.dataset.st, tasks, root); };
@@ -717,6 +768,79 @@ function rowHtml(r, members, i, manual) {
   </tr>`;
 }
 
+// ── アウトライン（階層）表示。outline.js から移植。フィルタ後のタスク集合からツリーを作る。 ──
+// 親が除外され子が残る場合、buildTaskTree は「どの subtask にもならないタスク」をルートにするので、
+// フィルタ後集合だけ渡せば残った子は自動的にルート扱いになり表示落ちしない。
+const olDueLabel = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(5, 10).replace("-", "/") : "");
+function buildOutlineHtml(tasks) {
+  const forest = buildTaskTree(tasks);
+  const counts = olCountChildren(forest);
+  const out = [];
+  const walk = (node, depth) => {
+    out.push(olRowHtml(node, depth, counts));
+    if (!olCollapsed.has(node.task.id)) for (const c of node.children) walk(c, depth + 1);
+  };
+  forest.forEach((n) => walk(n, 0));
+  return out.join("");
+}
+function olCountChildren(forest) {
+  const m = new Map();
+  const visit = (n) => { let done = 0; for (const c of n.children) { if (c.task.done) done++; visit(c); } m.set(n.task.id, { done, total: n.children.length }); };
+  forest.forEach(visit);
+  return m;
+}
+function olRowHtml(node, depth, counts) {
+  const t = node.task;
+  const has = node.children.length > 0;
+  const open = !olCollapsed.has(t.id);
+  const st = statusOf(t);
+  const who = (t.assignees || [])[0];
+  const wn = who ? (who.name || who.username) : "";
+  const cc = counts.get(t.id);
+  const childInfo = has ? `<span class="ol-cc">${cc.done}/${cc.total}</span>` : "";
+  const tw = has ? `<span class="ol-tw" data-id="${t.id}">${open ? "▾" : "▸"}</span>` : `<span class="ol-tw none"></span>`;
+  const due = olDueLabel(t);
+  return `<div class="ol-row" data-id="${t.id}" style="padding-left:${12 + depth * 22}px">
+    ${tw}
+    <span class="ol-cb ${st}"></span>
+    <span class="ol-name ${t.done ? "done" : ""}">${esc(t.title)}</span>
+    ${childInfo}
+    <span class="ol-meta">
+      ${who ? `<span class="ol-ava" style="background:${member_color(who.id)}">${esc((wn[0] || "?"))}</span>` : ""}
+      ${due ? `<span class="ol-due">${due}</span>` : ""}
+      <span class="ol-st ${st}">${STATUS[st].label}</span>
+    </span>
+  </div>`;
+}
+
+// ── 最上部の定期帯（定例業務・定期MTG）。recurrences を軽く要約して表示。折りたたみ可。0件なら出さない。 ──
+const RECKEY = (uid) => `ts.list.reccol.${uid ?? "anon"}`;
+function loadRecCollapsed(uid) { try { return localStorage.getItem(RECKEY(uid)) === "1"; } catch { return false; } }
+function setRecCollapsed(uid, v) { try { localStorage.setItem(RECKEY(uid), v ? "1" : "0"); } catch { /* noop */ } }
+function recurrenceBandHtml(recurrences, members) {
+  const list = recurrences || [];
+  if (!list.length) return "";
+  const collapsed = loadRecCollapsed(UID);
+  const nameOf = (id) => { const m = (members || []).find((x) => x.id === id); return m ? (m.name || m.username) : `user${id}`; };
+  const rows = list.map((rec) => {
+    const s = summarizeRecurrence(rec);
+    const ic = rec.kind === "task" ? icon("repeat", { size: 13 }) : icon("calendar", { size: 13 });
+    const names = (rec.assignee_ids || []).map(nameOf);
+    const who = rec.rotation ? `持ち回り: ${names.join(" → ") || "—"}` : (names.join("・") || "—");
+    const meta = [s.rep, s.time, s.durTxt].filter(Boolean).join(" ・ ");
+    return `<div class="tb-rec-row" data-rid="${rec.id}" title="クリックで編集">
+      <span class="tb-rec-ic">${ic}</span>
+      <span class="tb-rec-t">${esc(rec.title)}</span>
+      <span class="tb-rec-m">${esc(meta)}</span>
+      <span class="tb-rec-w">${esc(who)}</span>
+    </div>`;
+  }).join("");
+  return `<div class="tb-rec">
+    <button type="button" id="tb-rec-head" class="tb-rec-head">${icon("repeat", { size: 12 })} 定例業務・定期MTG <span class="tb-rec-cnt">${list.length}件</span><span class="tb-rec-car">${collapsed ? "▸" : "▾"}</span></button>
+    ${collapsed ? "" : `<div class="tb-rec-list">${rows}</div>`}
+  </div>`;
+}
+
 function css() {
   return `
   .tb-tools{display:flex;gap:10px;align-items:center;margin:0 0 14px;flex-wrap:wrap}
@@ -844,5 +968,55 @@ function css() {
   .tb-qa:hover{border-color:${C.fill};color:${C.fill}}
   .tb-qa.on{background:${C.fill};border-color:${C.fill};color:#fff;font-weight:600}
   .tb-qclr{color:${C.muted}}.tb-qclr:hover{color:${C.over};border-color:${C.over}}
-  .tb-empty{text-align:center;color:${C.muted};padding:30px}`;
+  .tb-empty{text-align:center;color:${C.muted};padding:30px}
+  /* 表/アウトライン セグメント切替 */
+  .tb-seg{display:inline-flex;border:1px solid ${C.line};border-radius:8px;overflow:hidden;background:#fff}
+  .tb-seg-b{font:inherit;font-size:12.5px;font-weight:600;padding:6px 13px;border:0;background:transparent;color:${C.muted};cursor:pointer}
+  .tb-seg-b + .tb-seg-b{border-left:1px solid ${C.line}}
+  .tb-seg-b:hover:not(.on){color:${C.ink}}
+  .tb-seg-b.on{background:#eaf2ff;color:${C.fill}}
+  /* 最上部の定期帯（軽く・控えめ） */
+  .tb-rec{margin:-4px 0 14px;border:1px solid ${C.line};border-radius:10px;background:#fbfcfe;overflow:hidden}
+  .tb-rec-head{display:flex;align-items:center;gap:6px;width:100%;font:inherit;font-size:11.5px;font-weight:700;color:${C.muted};background:transparent;border:0;padding:8px 12px;cursor:pointer;text-align:left}
+  .tb-rec-head:hover{color:${C.ink}}
+  .tb-rec-cnt{font-size:10.5px;font-weight:600;color:${C.muted};background:${C.track};border-radius:10px;padding:1px 7px}
+  .tb-rec-car{margin-left:auto;font-size:10px;opacity:.7}
+  .tb-rec-list{border-top:1px solid ${C.line}}
+  .tb-rec-row{display:flex;align-items:center;gap:10px;padding:6px 12px;font-size:12px;color:${C.ink};cursor:pointer;border-top:1px solid ${C.track}}
+  .tb-rec-row:first-child{border-top:0}
+  .tb-rec-row:hover{background:#f3f8ff}
+  .tb-rec-ic{flex:none;color:${C.fill};display:inline-flex}
+  .tb-rec-t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:34%}
+  .tb-rec-m{color:${C.muted};font-size:11.5px;white-space:nowrap}
+  .tb-rec-w{margin-left:auto;color:${C.muted};font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:30%;flex:none}
+  /* アウトライン（階層）= outline.js から移植 */
+  .ol-card{padding:6px 0}
+  .ol-row{display:flex;align-items:center;gap:8px;padding:7px 14px 7px 0;border-bottom:1px solid ${C.line};font-size:13.5px;cursor:pointer}
+  .ol-row:last-child{border-bottom:0}
+  .ol-row:hover{background:#f7fbff}
+  .ol-tw{width:26px;height:26px;margin:-6px 0;flex:none;display:grid;place-items:center;color:${C.muted};cursor:pointer;font-size:13px;line-height:1;user-select:none;border-radius:6px}
+  .ol-tw:not(.none):hover{background:#e7eef7;color:${C.fill}}
+  .ol-tw.none{cursor:pointer;visibility:hidden}
+  .ol-cb{width:13px;height:13px;border-radius:4px;flex:none;border:1.5px solid ${C.line}}
+  .ol-cb.done{background:${C.free};border-color:${C.free}}
+  .ol-cb.doing{background:#eaf2ff;border-color:${C.fill}}
+  .ol-name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ol-name.done{color:${C.muted};text-decoration:line-through}
+  .ol-cc{font-size:10.5px;color:${C.muted};background:#f0f1f4;border-radius:10px;padding:1px 7px;flex:none}
+  .ol-meta{margin-left:auto;display:flex;align-items:center;gap:8px;flex:none}
+  .ol-ava{width:19px;height:19px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:10px;font-weight:700}
+  .ol-due{font-size:11.5px;color:${C.muted};font-variant-numeric:tabular-nums}
+  .ol-st{font-size:10.5px;font-weight:600;border-radius:20px;padding:1px 8px}
+  .ol-st.todo{color:${C.muted};background:#f0f1f4}.ol-st.doing{color:${C.fill};background:#eaf2ff}.ol-st.waiting{color:#9a6a00;background:#fbf0d6}.ol-st.done{color:${C.free};background:#eaf7ef}
+  .ol-empty{padding:30px;text-align:center;color:${C.muted}}
+  /* ===== ダークモード（淡色直書きをダーク側へ上書き。ライト不変） ===== */
+  html[data-theme="dark"] .tb-seg{background:var(--card)}
+  html[data-theme="dark"] .tb-seg-b.on{background:rgba(58,134,255,.18)}
+  html[data-theme="dark"] .tb-rec{background:rgba(255,255,255,.03)}
+  html[data-theme="dark"] .tb-rec-row:hover{background:rgba(255,255,255,.05)}
+  html[data-theme="dark"] .tb-rec-cnt{background:rgba(255,255,255,.08)}
+  html[data-theme="dark"] .ol-row:hover{background:rgba(255,255,255,.05)}
+  html[data-theme="dark"] .ol-tw:not(.none):hover{background:${C.track};color:${C.fill}}
+  html[data-theme="dark"] .ol-cb.doing{background:rgba(58,134,255,.25);border-color:${C.fill}}
+  html[data-theme="dark"] .ol-cc{background:rgba(255,255,255,.08)}`;
 }
