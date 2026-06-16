@@ -110,8 +110,9 @@ export async function render(root) {
   const filtersActive = !!(V.proj || V.cat || V.qaWho || V.qaDue || V.doneMode !== "hide");
 
   const manual = V.manualMode && !isOutline; // アウトライン中はマイソート（手動順）を無効化（階層が順序）
-  // 選択はマイソート中のみ有効。表示中のタスクに限定（フィルタ/モード変更で掃除）
-  if (!manual) { selectedIds.clear(); anchorId = null; }
+  // 選択は表モード全般で有効（チェックボックス＋一括操作）。マイソート中はドラッグ移動にも併用。
+  // アウトライン中は選択を無効化。表示中のタスクに限定（フィルタ/モード変更で掃除）。
+  if (isOutline) { selectedIds.clear(); anchorId = null; }
   else { const vis = new Set(rows.map((r) => r.t.id)); selectedIds.forEach((id) => { if (!vis.has(id)) selectedIds.delete(id); }); }
   if (manual) {
     const allIds = rows.map((r) => r.t.id);
@@ -202,9 +203,10 @@ export async function render(root) {
     ${isOutline
       ? `<div class="card ol-card">${olBody || `<div class="ol-empty">${filtersActive ? "条件に一致するタスクがありません。" : "タスクがありません。"}</div>`}</div>`
       : `<div class="card tb-wrap"><table class="tb">
-      <thead><tr>${cols().map((c) => th(c, manual)).join("")}</tr></thead>
+      <thead><tr><th class="tb-selcol">${selAllHeadHtml(rows)}</th>${cols().map((c) => th(c, manual)).join("")}</tr></thead>
       <tbody>${rows.length ? rows.map((r, i) => rowHtml(r, members, i, manual)).join("") : emptyRow(filtersActive)}</tbody>
-    </table></div>`}`;
+    </table></div>`}
+    ${isOutline ? "" : bulkBarHtml(rows)}`;
 
   const persist = () => saveView(UID, V);
   const reRender = () => { persist(); render(root); };
@@ -262,7 +264,7 @@ export async function render(root) {
     };
   });
   root.querySelectorAll("tr[data-id]").forEach((tr) => {
-    tr.onclick = (e) => { if (V.manualMode || e.target.closest(".tb-fable")) return; openTaskForm({ taskId: +tr.dataset.id, onSaved: () => render(root) }); };
+    tr.onclick = (e) => { if (V.manualMode || e.target.closest(".tb-fable, .tb-rowck")) return; openTaskForm({ taskId: +tr.dataset.id, onSaved: () => render(root) }); };
     tr.oncontextmenu = (e) => { e.preventDefault(); openRowMenu(e.clientX, e.clientY, +tr.dataset.id, tasks, root); };
   });
   // 階層: 折りたたみトグル（展開/折りたたみのみ）＋ 行クリックで編集。トグルのたびに永続化。
@@ -315,6 +317,10 @@ export async function render(root) {
   root.querySelectorAll(".tb-priobtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openPrioMenu(b, +b.dataset.prio, tasks, root); }; });
   root.querySelectorAll(".tb-duebtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openDueMenu(b, +b.dataset.due, tasks, root, today); }; });
   root.querySelectorAll(".tb-estbtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openEstMenu(b, +b.dataset.est, tasks, root); }; });
+  // 行からプロジェクト変更（担当/分類/重要度セルと同様のクリックメニュー）。
+  root.querySelectorAll(".tb-projbtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openProjectMenu(b, +b.dataset.proj, tasks, projects, root); }; });
+  // 複数選択（チェックボックス＋全選択＋Shift範囲）＋ 一括操作バー。表モードのみ。
+  if (!isOutline) { wireSelection(root, rows, () => render(root)); wireBulk(root, rows, tasks, projects, members, today); }
   root.querySelectorAll(".tb-fable").forEach((b) => {
     b.onclick = async (e) => {
       e.stopPropagation(); b.disabled = true;
@@ -631,6 +637,134 @@ function openCategoryMenu(chipEl, id, tasks, labels, root) {
   openMenu(r.left, r.bottom + 4, build(), { keepOpen: true, rebuild: build, onClose: () => { if (dirty) { invalidate(); render(root); } } });
 }
 
+// プロジェクト（=親タスク扱いの project）のワンクリック変更（単一選択・即反映）。候補=data.projects。
+function openProjectMenu(chipEl, id, tasks, projects, root) {
+  closeRowMenu();
+  const t = (tasks || []).find((x) => x.id === id); if (!t) return;
+  const reload = () => { invalidate(); render(root); };
+  const cur = t.project_id || 0;
+  const items = (projects || []).map((p) => ({
+    label: p.title, check: cur === p.id,
+    on: () => { if (cur === p.id) return reload(); updateTask(id, { project_id: p.id }).then(reload).catch(() => {}); },
+  }));
+  const r = chipEl.getBoundingClientRect();
+  openMenu(r.left, r.bottom + 4, items);
+}
+
+// ── 複数選択（チェックボックス＋全選択＋Shift範囲）。既存 selectedIds/anchorId を活用。 ──
+function wireSelection(root, rows, rerender) {
+  const ids = rows.map((r) => r.t.id);
+  const toggle = (id) => { selectedIds.has(id) ? selectedIds.delete(id) : selectedIds.add(id); anchorId = id; };
+  const range = (id) => {
+    const a = ids.indexOf(anchorId), b = ids.indexOf(id);
+    if (a < 0) { selectedIds.add(id); anchorId = id; return; }
+    const [lo, hi] = a < b ? [a, b] : [b, a];
+    for (let i = lo; i <= hi; i++) selectedIds.add(ids[i]);
+  };
+  root.querySelectorAll(".tb-rowck[data-ck]").forEach((ck) => {
+    ck.onclick = (e) => {
+      e.stopPropagation(); e.preventDefault();
+      const id = +ck.dataset.ck;
+      if (e.shiftKey && anchorId != null) range(id); else toggle(id);
+      rerender();
+    };
+  });
+  const all = root.querySelector("#tb-selall");
+  if (all) all.onclick = (e) => {
+    e.stopPropagation();
+    const allSel = ids.length && ids.every((id) => selectedIds.has(id));
+    if (allSel) { ids.forEach((id) => selectedIds.delete(id)); anchorId = null; }
+    else { ids.forEach((id) => selectedIds.add(id)); anchorId = ids[ids.length - 1] ?? null; }
+    rerender();
+  };
+}
+
+// ── 一括操作バー（選択タスク全件に適用）。各アクションは既存の単体ロジック/APIを流用。 ──
+function wireBulk(root, rows, tasks, projects, members, today) {
+  const bar = root.querySelector("#tb-bulk");
+  if (!bar) return;
+  const busy = root.querySelector("#tb-bk-busy");
+  const targetIds = () => [...selectedIds];
+  const rerender = () => render(root);
+  const reload = () => { invalidate(); render(root); };
+  // 選択全件に fn を直列適用（失敗は握って続行）→ 完了後リロード。処理中は簡易表示。
+  const runAll = async (label, fn) => {
+    const ids = targetIds(); if (!ids.length) return;
+    let ok = 0, fail = 0;
+    bar.querySelectorAll(".tb-bk-a, .tb-bk-clr").forEach((b) => (b.disabled = true));
+    if (busy) busy.textContent = `${label}中… 0/${ids.length}`;
+    for (const id of ids) {
+      try { await fn(id); ok++; } catch { fail++; }
+      if (busy) busy.textContent = `${label}中… ${ok + fail}/${ids.length}`;
+    }
+    if (fail && busy) busy.textContent = `${fail}件失敗（${ok}件成功）`;
+    reload();
+  };
+  const taskOf = (id) => (tasks || []).find((t) => t.id === id);
+
+  const clr = root.querySelector("#tb-bk-clr");
+  if (clr) clr.onclick = () => { selectedIds.clear(); anchorId = null; rerender(); };
+
+  const ZERO = "0001-01-01T00:00:00Z";
+  const setDue = (id, iso) => updateTask(id, { due_date: iso ? iso + "T00:00:00Z" : ZERO });
+  // 各タスクの現在期限を相対シフト（期限なしは今日起点）。
+  const slide = (days) => runAll("期限変更", (id) => {
+    const t = taskOf(id);
+    const cur = (t && t.due_date && !t.due_date.startsWith("0001")) ? t.due_date.slice(0, 10) : today;
+    return setDue(id, shiftISO(cur, days));
+  });
+
+  bar.querySelectorAll(".tb-bk-a").forEach((b) => {
+    b.onclick = () => {
+      const r = b.getBoundingClientRect();
+      switch (b.dataset.bk) {
+        case "del": {
+          const ids = targetIds();
+          if (!confirm(`${ids.length}件のタスクを削除しますか？（元に戻せません）`)) return;
+          selectedIds.clear(); anchorId = null;
+          runAll("削除", (id) => deleteTask(id));
+          break;
+        }
+        case "due":
+          openMenu(r.left, r.bottom + 4, [
+            { label: "−1日", on: () => slide(-1) },
+            { label: "+1日", on: () => slide(1) },
+            { label: "+1週間", on: () => slide(7) },
+            { sep: true },
+            { label: "日付指定（全件）", input: "date", value: "", on: (v) => { if (v) runAll("期限変更", (id) => setDue(id, v)); } },
+            { sep: true },
+            { label: "クリア（期限なし）", danger: true, on: () => runAll("期限変更", (id) => setDue(id, null)) },
+          ]);
+          break;
+        case "who":
+          openMenu(r.left, r.bottom + 4, (members || []).map((m) => ({
+            label: m.name || m.username,
+            on: () => runAll("担当変更", (id) => addAssignee(id, m.id)),
+          })));
+          break;
+        case "proj":
+          openMenu(r.left, r.bottom + 4, (projects || []).map((p) => ({
+            label: p.title,
+            on: () => runAll("プロジェクト変更", (id) => updateTask(id, { project_id: p.id })),
+          })));
+          break;
+        case "status":
+          openMenu(r.left, r.bottom + 4, [
+            { label: "未着手", on: () => runAll("ステータス変更", (id) => Promise.all([updateTask(id, { done: false, percent_done: 0, started_at: null }), setTaskWaiting(taskOf(id), false)])) },
+            { label: "進行中", on: () => runAll("ステータス変更", (id) => { const t = taskOf(id); const keepPct = (t && (t.done || t.percent_done >= 100)) ? 0 : ((t && t.percent_done) || 0); return Promise.all([updateTask(id, { done: false, percent_done: keepPct, started_at: new Date().toISOString() }), setTaskWaiting(t, false)]); }) },
+            { label: "完了", on: () => runAll("ステータス変更", (id) => Promise.all([updateTask(id, { done: true, percent_done: 100 }), setTaskWaiting(taskOf(id), false)])) },
+          ]);
+          break;
+        case "prio":
+          openMenu(r.left, r.bottom + 4, [[0, "なし"], [1, "低"], [2, "中"], [3, "高"], [4, "MUST"]].map(([v, label]) => ({
+            label, on: () => runAll("重要度変更", (id) => updateTask(id, { priority: v })),
+          })));
+          break;
+      }
+    };
+  });
+}
+
 // プリセット名の候補（軸ラベルを連結）
 function presetSuggest(sorts) {
   return (sorts || []).map((s) => (AXES[s.key] ? AXES[s.key].label : s.key) + (s.dir > 0 ? "↑" : "↓")).join("・") || "マイプリセット";
@@ -656,7 +790,7 @@ function wireDrag(root, rerender) {
   rowsArr().forEach((dragRow) => {
     dragRow.addEventListener("pointerdown", (e) => {
       if (e.button && e.button !== 0) return;
-      if (e.target.closest("button, a, input, select")) return; // ▶やリンク等は各自のクリックに任せる
+      if (e.target.closest("button, a, input, select, .tb-rowck")) return; // ▶やリンク・チェック等は各自のクリックに任せる
       const dragId = +dragRow.dataset.id;
       // 修飾キー＝選択操作（ドラッグしない）
       if (e.ctrlKey || e.metaKey) { e.preventDefault(); toggleSel(dragId); return; }
@@ -749,7 +883,7 @@ const cols = () => [
   { k: "est", label: "見積" }, { k: "pct", label: "進捗" }, { k: "state", label: "ステータス" },
 ];
 // 0件時の空状態行。フィルタがアクティブなら「条件に一致するタスクがありません」＋解除ボタン、無ければ「タスクがありません」のみ。
-const emptyRow = (filtersActive) => `<tr><td colspan="${cols().length}" class="tb-empty">`
+const emptyRow = (filtersActive) => `<tr><td colspan="${cols().length + 1}" class="tb-empty">`
   + (filtersActive
     ? `条件に一致するタスクがありません <button id="tb-empty-clr" class="tb-qa tb-qclr" type="button">絞り込みを解除</button>`
     : `タスクがありません`)
@@ -768,6 +902,35 @@ const th = (c, manual) => {
   return `<th data-k="${c.k}" class="sortable">${c.label}${badge}</th>`;
 };
 
+// ヘッダの全選択チェック（現在の絞り込み結果＝表示中の全行が選択済みかで状態を出し分け）
+function selAllHeadHtml(rows) {
+  const total = rows.length;
+  const sel = rows.filter((r) => selectedIds.has(r.t.id)).length;
+  const state = total && sel === total ? "on" : (sel ? "part" : "");
+  const ic = state === "on" ? icon("check", { size: 12 }) : (state === "part" ? "–" : "");
+  return `<span class="tb-rowck tb-allck ${state}" id="tb-selall" role="checkbox" aria-checked="${state === "on"}" title="全選択（現在の絞り込み結果）">${ic}</span>`;
+}
+
+// 一括操作バー（sticky）。選択0件なら出さない。各アクションは下のwireBulkで配線。
+function bulkBarHtml(rows) {
+  const n = selectedIds.size;
+  if (!n) return "";
+  const btn = (act, label) => `<button class="tb-bk-a${act === "del" ? " danger" : ""}" data-bk="${act}">${esc(label)}</button>`;
+  return `<div class="tb-bulk" id="tb-bulk">
+    <span class="tb-bk-n">${n}件選択中</span>
+    <span class="tb-bk-acts">
+      ${btn("due", "期限")}
+      ${btn("who", "担当者")}
+      ${btn("proj", "プロジェクト")}
+      ${btn("status", "ステータス")}
+      ${btn("prio", "重要度")}
+      ${btn("del", "削除")}
+    </span>
+    <span class="tb-bk-busy" id="tb-bk-busy"></span>
+    <button class="tb-bk-clr" id="tb-bk-clr">選択解除</button>
+  </div>`;
+}
+
 function rowHtml(r, members, i, manual) {
   const id = r.t.id;
   const wn = r.who ? (r.who.name || r.who.username) : "";
@@ -784,8 +947,12 @@ function rowHtml(r, members, i, manual) {
   const dueBtn = `<button class="tb-cell tb-duebtn ${dueCls}" data-due="${id}" title="クリックで期限を変更">${r.due ? r.due.slice(5).replace("-", "/") : "—"}<span class="tb-cell-car">▾</span></button>`;
   const estBtn = `<button class="tb-cell tb-num tb-estbtn" data-est="${id}" title="クリックで見積を変更">${r.est ? fmtH(r.est) : "—"}<span class="tb-cell-car">▾</span></button>`;
   const st = `<button class="tb-st tb-stbtn ${r.status}" data-st="${id}" title="クリックでステータス変更">${STATUS[r.status].label}<span class="tb-st-car">▾</span></button>`;
-  return `<tr data-id="${id}" class="${manual ? "tb-draggable" : ""}${manual && selectedIds.has(id) ? " tb-sel" : ""}">
-    <td>${r.parent ? `<span class="tb-pj"><i style="background:${projColor(r.parent.id)}"></i>${esc(r.parent.title)}</span>` : `<span class="tb-pj none">—</span>`}</td>
+  const sel = selectedIds.has(id);
+  const projInner = r.parent ? `<span class="tb-pj"><i style="background:${projColor(r.parent.id)}"></i>${esc(r.parent.title)}</span>` : `<span class="tb-pj none">—</span>`;
+  const projBtn = `<button class="tb-cell tb-projbtn" data-proj="${id}" title="クリックでプロジェクトを変更">${projInner}<span class="tb-cell-car">▾</span></button>`;
+  return `<tr data-id="${id}" class="${manual ? "tb-draggable" : ""}${sel ? " tb-sel" : ""}">
+    <td class="tb-selcol"><span class="tb-rowck${sel ? " on" : ""}" data-ck="${id}" role="checkbox" aria-checked="${sel}" title="選択">${sel ? icon("check", { size: 12 }) : ""}</span></td>
+    <td>${projBtn}</td>
     <td class="tb-title">${esc(r.title)}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">${icon("flag", { size: 12 })}</span>` : ""}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">${icon("play", { size: 11 })}</button>` : ""}</td>
     <td>${whoBtn}</td>
     <td>${kind}</td>
@@ -956,6 +1123,23 @@ function css() {
   .tb tbody tr.tb-draggable{cursor:grab;user-select:none;touch-action:pan-y}
   .tb tbody tr.tb-sel td{background:#e6f0ff}
   .tb tbody tr.tb-sel td:first-child{box-shadow:inset 3px 0 0 ${C.fill}}
+  /* 選択チェックボックス列 */
+  .tb th.tb-selcol,.tb td.tb-selcol{width:34px;padding-left:14px;padding-right:4px}
+  .tb-rowck{display:inline-grid;place-items:center;width:17px;height:17px;border-radius:5px;border:1.5px solid ${C.line};background:#fff;color:#fff;cursor:pointer;font-weight:700;line-height:1}
+  .tb-rowck:hover{border-color:${C.fill};box-shadow:0 0 0 3px rgba(58,134,255,.12)}
+  .tb-rowck.on{background:${C.fill};border-color:${C.fill}}
+  .tb-rowck.part{background:${C.fill};border-color:${C.fill};color:#fff;font-size:12px}
+  /* 一括操作バー（sticky・選択時のみ） */
+  .tb-bulk{position:sticky;bottom:14px;z-index:20;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:14px 0 4px;padding:9px 14px;border:1px solid #cfe0ff;border-radius:12px;background:#fff;box-shadow:0 8px 26px rgba(20,30,50,.16)}
+  .tb-bk-n{font-size:12.5px;font-weight:700;color:${C.fill};white-space:nowrap}
+  .tb-bk-acts{display:inline-flex;gap:6px;flex-wrap:wrap}
+  .tb-bk-a{font:inherit;font-size:12.5px;font-weight:600;padding:6px 13px;border:1px solid ${C.line};border-radius:8px;background:#fff;color:${C.ink};cursor:pointer}
+  .tb-bk-a:hover{border-color:${C.fill};color:${C.fill};background:#eef4ff}
+  .tb-bk-a.danger{color:${C.over}}.tb-bk-a.danger:hover{border-color:${C.over};color:${C.over};background:#fdecec}
+  .tb-bk-a:disabled,.tb-bk-clr:disabled{opacity:.5;cursor:default}
+  .tb-bk-busy{font-size:11.5px;color:${C.muted};font-variant-numeric:tabular-nums}
+  .tb-bk-clr{font:inherit;font-size:12px;font-weight:600;margin-left:auto;padding:6px 12px;border:1px solid transparent;border-radius:8px;background:transparent;color:${C.muted};cursor:pointer}
+  .tb-bk-clr:hover{color:${C.ink};background:${C.track}}
   .tb-ghost-badge{position:absolute;top:-8px;right:-8px;min-width:20px;height:20px;border-radius:10px;background:${C.over};color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 5px;box-shadow:0 2px 6px rgba(0,0,0,.3)}
   /* 元の場所＝ギャップ: 文字も枠も無く、ただ柔らかい影が落ちているだけに見せる */
   /* 落下ギャップ＝フラットな薄いグレーの空き帯（グラデ無し・継ぎ目無し） */
@@ -1118,5 +1302,11 @@ function css() {
   html[data-theme="dark"] .ol-addsub{background:var(--card)}
   html[data-theme="dark"] .ol-addsub:hover{background:rgba(58,134,255,.18)}
   html[data-theme="dark"] .ol-addinp{background:var(--card)}
-  html[data-theme="dark"] .ol-addng{background:transparent}`;
+  html[data-theme="dark"] .ol-addng{background:transparent}
+  html[data-theme="dark"] .tb tbody tr.tb-sel td{background:rgba(58,134,255,.16)}
+  html[data-theme="dark"] .tb-rowck{background:var(--card)}
+  html[data-theme="dark"] .tb-rowck.on,html[data-theme="dark"] .tb-rowck.part{background:${C.fill};border-color:${C.fill}}
+  html[data-theme="dark"] .tb-bulk{background:var(--card);border-color:rgba(58,134,255,.4)}
+  html[data-theme="dark"] .tb-bk-a{background:var(--card)}
+  html[data-theme="dark"] .tb-bk-a:hover{background:rgba(58,134,255,.18)}`;
 }
