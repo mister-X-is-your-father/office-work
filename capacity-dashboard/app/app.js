@@ -143,6 +143,8 @@ function shell() {
   import("./views/pomodoro.js").then(({ mountPomodoro }) => {
     mountPomodoro(document.querySelector(".topbar"));
   }).catch(() => {});
+  // レビュー通知ベル（🔔・依頼者向け。承認/新着コメントを90秒ポーリングで拾い未読バッジ表示）
+  import("./views/notifbell.js").then(({ mountReviewBell }) => mountReviewBell(document.querySelector(".topbar"))).catch(() => {});
   // リマインダー通知（個人設定でON時のみ発火。多重起動はフラグで防止）
   if (!window.__tsNotify) {
     window.__tsNotify = true;
