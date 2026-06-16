@@ -3,7 +3,7 @@
 // 共有データ（DB）は一切変えないので、誰がどう並べても他メンバーの見え方に影響しない（衝突しない）。
 import { load, invalidate, projectName, isAiUser } from "../lib/store.js";
 import { savePresets } from "../lib/exec.js";
-import { updateTask, deleteTask, addAssignee, removeAssignee, addTaskLabel, removeTaskLabel, createLabel, setTaskWaiting, createTaskInProject, addRelation } from "../lib/api.js";
+import { updateTask, deleteTask, addAssignee, removeAssignee, addTaskLabel, removeTaskLabel, createLabel, setTaskWaiting, createTaskInProject, addRelation, removeRelation } from "../lib/api.js";
 import { PRIO, prioBucket, kindOf, isReviewTask, categoryLabels, categoryColor, REVIEW_LABEL, WAITING_LABEL, statusOf, STATUS } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 import { shiftISO, buildTaskTree } from "../lib/capacity.js";
@@ -323,6 +323,8 @@ export async function render(root) {
       openTaskForm({ taskId: +rowEl.dataset.id, onSaved: () => render(root) });
     };
   });
+  // 階層: ドラッグ＆ドロップで親（プロジェクト＝親タスク）へ付け替え。階層モードのみ。
+  if (isOutline) wireOutlineDnD(root, rows, () => render(root));
   // 階層: チェック（.ol-cb）で done を即トグル。行クリック（編集）とは分離。
   root.querySelectorAll(".ol-cb").forEach((cb) => {
     cb.onclick = (e) => {
@@ -913,6 +915,99 @@ function wireDrag(root, rerender) {
   });
 }
 
+// 階層モードのドラッグ＆ドロップ＝タスクを別の親（プロジェクト＝親タスク）の配下へ付け替える。
+// HTML5 DnD（draggable/dragstart/dragover/drop）。表モードの pointer ベースのマイソート移動とは別系統で混線しない。
+// 付け替え: 旧親から subtask を外し（removeRelation(oldParent,"subtask",child)）、新親に subtask を追加（addRelation(newParent,child,"subtask")）。
+// 向きは taskform.js:552-553 / openInlineSubtask と一致＝buildTaskTree が読む related_tasks.subtask（親→子）。
+function wireOutlineDnD(root, rows, rerender) {
+  const card = root.querySelector(".ol-card");
+  if (!card) return;
+  // 循環防止用の子孫集合: 各ノードID → その配下（自分自身＋全子孫）のIDセット。
+  const descend = new Map();
+  const collect = (node) => {
+    const set = new Set([node.task.id]);
+    for (const c of node.children) { collect(c); descend.get(c.task.id).forEach((id) => set.add(id)); }
+    descend.set(node.task.id, set);
+    return set;
+  };
+  buildTaskTree(rows.map((r) => r.t)).forEach(collect);
+
+  let dragId = null;       // 掴んでいるタスクID
+  let dragParent = null;   // 掴んでいるタスクの現在の親ID（"" or 数値）
+  const clearHints = () => card.querySelectorAll(".ol-drop-into, .ol-drop-root").forEach((el) => el.classList.remove("ol-drop-into", "ol-drop-root"));
+
+  card.querySelectorAll(".ol-row").forEach((rowEl) => {
+    rowEl.addEventListener("dragstart", (e) => {
+      // トグル/チェック/＋の上から掴んだら無効（各自のハンドラに任せる）
+      if (e.target.closest(".ol-tw:not(.none), .ol-cb, .ol-addsub")) { e.preventDefault(); return; }
+      dragId = +rowEl.dataset.id;
+      dragParent = rowEl.dataset.parent || "";
+      rowEl.classList.add("ol-dragging");
+      if (e.dataTransfer) { e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", String(dragId)); } catch { /* noop */ } }
+    });
+    rowEl.addEventListener("dragend", () => { rowEl.classList.remove("ol-dragging"); clearHints(); dragId = null; });
+
+    rowEl.addEventListener("dragover", (e) => {
+      if (dragId == null) return;
+      const targetId = +rowEl.dataset.id;
+      // 自分自身・自分の子孫への移動は禁止（循環防止）。既に同じ親（このターゲット）配下なら無視。
+      if (targetId === dragId || (descend.get(dragId) || new Set()).has(targetId)) return;
+      if (String(targetId) === String(dragParent)) return; // 既にこの行の子なら無視
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+      if (!rowEl.classList.contains("ol-drop-into")) { clearHints(); rowEl.classList.add("ol-drop-into"); }
+    });
+    rowEl.addEventListener("dragleave", (e) => { if (!rowEl.contains(e.relatedTarget)) rowEl.classList.remove("ol-drop-into"); });
+
+    rowEl.addEventListener("drop", (e) => {
+      if (dragId == null) return;
+      const newParent = +rowEl.dataset.id;
+      e.preventDefault(); e.stopPropagation();
+      clearHints();
+      if (newParent === dragId || (descend.get(dragId) || new Set()).has(newParent)) return; // 循環ガード（保険）
+      if (String(newParent) === String(dragParent)) return; // 同じ親へは何もしない
+      reparent(dragId, dragParent, newParent, rerender);
+    });
+  });
+
+  // ルート化ドロップ領域（カード余白＝最上位へ）。既存親があるタスクだけ受け付ける。
+  card.addEventListener("dragover", (e) => {
+    if (dragId == null || !dragParent) return;        // 既にルートなら無視
+    if (e.target.closest(".ol-row")) return;          // 行の上は各行が処理
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    if (!card.classList.contains("ol-drop-root")) { clearHints(); card.classList.add("ol-drop-root"); }
+  });
+  card.addEventListener("dragleave", (e) => { if (!card.contains(e.relatedTarget)) card.classList.remove("ol-drop-root"); });
+  card.addEventListener("drop", (e) => {
+    if (dragId == null || !dragParent) return;
+    if (e.target.closest(".ol-row")) return;          // 行ドロップは各行が処理済み
+    e.preventDefault();
+    clearHints();
+    reparent(dragId, dragParent, null, rerender);     // newParent=null＝ルート化（付与なし）
+  });
+}
+
+// 付け替えの実体: 旧親(あれば)から外し、新親(あれば)へ subtask 追加。完了後 invalidate→再描画、新親を自動展開。
+let _olReparentBusy = false;
+async function reparent(childId, oldParentId, newParentId, rerender) {
+  if (_olReparentBusy) return;
+  _olReparentBusy = true;
+  try {
+    if (oldParentId) await removeRelation(+oldParentId, "subtask", childId);
+    if (newParentId) {
+      await addRelation(+newParentId, childId, "subtask"); // 親→子（buildTaskTree が読む向き）
+      olCollapsed.delete(+newParentId); saveOlCollapsed(UID); // 新親を開いて移動先を見せる
+    }
+    invalidate();
+  } catch (e) {
+    alert("移動に失敗しました: " + (e && e.message ? e.message : ""));
+  } finally {
+    _olReparentBusy = false;
+    rerender();
+  }
+}
+
 const cols = () => [
   { k: "proj", label: "プロジェクト" }, { k: "title", label: "タスク" }, { k: "who", label: "担当" }, { k: null, label: "種別" },
   { k: "cat", label: "分類" }, { k: "prio", label: "重要度" }, { k: "due", label: "期限" },
@@ -1040,7 +1135,9 @@ function olRowHtml(node, depth, counts) {
   const childInfo = has ? `<span class="ol-cc">${cc.done}/${cc.total}</span>` : "";
   const tw = has ? `<span class="ol-tw" data-id="${t.id}">${open ? "▾" : "▸"}</span>` : `<span class="ol-tw none"></span>`;
   const due = olDueLabel(t);
-  return `<div class="ol-row" data-id="${t.id}" style="padding-left:${12 + depth * 22}px">
+  // 親付け替え用: 現在の親(プロジェクト=親タスク)のID。related_tasks.parenttask の先頭。ルートなら空。
+  const parentId = ((((t.related_tasks || {}).parenttask) || [])[0] || {}).id || "";
+  return `<div class="ol-row" data-id="${t.id}" data-parent="${parentId}" draggable="true" style="padding-left:${12 + depth * 22}px">
     ${tw}
     <span class="ol-cb ${st}" data-id="${t.id}" data-done="${t.done ? 1 : 0}" title="クリックで完了を切替"></span>
     <span class="ol-name ${t.done ? "done" : ""}">${esc(t.title)}</span>
@@ -1319,6 +1416,11 @@ function css() {
   .ol-cb:hover{border-color:${C.fill};box-shadow:0 0 0 3px rgba(58,134,255,.12)}
   .ol-cb.done{background:${C.free};border-color:${C.free}}
   .ol-cb.doing{background:#eaf2ff;border-color:${C.fill}}
+  /* 親付け替えDnD: 掴んだ行を薄く／ドロップ先（親候補）をハイライト／余白=最上位へ */
+  .ol-row[draggable="true"]{cursor:grab}
+  .ol-row.ol-dragging{opacity:.4}
+  .ol-row.ol-drop-into{background:#e7f0ff;box-shadow:inset 3px 0 0 ${C.fill};border-radius:6px}
+  .ol-card.ol-drop-root{box-shadow:inset 0 0 0 2px ${C.fill};border-radius:12px}
   /* 全展開/全折りたたみ（セグメント付近の小ボタン） */
   .tb-olexp{display:inline-flex;gap:5px}
   .tb-olx{font:inherit;font-size:11.5px;font-weight:600;padding:5px 10px;border:1px solid ${C.line};border-radius:8px;background:#fff;color:${C.muted};cursor:pointer;display:inline-flex;align-items:center;gap:4px}
@@ -1354,6 +1456,7 @@ function css() {
   html[data-theme="dark"] .tb-rec-row:hover{background:rgba(255,255,255,.05)}
   html[data-theme="dark"] .tb-rec-cnt{background:rgba(255,255,255,.08)}
   html[data-theme="dark"] .ol-row:hover{background:rgba(255,255,255,.05)}
+  html[data-theme="dark"] .ol-row.ol-drop-into{background:rgba(58,134,255,.18)}
   html[data-theme="dark"] .ol-tw:not(.none):hover{background:${C.track};color:${C.fill}}
   html[data-theme="dark"] .ol-cb.doing{background:rgba(58,134,255,.25);border-color:${C.fill}}
   html[data-theme="dark"] .ol-cc{background:rgba(255,255,255,.08)}
