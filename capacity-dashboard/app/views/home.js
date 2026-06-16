@@ -1,10 +1,12 @@
-// 総合ホーム（実データ）。縦積み: KPI / 今日の稼働予定 / 稼働プラン / 月間ガント。
+// 総合ホーム（実データ）。縦積み: KPI / やること / 今日の稼働予定 / 稼働プラン / 月間ガント。
 // 各セクションは折りたたみヘッダ付き。開閉状態は本人ごと localStorage に保存・復元。
-import { load } from "../lib/store.js";
+import { load, isAiUser, projectName } from "../lib/store.js";
 import { loadByMember, estimateVsActual, triage } from "../lib/capacity.js";
 import { capacityOn } from "../lib/recurrence.js";
 import { whoami } from "../lib/api.js";
-import { C, fmtH, todayISO } from "../lib/ui.js";
+import { statusOf } from "../lib/kinds.js";
+import { C, esc, fmtH, todayISO, member_color } from "../lib/ui.js";
+import { openTaskForm } from "./taskform.js";
 import { icon } from "../lib/icons.js";
 import * as today from "./today.js";
 import * as workplan from "./workplan.js";
@@ -13,7 +15,62 @@ import * as gantt from "./gantt.js";
 // 折りたたみ状態の保存キー（本人ごと）。共用ブラウザでも個人別に保持。
 const foldKey = (uid) => `ts.home.fold.${uid ?? "anon"}`;
 // 既定（未保存時）: 全セクション開。KPI は折りたたみ対象外（常時表示）。
-const DEFAULT_FOLD = { today: false, plan: false, gantt: false };
+const DEFAULT_FOLD = { todo: false, today: false, plan: false, gantt: false };
+
+// 期限 ISO（未設定/ゼロ日付＝空）。一覧/quad と同じ判定。
+const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(0, 10) : "");
+// today から n 日後の YYYY-MM-DD。
+const shiftISO = (iso, n) => { const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+// 人間担当（AI担当 fable は担当とみなさない＝未アサイン扱い。table.js の humanAssignees と同義）。
+const humanAssignees = (t) => (t.assignees || []).filter((a) => !isAiUser(a));
+// 未完了 = done でない（statusOf が "done" 以外）。連絡待ち/進行中は含む。
+const isOpen = (t) => statusOf(t) !== "done";
+
+// 「やること」3バケットを tasks から算出。重複を避けるため 1W は「明日〜7日」。
+function todoBuckets(tasks, day) {
+  const open = (tasks || []).filter(isOpen);
+  const tomorrow = shiftISO(day, 1), in7 = shiftISO(day, 7);
+  const unassigned = open.filter((t) => humanAssignees(t).length === 0);
+  const dueToday = open.filter((t) => dueISO(t) === day);
+  const within1w = open.filter((t) => { const d = dueISO(t); return d && d >= tomorrow && d <= in7; });
+  const byDue = (a, b) => (dueISO(a) || "9999").localeCompare(dueISO(b) || "9999") || a.id - b.id;
+  return [
+    { id: "unassigned", title: "未アサイン", ic: "user",         link: "#/list", items: unassigned.sort(byDue) },
+    { id: "today",      title: "今日期限",   ic: "alarm",        link: "#/list", items: dueToday.sort(byDue) },
+    { id: "next7",      title: "1週間以内（明日〜7日）", ic: "calendarDays", link: "#/list", items: within1w.sort(byDue) },
+  ];
+}
+
+const MAX_ROWS = 6; // 各バケットで先頭表示する件数。超過分は「他N件」リンク。
+
+// 1タスク行（タイトル＋軽いメタ: 担当アバター/期限/プロジェクト名）。
+function todoRow(t, projects, day) {
+  const who = humanAssignees(t)[0] || null;
+  const wn = who ? (who.name || who.username) : "";
+  const due = dueISO(t);
+  const late = due && due < day;
+  return `<button type="button" class="td-row" data-id="${t.id}">
+    <span class="td-row-t">${esc(t.title)}</span>
+    <span class="td-row-m">
+      ${who ? `<span class="td-ava" style="background:${member_color(who.id)}" title="${esc(wn)}">${esc((wn[0] || "?").toUpperCase())}</span>` : ""}
+      ${due ? `<span class="td-due${late ? " late" : ""}">${due.slice(5).replace("-", "/")}${late ? " 超過" : ""}</span>` : ""}
+      <span class="td-pj">${esc(projectName(projects, t.project_id))}</span>
+    </span>
+  </button>`;
+}
+
+// 1バケット（見出し「未アサイン (N)」＋行リスト＋他N件リンク）。0件は薄く「なし」。
+function bucketHtml(b, projects, day) {
+  const n = b.items.length;
+  const head = `<div class="td-bk-h">${icon(b.ic, { size: 14 }) || ""}<span>${esc(b.title)}</span><span class="td-bk-n">${n}</span></div>`;
+  if (n === 0) return `<div class="td-bk"><div>${head}</div><div class="td-empty">なし</div></div>`;
+  const shown = b.items.slice(0, MAX_ROWS);
+  const rest = n - shown.length;
+  const more = rest > 0
+    ? `<a class="td-more" href="${b.link}">他${rest}件 → タスク一覧 ${icon("chevronRight", { size: 12 }) || "›"}</a>` : "";
+  return `<div class="td-bk">${head}
+    <div class="td-rows">${shown.map((t) => todoRow(t, projects, day)).join("")}</div>${more}</div>`;
+}
 
 function readFold(uid) {
   try {
@@ -26,7 +83,7 @@ function writeFold(uid, fold) {
 }
 
 export async function render(root) {
-  const { tasks, members, plansByTask, holidaysSet, unavailabilityByMember, settings } = await load();
+  const { tasks, projects, members, plansByTask, holidaysSet, unavailabilityByMember, settings } = await load();
   const day = todayISO();
   // 営業日割り＋人別容量（週末/祝日/休暇=0）で今日KPIを正確に（§土日祝ギャップ）
   const capacityFor = (m, d) => capacityOn(m, d, { holidays: holidaysSet, unavailabilityByMember, capH: settings.capH });
@@ -65,6 +122,7 @@ export async function render(root) {
       <div class="kpi"><div class="l">今日必須</div><div class="v">${must.length}<small>件</small></div></div>
     </div>
     <div class="home-stack">
+      ${section("todo", "やること")}
       ${section("today", "今日の稼働予定")}
       ${section("plan", "稼働プラン（1ヶ月）")}
       ${section("gantt", "月間ガント（人別レーン）")}
@@ -81,6 +139,25 @@ export async function render(root) {
       .home-sec-title{flex:1;min-width:0}
       .home-sec-body{padding:12px 16px}
       .home-sec-body[hidden]{display:none}
+      /* やること: 3バケットを横並び（狭幅で縦積み）。可変高・トークン配色でテーマ追従。 */
+      .td-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+      @media(max-width:720px){.td-grid{grid-template-columns:1fr}}
+      .td-bk{border:1px solid ${C.line};border-radius:10px;padding:10px 12px;background:${C.bg};display:flex;flex-direction:column;min-width:0}
+      .td-bk-h{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;color:${C.ink};margin-bottom:8px}
+      .td-bk-h .ic{color:${C.muted}}
+      .td-bk-n{margin-left:auto;font-size:11px;font-weight:700;color:${C.muted};background:${C.track};border-radius:999px;padding:1px 8px}
+      .td-empty{font-size:12px;color:${C.muted};padding:6px 2px}
+      .td-rows{display:flex;flex-direction:column;gap:4px}
+      .td-row{display:flex;flex-direction:column;gap:3px;width:100%;box-sizing:border-box;text-align:left;
+        border:0;background:transparent;color:${C.ink};font:inherit;cursor:pointer;border-radius:7px;padding:6px 8px}
+      .td-row:hover{background:${C.track}}
+      .td-row-t{font-size:12.5px;font-weight:600;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .td-row-m{display:flex;align-items:center;gap:7px;font-size:11px;color:${C.muted};min-width:0}
+      .td-ava{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:50%;color:#fff;font-size:9px;font-weight:700;flex:none}
+      .td-due.late{color:${C.over};font-weight:700}
+      .td-pj{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .td-more{display:inline-flex;align-items:center;gap:3px;margin-top:6px;font-size:11.5px;font-weight:600;color:${C.fill};text-decoration:none}
+      .td-more:hover{text-decoration:underline}
     </style>`;
 
   // 各埋め込みは load() の共有キャッシュ経由（二重 fetch なし）。
@@ -91,7 +168,15 @@ export async function render(root) {
     const body = root.querySelector(`[data-body="${id}"]`);
     if (!body || body.hidden || body.dataset.filled === "1") return;
     body.dataset.filled = "1";
-    if (id === "today") {
+    if (id === "todo") {
+      // 「やること」3バケット。データは load() の tasks から算出（追加 fetch なし）。
+      const buckets = todoBuckets(tasks, day);
+      body.innerHTML = `<div class="td-grid">${buckets.map((b) => bucketHtml(b, projects, day)).join("")}</div>`;
+      // 行クリック=編集モーダル。保存後はホーム全体を再描画（バケット件数を最新化）。
+      body.querySelectorAll(".td-row[data-id]").forEach((el) => {
+        el.onclick = () => openTaskForm({ taskId: +el.dataset.id, onSaved: () => render(root) });
+      });
+    } else if (id === "today") {
       // fluid: ホーム埋め込みは固定高(px箱)をやめ可変高に（コンテナ幅に追従）。
       await today.renderInto(body, { compact: true, showToggle: false, mode: "stacked", title: false, fluid: true });
     } else if (id === "plan") {
@@ -128,6 +213,7 @@ export async function render(root) {
   });
 
   // 初期表示: 開いているセクションを順に描画（gantt は最後）。
+  await fill("todo");
   await fill("today");
   await fill("plan");
   await fill("gantt");
