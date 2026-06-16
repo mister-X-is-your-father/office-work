@@ -89,7 +89,7 @@ export async function mountReviewBell(topbar, opts = {}) {
   btn.className = "nb-btn";
   btn.title = "レビュー通知";
   btn.setAttribute("aria-label", "レビュー通知");
-  btn.innerHTML = `🔔<span class="nb-badge" hidden>0</span>`;
+  btn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:block;pointer-events:none"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span class="nb-badge" hidden>0</span>`;
   // 🔍検索・↻再読込の近く（refresh の前）に置く＝既存ウィジェットと並ぶ
   const anchor = topbar.querySelector("#refresh");
   anchor ? anchor.before(btn) : topbar.appendChild(btn);
@@ -198,7 +198,7 @@ function ensureStyle() {
   if (_style) return; _style = true;
   const s = document.createElement("style");
   s.textContent = `
-  .nb-btn{position:relative}
+  .nb-btn{position:relative;display:inline-flex;align-items:center;justify-content:center}
   .nb-badge{position:absolute;top:-5px;right:-5px;min-width:16px;height:16px;box-sizing:border-box;padding:0 4px;
     border-radius:9px;background:var(--over,#e5484d);color:#fff;font-size:10px;line-height:16px;font-weight:700;
     text-align:center;font-variant-numeric:tabular-nums}
