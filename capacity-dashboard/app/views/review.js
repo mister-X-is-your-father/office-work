@@ -1,6 +1,6 @@
 // レビュー ／ 承認キュー（mock 66 相当・実データ）。レビューラベル付き未完了タスクを「あなた宛/その他」で一覧。
 import { load, projectName, invalidate } from "../lib/store.js";
-import { whoami, updateTask } from "../lib/api.js";
+import { whoami, updateTask, createComment, getComments } from "../lib/api.js";
 import { isReviewTask } from "../lib/kinds.js";
 import { C, esc, member_color } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
@@ -67,23 +67,84 @@ export async function render(root) {
     el.onclick = () => openTaskForm({ taskId: +el.dataset.id, onSaved });
   });
 
-  root.querySelectorAll(".rq-appr").forEach((b) => {
-    b.onclick = async () => {
-      const id = +b.dataset.id;
-      const title = b.dataset.title || "タスク";
-      b.disabled = true; b.textContent = "…";
+  // インラインのコメント入力を開く（承認 or 差し戻し）。mode: "approve" | "reject"
+  const openInline = (id, mode, title) => {
+    const box = root.querySelector(`.rq-inline[data-for="${id}"]`);
+    if (!box) return;
+    const reject = mode === "reject";
+    box.hidden = false;
+    box.innerHTML = `
+      <div class="rq-inline-head">${reject ? "差し戻し（理由は必須）" : "承認（コメントは任意）"}</div>
+      <textarea class="rq-inline-ta" rows="2" placeholder="${reject ? "修正してほしい点を記入…" : "コメント（任意）…"}"></textarea>
+      <div class="rq-inline-err" hidden></div>
+      <div class="rq-inline-acts">
+        <button class="rq-btn rq-inline-cancel" type="button">キャンセル</button>
+        <button class="rq-btn ${reject ? "" : "appr"} rq-inline-ok" type="button">確定</button>
+      </div>`;
+    const ta = box.querySelector(".rq-inline-ta");
+    const err = box.querySelector(".rq-inline-err");
+    const ok = box.querySelector(".rq-inline-ok");
+    ta.focus();
+    box.querySelector(".rq-inline-cancel").onclick = () => { box.hidden = true; box.innerHTML = ""; };
+    ok.onclick = async () => {
+      const text = ta.value.trim();
+      if (reject && !text) {
+        err.hidden = false; err.textContent = "差し戻しには理由の記入が必要です。"; ta.focus();
+        return;
+      }
+      ok.disabled = true; ok.textContent = "…";
       try {
-        await updateTask(id, { done: true });
+        if (reject) {
+          await createComment(id, `↩️ 要修正（${meName}）：${text}`);
+        } else {
+          await createComment(id, `✅ ${meName} が承認しました${text ? "：" + text : ""}`);
+          await updateTask(id, { done: true });
+        }
       } catch {
-        b.disabled = false; b.textContent = "承認";
-        showUndoToast("承認に失敗しました", null, { error: true });
+        ok.disabled = false; ok.textContent = "確定";
+        err.hidden = false; err.textContent = "送信に失敗しました。";
         return;
       }
       invalidate(); render(root);
-      showUndoToast(`「${title}」を承認しました`, async () => {
-        await updateTask(id, { done: false });
-        invalidate(); render(root);
-      });
+      if (reject) {
+        showUndoToast("差し戻しました（依頼者に表示されます）", null);
+      } else {
+        showUndoToast(`「${title}」を承認しました`, async () => {
+          await updateTask(id, { done: false });
+          invalidate(); render(root);
+        });
+      }
+    };
+  };
+
+  root.querySelectorAll(".rq-appr").forEach((b) => {
+    b.onclick = () => openInline(+b.dataset.id, "approve", b.dataset.title || "タスク");
+  });
+  root.querySelectorAll(".rq-reject").forEach((b) => {
+    b.onclick = () => openInline(+b.dataset.id, "reject", b.dataset.title || "タスク");
+  });
+
+  // 💬 履歴トグル: クリックでコメント遅延ロード→その行の下に表示。再クリックで畳む。
+  root.querySelectorAll(".rq-hist").forEach((b) => {
+    b.onclick = async () => {
+      const id = +b.dataset.id;
+      const box = root.querySelector(`.rq-histbox[data-for="${id}"]`);
+      if (!box) return;
+      if (!box.hidden) { box.hidden = true; box.innerHTML = ""; return; }
+      box.hidden = false;
+      box.innerHTML = `<div class="rq-hist-empty">読み込み中…</div>`;
+      let list = null;
+      try { list = await getComments(id); } catch {
+        box.innerHTML = `<div class="rq-hist-empty">コメント取得失敗</div>`; return;
+      }
+      const items = (list || []).slice().sort((a, b) =>
+        String(a.created || "").localeCompare(String(b.created || "")));
+      if (!items.length) { box.innerHTML = `<div class="rq-hist-empty">コメントはまだありません。</div>`; return; }
+      box.innerHTML = items.map((c) => {
+        const au = c.author && (c.author.name || c.author.username) || "不明";
+        const dt = c.created ? new Date(c.created).toLocaleString("ja-JP") : "";
+        return `<div class="rq-hist-item"><div class="rq-hist-meta"><b>${esc(au)}</b> <span>${esc(dt)}</span></div><div class="rq-hist-body">${esc(c.comment || "")}</div></div>`;
+      }).join("");
     };
   });
 }
@@ -152,8 +213,10 @@ function rowHtml(r) {
         <span class="rq-wait ${warn ? "warn" : "ok"}"><span class="wdot"></span>${waitLabel(r.wait)}${warn ? " 要対応" : ""}</span>
       </div>
     </div>
-    <div class="rq-acts">${open}<button class="rq-btn appr rq-appr" data-id="${r.id}" data-title="${esc(r.title)}">承認</button></div>
-  </div>`;
+    <div class="rq-acts">${open}<button class="rq-btn rq-hist" data-id="${r.id}" title="コメント履歴">💬 履歴</button><button class="rq-btn rq-reject" data-id="${r.id}" data-title="${esc(r.title)}">差し戻し</button><button class="rq-btn appr rq-appr" data-id="${r.id}" data-title="${esc(r.title)}">承認</button></div>
+  </div>
+  <div class="rq-inline" data-for="${r.id}" hidden></div>
+  <div class="rq-histbox" data-for="${r.id}" hidden></div>`;
 }
 
 function css() {
@@ -192,6 +255,24 @@ function css() {
   .rq-btn.appr{background:${C.free};border-color:${C.free};color:#fff}
   .rq-btn.appr:hover{filter:brightness(.95)}
   .rq-empty{padding:30px;text-align:center;color:${C.muted};background:${C.card};border:1px solid ${C.line};border-radius:14px}
+
+  /* インラインのコメント入力（承認/差し戻し） */
+  .rq-inline{padding:10px 16px 13px;border-bottom:1px solid ${C.line};background:#fafbfd}
+  .rq-inline-head{font-size:11.5px;font-weight:700;color:${C.muted};margin-bottom:6px}
+  .rq-inline-ta{width:100%;box-sizing:border-box;resize:vertical;border:1px solid ${C.line};border-radius:8px;
+    padding:7px 9px;font:inherit;font-size:12.5px;background:${C.card};color:${C.ink}}
+  .rq-inline-ta:focus{outline:none;border-color:${C.fill}}
+  .rq-inline-err{color:${C.over};font-size:11.5px;font-weight:600;margin-top:5px}
+  .rq-inline-acts{display:flex;gap:7px;justify-content:flex-end;margin-top:8px}
+
+  /* 💬 コメント履歴 */
+  .rq-histbox{padding:8px 16px 12px;border-bottom:1px solid ${C.line};background:#fafbfd;display:flex;flex-direction:column;gap:7px}
+  .rq-hist-empty{font-size:12px;color:${C.muted}}
+  .rq-hist-item{border-left:2px solid ${C.line};padding:2px 0 2px 9px}
+  .rq-hist-meta{font-size:11px;color:${C.muted}}
+  .rq-hist-meta b{color:${C.ink}}
+  .rq-hist-body{font-size:12.5px;color:${C.ink};white-space:pre-wrap;margin-top:1px}
+
   @media(max-width:760px){.rq-qhead{display:none}.rq-row{grid-template-columns:1fr;gap:6px}}
 
   /* ダークモード: あなた宛の淡色ハイライトは暗い青tintへ / ボタン面=card / レビューバッジtintも暗系。アクセント色は維持 */
@@ -199,5 +280,6 @@ function css() {
   html[data-theme="dark"] .rq-row.you{background:rgba(58,134,255,.08)}
   html[data-theme="dark"] .rq-kind{background:rgba(58,134,255,.16);border-color:rgba(58,134,255,.35)}
   html[data-theme="dark"] .rq-btn{background:var(--card);color:var(--ink)}
-  html[data-theme="dark"] .rq-btn:hover{background:var(--track)}`;
+  html[data-theme="dark"] .rq-btn:hover{background:var(--track)}
+  html[data-theme="dark"] .rq-inline,html[data-theme="dark"] .rq-histbox{background:var(--track)}`;
 }

@@ -134,6 +134,10 @@ export async function removeAssignee(taskId, userId) { return req(`/tasks/${task
 export async function addRelation(taskId, otherTaskId, kind = "related") { return req(`/tasks/${taskId}/relations`, { method: "PUT", body: { other_task_id: otherTaskId, relation_kind: kind } }); }
 export async function removeRelation(taskId, kind, otherTaskId) { return req(`/tasks/${taskId}/relations/${kind}/${otherTaskId}`, { method: "DELETE" }); }
 
+// タスクコメント（ネイティブ機能）。一覧は配列（comment/author/created 等）、作成は PUT body {comment}。
+export async function getComments(taskId) { return req(`/tasks/${taskId}/comments`); }
+export async function createComment(taskId, comment) { return req(`/tasks/${taskId}/comments`, { method: "PUT", body: { comment } }); }
+
 // 連絡待ち（GTD Waiting For）= 予約ラベル。付け外しでステータスを切り替える。
 export const WAITING_LABEL = "連絡待ち";
 let _waitingLabelId = null;
