@@ -1,12 +1,9 @@
-// 予定の基礎データ管理（祝日・休業日 / 個人休暇 の登録・編集・削除）。
-// これまで seed/API でしか入らなかったデータをSPAから運用できるようにする入力UI。
-// データはすべて TaskStation API のグローバルエンティティ（ログインユーザーがCRUD可）。
-// ※定期業務・定期MTGの管理は views/recurring.js（#/recurring）に分離済み。
+// 個人休暇（member leave / unavailability）の登録・編集・削除。
+// 休暇期間（両端含む）はその人の容量が0になり、空き・負荷計算に反映される。
+// データは TaskStation API のグローバルエンティティ（ログインユーザーがCRUD可）。
+// ※祝日・休業日の管理は views/manage.js（#/manage）、定期業務は views/recurring.js（#/recurring）。
 import { load, invalidate } from "../lib/store.js";
-import {
-  getHolidays, createHoliday, deleteHoliday,
-  getUnavailability, createUnavailability, deleteUnavailability,
-} from "../lib/api.js";
+import { getUnavailability, createUnavailability, deleteUnavailability } from "../lib/api.js";
 import { parseSmartDate, fmtDisplayDow, attachDatePicker } from "../lib/form.js";
 import { C, esc } from "../lib/ui.js";
 
@@ -18,68 +15,17 @@ export async function render(root) {
   const memberName = (id) => { const m = (members || []).find((x) => x.id === id); return m ? (m.name || m.username) : `user${id}`; };
 
   // 管理対象は id 付きの生データが要る（削除のため）。store のキャッシュとは別に直接取得。
-  const [holidays, unavailability] = await Promise.all([
-    getHolidays().catch(() => []),
-    getUnavailability().catch(() => []),
-  ]);
+  const unavailability = await getUnavailability().catch(() => []);
 
   root.innerHTML = `
-    <h1 class="vtitle">予定の基礎データ <small>祝日・休業日／個人休暇の登録・編集</small></h1>
+    <h1 class="vtitle">休暇 <small>メンバーの個人休暇の登録・編集</small></h1>
     <div class="mg-grid">
-      <div class="card mg-card" id="mg-hol"></div>
       <div class="card mg-card" id="mg-una"></div>
     </div>`;
 
   const reload = () => { invalidate(); render(root); };
 
-  renderHolidays(root.querySelector("#mg-hol"), holidays, { holidaysByDate, reload });
   renderUnavailability(root.querySelector("#mg-una"), unavailability, memberName, { members, holidaysByDate, reload });
-}
-
-// ===== 祝日 =====
-function renderHolidays(el, holidays, { holidaysByDate, reload }) {
-  const sorted = [...(holidays || [])].sort((a, b) => String(a.date).localeCompare(String(b.date)));
-  const todayISO = new Date().toISOString().slice(0, 10);
-  el.innerHTML = `
-    <div class="mg-h"><span>祝日・休業日 <span class="mg-cnt">${sorted.length}</span></span></div>
-    <div class="mg-hint">国民の祝日は自動同期（週1）。会社独自の休業日などはここで手動追加できます。</div>
-    <div class="mg-form">
-      <input id="hol-date" class="mg-in mg-in-date" inputmode="numeric" autocomplete="off" placeholder="日付（例: 1112）">
-      <input id="hol-name" class="mg-in" placeholder="名称（例: 創立記念日）">
-      <button class="mg-add" id="hol-save">追加</button>
-    </div>
-    <div class="mg-err" id="hol-err"></div>
-    <div class="mg-list">${sorted.length ? sorted.map((h) => {
-      const iso = String(h.date).slice(0, 10);
-      const past = iso < todayISO;
-      return `<div class="mg-row${past ? " mg-past" : ""}">
-        <div class="mg-row-main"><div class="mg-row-t">${fmtDate(iso)}</div><div class="mg-row-sub">${esc(h.name)}</div></div>
-        <div class="mg-row-acts"><button class="mg-btn mg-del" data-del="${h.id}">削除</button></div>
-      </div>`;
-    }).join("") : `<div class="mg-empty">まだありません</div>`}</div>`;
-
-  const dateEl = el.querySelector("#hol-date");
-  attachDatePicker(dateEl, { holidaysByDate });
-  dateEl.onblur = () => { const iso = parseSmartDate(dateEl.value); if (iso) dateEl.value = fmtDisplayDow(iso); };
-
-  el.querySelector("#hol-save").onclick = async () => {
-    const err = el.querySelector("#hol-err"); err.textContent = "";
-    const iso = parseSmartDate(dateEl.value);
-    const name = el.querySelector("#hol-name").value.trim();
-    if (!iso) { err.textContent = "日付の形式が不正です（例: 1112 → 11/12）。"; return; }
-    if (!name) { err.textContent = "名称を入力してください。"; return; }
-    const btn = el.querySelector("#hol-save"); btn.disabled = true;
-    try { await createHoliday({ date: iso + "T00:00:00Z", name }); reload(); }
-    catch (e) { btn.disabled = false; err.textContent = "× " + e.message; }
-  };
-  el.querySelectorAll("[data-del]").forEach((b) => {
-    b.onclick = async () => {
-      const h = sorted.find((x) => x.id === +b.dataset.del);
-      if (!h || !confirm(`祝日「${h.name}」を削除しますか？`)) return;
-      b.disabled = true;
-      try { await deleteHoliday(h.id); reload(); } catch (e) { b.disabled = false; alert("削除に失敗: " + e.message); }
-    };
-  });
 }
 
 // ===== 個人休暇 =====

@@ -9,29 +9,51 @@ import { C, esc } from "../lib/ui.js";
 
 const KIND_ICON = { mtg: "📅", rmtg: "🔁", rtask: "🔁" };
 
+// URLハッシュから有効なkindフィルタを判定。
+//  ...recurring-task...    → "task"    （定期業務のみ）
+//  ...recurring-meeting... → "meeting" （定期MTGのみ）
+//  それ以外（素の #/recurring 含む）→ null （全件・後方互換）
+function activeKind() {
+  const h = location.hash || "";
+  if (h.includes("recurring-task")) return "task";
+  if (h.includes("recurring-meeting")) return "meeting";
+  return null;
+}
+
+// フィルタ別の画面テキスト。
+const KIND_VIEW = {
+  task: { title: "定期業務", sub: "定期タスクの登録・編集", section: "定期業務", empty: "定期業務はまだありません" },
+  meeting: { title: "定期MTG", sub: "定例MTG・単発MTGの登録・編集", section: "定期MTG", empty: "定期MTGはまだありません" },
+  null: { title: "定期業務・定期MTG", sub: "定例MTG・定期タスク・単発MTGの登録・編集", section: "定期・会議", empty: "まだありません" },
+};
+
 export async function render(root) {
   ensureStyle();
   const { members, holidaysByDate, recurrences } = await load();
   const memberName = (id) => { const m = (members || []).find((x) => x.id === id); return m ? (m.name || m.username) : `user${id}`; };
 
+  const kind = activeKind();
+  const view = KIND_VIEW[kind];
+  const list = kind ? (recurrences || []).filter((r) => r.kind === kind) : (recurrences || []);
+
   root.innerHTML = `
-    <h1 class="vtitle">定期業務・定期MTG <small>定例MTG・定期タスク・単発MTGの登録・編集</small></h1>
+    <h1 class="vtitle">${esc(view.title)} <small>${esc(view.sub)}</small></h1>
     <div class="rc-grid">
       <div class="card rc-card" id="rc-rec"></div>
     </div>`;
 
   const reload = () => { invalidate(); render(root); };
 
-  renderRecurrences(root.querySelector("#rc-rec"), recurrences || [], memberName, { members, holidaysByDate, reload });
+  renderRecurrences(root.querySelector("#rc-rec"), list, memberName, { members, holidaysByDate, reload, view });
 }
 
-function renderRecurrences(el, recurrences, memberName, { members, holidaysByDate, reload }) {
+function renderRecurrences(el, recurrences, memberName, { members, holidaysByDate, reload, view }) {
   const sorted = [...(recurrences || [])].sort((a, b) => String(a.dtstart).localeCompare(String(b.dtstart)));
   el.innerHTML = `
-    <div class="rc-h"><span>定期・会議 <span class="rc-cnt">${sorted.length}</span></span>
+    <div class="rc-h"><span>${esc(view.section)} <span class="rc-cnt">${sorted.length}</span></span>
       <button class="rc-add" id="rec-add">＋ 新規</button></div>
     <div class="rc-hint">定例MTG・定期タスク・単発MTGをRRULEで管理。「持ち回り」は担当が順番に巡回します。</div>
-    <div class="rc-list">${sorted.length ? sorted.map((r) => recRow(r, memberName)).join("") : `<div class="rc-empty">まだありません</div>`}</div>`;
+    <div class="rc-list">${sorted.length ? sorted.map((r) => recRow(r, memberName)).join("") : `<div class="rc-empty">${esc(view.empty)}</div>`}</div>`;
 
   el.querySelector("#rec-add").onclick = () =>
     openRecurrenceForm({ members, holidaysByDate, onSaved: reload });

@@ -24,14 +24,18 @@ const ROUTES = {
   outline:  { label: "アウトライン",  grp: "仕事",   mod: "./views/outline.js" },
   depgraph: { label: "依存グラフ",    grp: "仕事",   mod: "./views/depgraph.js" },
   gantt:    { label: "ガントチャート",    grp: "仕事",   mod: "./views/gantt.js" },
+  // 旧「定期業務・定期MTG」は後方互換ルートとして残す（recurring.js が hash で全件表示）が、ORDER には載せない。
   recurring:{ label: "定期業務・定期MTG", grp: "その他", mod: "./views/recurring.js" },
-  manage:   { label: "予定の基礎データ", grp: "その他", mod: "./views/manage.js" },
-  settings: { label: "設定",          grp: "その他", mod: "./views/settings.js" },
+  // 定期を業務 / MTG の2項目に分割。どちらも recurring.js を読み、recurring.js 側が location.hash で出し分ける。
+  "recurring-task":    { label: "定期業務", grp: "その他", mod: "./views/recurring.js" },
+  "recurring-meeting": { label: "定期MTG",  grp: "その他", mod: "./views/recurring.js" },
+  leave:    { label: "休暇",          grp: "その他", mod: "./views/leave.js" },
   export:   { label: "バックアップ",   grp: "その他", mod: "./views/export.js" },
+  settings: { label: "設定",          grp: "その他", mod: "./views/settings.js" },
   // 隠しルート: ORDER に載せない＝通常ユーザーのナビには出ない。許可者のみ shell() がリンクを追加。
   fable:    { label: "🤖 Fable",      grp: "AI",     mod: "./views/fable.js" },
 };
-const ORDER = ["home", "smart", "today", "triage", "quad", "habits", "review", "calendar", "monthcal", "week", "planner", "freefinder", "weekstack", "workplan", "summary", "estactual", "kanban", "list", "outline", "depgraph", "gantt", "recurring", "manage", "settings", "export"];
+const ORDER = ["home", "smart", "today", "triage", "quad", "habits", "review", "calendar", "monthcal", "week", "planner", "freefinder", "weekstack", "workplan", "summary", "estactual", "kanban", "list", "outline", "depgraph", "gantt", "recurring-task", "recurring-meeting", "leave", "export", "settings"];
 
 const app = document.getElementById("app");
 
@@ -71,9 +75,16 @@ function showAuth(mode = "login", msg = "") {
 function shell() {
   const grps = {};
   for (const k of ORDER) { const r = ROUTES[k]; (grps[r.grp] ||= []).push(k); }
+  const link = (k) =>
+    `<a href="#/${k}" data-k="${k}" class="${ROUTES[k].soon ? "soon" : ""}">${ROUTES[k].label}${ROUTES[k].soon ? " ·準備中" : ""}</a>`;
   const nav = Object.entries(grps).map(([g, keys]) =>
-    `<div class="navgrp">${g}</div>` + keys.map(k =>
-      `<a href="#/${k}" data-k="${k}" class="${ROUTES[k].soon ? "soon" : ""}">${ROUTES[k].label}${ROUTES[k].soon ? " ·準備中" : ""}</a>`).join("")
+    `<div class="navgrp">${g}</div>` + keys.map(k => {
+      // 定期MTG の直後に少し余白を入れ、定期(業務/MTG)と後続の休暇/設定等を視覚的に分ける。
+      const sep = k === "recurring-meeting" ? `<div class="nav-spacer"></div>` : "";
+      // 設定は「その他」最下部に独立配置＝直前に区切り線を入れて強調。
+      const rule = k === "settings" ? `<div class="nav-rule"></div>` : "";
+      return rule + link(k) + sep;
+    }).join("")
   ).join("");
   app.innerHTML = `
     <div class="shell">

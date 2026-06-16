@@ -47,6 +47,13 @@
   .nav a:hover{background:var(--track)}
   .nav a.active{background:#eaf1ff;color:var(--fill);font-weight:700}
   .nav a.soon{color:var(--muted)}
+  /* 定期(業務/MTG)と後続項目の間の小さな余白。 */
+  .nav-spacer{height:10px}
+  /* 設定の直前に入れる区切り線＝最下部の独立感を出す。 */
+  .nav-rule{height:1px;background:var(--line);margin:10px 8px 6px}
+  /* 設定リンクの強調（最下部・目立たせる）。 */
+  .nav a[data-k="settings"]{font-weight:700}
+  .nav a[data-k="settings"]::before{content:"⚙ "}
   .main{flex:1;min-width:0;display:flex;flex-direction:column}
   .topbar{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:10px 22px;
     border-bottom:1px solid var(--line);background:var(--card);position:sticky;top:0;z-index:5}

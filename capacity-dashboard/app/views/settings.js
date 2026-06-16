@@ -3,11 +3,13 @@
 // UI: 「個人設定 / チーム共有設定」の2グループに分け、各設定を行レイアウト＋明確な保存バーで構造化。
 import { load, invalidate, TEMPLATE_WS } from "../lib/store.js";
 import { getSettings, saveSettings } from "../lib/exec.js";
+import { getHolidays, createHoliday, deleteHoliday } from "../lib/api.js";
+import { parseSmartDate, fmtDisplayDow, attachDatePicker } from "../lib/form.js";
 import { notifyPrefs, saveNotifyPrefs } from "../lib/notify.js";
 import { C, esc } from "../lib/ui.js";
 
 export async function render(root) {
-  const { projects, templateProject, me } = await load();
+  const { projects, templateProject, me, holidaysByDate } = await load();
   let cur = null, canEdit = false, execDown = false;
   try {
     const d = await getSettings();
@@ -65,6 +67,9 @@ export async function render(root) {
   const hourOpts = (sel) => Array.from({ length: 24 }, (_, h) =>
     `<option value="${h}"${h === sel ? " selected" : ""}>${h}:00</option>`).join("");
 
+  // 祝日・休業日: id 付き生データを直接取得（削除のため）。store キャッシュとは別。
+  const holidays = await getHolidays().catch(() => []);
+
   root.innerHTML = `
     <style>${css()}</style>
     <div class="sx">
@@ -103,6 +108,8 @@ export async function render(root) {
         </div>
       </section>
 
+      ${holidaySection(holidays)}
+
       ${canEdit ? `
       <div class="sx-savebar">
         <span class="sx-savemeta">変更は<b>保存するまで反映されません</b></span>
@@ -112,6 +119,7 @@ export async function render(root) {
     </div>`;
 
   wireNotify(root, me);
+  wireHolidays(root, holidays, holidaysByDate);
 
   const btn = root.querySelector("#st-save");
   if (btn) btn.onclick = async () => {
@@ -163,6 +171,66 @@ function wireNotify(root, me) {
       : "ブラウザ通知が許可されていません（アプリ内トーストで通知します）。";
   };
   lead.onchange = save;
+}
+
+// 祝日・休業日: 任意のログインユーザーが即時に作成/削除できる自己完結セクション。
+// チーム共有設定の管理者専用 savebar には紐づけず、create/delete API を直接叩く（manage.js と同挙動）。
+function holidaySection(holidays) {
+  const sorted = [...(holidays || [])].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const rows = sorted.length ? sorted.map((h) => {
+    const iso = String(h.date).slice(0, 10);
+    const past = iso < todayISO;
+    return `<div class="sx-hrow${past ? " past" : ""}">
+      <div class="sx-hmain"><div class="sx-ht">${fmtDisplayDow(iso)}</div><div class="sx-hsub">${esc(h.name)}</div></div>
+      <button class="sx-hdel" data-hol-del="${h.id}">削除</button>
+    </div>`;
+  }).join("") : `<div class="sx-hempty">まだありません</div>`;
+  return `
+    <section class="sx-card">
+      <header class="sx-chd">
+        <div class="sx-ctitle">祝日・休業日 <span class="sx-hcnt">${sorted.length}</span></div>
+        <span class="sx-scope"><span class="dot" style="background:${C.fill}"></span>追加・削除は即反映</span>
+      </header>
+      <div class="sx-body">
+        <div class="sx-hhint">国民の祝日は自動同期（週1）。会社独自の休業日などはここで手動追加できます。</div>
+        <div class="sx-hform">
+          <input id="hol-date" class="sx-in sx-hdate" inputmode="numeric" autocomplete="off" placeholder="日付（例: 1112）">
+          <input id="hol-name" class="sx-in sx-hname" placeholder="名称（例: 創立記念日）">
+          <button class="sx-hadd" id="hol-save">追加</button>
+        </div>
+        <div class="sx-herr" id="hol-err"></div>
+        <div class="sx-hlist">${rows}</div>
+      </div>
+    </section>`;
+}
+
+function wireHolidays(root, holidays, holidaysByDate) {
+  const sorted = [...(holidays || [])].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const reload = () => { invalidate(); render(root); };
+  const dateEl = root.querySelector("#hol-date");
+  if (!dateEl) return;
+  attachDatePicker(dateEl, { holidaysByDate });
+  dateEl.onblur = () => { const iso = parseSmartDate(dateEl.value); if (iso) dateEl.value = fmtDisplayDow(iso); };
+
+  root.querySelector("#hol-save").onclick = async () => {
+    const err = root.querySelector("#hol-err"); err.textContent = "";
+    const iso = parseSmartDate(dateEl.value);
+    const name = root.querySelector("#hol-name").value.trim();
+    if (!iso) { err.textContent = "日付の形式が不正です（例: 1112 → 11/12）。"; return; }
+    if (!name) { err.textContent = "名称を入力してください。"; return; }
+    const btn = root.querySelector("#hol-save"); btn.disabled = true;
+    try { await createHoliday({ date: iso + "T00:00:00Z", name }); reload(); }
+    catch (e) { btn.disabled = false; err.textContent = "× " + e.message; }
+  };
+  root.querySelectorAll("[data-hol-del]").forEach((b) => {
+    b.onclick = async () => {
+      const h = sorted.find((x) => x.id === +b.dataset.holDel);
+      if (!h || !confirm(`祝日「${h.name}」を削除しますか？`)) return;
+      b.disabled = true;
+      try { await deleteHoliday(h.id); reload(); } catch (e) { b.disabled = false; alert("削除に失敗: " + e.message); }
+    };
+  });
 }
 
 function css() {
@@ -241,6 +309,28 @@ function css() {
     background:${C.fill};color:#fff;cursor:pointer;transition:filter .15s,transform .06s}
   .sx-save:hover{filter:brightness(1.06)}.sx-save:active{transform:translateY(1px)}
   .sx-save:disabled{opacity:.55;cursor:default}
+
+  /* 祝日・休業日セクション: 追加フォーム＋日付順リスト（過去は淡色） */
+  .sx-hcnt{font-size:12px;color:${C.muted};font-weight:600;background:var(--track);border-radius:10px;padding:1px 8px;margin-left:6px}
+  .sx-hhint{font-size:11.5px;color:${C.muted};line-height:1.55;padding:14px 0 0}
+  .sx-hform{display:flex;gap:8px;flex-wrap:wrap;padding:12px 0 0}
+  .sx-hdate{flex:0 0 auto;width:150px}
+  .sx-hname{flex:1;min-width:140px}
+  .sx-hadd{font:inherit;font-size:13.5px;font-weight:700;padding:9px 20px;border-radius:9px;border:0;
+    background:${C.fill};color:#fff;cursor:pointer;white-space:nowrap;transition:filter .15s,transform .06s}
+  .sx-hadd:hover{filter:brightness(1.06)}.sx-hadd:active{transform:translateY(1px)}.sx-hadd:disabled{opacity:.55;cursor:default}
+  .sx-herr{font-size:12px;font-weight:600;color:${C.over};min-height:14px;margin:6px 0 0}
+  .sx-hlist{display:flex;flex-direction:column;gap:2px;margin:6px 0 14px}
+  .sx-hempty{font-size:12.5px;color:${C.muted};padding:10px 2px}
+  .sx-hrow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 2px;border-top:1px solid var(--line)}
+  .sx-hrow:first-child{border-top:0}
+  .sx-hrow.past{opacity:.5}
+  .sx-hmain{min-width:0}
+  .sx-ht{font-size:13.5px;font-weight:700;color:${C.ink}}
+  .sx-hsub{font-size:11.5px;color:${C.muted};margin-top:2px}
+  .sx-hdel{font:inherit;font-size:11.5px;font-weight:600;padding:5px 12px;border-radius:8px;flex:none;
+    border:1px solid var(--line-strong);background:var(--card);color:${C.muted};cursor:pointer;transition:border-color .12s,color .12s}
+  .sx-hdel:hover{border-color:${C.over};color:${C.over}}
 
   /* ダークモード: ハードコードした淡色面/tintを反転（ライト値は不変） */
   html[data-theme="dark"] .sx-chd{background:var(--track)}
