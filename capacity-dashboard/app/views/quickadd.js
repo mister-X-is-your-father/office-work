@@ -59,6 +59,29 @@ function chipsHtml(r, defaultProj) {
     `<div class="qa-help">構文: 明日15時 / 6/20 / 月曜 / #分類 / !高 / 1.5h / @担当 / &gt;ワークスペース / URL→資料</div>`;
 }
 
+// 構文ヘルプの早見表（実際にパーサが解釈する記法のみ）。lib/quickadd.js と整合させること。
+const HELP_ROWS = [
+  ["#分類", "分類/タグ", "#会議"],
+  ["@担当", "担当（人のみ）", "@田中"],
+  [">WS名", "投入先ワークスペース", ">チーム作業"],
+  ["!重要度", "MUST/最優先/最/高/中/低", "!高"],
+  ["1h・1.5h・30m", "見積時間（時間/分）", "1.5h"],
+  ["明日15時", "日付＋時刻（予定も作成）", "明日15:30"],
+  ["今日/明後日/N日後", "相対日付", "3日後"],
+  ["月曜/来週金曜", "曜日指定", "来週金曜"],
+  ["6/20・6月20日", "日付", "6/20"],
+  ["15時・15:30", "時刻（当日扱い）", "15時"],
+  ["URL", "貼ると資料へ", "https://…"],
+];
+function helpTipHtml() {
+  const rows = HELP_ROWS.map(([sym, desc, ex]) =>
+    `<tr><td class="qa-tip-sym">${esc(sym)}</td><td class="qa-tip-desc">${esc(desc)}</td><td class="qa-tip-ex">${esc(ex)}</td></tr>`
+  ).join("");
+  return `<div class="qa-tip-head">入力構文の早見表</div>
+    <table class="qa-tip-tbl">${rows}</table>
+    <div class="qa-tip-eg">例: <code>明日15時 MTG準備 #会議 1h</code></div>`;
+}
+
 // インボックスWSの取得（無ければ作成）。作成したら store を無効化して名簿を更新。
 async function ensureInbox(projects) {
   const found = (projects || []).find((p) => p.title === INBOX_WS);
@@ -101,14 +124,30 @@ export function mountQuickAdd(topbar, { onCreated } = {}) {
   wrap.className = "qa-wrap";
   wrap.innerHTML = `
     <input id="qa-in" autocomplete="off" placeholder="クイック追加（/ でフォーカス）例: 明日15時 MTG準備 #会議 1h" aria-label="クイック追加">
+    <button type="button" id="qa-help-btn" class="qa-help-btn" title="入力構文ヘルプ" aria-label="入力構文ヘルプ" aria-expanded="false">${icon("lightbulb", { size: 15 })}</button>
     <select id="qa-proj" class="qa-proj" title="投入先ワークスペース" aria-label="投入先ワークスペース">
       <option value="">なし（${INBOX_WS}）</option>
     </select>
-    <div class="qa-pop" id="qa-pop" hidden></div>`;
+    <div class="qa-pop" id="qa-pop" hidden></div>
+    <div class="qa-tip" id="qa-tip" role="dialog" aria-label="入力構文の早見表" hidden>${helpTipHtml()}</div>`;
   who ? who.after(wrap) : topbar.prepend(wrap);
   const input = wrap.querySelector("#qa-in");
   const sel = wrap.querySelector("#qa-proj");
   const pop = wrap.querySelector("#qa-pop");
+  const helpBtn = wrap.querySelector("#qa-help-btn");
+  const tip = wrap.querySelector("#qa-tip");
+
+  // 構文ヘルプのツールチップ: クリックで開閉、外側クリック/Escで閉じる。
+  const closeTip = () => { tip.hidden = true; helpBtn.setAttribute("aria-expanded", "false"); };
+  const toggleTip = () => {
+    const open = tip.hidden;
+    tip.hidden = !open;
+    helpBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  };
+  helpBtn.addEventListener("click", (ev) => { ev.stopPropagation(); toggleTip(); });
+  tip.addEventListener("click", (ev) => ev.stopPropagation());
+  document.addEventListener("click", () => { if (!tip.hidden) closeTip(); });
+  document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && !tip.hidden) closeTip(); });
 
   let data = null;   // store.load の結果（チップ解決用・遅延）
   let resolved = null;
@@ -210,6 +249,25 @@ function ensureStyle() {
   .qa-chip.ws{color:var(--muted)}
   .qa-chip.warn{color:#b3261e;background:#fdf0ef;border-color:#f3c9c6}
   .qa-chip.ok{color:#1d7a46;background:#eaf7ef;border-color:#bfe5cd;font-weight:700}
-  .qa-help{flex-basis:100%;font-size:10.5px;color:var(--muted);margin-top:2px}`;
+  .qa-help{flex-basis:100%;font-size:10.5px;color:var(--muted);margin-top:2px}
+  .qa-help-btn{flex:none;display:inline-flex;align-items:center;justify-content:center;
+    width:30px;height:30px;padding:0;box-sizing:border-box;cursor:pointer;
+    border:1px solid var(--line);border-radius:9px;background:var(--card);color:var(--muted)}
+  .qa-help-btn:hover{color:var(--ink);border-color:var(--fill)}
+  .qa-help-btn:focus{outline:none;border-color:var(--fill);box-shadow:0 0 0 3px rgba(58,134,255,.12)}
+  .qa-help-btn[aria-expanded="true"]{color:var(--fill);border-color:var(--fill)}
+  .qa-tip{position:absolute;z-index:9;top:calc(100% + 6px);right:0;max-width:340px;
+    background:var(--card);border:1px solid var(--line);border-radius:11px;
+    box-shadow:0 10px 30px rgba(20,30,50,.18);padding:11px 13px;color:var(--ink);text-align:left}
+  .qa-tip[hidden]{display:none}
+  .qa-tip-head{font-size:11.5px;font-weight:700;color:var(--ink);margin-bottom:7px}
+  .qa-tip-tbl{border-collapse:collapse;width:100%;font-size:11.5px}
+  .qa-tip-tbl td{padding:2.5px 0;vertical-align:top}
+  .qa-tip-sym{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700;
+    color:var(--ink);white-space:nowrap;padding-right:10px}
+  .qa-tip-desc{color:var(--ink);padding-right:10px}
+  .qa-tip-ex{color:var(--muted);white-space:nowrap}
+  .qa-tip-eg{margin-top:9px;padding-top:8px;border-top:1px solid var(--line);font-size:11px;color:var(--muted)}
+  .qa-tip-eg code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink)}`;
   document.head.appendChild(s);
 }
