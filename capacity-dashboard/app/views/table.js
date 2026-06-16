@@ -3,7 +3,7 @@
 // 共有データ（DB）は一切変えないので、誰がどう並べても他メンバーの見え方に影響しない（衝突しない）。
 import { load, invalidate, projectName, isAiUser } from "../lib/store.js";
 import { savePresets } from "../lib/exec.js";
-import { updateTask, deleteTask, addAssignee, removeAssignee, addTaskLabel, removeTaskLabel, createLabel, setTaskWaiting } from "../lib/api.js";
+import { updateTask, deleteTask, addAssignee, removeAssignee, addTaskLabel, removeTaskLabel, createLabel, setTaskWaiting, createTaskInProject, addRelation } from "../lib/api.js";
 import { PRIO, prioBucket, kindOf, isReviewTask, categoryLabels, categoryColor, REVIEW_LABEL, WAITING_LABEL, statusOf, STATUS } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 import { shiftISO, buildTaskTree } from "../lib/capacity.js";
@@ -35,7 +35,14 @@ function loadMySorts(uid) { try { return JSON.parse(localStorage.getItem(MSKEY(u
 function saveMySorts(uid, list) { try { localStorage.setItem(MSKEY(uid), JSON.stringify(list)); } catch { /* noop */ } }
 
 let V = null, UID = null;
-const olCollapsed = new Set(); // アウトライン表示の折りたたみ状態（task.id・モジュール変数で保持）
+// 階層（アウトライン）表示の折りたたみ状態（task.id）。本人ごとに localStorage 永続化。
+const olCollapsed = new Set();
+const OLKEY = (uid) => `ts.list.olcollapse.${uid ?? "anon"}`;
+function loadOlCollapsed(uid) {
+  olCollapsed.clear();
+  try { (JSON.parse(localStorage.getItem(OLKEY(uid)) || "[]") || []).forEach((id) => olCollapsed.add(id)); } catch { /* noop */ }
+}
+function saveOlCollapsed(uid) { try { localStorage.setItem(OLKEY(uid), JSON.stringify([...olCollapsed])); } catch { /* noop */ } }
 let flashId = null;          // ドロップ直後にジワっと色が戻る着地ハイライト対象（再描画後に適用）
 let selectedIds = new Set(); // まとめて移動用の複数選択（マイソート中のみ・Ctrl/Shiftで操作）
 let anchorId = null;         // Shift範囲選択の起点
@@ -68,6 +75,7 @@ export async function render(root) {
   const today = todayISO();
   UID = (me && me.id) || 0;
   V = loadView(UID);
+  loadOlCollapsed(UID); // 階層の折りたたみ状態を本人ごとに復元
   // 後方互換: #/outline で来たら、Vを書き換えずこのロードだけアウトライン表示にする。
   const mode = location.hash.includes("outline") ? "outline" : (V.mode === "outline" ? "outline" : "table");
   const isOutline = mode === "outline";
@@ -145,7 +153,7 @@ export async function render(root) {
   const recBand = recurrenceBandHtml(recurrences, members);
 
   const subtitle = isOutline
-    ? "プロジェクト＞タスク階層"
+    ? "階層表示（プロジェクト＞タスク）・チェックで完了、＋でサブタスク追加"
     : (manual ? "・ 行をどこでもドラッグして自分用に並べ替え" : `・ ソート条件を重ねて並べ替え（列ヘッダ: クリック=第1条件 / Shift+クリック=条件を追加・最大${MAX_SORTS}）`);
   root.innerHTML = `
     <style>${css()}</style>
@@ -154,8 +162,9 @@ export async function render(root) {
       <button id="tb-add" class="tb-add">タスク追加</button>
       <span class="tb-seg" role="tablist">
         <button class="tb-seg-b${!isOutline ? " on" : ""}" data-mode="table">表</button>
-        <button class="tb-seg-b${isOutline ? " on" : ""}" data-mode="outline">アウトライン</button>
+        <button class="tb-seg-b${isOutline ? " on" : ""}" data-mode="outline">階層</button>
       </span>
+      ${isOutline ? `<span class="tb-olexp"><button class="tb-olx" id="tb-ol-expand" title="すべて展開"><span class="tb-olx-car">▾</span> 全展開</button><button class="tb-olx" id="tb-ol-collapse" title="すべて折りたたみ"><span class="tb-olx-car">▸</span> 全折りたたみ</button></span>` : ""}
       ${isOutline ? "" : `<button id="tb-manual" class="tb-manbtn${manual ? " on" : ""}" title="自分だけの手動ソート">${icon("hand")} マイソート</button>`}
       ${isOutline ? "" : `<span class="tb-sortwrap${manual ? " dim" : ""}">ソート条件: <span class="tb-chips">${chips || `<span class="tb-sc-none">なし（既定: 期限順）</span>`}</span>
         ${V.sorts.length < MAX_SORTS ? `<select id="tb-addsort" class="tb-addsort">${addOpts}</select>` : `<span class="tb-sc-none">最大${MAX_SORTS}件</span>`}</span>`}
@@ -256,16 +265,37 @@ export async function render(root) {
     tr.onclick = (e) => { if (V.manualMode || e.target.closest(".tb-fable")) return; openTaskForm({ taskId: +tr.dataset.id, onSaved: () => render(root) }); };
     tr.oncontextmenu = (e) => { e.preventDefault(); openRowMenu(e.clientX, e.clientY, +tr.dataset.id, tasks, root); };
   });
-  // アウトライン: 折りたたみトグル（展開/折りたたみのみ）＋ 行クリックで編集
+  // 階層: 折りたたみトグル（展開/折りたたみのみ）＋ 行クリックで編集。トグルのたびに永続化。
   root.querySelectorAll(".ol-tw").forEach((tw) => {
     if (!tw.dataset.id) return; // 子なしのプレースホルダは無反応
-    tw.onclick = (e) => { e.stopPropagation(); const id = +tw.dataset.id; olCollapsed.has(id) ? olCollapsed.delete(id) : olCollapsed.add(id); render(root); };
+    tw.onclick = (e) => { e.stopPropagation(); const id = +tw.dataset.id; olCollapsed.has(id) ? olCollapsed.delete(id) : olCollapsed.add(id); saveOlCollapsed(UID); render(root); };
   });
+  // 全展開／全折りたたみ（階層モードのみ）。全折りたたみ=子を持つ全ノードを畳む。
+  const olExp = root.querySelector("#tb-ol-expand");
+  if (olExp) olExp.onclick = () => { olCollapsed.clear(); saveOlCollapsed(UID); render(root); };
+  const olCol = root.querySelector("#tb-ol-collapse");
+  if (olCol) olCol.onclick = () => {
+    olCollapsed.clear();
+    buildTaskTree(rows.map((r) => r.t)).forEach(function add(n) { if (n.children.length) { olCollapsed.add(n.task.id); n.children.forEach(add); } });
+    saveOlCollapsed(UID); render(root);
+  };
   root.querySelectorAll(".ol-row").forEach((rowEl) => {
     rowEl.onclick = (e) => {
-      if (e.target.closest(".ol-tw:not(.none)")) return; // 実トグルだけは展開/折りたたみ専用
+      if (e.target.closest(".ol-tw:not(.none)") || e.target.closest(".ol-cb") || e.target.closest(".ol-addsub")) return; // トグル/チェック/＋は専用ハンドラ
       openTaskForm({ taskId: +rowEl.dataset.id, onSaved: () => render(root) });
     };
+  });
+  // 階層: チェック（.ol-cb）で done を即トグル。行クリック（編集）とは分離。
+  root.querySelectorAll(".ol-cb").forEach((cb) => {
+    cb.onclick = (e) => {
+      e.stopPropagation();
+      const id = +cb.dataset.id, done = cb.dataset.done === "1";
+      updateTask(id, done ? { done: false } : { done: true, percent_done: 100 }).then(() => { invalidate(); render(root); }).catch(() => {});
+    };
+  });
+  // 階層: ＋ でインライン入力を開き、確定で親タスクのサブタスクを新規作成。
+  root.querySelectorAll(".ol-addsub").forEach((b) => {
+    b.onclick = (e) => { e.stopPropagation(); openInlineSubtask(b, +b.dataset.pid, +b.dataset.proj, root); };
   });
   // 最上部の定期帯: ヘッダで折りたたみ（本人ごとに永続）＋ 行クリックで編集モーダル
   const recHead = root.querySelector("#tb-rec-head");
@@ -802,15 +832,61 @@ function olRowHtml(node, depth, counts) {
   const due = olDueLabel(t);
   return `<div class="ol-row" data-id="${t.id}" style="padding-left:${12 + depth * 22}px">
     ${tw}
-    <span class="ol-cb ${st}"></span>
+    <span class="ol-cb ${st}" data-id="${t.id}" data-done="${t.done ? 1 : 0}" title="クリックで完了を切替"></span>
     <span class="ol-name ${t.done ? "done" : ""}">${esc(t.title)}</span>
     ${childInfo}
     <span class="ol-meta">
+      <button type="button" class="ol-addsub" data-pid="${t.id}" data-proj="${t.project_id || 0}" title="サブタスクを追加">＋</button>
       ${who ? `<span class="ol-ava" style="background:${member_color(who.id)}">${esc((wn[0] || "?"))}</span>` : ""}
       ${due ? `<span class="ol-due">${due}</span>` : ""}
       <span class="ol-st ${st}">${STATUS[st].label}</span>
     </span>
   </div>`;
+}
+
+// 階層: ＋ボタン直下にインライン入力を開き、確定で親タスクのサブタスクを新規作成。
+// 親と同じ project_id に作り、addRelation(parentId, childId, "subtask") で関連付け（buildTaskTree と整合）。
+let _olInlineEl = null;
+function closeInlineSubtask() { if (_olInlineEl) { _olInlineEl.remove(); _olInlineEl = null; } }
+function openInlineSubtask(btn, parentId, projId, root) {
+  closeInlineSubtask();
+  closeRowMenu();
+  const box = document.createElement("div");
+  box.className = "tb-ctx ol-addbox";
+  box.innerHTML = `<textarea class="ol-addinp" rows="2" placeholder="サブタスク名を入力（Enterで追加）"></textarea>
+    <div class="ol-addbtns"><button class="ol-addok">追加</button><button class="ol-addng">キャンセル</button><span class="ol-adderr"></span></div>`;
+  document.body.appendChild(box);
+  _olInlineEl = box;
+  const r = btn.getBoundingClientRect();
+  const bw = box.offsetWidth;
+  box.style.left = Math.max(6, Math.min(r.left, window.innerWidth - bw - 8)) + "px";
+  box.style.top = Math.min(r.bottom + 4, window.innerHeight - box.offsetHeight - 8) + "px";
+  const ta = box.querySelector(".ol-addinp");
+  const err = box.querySelector(".ol-adderr");
+  ta.focus();
+  const submit = async () => {
+    const title = ta.value.trim();
+    if (!title) { closeInlineSubtask(); return; }
+    const ok = box.querySelector(".ol-addok");
+    ok.disabled = true; err.textContent = "";
+    try {
+      const child = await createTaskInProject(projId || 0, { title });
+      await addRelation(parentId, child.id, "subtask"); // 親→子（subtask）= buildTaskTree が読む向き
+      olCollapsed.delete(parentId); saveOlCollapsed(UID); // 追加後は親を開いて子を見せる
+      closeInlineSubtask(); invalidate(); render(root);
+    } catch (e) { ok.disabled = false; err.textContent = "追加に失敗しました"; }
+  };
+  box.querySelector(".ol-addok").onclick = (e) => { e.stopPropagation(); submit(); };
+  box.querySelector(".ol-addng").onclick = (e) => { e.stopPropagation(); closeInlineSubtask(); };
+  ta.onkeydown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
+    else if (e.key === "Escape") { e.preventDefault(); closeInlineSubtask(); }
+  };
+  box.addEventListener("pointerdown", (e) => e.stopPropagation());
+  setTimeout(() => {
+    const onDown = (ev) => { if (!box.contains(ev.target)) { closeInlineSubtask(); document.removeEventListener("pointerdown", onDown, true); } };
+    document.addEventListener("pointerdown", onDown, true);
+  }, 0);
 }
 
 // ── 最上部の定期帯（定例業務・定期MTG）。recurrences を軽く要約して表示。折りたたみ可。0件なら出さない。 ──
@@ -997,9 +1073,28 @@ function css() {
   .ol-tw{width:26px;height:26px;margin:-6px 0;flex:none;display:grid;place-items:center;color:${C.muted};cursor:pointer;font-size:13px;line-height:1;user-select:none;border-radius:6px}
   .ol-tw:not(.none):hover{background:#e7eef7;color:${C.fill}}
   .ol-tw.none{cursor:pointer;visibility:hidden}
-  .ol-cb{width:13px;height:13px;border-radius:4px;flex:none;border:1.5px solid ${C.line}}
+  .ol-cb{width:15px;height:15px;border-radius:4px;flex:none;border:1.5px solid ${C.line};cursor:pointer;display:grid;place-items:center}
+  .ol-cb:hover{border-color:${C.fill};box-shadow:0 0 0 3px rgba(58,134,255,.12)}
   .ol-cb.done{background:${C.free};border-color:${C.free}}
   .ol-cb.doing{background:#eaf2ff;border-color:${C.fill}}
+  /* 全展開/全折りたたみ（セグメント付近の小ボタン） */
+  .tb-olexp{display:inline-flex;gap:5px}
+  .tb-olx{font:inherit;font-size:11.5px;font-weight:600;padding:5px 10px;border:1px solid ${C.line};border-radius:8px;background:#fff;color:${C.muted};cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+  .tb-olx:hover{border-color:${C.fill};color:${C.fill}}
+  .tb-olx-car{font-size:10px;opacity:.7}
+  /* 行内サブタスク追加（＋） */
+  .ol-addsub{font:inherit;font-size:13px;font-weight:700;width:20px;height:20px;line-height:1;border:1px solid ${C.line};border-radius:6px;background:#fff;color:${C.muted};cursor:pointer;opacity:0;transition:opacity .1s;display:grid;place-items:center;padding:0}
+  .ol-row:hover .ol-addsub{opacity:1}
+  .ol-addsub:hover{border-color:${C.fill};color:${C.fill};background:#eef4ff}
+  @media (hover:none){.ol-addsub{opacity:.55}}
+  .ol-addbox{padding:8px;min-width:240px;gap:7px}
+  .ol-addinp{font:inherit;font-size:13px;width:100%;box-sizing:border-box;border:1px solid ${C.line};border-radius:7px;padding:6px 8px;resize:vertical;color:${C.ink};background:#fff}
+  .ol-addinp:focus{outline:none;border-color:${C.fill}}
+  .ol-addbtns{display:flex;align-items:center;gap:7px}
+  .ol-addok{font:inherit;font-size:12px;font-weight:600;color:#fff;background:${C.fill};border:1px solid ${C.fill};border-radius:6px;padding:5px 14px;cursor:pointer}
+  .ol-addok:disabled{opacity:.6}
+  .ol-addng{font:inherit;font-size:12px;color:${C.muted};background:transparent;border:1px solid ${C.line};border-radius:6px;padding:5px 11px;cursor:pointer}
+  .ol-adderr{font-size:11px;color:${C.over}}
   .ol-name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ol-name.done{color:${C.muted};text-decoration:line-through}
   .ol-cc{font-size:10.5px;color:${C.muted};background:#f0f1f4;border-radius:10px;padding:1px 7px;flex:none}
@@ -1018,5 +1113,10 @@ function css() {
   html[data-theme="dark"] .ol-row:hover{background:rgba(255,255,255,.05)}
   html[data-theme="dark"] .ol-tw:not(.none):hover{background:${C.track};color:${C.fill}}
   html[data-theme="dark"] .ol-cb.doing{background:rgba(58,134,255,.25);border-color:${C.fill}}
-  html[data-theme="dark"] .ol-cc{background:rgba(255,255,255,.08)}`;
+  html[data-theme="dark"] .ol-cc{background:rgba(255,255,255,.08)}
+  html[data-theme="dark"] .tb-olx{background:var(--card)}
+  html[data-theme="dark"] .ol-addsub{background:var(--card)}
+  html[data-theme="dark"] .ol-addsub:hover{background:rgba(58,134,255,.18)}
+  html[data-theme="dark"] .ol-addinp{background:var(--card)}
+  html[data-theme="dark"] .ol-addng{background:transparent}`;
 }
