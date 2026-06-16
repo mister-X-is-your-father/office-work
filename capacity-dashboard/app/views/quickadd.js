@@ -6,12 +6,11 @@
 import * as vik from "../lib/api.js";
 import { load, invalidate } from "../lib/store.js";
 import { parseQuickAdd } from "../lib/quickadd.js";
-import { joinMeta, DOW_JA } from "../lib/form.js";
-import { esc, fmtH } from "../lib/ui.js";
+import { joinMeta } from "../lib/form.js";
+import { esc } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
 
 export const INBOX_WS = "インボックス";
-const PRIO_NAME = { 4: "MUST", 3: "高", 2: "中", 1: "低" };
 const PROJ_KEY = "ts.quickadd.proj"; // 既定投入先（ワークスペース）の保持キー。"" or 数値ID。
 
 // 解析結果を実データに照合（WS/担当の解決）。store.load はキャッシュ済み前提で軽い。
@@ -32,31 +31,41 @@ function resolveParsed(parsed, { projects, members }) {
   return r;
 }
 
-function fmtDateChip(iso, startMinute) {
-  const dow = DOW_JA[new Date(iso + "T00:00:00Z").getUTCDay()];
-  let s = `${+iso.slice(5, 7)}/${+iso.slice(8, 10)}（${dow}）`;
-  if (startMinute != null) s += ` ${Math.floor(startMinute / 60)}:${String(startMinute % 60).padStart(2, "0")}`;
-  return s;
+// トークン種別→アイコン名（lib/icons.js）と接頭ラベル。
+const TOK_ICON = { date: "calendar", time: "calendar", estimate: "stopwatch", priority: "flag", label: "tag", assignee: "user", ws: "folder" };
+const TOK_PREFIX = { priority: "重要度: ", label: "#", assignee: "@" };
+
+// 認識トークンを「適用/テキスト化」トグル可能なチップとして描画。
+// data-raw に生トークンを持たせ、クリックで ignore セットを切替える（view 側で処理）。
+function tokenChipHtml(t, r) {
+  const ic = TOK_ICON[t.kind] ? icon(TOK_ICON[t.kind], { size: 13 }) : "";
+  const prefix = TOK_PREFIX[t.kind] || "";
+  // ws/assignee は実データ照合の警告を反映（適用時のみ）。
+  let label = esc(t.label);
+  let extraCls = "";
+  if (t.applied && t.kind === "ws" && r.wsMiss) { label = `${esc(t.label)} 不明`; extraCls = " miss"; }
+  if (t.applied && t.kind === "assignee") {
+    if (r.member) label = esc(r.member.name || r.member.username);
+    else { label = `${esc(t.label)} 不在`; extraCls = " miss"; }
+  }
+  const cls = `qa-chip qa-tok${t.applied ? "" : " text"}${extraCls}`;
+  const title = t.applied ? "クリックでテキスト扱いにする" : "クリックで再び認識する";
+  return `<button type="button" class="${cls}" data-raw="${esc(t.raw)}" title="${title}" aria-pressed="${t.applied ? "true" : "false"}">${ic}${prefix}${label}</button>`;
 }
 
 function chipsHtml(r, defaultProj) {
   const c = [];
   if (!r.title) c.push(`<span class="qa-chip warn">タイトルを入力</span>`);
   else c.push(`<span class="qa-chip title">${esc(r.title)}</span>`);
-  if (r.dateISO) c.push(`<span class="qa-chip">${icon("calendar", { size: 13 })} ${fmtDateChip(r.dateISO, r.startMinute)}</span>`);
-  if (r.estimateH) c.push(`<span class="qa-chip">${icon("stopwatch", { size: 13 })} ${fmtH(r.estimateH)}</span>`);
-  if (r.priority) c.push(`<span class="qa-chip">重要度: ${PRIO_NAME[r.priority]}</span>`);
-  for (const l of r.labels) c.push(`<span class="qa-chip">#${esc(l)}</span>`);
-  if (r.assignee) c.push(r.member
-    ? `<span class="qa-chip">${icon("user", { size: 13 })} ${esc(r.member.name || r.member.username)}</span>`
-    : `<span class="qa-chip warn">@${esc(r.assignee)} 見つかりません</span>`);
+  // 認識トークン（適用/テキスト化トグル可）。入力順を保つ。
+  for (const t of (r.tokens || [])) c.push(tokenChipHtml(t, r));
+  // links は解釈固定（トグル対象外）。
   for (const u of r.links) c.push(`<span class="qa-chip">${icon("link", { size: 13 })} ${esc(u.length > 30 ? u.slice(0, 28) + "…" : u)}</span>`);
-  c.push(r.ws
-    ? (r.wsProject ? `<span class="qa-chip ws">${icon("folder", { size: 13 })} ${esc(r.wsProject.title)}</span>`
-       : `<span class="qa-chip warn">>${esc(r.ws)} 不明 → ${defaultProj ? esc(defaultProj.title) : INBOX_WS}へ</span>`)
-    : `<span class="qa-chip ws">${icon("folder", { size: 13 })} ${defaultProj ? esc(defaultProj.title) : INBOX_WS}</span>`);
+  // 投入先（>WS が無い or テキスト化された場合の既定行き先を明示）。
+  const wsApplied = (r.tokens || []).some((t) => t.kind === "ws" && t.applied);
+  if (!wsApplied) c.push(`<span class="qa-chip ws">${icon("folder", { size: 13 })} ${defaultProj ? esc(defaultProj.title) : INBOX_WS}</span>`);
   return c.join("") +
-    `<div class="qa-help">構文: 明日15時 / 6/20 / 月曜 / #分類 / !高 / 1.5h / @担当 / &gt;ワークスペース / URL→資料</div>`;
+    `<div class="qa-help">チップをクリックでテキスト扱いに（取り消し線＝適用しない）。構文: 明日15時 / 6/20 / 月曜 / #分類 / !高 / 1.5h / @担当 / &gt;ワークスペース / URL→資料</div>`;
 }
 
 // 構文ヘルプの早見表（実際にパーサが解釈する記法のみ）。lib/quickadd.js と整合させること。
@@ -152,6 +161,8 @@ export function mountQuickAdd(topbar, { onCreated } = {}) {
   let data = null;   // store.load の結果（チップ解決用・遅延）
   let resolved = null;
   let busy = false;
+  let ignore = new Set();   // テキスト扱いにした生トークン文字列
+  let ignoreFor = "";       // ignore が有効な入力値（変わればリセット）
 
   // セレクタで選んだ既定投入先プロジェクト（無効値はインボックス扱い＝null）。
   const currentDefaultProj = () => {
@@ -176,17 +187,35 @@ export function mountQuickAdd(topbar, { onCreated } = {}) {
     if (resolved) { pop.innerHTML = chipsHtml(resolved, currentDefaultProj()); pop.hidden = false; }
   });
 
+  // 入力に応じてチップ帯を再描画。ignore（テキスト化したトークン）を反映して解析する。
+  // 入力本文が変わったら ignore はリセット（同一入力内でのみ有効）。
   const refresh = async () => {
     const v = input.value;
-    if (!v.trim()) { pop.hidden = true; resolved = null; return; }
+    if (!v.trim()) { pop.hidden = true; resolved = null; ignore = new Set(); ignoreFor = ""; return; }
+    if (v !== ignoreFor) { ignore = new Set(); ignoreFor = v; }
     if (!data) { try { data = await load(); } catch { data = { projects: [], members: [], me: null }; } }
-    resolved = resolveParsed(parseQuickAdd(v), data);
+    resolved = resolveParsed(parseQuickAdd(v, { ignore }), data);
     pop.innerHTML = chipsHtml(resolved, currentDefaultProj());
     pop.hidden = false;
   };
   input.addEventListener("input", refresh);
   input.addEventListener("focus", refresh);
   input.addEventListener("blur", () => setTimeout(() => { pop.hidden = true; }, 150));
+
+  // チップ（認識トークン）クリックで 適用⇄テキスト化 をトグル → 再解析・再描画。
+  // mousedown で処理する（input.blur の遅延 hide より先に確定させ、フォーカスを奪わない）。
+  pop.addEventListener("mousedown", (ev) => {
+    const btn = ev.target.closest(".qa-tok");
+    if (!btn) return;
+    ev.preventDefault(); // input からフォーカスを奪わない
+    const raw = btn.getAttribute("data-raw");
+    if (raw == null) return;
+    if (ignore.has(raw)) ignore.delete(raw); else ignore.add(raw);
+    ignoreFor = input.value; // 現入力に紐づけ
+    resolved = resolveParsed(parseQuickAdd(input.value, { ignore }), data || { projects: [], members: [], me: null });
+    pop.innerHTML = chipsHtml(resolved, currentDefaultProj());
+    pop.hidden = false;
+  });
 
   const submit = async () => {
     if (busy || !resolved || !resolved.title) return;
@@ -196,7 +225,7 @@ export function mountQuickAdd(topbar, { onCreated } = {}) {
     try {
       // 投入先: 明示 >WS名 ＞ セレクタ既定 ＞ インボックス。直前のデータで作成。
       await createFromParsed(resolved, data, currentDefaultProj());
-      data = null; resolved = null;
+      data = null; resolved = null; ignore = new Set(); ignoreFor = "";
       input.value = "";
       pop.innerHTML = `<span class="qa-chip ok">${icon("check", { size: 13 })} 追加しました</span>`;
       setTimeout(() => { if (!input.value) pop.hidden = true; }, 1200);
@@ -249,6 +278,21 @@ function ensureStyle() {
   .qa-chip.ws{color:var(--muted)}
   .qa-chip.warn{color:#b3261e;background:#fdf0ef;border-color:#f3c9c6}
   .qa-chip.ok{color:#1d7a46;background:#eaf7ef;border-color:#bfe5cd;font-weight:700}
+  /* 認識トークン（適用/テキスト化トグル）。button なので見た目を chip に揃える。 */
+  .qa-tok{display:inline-flex;align-items:center;gap:4px;font:inherit;font-size:11.5px;line-height:1.4;
+    cursor:pointer;background:#eef4ff;border:1px solid #cfe0ff;color:var(--ink)}
+  .qa-tok:hover{border-color:var(--fill)}
+  .qa-tok:focus-visible{outline:none;border-color:var(--fill);box-shadow:0 0 0 3px rgba(58,134,255,.18)}
+  .qa-tok .ic{color:var(--fill)}
+  /* テキスト扱い（適用しない）: 取り消し線＋淡色 */
+  .qa-tok.text{background:#f4f5f7;border-color:var(--line);color:var(--muted);text-decoration:line-through;
+    text-decoration-thickness:1px}
+  .qa-tok.text .ic{color:var(--muted)}
+  /* WS/担当の未照合（適用中だが見つからない） */
+  .qa-tok.miss{background:#fdf0ef;border-color:#f3c9c6;color:#b3261e}
+  .qa-tok.miss .ic{color:#b3261e}
+  .qa-tok.text.miss{background:#f4f5f7;border-color:var(--line);color:var(--muted)}
+  .qa-tok.text.miss .ic{color:var(--muted)}
   .qa-help{flex-basis:100%;font-size:10.5px;color:var(--muted);margin-top:2px}
   .qa-help-btn{flex:none;display:inline-flex;align-items:center;justify-content:center;
     width:30px;height:30px;padding:0;box-sizing:border-box;cursor:pointer;
