@@ -17,7 +17,7 @@ const MAX_SORTS = 5; // 組めるソート条件の上限（第1〜第5条件）
 const VKEY = (uid) => `ts.list.view.${uid ?? "anon"}`;
 function loadView(uid) {
   // doneMode: "show"=完了も表示 / "today"=完了は隠すが今日の完了は残す / "hide"=完了を隠す
-  const def = { sorts: [{ key: "due", dir: 1 }], manualMode: false, order: [], doneMode: "hide", proj: "", cat: "", qaWho: "", qaDue: "", mode: "table" };
+  const def = { sorts: [{ key: "due", dir: 1 }], manualMode: false, order: [], doneMode: "hide", proj: "", cat: "", qaWho: "", qaDue: "", mode: "table", q: "" };
   try {
     const raw = JSON.parse(localStorage.getItem(VKEY(uid)) || "null");
     if (!raw) return { ...def };                       // 初回のみ既定（期限）
@@ -106,8 +106,25 @@ export async function render(root) {
   else if (V.qaDue === "7d") rows = rows.filter((r) => r.due && r.due <= shiftISO(today, 7));
   else if (V.qaDue === "30d") rows = rows.filter((r) => r.due && r.due <= shiftISO(today, 30));
 
-  // 絞り込み（プロジェクト/分類/担当/期限/完了表示）のいずれかがアクティブか。0件時の空状態出し分け用。
-  const filtersActive = !!(V.proj || V.cat || V.qaWho || V.qaDue || V.doneMode !== "hide");
+  // フリーワード検索（右上）。タイトル中心＋プロジェクト名/親(プロジェクト)名/分類/担当名を対象。
+  // 他フィルタの後（＝絞り込み済み集合）にAND併用。表/階層どちらも rows 由来なので両モードに効く。
+  const q = (V.q || "").trim().toLowerCase();
+  if (q) {
+    const hit = (r) => {
+      const parts = [
+        r.title,
+        r.proj,
+        r.parent && r.parent.title,
+        r.cat && r.cat.title,
+        ...(r.t.assignees || []).map((a) => a.name || a.username),
+      ];
+      return parts.some((s) => s && String(s).toLowerCase().includes(q));
+    };
+    rows = rows.filter(hit);
+  }
+
+  // 絞り込み（プロジェクト/分類/担当/期限/完了表示/検索）のいずれかがアクティブか。0件時の空状態出し分け用。
+  const filtersActive = !!(V.proj || V.cat || V.qaWho || V.qaDue || V.doneMode !== "hide" || q);
 
   const manual = V.manualMode && !isOutline; // アウトライン中はマイソート（手動順）を無効化（階層が順序）
   // 選択は表モード全般で有効（チェックボックス＋一括操作）。マイソート中はドラッグ移動にも併用。
@@ -158,24 +175,35 @@ export async function render(root) {
     : (manual ? "・ 行をどこでもドラッグして自分用に並べ替え" : `・ ソート条件を重ねて並べ替え（列ヘッダ: クリック=第1条件 / Shift+クリック=条件を追加・最大${MAX_SORTS}）`);
   root.innerHTML = `
     <style>${css()}</style>
-    <h1 class="vtitle">タスク一覧 <small>${rows.length}件 ${subtitle}</small></h1>
+    <div class="tb-head">
+      <h1 class="vtitle">タスク一覧 <small>${rows.length}件 ${subtitle}</small></h1>
+      <span class="tb-search">${icon("search", { size: 15, cls: "tb-search-ic" })}<input id="tb-q" class="tb-search-in" type="text" placeholder="タスクを検索（名前・PJ・分類・担当）" value="${esc(V.q || "")}">${V.q ? `<button id="tb-q-clr" class="tb-search-x" type="button" title="検索をクリア">×</button>` : ""}</span>
+    </div>
     <div class="tb-tools">
-      <button id="tb-add" class="tb-add">タスク追加</button>
-      <span class="tb-seg" role="tablist">
-        <button class="tb-seg-b${!isOutline ? " on" : ""}" data-mode="table">表</button>
-        <button class="tb-seg-b${isOutline ? " on" : ""}" data-mode="outline">階層</button>
+      <span class="tb-grp">
+        <button id="tb-add" class="tb-add">タスク追加</button>
+        <span class="tb-seg" role="tablist">
+          <button class="tb-seg-b${!isOutline ? " on" : ""}" data-mode="table">表</button>
+          <button class="tb-seg-b${isOutline ? " on" : ""}" data-mode="outline">階層</button>
+        </span>
+        ${isOutline ? `<span class="tb-olexp"><button class="tb-olx" id="tb-ol-expand" title="すべて展開"><span class="tb-olx-car">▾</span> 全展開</button><button class="tb-olx" id="tb-ol-collapse" title="すべて折りたたみ"><span class="tb-olx-car">▸</span> 全折りたたみ</button></span>` : ""}
       </span>
-      ${isOutline ? `<span class="tb-olexp"><button class="tb-olx" id="tb-ol-expand" title="すべて展開"><span class="tb-olx-car">▾</span> 全展開</button><button class="tb-olx" id="tb-ol-collapse" title="すべて折りたたみ"><span class="tb-olx-car">▸</span> 全折りたたみ</button></span>` : ""}
-      ${isOutline ? "" : `<button id="tb-manual" class="tb-manbtn${manual ? " on" : ""}" title="自分だけの手動ソート">${icon("hand")} マイソート</button>`}
-      ${isOutline ? "" : `<span class="tb-sortwrap${manual ? " dim" : ""}">ソート条件: <span class="tb-chips">${chips || `<span class="tb-sc-none">なし（既定: 期限順）</span>`}</span>
-        ${V.sorts.length < MAX_SORTS ? `<select id="tb-addsort" class="tb-addsort">${addOpts}</select>` : `<span class="tb-sc-none">最大${MAX_SORTS}件</span>`}</span>`}
-      <select id="tb-proj">${projOpts}</select>
-      <select id="tb-cat">${catOpts}</select>
-      <select id="tb-done" title="完了タスクの表示">
-        <option value="show" ${V.doneMode === "show" ? "selected" : ""}>完了も表示</option>
-        <option value="today" ${V.doneMode === "today" ? "selected" : ""}>完了を隠す（今日の完了は残す）</option>
-        <option value="hide" ${V.doneMode === "hide" ? "selected" : ""}>完了を隠す</option>
-      </select>
+      <span class="tb-grp">
+        <span class="tb-glbl">絞込</span>
+        <select id="tb-proj">${projOpts}</select>
+        <select id="tb-cat">${catOpts}</select>
+        <select id="tb-done" title="完了タスクの表示">
+          <option value="show" ${V.doneMode === "show" ? "selected" : ""}>完了も表示</option>
+          <option value="today" ${V.doneMode === "today" ? "selected" : ""}>完了を隠す（今日の完了は残す）</option>
+          <option value="hide" ${V.doneMode === "hide" ? "selected" : ""}>完了を隠す</option>
+        </select>
+      </span>
+      ${isOutline ? "" : `<span class="tb-grp${manual ? " dim" : ""}">
+        <span class="tb-glbl">ソート</span>
+        <button id="tb-manual" class="tb-manbtn${manual ? " on" : ""}" title="自分だけの手動ソート">${icon("hand")} マイソート</button>
+        <span class="tb-sortwrap${manual ? " dim" : ""}"><span class="tb-chips">${chips || `<span class="tb-sc-none">なし（既定: 期限順）</span>`}</span>
+          ${V.sorts.length < MAX_SORTS ? `<select id="tb-addsort" class="tb-addsort">${addOpts}</select>` : `<span class="tb-sc-none">最大${MAX_SORTS}件</span>`}</span>
+      </span>`}
     </div>
     <div class="tb-quick">
       <span class="tb-ql">クイック絞り込み</span>
@@ -235,6 +263,14 @@ export async function render(root) {
     };
   });
   root.querySelector("#tb-done").onchange = (e) => { V.doneMode = e.target.value; reRender(); };
+  // 検索（右上）: インクリメンタル絞り込み。再描画後にフォーカス＋キャレット位置を復元（入力が途切れない）。
+  const qIn = root.querySelector("#tb-q");
+  if (qIn) {
+    qIn.oninput = (e) => { V.q = e.target.value; const pos = e.target.selectionStart; reRender(); restoreSearchFocus(root, pos); };
+    qIn.onkeydown = (e) => { if (e.key === "Escape" && V.q) { V.q = ""; reRender(); restoreSearchFocus(root, 0); } };
+  }
+  const qClr = root.querySelector("#tb-q-clr");
+  if (qClr) qClr.onclick = () => { V.q = ""; reRender(); restoreSearchFocus(root, 0); };
   // 0件の空状態にある「絞り込みを解除」: 全フィルタをクリア＋完了表示を既定(hide)に戻して再描画
   const emptyClr = root.querySelector("#tb-empty-clr");
   if (emptyClr) emptyClr.onclick = () => { V.proj = ""; V.cat = ""; V.qaWho = ""; V.qaDue = ""; V.doneMode = "hide"; reRender(); };
@@ -888,6 +924,13 @@ const emptyRow = (filtersActive) => `<tr><td colspan="${cols().length + 1}" clas
     ? `条件に一致するタスクがありません <button id="tb-empty-clr" class="tb-qa tb-qclr" type="button">絞り込みを解除</button>`
     : `タスクがありません`)
   + `</td></tr>`;
+// 検索ボックスのフォーカス＋キャレットを再描画後に復元（入力中に集中が外れないように）。
+function restoreSearchFocus(root, pos) {
+  const el = root.querySelector("#tb-q");
+  if (!el) return;
+  el.focus();
+  try { const p = Math.min(pos ?? el.value.length, el.value.length); el.setSelectionRange(p, p); } catch { /* noop */ }
+}
 // プロジェクト(=親タスク)別の色（親タスクidからパレットを引く）。一覧のプロジェクトチップ用。
 const PROJ_PAL = ["#3a86ff", "#2fa66b", "#b657d6", "#e5772d", "#0ea5e9", "#f5a623", "#ef476f", "#14b8a6"];
 const projColor = (pid) => PROJ_PAL[(pid || 0) % PROJ_PAL.length];
@@ -1086,7 +1129,22 @@ function recurrenceBandHtml(recurrences, members) {
 
 function css() {
   return `
+  /* タイトル行＝左に見出し・右に検索ボックス */
+  .tb-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:0 0 14px}
+  .tb-head .vtitle{margin:0;flex:1 1 auto;min-width:200px}
+  .tb-search{position:relative;display:inline-flex;align-items:center;margin-left:auto;flex:0 1 320px;min-width:200px}
+  .tb-search-ic{position:absolute;left:11px;color:${C.muted};pointer-events:none}
+  .tb-search-in{font:inherit;font-size:13px;width:100%;padding:7px 30px 7px 32px;border:1px solid ${C.line};border-radius:9px;background:#fff;color:${C.ink}}
+  .tb-search-in:focus{outline:none;border-color:${C.fill};box-shadow:0 0 0 3px rgba(58,134,255,.14)}
+  .tb-search-in::placeholder{color:${C.muted}}
+  .tb-search-x{position:absolute;right:7px;font:inherit;font-size:15px;line-height:1;color:${C.muted};background:transparent;border:0;padding:2px 5px;border-radius:6px;cursor:pointer}
+  .tb-search-x:hover{color:${C.ink};background:${C.track}}
+  /* ツールバー＝関連コントロールを見出し付きグループにまとめ、区切りで整頓 */
   .tb-tools{display:flex;gap:10px;align-items:center;margin:0 0 14px;flex-wrap:wrap}
+  .tb-grp{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;padding-right:12px;border-right:1px solid ${C.line}}
+  .tb-grp:last-child{border-right:0;padding-right:0}
+  .tb-grp.dim .tb-glbl{opacity:.55}
+  .tb-glbl{font-size:10.5px;font-weight:700;letter-spacing:.04em;color:${C.muted};text-transform:none;white-space:nowrap}
   .tb-tools select{font:inherit;font-size:13px;padding:6px 10px;border:1px solid ${C.line};border-radius:8px;background:#fff}
   .tb-add{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:13px;font-weight:600;padding:6px 13px;border:1px solid ${C.line};border-radius:8px;background:#fff;color:${C.ink};cursor:pointer}
   .tb-add::before{content:"+";font-size:15px;color:${C.fill};line-height:1}
@@ -1289,6 +1347,7 @@ function css() {
   .ol-st.todo{color:${C.muted};background:#f0f1f4}.ol-st.doing{color:${C.fill};background:#eaf2ff}.ol-st.waiting{color:#9a6a00;background:#fbf0d6}.ol-st.done{color:${C.free};background:#eaf7ef}
   .ol-empty{padding:30px;text-align:center;color:${C.muted}}
   /* ===== ダークモード（淡色直書きをダーク側へ上書き。ライト不変） ===== */
+  html[data-theme="dark"] .tb-search-in{background:var(--card)}
   html[data-theme="dark"] .tb-seg{background:var(--card)}
   html[data-theme="dark"] .tb-seg-b.on{background:rgba(58,134,255,.18)}
   html[data-theme="dark"] .tb-rec{background:rgba(255,255,255,.03)}
