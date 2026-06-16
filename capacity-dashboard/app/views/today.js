@@ -27,9 +27,10 @@ const segHtml = (mode) => `<div class="t-seg">
     </div>`;
 
 // body 要素に指定モードで描画（全画面/埋め込み 共通）。rerender はモード切替/clock 再描画用。
-function paintBody(body, data, day, mode, rerender) {
+// opts.fluid: ホーム埋め込みで固定高(px箱)をやめ、コンテナ幅に応じた可変高にする（積み上げのみ）。
+function paintBody(body, data, day, mode, rerender, opts = {}) {
   if (mode === "clock") renderClock(body, data, day, rerender);
-  else renderStacked(body, data, day);
+  else renderStacked(body, data, day, opts);
 }
 
 export async function render(root) {
@@ -66,7 +67,7 @@ export async function render(root) {
 //   title     見出しを出すか（既定 false）
 export async function renderInto(container, opts = {}) {
   if (!container) return;
-  const { compact = true, showToggle = false, title = false } = opts;
+  const { compact = true, showToggle = false, title = false, fluid = false } = opts;
   let localMode = opts.mode === "clock" ? "clock" : DEFAULT_MODE; // 全画面 MODE と独立
   const data = await load();          // store.js のキャッシュ経由（二重 fetch なし）
   CAP = data.settings.capH;
@@ -85,12 +86,12 @@ export async function renderInto(container, opts = {}) {
     }
     const body = container.querySelector(".t-embed");
     // 埋め込み内のモード切替/clock 再描画はサブコンテナ内で完結（全画面に波及しない）。
-    paintBody(body, data, day, localMode, draw);
+    paintBody(body, data, day, localMode, draw, { fluid });
   };
   draw();
 }
 
-function renderStacked(body, data, day) {
+function renderStacked(body, data, day, opts = {}) {
   const { tasks, members, projects, plansByTask, holidaysSet, unavailabilityByMember } = data;
   const taskById = new Map((tasks || []).map((t) => [t.id, t]));
   const pjIdx = new Map();
@@ -109,7 +110,13 @@ function renderStacked(body, data, day) {
   const rate = totCap > 0 ? Math.round((totAsg / totCap) * 100) : 0;
   const maxTotal = rows.reduce((m, r) => Math.max(m, r.assignedH), 0);
   const yMax = Math.max(11, Math.ceil(maxTotal) + 1);
-  const CHART_H = 400, FOOT_H = 54, PLOT_H = CHART_H - FOOT_H;
+  // 全画面=固定 400px（従来どおり・非回帰）。fluid(ホーム埋め込み)=固定px箱をやめ、
+  // ビューポート幅に追従する可変高（clamp 260〜400px）に。SVGではなく px レイアウトのため、
+  // 描画時点の幅から高さを算出して箱を固定値に縛らない。
+  const fluid = !!opts.fluid;
+  const vw = (typeof window !== "undefined" && window.innerWidth) ? window.innerWidth : 1200;
+  const CHART_H = fluid ? Math.round(Math.max(260, Math.min(400, vw * 0.32))) : 400;
+  const FOOT_H = 54, PLOT_H = CHART_H - FOOT_H;
   const pxPerH = PLOT_H / yMax;
   const usedPjs = [...pjIdx.keys()];
 

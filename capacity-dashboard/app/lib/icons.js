@@ -102,6 +102,10 @@ const P = {
   smartphone: '<rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/>',
   // 任意（lucide: download）
   download: '<path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/>',
+  // ▾ 折りたたみ展開中（lucide: chevron-down）
+  chevronDown: '<path d="m6 9 6 6 6-6"/>',
+  // ▸ 折りたたみ収納中（lucide: chevron-right）
+  chevronRight: '<path d="m9 18 6-6-6-6"/>',
 };
 
 let styleInjected = false;

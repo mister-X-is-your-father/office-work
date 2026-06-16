@@ -48,6 +48,7 @@ function makeLocalState(opts = {}) {
     FROM: "",
     TO: "",
     GRAIN: opts.grain != null ? String(opts.grain) : "",   // ""=自動
+    FLUID: !!opts.fluid,   // ホーム埋め込みで固定高(px箱)をやめ可変高にする
     save() { /* no-op: 埋め込みは永続化しない */ },
   };
 }
@@ -152,7 +153,15 @@ async function renderState(root, state, rerender, view = {}) {
   const perMember = targets.map((m) => ({ m, cols: colsForMember(m, bdays, granularity, tasks, plansByTask, holidaysSet) }));
   const allCols = perMember.flatMap((x) => x.cols);
   const yMax = Math.max(1, ...allCols.map((c) => Math.max(c.cap, c.total))) * 1.12;
-  const H = mode === "all" ? 190 : 300, pxPerH = H / yMax;
+  // 既定の各チャート高（全員=190 / 個人=300）。fluid(ホーム埋め込み)=固定px箱をやめ、
+  // ビューポート幅に追従する可変高にする（全画面・全員グリッドの見た目は非回帰）。
+  let H = mode === "all" ? 190 : 300;
+  if (state.FLUID) {
+    const vw = (typeof window !== "undefined" && window.innerWidth) ? window.innerWidth : 1200;
+    H = mode === "all" ? Math.round(Math.max(150, Math.min(190, vw * 0.16)))
+                       : Math.round(Math.max(220, Math.min(300, vw * 0.26)));
+  }
+  const pxPerH = H / yMax;
   const tickStep = yMax > 80 ? 40 : (yMax > 40 ? 16 : (yMax > 16 ? 8 : 4));
   let ticks = "";
   for (let h = 0; h <= yMax - tickStep / 2; h += tickStep) ticks += `<div class="wp-tick" style="bottom:${h * pxPerH}px">${h}h</div>`;
