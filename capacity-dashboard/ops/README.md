@@ -8,7 +8,8 @@
 | `taskstation-exec.py` | `~/.local/bin/` | Fable実行サービス（7020・直列キュー/スクリプト/SSE） |
 | `taskstation-mcp.py` | `~/.local/bin/` | TaskStation MCP（stdio・Fable自律操作: コメント/分割/進捗） |
 | `taskstation-fable-runner.py` | `~/.local/bin/` | 15分巡回の自動提案（タイマー起動） |
-| `systemd/*` | `~/.config/systemd/user/` | 上記のユニット（spa/exec=常駐、fable=timer） |
+| `taskstation-backup.sh` | `~/.local/bin/` | 日次バックアップ（毎日00:00・公式dumpで db+files+env を `~/backups/taskstation/vikunja-YYYYMMDD.zip`・前日ラベル・30日保持） |
+| `systemd/*` | `~/.config/systemd/user/` | 上記のユニット（spa/exec=常駐、fable/backup=timer） |
 
 設定（リポジトリ非収録・leo の `~/.config/taskstation/`）:
 - `fable.env` — fableアカウント資格情報（chmod 600）

@@ -1,0 +1,9 @@
+[Unit]
+Description=Run TaskStation daily backup at 00:00 (backs up the previous day)
+
+[Timer]
+OnCalendar=*-*-* 00:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
