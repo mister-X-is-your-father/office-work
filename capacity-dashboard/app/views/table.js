@@ -500,7 +500,8 @@ function openMenu(x, y, items, opts = {}) {
         + `<div class="tb-hg-col h"><span class="tb-hg-lbl">時間</span><div class="tb-hg-wrap">${it.hOpts.map((v) => `<button class="tb-hg-b${v === it.h ? " on" : ""}" data-i="${i}" data-hk="${v}">${v}</button>`).join("")}</div></div>`
         + `<div class="tb-hg-col"><span class="tb-hg-lbl">分</span><div class="tb-hg-min">${it.mOpts.map((v) => `<button class="tb-hg-b${v === it.m ? " on" : ""}" data-i="${i}" data-mk="${v}">${v}</button>`).join("")}</div></div>`
         + `</div>`
-        + `<div class="tb-hg-direct"><span class="tb-hg-lbl">直接(h)</span>${hourInputHtml("tb-est-direct", { value: it.hv ?? "" })}<button class="tb-hg-apply" data-i="${i}">適用</button></div>`
+        + `<div class="tb-hg-direct"><span class="tb-hg-lbl">直接(h)</span>${hourInputHtml("tb-est-direct", { value: it.hv ?? "" })}</div>`
+        + `<div class="tb-hg-foot"><button class="tb-hg-clear" data-i="${i}">クリア</button><button class="tb-hg-cancel" data-i="${i}">キャンセル</button><button class="tb-hg-apply" data-i="${i}">適用</button></div>`
         + `</div>`;
       return `<button class="tb-ctx-it${it.danger ? " danger" : ""}" data-i="${i}">${it.check !== undefined ? `<span class="tb-ctx-ck">${it.check ? icon("check", { size: 13 }) : ""}</span>` : ""}${esc(it.label)}</button>`;
     }).join("");
@@ -536,6 +537,10 @@ function openMenu(x, y, items, opts = {}) {
       dEl.addEventListener("click", (e) => e.stopPropagation());
       dEl.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); applyHours(); } });
       applyEl.onclick = (e) => { e.stopPropagation(); applyHours(); };
+      const clearEl = m.querySelector(".tb-hg-clear");
+      if (clearEl) clearEl.onclick = (e) => { e.stopPropagation(); const it = its[+clearEl.dataset.i]; closeRowMenu(); it.onClear && it.onClear(); };
+      const cancelEl = m.querySelector(".tb-hg-cancel");
+      if (cancelEl) cancelEl.onclick = (e) => { e.stopPropagation(); closeRowMenu(); };
     }
     // 時間カラムは縦スクロール。開いた／再描画時に選択中が見える位置へ寄せる。
     const onH = m.querySelector(".tb-hg-wrap .tb-hg-b.on");
@@ -641,9 +646,8 @@ function openEstMenu(chipEl, id, tasks, root) {
   const build = () => [
     { input: "hmgrid", h, m: mn, hv, hOpts, mOpts: mBase,
       onPick: (nh, nm) => { h = (nh == null ? 0 : nh); mn = (nm == null ? 0 : nm); const sec = h * 3600 + mn * 60; hv = toHv(sec); commit(sec); },
-      onHours: (hf) => { if (!isFinite(hf) || hf < 0) return; const sec = Math.round(hf * 3600); hv = hf || ""; const s = syncGrid(sec); h = s.h; mn = s.m; commit(sec); } },
-    { sep: true },
-    { label: "クリア", danger: cur > 0, on: () => { updateTask(id, { time_estimate: 0 }).then(() => { invalidate(); render(root); }).catch(() => {}); } },
+      onHours: (hf) => { if (!isFinite(hf) || hf < 0) return; const sec = Math.round(hf * 3600); hv = hf || ""; const s = syncGrid(sec); h = s.h; mn = s.m; commit(sec); },
+      onClear: () => { updateTask(id, { time_estimate: 0 }).then(() => { invalidate(); render(root); }).catch(() => {}); } },
   ];
   const r = chipEl.getBoundingClientRect();
   openMenu(r.left, r.bottom + 4, build(), { keepOpen: true, rebuild: build, onClose: () => { if (dirty) chain.then(() => { invalidate(); render(root); }); } });
@@ -1333,6 +1337,14 @@ function css() {
   .tb-hg-direct .tf-step{flex:none;width:96px}
   .tb-hg-apply{font:inherit;font-size:12px;font-weight:600;color:${C.fill};background:#eaf2ff;border:1px solid #cfe0ff;border-radius:6px;padding:5px 12px;cursor:pointer;flex:none}
   .tb-hg-apply:hover{background:#dbe9ff}
+  /* 見積フッター: クリア(左)・キャンセル(中)・適用(右) */
+  .tb-hg-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px}
+  .tb-hg-clear,.tb-hg-cancel{font:inherit;font-size:12px;font-weight:600;border-radius:6px;padding:5px 12px;cursor:pointer;background:#fff;border:1px solid ${C.line}}
+  .tb-hg-clear{color:${C.over}}
+  .tb-hg-cancel{color:${C.muted}}
+  .tb-hg-clear:hover,.tb-hg-cancel:hover{background:${C.track}}
+  html[data-theme="dark"] .tb-hg-clear,html[data-theme="dark"] .tb-hg-cancel{background:${C.card}}
+  html[data-theme="dark"] .tb-hg-apply{background:rgba(58,134,255,.18);border-color:rgba(58,134,255,.4)}
   .tb-ctx-it{font:inherit;font-size:13px;text-align:left;border:0;background:transparent;color:${C.ink};padding:8px 12px;border-radius:7px;cursor:pointer;white-space:nowrap}
   .tb-ctx-it:hover{background:${C.track}}
   .tb-ctx-it.danger{color:${C.over}}
