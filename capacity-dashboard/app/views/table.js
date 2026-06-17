@@ -3,7 +3,7 @@
 // 共有データ（DB）は一切変えないので、誰がどう並べても他メンバーの見え方に影響しない（衝突しない）。
 import { load, invalidate, isAiUser } from "../lib/store.js";
 import { savePresets } from "../lib/exec.js";
-import { updateTask, deleteTask, addAssignee, removeAssignee, addTaskLabel, removeTaskLabel, createLabel, setTaskWaiting, createTaskInProject, addRelation, removeRelation } from "../lib/api.js";
+import { updateTask, deleteTask, addAssignee, removeAssignee, addTaskLabel, removeTaskLabel, createLabel, setTaskWaiting, createTaskInProject, addRelation, removeRelation, getTask } from "../lib/api.js";
 import { PRIO, prioBucket, kindOf, isReviewTask, categoryLabels, categoryColor, REVIEW_LABEL, WAITING_LABEL, statusOf, STATUS } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 import { shiftISO, buildTaskTree } from "../lib/capacity.js";
@@ -12,6 +12,24 @@ import { summarizeRecurrence, openRecurrenceForm } from "./recurrenceform.js";
 import { hourInputHtml, wireHourInput } from "../lib/form.js";
 import { taskMatches, next7End, EMPTY_FILTER, BUILTIN_VIEWS } from "../lib/smartlist.js";
 import { icon } from "../lib/icons.js";
+import * as history from "../lib/history.js";
+
+history.initHistoryHotkeys(); // Ctrl/Cmd+Z=取消・Ctrl+Y/Ctrl+Shift+Z=やり直し（入力中/モーダル内は無視）
+
+// 履歴の undo/redo から呼ぶ再描画。最後に描画した一覧 root（lastRoot）へ再適用する。
+// 一覧を離れていても render は安全（store から再取得するだけ）。
+function historyRerender() { invalidate(); if (lastRoot && lastRoot.isConnected) render(lastRoot); }
+
+// ── 一覧のインライン編集を1アクションとして履歴に積む共通ヘルパ ─────────────
+// applyPatch(patch) は updateTask 等を呼んで該当値を適用する関数（before/after を渡して逆操作/再操作）。
+// 適用は呼び出し側で済ませた後にこれを呼ぶ＝二重適用しない（push のみ）。
+function pushScalarEdit(label, taskId, before, after, applyPatch) {
+  history.push({
+    label,
+    undo: async () => { await applyPatch(taskId, before); historyRerender(); },
+    redo: async () => { await applyPatch(taskId, after); historyRerender(); },
+  });
+}
 
 const HOUR = 3600;
 const MAX_SORTS = 5; // 組めるソート条件の上限（第1〜第5条件）
@@ -51,6 +69,7 @@ let flashId = null;          // ドロップ直後にジワっと色が戻る着
 let selectedIds = new Set(); // まとめて移動用の複数選択（マイソート中のみ・Ctrl/Shiftで操作）
 let anchorId = null;         // Shift範囲選択の起点
 let lastRoot = null, docDeselectWired = false; // 余白クリック解除（document全体・右側の地まで拾う）
+let historyUnsub = null; // Undo/Redo ボタンの活性同期（subscribe 解除関数。再描画ごとに張り替える）
 
 const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(0, 10) : "");
 
@@ -204,6 +223,10 @@ export async function render(root) {
     <div class="tb-tools">
       <span class="tb-grp">
         <button id="tb-add" class="tb-add">タスク追加</button>
+        <span class="tb-undogrp">
+          <button id="tb-undo" class="tb-undobtn" type="button" title="取り消し（Ctrl+Z）" aria-label="取り消し">${icon("undo", { size: 15 })}</button>
+          <button id="tb-redo" class="tb-undobtn" type="button" title="やり直し（Ctrl+Y）" aria-label="やり直し">${icon("redo", { size: 15 })}</button>
+        </span>
         <span class="tb-seg" role="tablist">
           <button class="tb-seg-b${!isOutline ? " on" : ""}" data-mode="table">表</button>
           <button class="tb-seg-b${isOutline ? " on" : ""}" data-mode="outline">階層</button>
@@ -300,6 +323,17 @@ export async function render(root) {
   const emptyClr = root.querySelector("#tb-empty-clr");
   if (emptyClr) emptyClr.onclick = () => { V.cat = ""; V.qaWho = ""; V.qaDue = ""; V.doneMode = "hide"; V.preset = ""; reRender(); };
   root.querySelector("#tb-add").onclick = () => openTaskForm({ onSaved: () => render(root) });
+  // 取消/やり直し（履歴）。canUndo/canRedo で活性・非活性を切り替え（subscribe で随時更新）。
+  const undoBtn = root.querySelector("#tb-undo"), redoBtn = root.querySelector("#tb-redo");
+  if (undoBtn) undoBtn.onclick = () => history.undo();
+  if (redoBtn) redoBtn.onclick = () => history.redo();
+  if (undoBtn && redoBtn) {
+    const sync = (st) => { undoBtn.disabled = !st.canUndo; redoBtn.disabled = !st.canRedo; };
+    sync({ canUndo: history.canUndo(), canRedo: history.canRedo() });
+    // 直近の subscribe を1つだけ保持（再描画のたびに古い購読を解除して二重通知を防ぐ）。
+    if (historyUnsub) historyUnsub();
+    historyUnsub = history.subscribe(sync);
+  }
   // 条件を追加（最大5件・5件到達時はセレクト自体を出さない）。マイソート中なら組み合わせソートに切替
   const addSel = root.querySelector("#tb-addsort");
   if (addSel) addSel.onchange = (e) => {
@@ -355,7 +389,11 @@ export async function render(root) {
     cb.onclick = (e) => {
       e.stopPropagation();
       const id = +cb.dataset.id, done = cb.dataset.done === "1";
-      updateTask(id, done ? { done: false } : { done: true, percent_done: 100 }).then(() => { invalidate(); render(root); }).catch(() => {});
+      const t = (tasks || []).find((x) => x.id === id);
+      const before = { done: !!(t && t.done), percent_done: (t && t.percent_done) || 0 };
+      const after = done ? { done: false, percent_done: before.percent_done } : { done: true, percent_done: 100 };
+      const applyDone = (taskId, s) => updateTask(taskId, { done: s.done, percent_done: s.percent_done });
+      applyDone(id, after).then(() => { pushScalarEdit("完了切替", id, before, after, applyDone); invalidate(); render(root); }).catch(() => {});
     };
   });
   // 階層: ＋ でインライン入力を開き、確定で親タスクのサブタスクを新規作成。
@@ -566,22 +604,42 @@ function openStatusMenu(chipEl, id, tasks, root) {
   const t = (tasks || []).find((x) => x.id === id); if (!t) return;
   const cur = statusOf(t);
   const reload = () => { invalidate(); render(root); };
-  // ステータスと進捗%は別軸。状態変更は%を捏造しない。
-  // 進行中＝着手時刻(started_at)を立てるだけ／未着手＝下ろすだけ（%には触らない=0のまま）。
-  // 完了だけが唯一 %=100 を意味する（その逆＝未完了化で % を 0 に戻す）。
-  const set = (key) => {
-    // 連絡待ち（GTD Waiting For）= 予約ラベルで表現。未完了化＋ラベル付与だけ（%・着手時刻は触らない）。
-    if (key === "waiting") {
-      Promise.all([updateTask(id, { done: false }), setTaskWaiting(t, true)]).then(reload).catch(() => {});
-      return;
-    }
-    // 進行中: %は触らない（=既存値維持）。ただし完了(100%)からの復帰だけは100を0へ戻す（完了=100の逆）。
+  // 取消用に変更前のステータス関連フィールドを捕捉（done/percent/started_at/連絡待ちラベル）。
+  const wasWaiting = (t.labels || []).some((l) => (l.title || "") === WAITING_LABEL);
+  const before = { done: !!t.done, percent_done: t.percent_done || 0, started_at: t.started_at || null, waiting: wasWaiting };
+  // status キーに応じたフィールド差分（scalar patch）＋連絡待ちラベルの on/off を組み立てる。
+  const stateOf = (key) => {
+    if (key === "waiting") return { patch: { done: false, percent_done: t.percent_done || 0, started_at: t.started_at || null }, waiting: true };
     const keepPct = (t.done || t.percent_done >= 100) ? 0 : (t.percent_done || 0);
     const patch = key === "done" ? { done: true, percent_done: 100 }
       : key === "doing" ? { done: false, percent_done: keepPct, started_at: new Date().toISOString() }
       : { done: false, percent_done: 0, started_at: null };
+    return { patch, waiting: false };
+  };
+  // before/after（{done,percent_done,started_at,waiting}）を実際に適用する。undo/redo で同じ経路。
+  // 連絡待ちラベルの付け外しは冪等だが、現在のラベル状態に基づく判定が要るので最新タスクを読む。
+  const applyState = async (taskId, s) => {
+    await updateTask(taskId, { done: s.done, percent_done: s.percent_done, started_at: s.started_at });
+    let tt = null; try { tt = await getTask(taskId); } catch { tt = (tasks || []).find((x) => x.id === taskId) || t; }
+    await setTaskWaiting(tt, !!s.waiting);
+  };
+  // ステータスと進捗%は別軸。状態変更は%を捏造しない。
+  // 進行中＝着手時刻(started_at)を立てるだけ／未着手＝下ろすだけ（%には触らない=0のまま）。
+  // 完了だけが唯一 %=100 を意味する（その逆＝未完了化で % を 0 に戻す）。
+  const set = (key) => {
+    const st = stateOf(key);
+    const after = { done: !!st.patch.done, percent_done: st.patch.percent_done ?? 0, started_at: st.patch.started_at ?? null, waiting: st.waiting };
+    // 連絡待ち（GTD Waiting For）= 予約ラベルで表現。未完了化＋ラベル付与だけ。
+    if (key === "waiting") {
+      Promise.all([updateTask(id, { done: false }), setTaskWaiting(t, true)]).then(() => {
+        pushScalarEdit("ステータス変更", id, before, after, applyState); reload();
+      }).catch(() => {});
+      return;
+    }
     // 連絡待ち以外に変えるときは待ちラベルを外す。
-    Promise.all([updateTask(id, patch), setTaskWaiting(t, false)]).then(reload).catch(() => {});
+    Promise.all([updateTask(id, st.patch), setTaskWaiting(t, false)]).then(() => {
+      pushScalarEdit("ステータス変更", id, before, after, applyState); reload();
+    }).catch(() => {});
   };
   const it = (key, label) => ({ label, check: cur === key, on: () => set(key) });
   const r = chipEl.getBoundingClientRect();
@@ -596,7 +654,9 @@ function openPrioMenu(chipEl, id, tasks, root) {
   const cur = t.priority || 0;
   const reload = () => { invalidate(); render(root); };
   const opts = [[0, "なし"], [1, "低"], [2, "中"], [3, "高"], [4, "MUST"]];
-  const items = opts.map(([v, label]) => ({ label, check: (cur >= 4 ? 4 : cur) === v, on: () => updateTask(id, { priority: v }).then(reload).catch(() => {}) }));
+  const before = cur;
+  const applyPrio = (taskId, p) => updateTask(taskId, { priority: p });
+  const items = opts.map(([v, label]) => ({ label, check: (cur >= 4 ? 4 : cur) === v, on: () => updateTask(id, { priority: v }).then(() => { pushScalarEdit("重要度変更", id, before, v, applyPrio); reload(); }).catch(() => {}) }));
   const r = chipEl.getBoundingClientRect();
   openMenu(r.left, r.bottom + 4, items);
 }
@@ -608,7 +668,9 @@ function openDueMenu(chipEl, id, tasks, root, today) {
   const reload = () => { invalidate(); render(root); };
   const ZERO = "0001-01-01T00:00:00Z";
   const cur = (t.due_date && !t.due_date.startsWith("0001")) ? t.due_date.slice(0, 10) : "";
-  const set = (iso) => updateTask(id, { due_date: iso ? iso + "T00:00:00Z" : ZERO }).then(reload).catch(() => {});
+  // before/after は "YYYY-MM-DD" or "" を ISO へ。undo/redo で同じ経路。
+  const applyDue = (taskId, iso) => updateTask(taskId, { due_date: iso ? iso + "T00:00:00Z" : ZERO });
+  const set = (iso) => applyDue(id, iso).then(() => { pushScalarEdit("期限変更", id, cur, iso || "", applyDue); reload(); }).catch(() => {});
   const dow = new Date(today + "T00:00:00Z").getUTCDay();   // 0=日 … 6=土
   const sat = shiftISO(today, (6 - dow + 7) % 7);           // 今週の土曜（今日以降）
   const items = [
@@ -641,16 +703,38 @@ function openEstMenu(chipEl, id, tasks, root) {
   let g = syncGrid(cur), h = g.h, mn = g.m;
   let hv = toHv(cur);
   let dirty = false, chain = Promise.resolve();
+  let lastSec = cur; // 最後にコミットした見積（秒）＝閉じる時に履歴へ積む after
+  const applyEst = (taskId, sec) => updateTask(taskId, { time_estimate: sec });
   // 連続操作を直列化し、閉じる時に最後の保存完了を待ってから再描画（適用直後のレース防止）。
-  const commit = (sec) => { dirty = true; chain = chain.then(() => updateTask(id, { time_estimate: sec }).catch(() => {})); };
+  const commit = (sec) => { dirty = true; lastSec = sec; chain = chain.then(() => updateTask(id, { time_estimate: sec }).catch(() => {})); };
   const build = () => [
     { input: "hmgrid", h, m: mn, hv, hOpts, mOpts: mBase,
       onPick: (nh, nm) => { h = (nh == null ? 0 : nh); mn = (nm == null ? 0 : nm); const sec = h * 3600 + mn * 60; hv = toHv(sec); commit(sec); },
       onHours: (hf) => { if (!isFinite(hf) || hf < 0) return; const sec = Math.round(hf * 3600); hv = hf || ""; const s = syncGrid(sec); h = s.h; mn = s.m; commit(sec); },
-      onClear: () => { updateTask(id, { time_estimate: 0 }).then(() => { invalidate(); render(root); }).catch(() => {}); } },
+      onClear: () => { updateTask(id, { time_estimate: 0 }).then(() => { if (cur !== 0) pushScalarEdit("見積変更", id, cur, 0, applyEst); invalidate(); render(root); }).catch(() => {}); } },
   ];
   const r = chipEl.getBoundingClientRect();
-  openMenu(r.left, r.bottom + 4, build(), { keepOpen: true, rebuild: build, onClose: () => { if (dirty) chain.then(() => { invalidate(); render(root); }); } });
+  // 閉じる時に最後にコミットした値(lastSec)で1アクションとして履歴へ積む（開いた時点 cur から変わった時だけ）。
+  openMenu(r.left, r.bottom + 4, build(), { keepOpen: true, rebuild: build, onClose: () => { if (dirty) chain.then(() => { if (lastSec !== cur) pushScalarEdit("見積変更", id, cur, lastSec, applyEst); invalidate(); render(root); }); } });
+}
+
+// 多対多リレーション（担当/分類）の集合編集を1アクションとして履歴へ積む。
+// before/after は ID 配列。undo/redo は「現状(API)から見て足りない/余分な分」を add/remove する。
+// 単純な集合適用なので途中状態が違っても収束する。getCur は当該タスクの現在ID配列を返す関数。
+function pushSetEdit(label, before, after, getCur, addFn, removeFn) {
+  const bs = new Set(before), as = new Set(after);
+  if (before.length === after.length && before.every((x) => as.has(x))) return; // 変化なし
+  const applySet = async (target) => {
+    const ts = new Set(target);
+    const cur = getCur();
+    for (const x of cur) if (!ts.has(x)) await removeFn(x).catch(() => {});
+    for (const x of target) if (!cur.includes(x)) await addFn(x).catch(() => {});
+  };
+  history.push({
+    label,
+    undo: async () => { await applySet(before); historyRerender(); },
+    redo: async () => { await applySet(after); historyRerender(); },
+  });
 }
 
 // 担当のワンクリック変更（メンバーを複数トグル・メニューは開いたまま即反映）。
@@ -659,6 +743,9 @@ function openAssigneeMenu(chipEl, id, tasks, members, root) {
   const t = (tasks || []).find((x) => x.id === id); if (!t) return;
   if (!t.assignees) t.assignees = [];
   let dirty = false;
+  const before = t.assignees.map((a) => a.id); // 開いた時点の担当ID（履歴の before）
+  const curAssignees = () => { const tt = (tasks || []).find((x) => x.id === id); return (tt && tt.assignees ? tt.assignees : t.assignees).map((a) => a.id); };
+  const recordAssignees = () => pushSetEdit("担当変更", before, t.assignees.map((a) => a.id), curAssignees, (uid) => addAssignee(id, uid), (uid) => removeAssignee(id, uid));
   const build = () => {
     const items = (members || []).map((m) => ({
       label: m.name || m.username,
@@ -670,11 +757,11 @@ function openAssigneeMenu(chipEl, id, tasks, members, root) {
         else { t.assignees = [...t.assignees, { id: m.id, username: m.username, name: m.name }]; addAssignee(id, m.id).catch(() => {}); }
       },
     }));
-    if (t.assignees.length) items.push({ sep: true }, { label: "担当なし（全員外す）", danger: true, on: () => { const cur = [...t.assignees]; t.assignees = []; cur.forEach((a) => removeAssignee(id, a.id).catch(() => {})); invalidate(); render(root); } });
+    if (t.assignees.length) items.push({ sep: true }, { label: "担当なし（全員外す）", danger: true, on: () => { const cur = [...t.assignees]; t.assignees = []; cur.forEach((a) => removeAssignee(id, a.id).catch(() => {})); recordAssignees(); invalidate(); render(root); } });
     return items;
   };
   const r = chipEl.getBoundingClientRect();
-  openMenu(r.left, r.bottom + 4, build(), { keepOpen: true, rebuild: build, onClose: () => { if (dirty) { invalidate(); render(root); } } });
+  openMenu(r.left, r.bottom + 4, build(), { keepOpen: true, rebuild: build, onClose: () => { if (dirty) { recordAssignees(); invalidate(); render(root); } } });
 }
 
 // 分類（ラベル）のワンクリック変更（複数トグル＋新規作成）。レビューは予約語なので除外。
@@ -683,6 +770,9 @@ function openCategoryMenu(chipEl, id, tasks, labels, root) {
   const t = (tasks || []).find((x) => x.id === id); if (!t) return;
   if (!t.labels) t.labels = [];
   let dirty = false;
+  const before = t.labels.map((x) => x.id); // 開いた時点の分類ラベルID（履歴の before）
+  const curLabels = () => { const tt = (tasks || []).find((x) => x.id === id); return (tt && tt.labels ? tt.labels : t.labels).map((x) => x.id); };
+  const recordLabels = () => pushSetEdit("分類変更", before, t.labels.map((x) => x.id), curLabels, (lid) => addTaskLabel(id, lid), (lid) => removeTaskLabel(id, lid));
   const cats = (labels || []).filter((l) => l.title !== REVIEW_LABEL && l.title !== WAITING_LABEL);
   const build = () => {
     const items = cats.map((l) => ({
@@ -695,11 +785,11 @@ function openCategoryMenu(chipEl, id, tasks, labels, root) {
         else { t.labels = [...t.labels, l]; addTaskLabel(id, l.id).catch(() => {}); }
       },
     }));
-    items.push({ sep: true }, { label: "＋ 新しい分類…", on: async () => { const name = (prompt("新しい分類名") || "").trim(); if (!name) return; try { const lab = await createLabel(name); await addTaskLabel(id, lab.id); } catch (e) { /* noop */ } invalidate(); render(root); } });
+    items.push({ sep: true }, { label: "＋ 新しい分類…", on: async () => { const name = (prompt("新しい分類名") || "").trim(); if (!name) return; try { const lab = await createLabel(name); await addTaskLabel(id, lab.id); t.labels = [...t.labels, lab]; recordLabels(); } catch (e) { /* noop */ } invalidate(); render(root); } });
     return items;
   };
   const r = chipEl.getBoundingClientRect();
-  openMenu(r.left, r.bottom + 4, build(), { keepOpen: true, rebuild: build, onClose: () => { if (dirty) { invalidate(); render(root); } } });
+  openMenu(r.left, r.bottom + 4, build(), { keepOpen: true, rebuild: build, onClose: () => { if (dirty) { recordLabels(); invalidate(); render(root); } } });
 }
 
 // ── 複数選択（チェックボックス＋全選択＋Shift範囲）。既存 selectedIds/anchorId を活用。 ──
@@ -756,10 +846,43 @@ function wireBulk(root, rows, tasks, members, today) {
   const clr = root.querySelector("#tb-bk-clr");
   if (clr) clr.onclick = () => { selectedIds.clear(); anchorId = null; rerender(); };
 
+  // 一括操作も1アクションとして履歴へ。適用前に対象全件のスナップショット（編集対象になり得る
+  // スカラ＋連絡待ち＋担当/分類の集合）を取り、undo で全件をその状態へ戻す（redo は同じ fn を再実行）。
   const ZERO = "0001-01-01T00:00:00Z";
+  const snapshot = (t) => ({
+    id: t.id, done: !!t.done, percent_done: t.percent_done || 0, started_at: t.started_at || null,
+    priority: t.priority || 0,
+    due_date: (t.due_date && !t.due_date.startsWith("0001")) ? t.due_date : ZERO,
+    waiting: (t.labels || []).some((l) => (l.title || "") === WAITING_LABEL),
+    assignees: (t.assignees || []).map((a) => a.id), labels: (t.labels || []).map((l) => l.id),
+  });
+  // スナップショットへ復元（現在 API 状態から差分適用）。担当/分類は add/remove で集合一致させる。
+  const restoreSnap = async (s) => {
+    let cur = null; try { cur = await getTask(s.id); } catch { /* 既存 tasks で代替 */ cur = taskOf(s.id); }
+    await updateTask(s.id, { done: s.done, percent_done: s.percent_done, started_at: s.started_at, priority: s.priority, due_date: s.due_date }).catch(() => {});
+    await setTaskWaiting(cur || { id: s.id, labels: [] }, s.waiting).catch(() => {});
+    const curAs = ((cur && cur.assignees) || []).map((a) => a.id), tAs = new Set(s.assignees);
+    for (const a of curAs) if (!tAs.has(a)) await removeAssignee(s.id, a).catch(() => {});
+    for (const a of s.assignees) if (!curAs.includes(a)) await addAssignee(s.id, a).catch(() => {});
+    const curLb = ((cur && cur.labels) || []).filter((l) => (l.title || "") !== WAITING_LABEL).map((l) => l.id), tLb = new Set(s.labels);
+    for (const l of curLb) if (!tLb.has(l)) await removeTaskLabel(s.id, l).catch(() => {});
+    for (const l of s.labels) if (!curLb.includes(l)) await addTaskLabel(s.id, l).catch(() => {});
+  };
+  // runAll のラッパ: 適用前に全件スナップショット→適用→履歴 push（undo=全件復元・redo=fn 再実行）。
+  const runAllH = async (label, fn) => {
+    const ids = targetIds(); if (!ids.length) return;
+    const snaps = ids.map((id) => taskOf(id)).filter(Boolean).map(snapshot);
+    await runAll(label, fn);
+    history.push({
+      label: `${label}（${ids.length}件）`,
+      undo: async () => { for (const s of snaps) await restoreSnap(s); historyRerender(); },
+      redo: async () => { for (const id of ids) await fn(id).catch(() => {}); historyRerender(); },
+    });
+  };
+
   const setDue = (id, iso) => updateTask(id, { due_date: iso ? iso + "T00:00:00Z" : ZERO });
   // 各タスクの現在期限を相対シフト（期限なしは今日起点）。
-  const slide = (days) => runAll("期限変更", (id) => {
+  const slide = (days) => runAllH("期限変更", (id) => {
     const t = taskOf(id);
     const cur = (t && t.due_date && !t.due_date.startsWith("0001")) ? t.due_date.slice(0, 10) : today;
     return setDue(id, shiftISO(cur, days));
@@ -782,27 +905,27 @@ function wireBulk(root, rows, tasks, members, today) {
             { label: "+1日", on: () => slide(1) },
             { label: "+1週間", on: () => slide(7) },
             { sep: true },
-            { label: "日付指定（全件）", input: "date", value: "", on: (v) => { if (v) runAll("期限変更", (id) => setDue(id, v)); } },
+            { label: "日付指定（全件）", input: "date", value: "", on: (v) => { if (v) runAllH("期限変更", (id) => setDue(id, v)); } },
             { sep: true },
-            { label: "クリア（期限なし）", danger: true, on: () => runAll("期限変更", (id) => setDue(id, null)) },
+            { label: "クリア（期限なし）", danger: true, on: () => runAllH("期限変更", (id) => setDue(id, null)) },
           ]);
           break;
         case "who":
           openMenu(r.left, r.bottom + 4, (members || []).map((m) => ({
             label: m.name || m.username,
-            on: () => runAll("担当変更", (id) => addAssignee(id, m.id)),
+            on: () => runAllH("担当変更", (id) => addAssignee(id, m.id)),
           })));
           break;
         case "status":
           openMenu(r.left, r.bottom + 4, [
-            { label: "未着手", on: () => runAll("ステータス変更", (id) => Promise.all([updateTask(id, { done: false, percent_done: 0, started_at: null }), setTaskWaiting(taskOf(id), false)])) },
-            { label: "進行中", on: () => runAll("ステータス変更", (id) => { const t = taskOf(id); const keepPct = (t && (t.done || t.percent_done >= 100)) ? 0 : ((t && t.percent_done) || 0); return Promise.all([updateTask(id, { done: false, percent_done: keepPct, started_at: new Date().toISOString() }), setTaskWaiting(t, false)]); }) },
-            { label: "完了", on: () => runAll("ステータス変更", (id) => Promise.all([updateTask(id, { done: true, percent_done: 100 }), setTaskWaiting(taskOf(id), false)])) },
+            { label: "未着手", on: () => runAllH("ステータス変更", (id) => Promise.all([updateTask(id, { done: false, percent_done: 0, started_at: null }), setTaskWaiting(taskOf(id), false)])) },
+            { label: "進行中", on: () => runAllH("ステータス変更", (id) => { const t = taskOf(id); const keepPct = (t && (t.done || t.percent_done >= 100)) ? 0 : ((t && t.percent_done) || 0); return Promise.all([updateTask(id, { done: false, percent_done: keepPct, started_at: new Date().toISOString() }), setTaskWaiting(t, false)]); }) },
+            { label: "完了", on: () => runAllH("ステータス変更", (id) => Promise.all([updateTask(id, { done: true, percent_done: 100 }), setTaskWaiting(taskOf(id), false)])) },
           ]);
           break;
         case "prio":
           openMenu(r.left, r.bottom + 4, [[0, "なし"], [1, "低"], [2, "中"], [3, "高"], [4, "MUST"]].map(([v, label]) => ({
-            label, on: () => runAll("重要度変更", (id) => updateTask(id, { priority: v })),
+            label, on: () => runAllH("重要度変更", (id) => updateTask(id, { priority: v })),
           })));
           break;
       }
@@ -1259,6 +1382,10 @@ function css() {
   .tb-add{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:13px;font-weight:600;padding:6px 13px;border:1px solid ${C.line};border-radius:8px;background:#fff;color:${C.ink};cursor:pointer}
   .tb-add::before{content:"+";font-size:15px;color:${C.fill};line-height:1}
   .tb-add:hover{background:${C.track};border-color:#d7dde6}
+  .tb-undogrp{display:inline-flex;gap:2px}
+  .tb-undobtn{display:inline-grid;place-items:center;width:32px;height:32px;border:1px solid ${C.line};border-radius:8px;background:#fff;color:${C.muted};cursor:pointer}
+  .tb-undobtn:hover:not(:disabled){background:${C.track};border-color:#d7dde6;color:${C.ink}}
+  .tb-undobtn:disabled{opacity:.4;cursor:default}
   .tb-manbtn{font:inherit;font-size:12.5px;font-weight:600;padding:6px 12px;border:1px solid ${C.line};border-radius:8px;background:#fff;color:${C.muted};cursor:pointer}
   .tb-manbtn:hover,.tb-manbtn:hover{border-color:#d7dde6;color:${C.ink}}
   .tb-manbtn.on{border-color:${C.fill};background:#eaf2ff;color:${C.fill}}
