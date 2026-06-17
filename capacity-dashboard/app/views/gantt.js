@@ -242,9 +242,12 @@ async function mount(root, opts) {
   }
 
   // 1タスク行（人別/未アサイン共通）。child=trueでプロジェクト配下のネスト見た目。
-  function memberTaskRow(t, child) {
+  // isLast=最後の子（ツリー縦線をエルボーで止める）／band=親プロジェクト色（ツリー線色）。
+  function memberTaskRow(t, child, isLast, band) {
     const r = rangeByTask.get(t.id);
-    return `<div class="row${r.over ? " delayed" : ""}${child ? " mp-child" : ""}" data-task="${t.id}">
+    const treeCls = child ? ` mp-child${isLast ? " last" : ""}` : "";
+    const treeStyle = child && band ? ` style="--pj:${band}"` : "";
+    return `<div class="row${r.over ? " delayed" : ""}${treeCls}" data-task="${t.id}"${treeStyle}>
       <div class="r-label r-label-sub">
         <span class="r-pbar" style="background:${projColor(t.project_id)}"></span>
         <span class="r-text"><span class="r-name" title="${esc(t.title)}">${esc(t.title)}</span>
@@ -255,13 +258,14 @@ async function mount(root, opts) {
     </div>`;
   }
 
-  // 親プロジェクトのサブグループ見出し（集約バー付き・既定折りたたみ）と、展開時の子タスク行。
+  // 親プロジェクトのサブグループ見出し（集約バー付き・既定展開）と、展開時の子タスク行。
   // toggleKey はメンバー折りたたみ "m"+id と衝突しない "mp"+m.id+"_"+pid。
   function parentSubgroup(toggleKey, pid, children, includeParentInAgg) {
     const parent = byIdAll.get(pid);
     const title = parent ? parent.title : "（不明なプロジェクト）";
-    // サブグループは既定折りたたみ＝toggleKey の「存在」が展開フラグ（メンバー/通常グループとは逆向き）。
-    const collapsed = !state.collapsed.has(toggleKey);
+    // サブグループは既定展開＝toggleKey の「存在」が折りたたみフラグ（メンバー/通常グループと同じ向き）。
+    // 埋め込みは state.collapsed が毎回新規 Set ＝未登録＝展開で子が見える。
+    const collapsed = state.collapsed.has(toggleKey);
     const aggSrc = includeParentInAgg && parent ? [parent, ...children] : children;
     const ar = aggRange(aggSrc);
     const totH = children.reduce((s, t) => s + (rangeByTask.get(t.id).planned.h || 0), 0)
@@ -280,7 +284,8 @@ async function mount(root, opts) {
     </div>`;
     let rows = GRP_H;
     if (!collapsed) {
-      for (const t of children) { h += memberTaskRow(t, true); rows += ROW_H; }
+      const band = projColor(parent ? parent.project_id : 0);
+      children.forEach((t, i) => { h += memberTaskRow(t, true, i === children.length - 1, band); rows += ROW_H; });
     }
     return { html: h, rows };
   }
@@ -414,6 +419,15 @@ async function mount(root, opts) {
     }
 
     rowsEl.innerHTML = html || `<div class="empty">メンバーがいません（担当の付いたタスクが必要）。</div>`;
+    // ツリー縦線を、親サブグループ見出しの色四角(.mp-sub .pj-band)の中心に揃える。
+    // 四角のx位置は caret/インデントの字幅に依存しフォントで変わるため、実測して --mprail に入れる。
+    const mpb = rowsEl.querySelector('.grp.mp-sub .pj-band');
+    if (mpb) {
+      const lab = mpb.closest('.grp-label');
+      const bb = mpb.getBoundingClientRect();
+      const off = bb.left + bb.width / 2 - lab.getBoundingClientRect().left; // ラベル左端からの四角中心
+      rowsEl.style.setProperty('--mprail', (off - 1) + 'px'); // 2px線の左端＝中心-1
+    }
     overlays(0, null, null, ROW_H, rowOffset, false);
   }
 
@@ -607,7 +621,9 @@ async function mount(root, opts) {
   rowsEl.addEventListener("click", (e) => {
     const lbl = e.target.closest("[data-toggle]");
     if (!lbl) return;
-    const key = lbl.dataset.toggle; // "m{memberId}" / "p{projectId}"（モード間の id 衝突回避）
+    // キー: "m{memberId}" / "p{projectId}" / "unassigned" / "mp{mid}_{pid}" / "up_{pid}"。
+    // いずれも「存在＝折りたたみ」で統一（未登録＝既定展開。親サブグループも既定展開）。
+    const key = lbl.dataset.toggle;
     state.collapsed.has(key) ? state.collapsed.delete(key) : state.collapsed.add(key);
     paint();
   });
@@ -936,8 +952,14 @@ function ganttStyles() {
   .gv .grp.mp-sub .grp-label:hover{background:#eef2f7}
   .gv .grp.mp-sub .grp-name{font-size:12.5px;font-weight:700}
   .gv .grp.mp-sub .pj-band{width:11px;height:22px}
-  /* 人別: サブグループ配下の子タスク行はさらに字下げ＝親の下に畳まれていると分かる */
-  .gv .row.mp-child .r-label{padding-left:46px}
+  /* 人別: サブグループ配下の子タスク行はさらに字下げ＝親の下に畳まれていると分かる。
+     ツリー接続線: 親見出し直下から伸びる縦線＋各子へのエルボー(┗)。色は親プロジェクト色(--pj)。
+     縦線xは見出しの色四角(.mp-sub .pj-band)中心を実測した --mprail に揃える。 */
+  .gv .row.mp-child .r-label{padding-left:52px}
+  .gv .row.mp-child .r-label::before{content:"";position:absolute;left:var(--mprail,36px);top:0;bottom:0;width:2px;background:var(--pj,${C.line});opacity:.5}
+  .gv .row.mp-child.last .r-label::before{bottom:auto;height:50%}
+  /* エルボーの横線: 縦線から子ラベルへ向かう短い水平線（行の中央高さ） */
+  .gv .row.mp-child .r-label::after{content:"";position:absolute;left:var(--mprail,36px);top:50%;width:11px;height:2px;background:var(--pj,${C.line});opacity:.5}
   /* 未アサイングループ: 容量線/負荷帯なしの中立アバター */
   .gv .grp.grp-unassigned .avatar.avatar-none{background:${C.track};color:${C.muted};box-shadow:inset 0 0 0 1px ${C.line}}
   .gv-draglabel{position:fixed;z-index:9999;background:${C.ink};color:#fff;font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px;pointer-events:none;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.25);display:none}
@@ -974,6 +996,8 @@ function ganttStyles() {
   /* 縦線は子タスク行のみ。色四角の中心(ラベル左から33px)に揃える。最後の子の中央で止める */
   .gv .row.pj-child .r-label::before{content:"";position:absolute;left:var(--pjrail,32px);top:0;bottom:0;width:2px;background:var(--pj);opacity:.5}
   .gv .row.pj-child.last .r-label::before{bottom:auto;height:50%}
+  /* エルボーの横線: 縦線から子ラベルへ向かう短い水平線（人別と同一スタイル） */
+  .gv .row.pj-child .r-label::after{content:"";position:absolute;left:var(--pjrail,32px);top:50%;width:11px;height:2px;background:var(--pj);opacity:.5}
   .gv .grp-top{display:flex;align-items:center;gap:8px;min-width:0}
   .gv .grp-name{font-size:14px;font-weight:700;color:${C.ink};display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;line-height:1.25;word-break:break-word;min-width:0}
   .gv .grp-sub{font-size:10.5px;color:${C.muted};white-space:nowrap}
