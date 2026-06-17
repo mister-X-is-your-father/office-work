@@ -183,7 +183,7 @@ export async function render(root) {
       await workplan.renderInto(body, { preset: "1m", who: "all", fluid: true });
     } else if (id === "gantt") {
       // ガントは teardown を返す。折りたたみ/再描画で確実に解除（リスナー漏れ防止）。
-      const td = await gantt.renderInto(body, { months: 1, mode: "member", fluid: true });
+      const td = await gantt.renderInto(body, { months: 1, mode: "member", fluid: true, editable: true });
       if (typeof td === "function") teardowns.set(id, td);
     }
   }
