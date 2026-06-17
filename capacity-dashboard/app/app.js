@@ -18,6 +18,7 @@ const ROUTES = {
   summary:  { label: "概要",          grp: "実績",   mod: "./views/summary.js", wide: true },
   estactual:{ label: "見積りvs実績",  grp: "実績",   mod: "./views/estactual.js", wide: true },
   report:   { label: "報告",          grp: "実績",   mod: "./views/report.js", wide: true },
+  status:   { label: "ステータス",    grp: "実績",   mod: "./views/status.js", wide: true },
   kanban:   { label: "かんばん",      grp: "仕事",   mod: "./views/kanban.js", wide: true },
   list:     { label: "タスク一覧",    grp: "仕事",   mod: "./views/table.js", wide: true },
   // アウトラインは「タスク一覧」に統合（table.js が V.mode で表/アウトラインを切替）。
@@ -40,7 +41,7 @@ const ROUTES = {
   // 隠しルート: ORDER に載せない＝通常ユーザーのナビには出ない。許可者のみ shell() がリンクを追加。
   fable:    { label: "Fable",         grp: "AI",     mod: "./views/fable.js" },
 };
-const ORDER = ["home", "smart", "today", "triage", "quad", "habits", "review", "calendar", "monthcal", "planner", "workplan", "summary", "estactual", "report", "kanban", "list", "depgraph", "gantt", "recurring-task", "recurring-meeting", "leave", "export", "settings-personal", "settings-team"];
+const ORDER = ["home", "smart", "today", "triage", "quad", "habits", "review", "calendar", "monthcal", "planner", "workplan", "summary", "estactual", "report", "status", "kanban", "list", "depgraph", "gantt", "recurring-task", "recurring-meeting", "leave", "export", "settings-personal", "settings-team"];
 
 const app = document.getElementById("app");
 
