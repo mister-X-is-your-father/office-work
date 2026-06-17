@@ -9,7 +9,7 @@ export const EMPTY_FILTER = { text: "", due: "", prio: "", ws: 0, status: "undon
 // ws=Inbox は呼び出し側で inboxWsId を differ で埋める（id は環境依存のため）。
 // icon は共通アイコン名（views/smartlist.js が icon(name) で SVG 描画する）。
 export const BUILTIN_VIEWS = [
-  { key: "inbox", label: "インボックス", icon: "inbox", inbox: true, filter: { status: "undone" } },
+  { key: "inbox", label: "未整理", icon: "inbox", inbox: true, filter: { status: "undone" } },
   { key: "today", label: "今日", icon: "calendar", filter: { due: "today", status: "undone" } },
   { key: "next7", label: "次の7日間", icon: "calendarDays", filter: { due: "next7", status: "undone" } },
   { key: "overdue", label: "期限切れ", icon: "alertTriangle", filter: { due: "overdue", status: "undone" } },

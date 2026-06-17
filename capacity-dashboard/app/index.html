@@ -36,29 +36,52 @@
   /* shell */
   .shell{display:flex;min-height:100vh}
   .sidebar{width:208px;flex:none;background:var(--card);border-right:1px solid var(--line);
-    padding:16px 10px;position:sticky;top:0;height:100vh;overflow:auto}
+    padding:16px 10px;position:sticky;top:0;height:100vh;overflow:auto;
+    transition:width .18s ease,padding .18s ease}
+  .sb-head{display:flex;align-items:center;justify-content:space-between;gap:4px}
   .brand{font-weight:800;font-size:15px;padding:6px 10px 12px}
   .brand small{display:block;font-weight:500;color:var(--muted);font-size:10.5px;margin-top:2px}
+  /* デスクトップの折りたたみトグル（サイドバー上部）。狭幅では非表示（☰がドロワー担当）。 */
+  .sb-collapse{display:inline-flex;align-items:center;justify-content:center;flex:none;
+    width:28px;height:28px;padding:0;border:1px solid var(--line);border-radius:8px;
+    background:var(--card);color:var(--muted);cursor:pointer;margin-bottom:6px;
+    transition:background .12s,color .12s,border-color .12s}
+  .sb-collapse:hover{background:var(--track);color:var(--ink);border-color:var(--line-strong)}
   .addbtn{display:flex;align-items:center;gap:7px;width:100%;margin:2px 0 10px;padding:8px 11px;
     border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);
     font:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s}
   .addbtn::before{content:"+";font-size:15px;font-weight:600;color:var(--fill);line-height:1}
   .addbtn:hover{background:var(--track);border-color:#d7dde6}
   .navgrp{font-size:10.5px;color:var(--muted);font-weight:700;margin:14px 10px 4px;letter-spacing:.04em}
-  .nav a{display:block;padding:7px 11px;border-radius:8px;text-decoration:none;color:var(--ink);font-size:13.5px;margin:1px 0}
+  .nav a{display:flex;align-items:center;gap:9px;padding:7px 11px;border-radius:8px;text-decoration:none;color:var(--ink);font-size:13.5px;margin:1px 0}
   .nav a:hover{background:var(--track)}
   .nav a.active{background:#eaf1ff;color:var(--fill);font-weight:700}
   .nav a.soon{color:var(--muted)}
+  .nav-ic{flex:none;display:inline-flex;align-items:center;justify-content:center;width:18px;color:var(--muted)}
+  .nav a.active .nav-ic{color:var(--fill)}
+  .nav-lb{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   /* 定期(業務/MTG)と後続項目の間の小さな余白。 */
   .nav-spacer{height:10px}
   /* 設定の直前に入れる区切り線＝最下部の独立感を出す。 */
   .nav-rule{height:1px;background:var(--line);margin:10px 8px 6px}
   /* 設定リンク（個人設定/チーム設定）の強調（最下部・目立たせる）。 */
   .nav a[data-k="settings-personal"],.nav a[data-k="settings-team"]{font-weight:700}
-  /* 設定リンクのギア＝Lucide settings をマスクで currentColor 追従の単色アイコンに（旧 content:"⚙"）。 */
-  .nav a[data-k="settings-personal"]::before,.nav a[data-k="settings-team"]::before{content:"";display:inline-block;width:15px;height:15px;margin-right:7px;vertical-align:-2px;background:currentColor;
-    -webkit-mask:var(--ic-settings) center/contain no-repeat;mask:var(--ic-settings) center/contain no-repeat}
   .main{flex:1;min-width:0;display:flex;flex-direction:column}
+  /* ===== 折りたたみレール（広い画面のみ） ===== */
+  .shell.sb-collapsed .sidebar{width:56px;padding-left:6px;padding-right:6px;overflow:visible}
+  .shell.sb-collapsed .brand,
+  .shell.sb-collapsed .navgrp,
+  .shell.sb-collapsed .nav-lb,
+  .shell.sb-collapsed .nav-rule,
+  .shell.sb-collapsed .theme-tg .nav-lb{display:none}
+  .shell.sb-collapsed .sb-head{justify-content:center}
+  .shell.sb-collapsed .nav a{justify-content:center;padding:9px 0;gap:0}
+  .shell.sb-collapsed .addbtn{justify-content:center;padding:9px 0;gap:0}
+  .shell.sb-collapsed .theme-tg{padding:9px 0;gap:0}
+  .shell.sb-collapsed .sb-collapse{transform:rotate(180deg)}
+  /* 折りたたみ時のグループ間の区切り（見出しが消えるので薄線で代替）。 */
+  .shell.sb-collapsed .navgrp{display:block;height:1px;margin:8px 6px;padding:0;background:var(--line);overflow:hidden;text-indent:-9999px}
+  .shell.sb-collapsed .navgrp:first-of-type{display:none}
   .topbar{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:10px 22px;
     border-bottom:1px solid var(--line);background:var(--card);position:sticky;top:0;z-index:5}
   .topbar .who{font-size:12px;color:var(--muted);margin-right:auto}
@@ -71,6 +94,18 @@
     .sb-backdrop.open{display:block;position:fixed;inset:0;background:rgba(10,18,35,.35);z-index:38}
     .sb-toggle{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);background:var(--card);border-radius:8px;width:36px;height:32px;font-size:16px;cursor:pointer;flex:none;padding:0}
     .content{padding:18px 14px 60px}
+    /* 狭幅では折りたたみレールを無効化＝従来のフル幅ドロワーを維持。専用トグルも隠す。 */
+    .sb-collapse{display:none}
+    .shell.sb-collapsed .sidebar{width:208px;padding-left:10px;padding-right:10px;overflow:auto}
+    .shell.sb-collapsed .brand,
+    .shell.sb-collapsed .navgrp,
+    .shell.sb-collapsed .navgrp:first-of-type{display:block;height:auto;margin:14px 10px 4px;padding:0;background:none;text-indent:0;overflow:visible}
+    .shell.sb-collapsed .brand{font-size:15px;padding:6px 10px 12px;margin:0}
+    .shell.sb-collapsed .nav-lb,
+    .shell.sb-collapsed .theme-tg .nav-lb{display:inline}
+    .shell.sb-collapsed .nav a{justify-content:flex-start;padding:7px 11px;gap:9px}
+    .shell.sb-collapsed .addbtn,
+    .shell.sb-collapsed .theme-tg{justify-content:center;padding:8px 11px;gap:7px}
   }
   .topbar button{border:1px solid var(--line);background:var(--card);border-radius:8px;padding:6px 12px;font:inherit;font-size:12.5px;cursor:pointer}
   .topbar button:hover{background:var(--track)}

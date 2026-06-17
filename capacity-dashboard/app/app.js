@@ -4,42 +4,42 @@ import * as store from "./lib/store.js";
 import { icon } from "./lib/icons.js";
 
 const ROUTES = {
-  home:     { label: "ホーム",        grp: "総合",   mod: "./views/home.js", wide: true },
-  smart:    { label: "スマートリスト", grp: "総合",   mod: "./views/smartlist.js" },
-  today:    { label: "稼働予定",      grp: "今日",   mod: "./views/today.js" },
-  triage:   { label: "トリアージ",    grp: "今日",   mod: "./views/triage.js" },
-  quad:     { label: "優先度マトリクス", grp: "今日",   mod: "./views/quad.js" },
-  habits:   { label: "習慣",          grp: "今日",   mod: "./views/habits.js" },
-  review:   { label: "レビュー",      grp: "今日",   mod: "./views/review.js" },
-  calendar: { label: "時刻カレンダー",grp: "今日",   mod: "./views/calendar.js", wide: true },
-  monthcal: { label: "月カレンダー",  grp: "計画",   mod: "./views/monthcal.js", wide: true },
-  planner:  { label: "週プランナー",  grp: "計画",   mod: "./views/planner.js", wide: true },
-  workplan: { label: "稼働プラン",    grp: "計画",   mod: "./views/workplan.js", wide: true },
-  summary:  { label: "概要",          grp: "実績",   mod: "./views/summary.js", wide: true },
-  estactual:{ label: "見積りvs実績",  grp: "実績",   mod: "./views/estactual.js", wide: true },
-  report:   { label: "報告",          grp: "実績",   mod: "./views/report.js", wide: true },
-  status:   { label: "ステータス",    grp: "実績",   mod: "./views/status.js", wide: true },
-  kanban:   { label: "かんばん",      grp: "仕事",   mod: "./views/kanban.js", wide: true },
-  list:     { label: "タスク一覧",    grp: "仕事",   mod: "./views/table.js", wide: true },
+  home:     { label: "ホーム",        grp: "総合",   mod: "./views/home.js", wide: true, ic: "home" },
+  smart:    { label: "スマートリスト", grp: "総合",   mod: "./views/smartlist.js", ic: "listChecks" },
+  today:    { label: "稼働予定",      grp: "今日",   mod: "./views/today.js", ic: "timer" },
+  triage:   { label: "トリアージ",    grp: "今日",   mod: "./views/triage.js", ic: "filter" },
+  quad:     { label: "優先度マトリクス", grp: "今日",   mod: "./views/quad.js", ic: "grid" },
+  habits:   { label: "習慣",          grp: "今日",   mod: "./views/habits.js", ic: "flame" },
+  review:   { label: "レビュー",      grp: "今日",   mod: "./views/review.js", ic: "eye" },
+  calendar: { label: "時刻カレンダー",grp: "今日",   mod: "./views/calendar.js", wide: true, ic: "calendar" },
+  monthcal: { label: "月カレンダー",  grp: "計画",   mod: "./views/monthcal.js", wide: true, ic: "calendarDays" },
+  planner:  { label: "週プランナー",  grp: "計画",   mod: "./views/planner.js", wide: true, ic: "calendarDays" },
+  workplan: { label: "稼働プラン",    grp: "計画",   mod: "./views/workplan.js", wide: true, ic: "hourglass" },
+  summary:  { label: "概要",          grp: "実績",   mod: "./views/summary.js", wide: true, ic: "trendingUp" },
+  estactual:{ label: "見積りvs実績",  grp: "実績",   mod: "./views/estactual.js", wide: true, ic: "ruler" },
+  report:   { label: "報告",          grp: "実績",   mod: "./views/report.js", wide: true, ic: "message" },
+  status:   { label: "ステータス",    grp: "実績",   mod: "./views/status.js", wide: true, ic: "activity" },
+  kanban:   { label: "かんばん",      grp: "仕事",   mod: "./views/kanban.js", wide: true, ic: "columns" },
+  list:     { label: "タスク一覧",    grp: "仕事",   mod: "./views/table.js", wide: true, ic: "list" },
   // アウトラインは「タスク一覧」に統合（table.js が V.mode で表/アウトラインを切替）。
   // 後方互換: #/outline で来たら table.js が起動し、ハッシュに "outline" を含むのでアウトライン表示で開く。
-  outline:  { label: "アウトライン",  grp: "仕事",   mod: "./views/table.js", wide: true },
-  depgraph: { label: "依存グラフ",    grp: "仕事",   mod: "./views/depgraph.js", wide: true },
-  gantt:    { label: "ガントチャート",    grp: "仕事",   mod: "./views/gantt.js", wide: true },
+  outline:  { label: "アウトライン",  grp: "仕事",   mod: "./views/table.js", wide: true, ic: "list" },
+  depgraph: { label: "依存グラフ",    grp: "仕事",   mod: "./views/depgraph.js", wide: true, ic: "network" },
+  gantt:    { label: "ガントチャート",    grp: "仕事",   mod: "./views/gantt.js", wide: true, ic: "barChart" },
   // 旧「定期業務・定期MTG」は後方互換ルートとして残す（recurring.js が hash で全件表示）が、ORDER には載せない。
-  recurring:{ label: "定期業務・定期MTG", grp: "その他", mod: "./views/recurring.js" },
+  recurring:{ label: "定期業務・定期MTG", grp: "その他", mod: "./views/recurring.js", ic: "repeat" },
   // 定期を業務 / MTG の2項目に分割。どちらも recurring.js を読み、recurring.js 側が location.hash で出し分ける。
-  "recurring-task":    { label: "定期業務", grp: "その他", mod: "./views/recurring.js" },
-  "recurring-meeting": { label: "定期MTG",  grp: "その他", mod: "./views/recurring.js" },
-  leave:    { label: "休暇",          grp: "その他", mod: "./views/leave.js" },
-  export:   { label: "バックアップ",   grp: "その他", mod: "./views/export.js" },
+  "recurring-task":    { label: "定期業務", grp: "その他", mod: "./views/recurring.js", ic: "repeat" },
+  "recurring-meeting": { label: "定期MTG",  grp: "その他", mod: "./views/recurring.js", ic: "calendar" },
+  leave:    { label: "休暇",          grp: "その他", mod: "./views/leave.js", ic: "palmtree" },
+  export:   { label: "バックアップ",   grp: "その他", mod: "./views/export.js", ic: "save" },
   // 旧「設定」は後方互換ルートとして残す（settings.js が hash で個人設定モードを描画）が、ORDER には載せない。
-  settings: { label: "設定",          grp: "その他", mod: "./views/settings.js" },
+  settings: { label: "設定",          grp: "その他", mod: "./views/settings.js", ic: "settings" },
   // 設定を個人 / チームの2項目に分割。どちらも settings.js を読み、settings.js 側が location.hash で出し分ける。
-  "settings-personal": { label: "個人設定", grp: "その他", mod: "./views/settings.js" },
-  "settings-team":     { label: "チーム設定", grp: "その他", mod: "./views/settings.js" },
+  "settings-personal": { label: "個人設定", grp: "その他", mod: "./views/settings.js", ic: "user" },
+  "settings-team":     { label: "チーム設定", grp: "その他", mod: "./views/settings.js", ic: "settings" },
   // 隠しルート: ORDER に載せない＝通常ユーザーのナビには出ない。許可者のみ shell() がリンクを追加。
-  fable:    { label: "Fable",         grp: "AI",     mod: "./views/fable.js" },
+  fable:    { label: "Fable",         grp: "AI",     mod: "./views/fable.js", ic: "bot" },
 };
 const ORDER = ["home", "smart", "today", "triage", "quad", "habits", "review", "calendar", "monthcal", "planner", "workplan", "summary", "estactual", "report", "status", "kanban", "list", "depgraph", "gantt", "recurring-task", "recurring-meeting", "leave", "export", "settings-personal", "settings-team"];
 
@@ -81,8 +81,14 @@ function showAuth(mode = "login", msg = "") {
 function shell() {
   const grps = {};
   for (const k of ORDER) { const r = ROUTES[k]; (grps[r.grp] ||= []).push(k); }
-  const link = (k) =>
-    `<a href="#/${k}" data-k="${k}" class="${ROUTES[k].soon ? "soon" : ""}">${ROUTES[k].label}${ROUTES[k].soon ? " ·準備中" : ""}</a>`;
+  // 各リンクは「アイコン + ラベル」。折りたたみ時は CSS でラベルを隠しアイコンだけ残す。
+  // title 属性で折りたたみ時のネイティブ tooltip を確保。
+  const link = (k) => {
+    const r = ROUTES[k];
+    const ic = `<span class="nav-ic">${icon(r.ic || "file", { size: 17 })}</span>`;
+    const lb = `${r.label}${r.soon ? " ·準備中" : ""}`;
+    return `<a href="#/${k}" data-k="${k}" class="${r.soon ? "soon" : ""}" title="${r.label}">${ic}<span class="nav-lb">${lb}</span></a>`;
+  };
   const nav = Object.entries(grps).map(([g, keys]) =>
     `<div class="navgrp">${g}</div>` + keys.map(k => {
       // 定期MTG の直後に少し余白を入れ、定期(業務/MTG)と後続の休暇/設定等を視覚的に分ける。
@@ -95,8 +101,11 @@ function shell() {
   app.innerHTML = `
     <div class="shell">
       <aside class="sidebar">
-        <div class="brand">TaskStation</div>
-        <button class="addbtn" id="addtask">タスク追加</button>
+        <div class="sb-head">
+          <div class="brand">TaskStation</div>
+          <button class="sb-collapse" id="sb-collapse" type="button" aria-label="サイドバーを折りたたむ" title="サイドバーを折りたたむ">${icon("chevronLeft", { size: 18 })}</button>
+        </div>
+        <button class="addbtn" id="addtask" title="タスク追加"><span class="nav-lb">タスク追加</span></button>
         <nav class="nav" id="nav">${nav}</nav>
         <button class="theme-tg" id="theme-tg" aria-label="テーマ切替"></button>
       </aside>
@@ -114,13 +123,35 @@ function shell() {
   // モバイル: サイドバーのドロワー開閉（デスクトップは常時表示＝CSSのmedia queryで切替）。
   const _sb = document.querySelector(".sidebar"), _bd = document.getElementById("sb-backdrop"), _tg = document.getElementById("sb-toggle");
   const setDrawer = (o) => { _sb.classList.toggle("open", o); _bd.classList.toggle("open", o); _tg.setAttribute("aria-expanded", o ? "true" : "false"); };
-  _tg.onclick = () => setDrawer(!_sb.classList.contains("open"));
   _bd.onclick = () => setDrawer(false);
   document.getElementById("nav").addEventListener("click", (e) => { if (e.target.closest("a")) setDrawer(false); });
+
+  // デスクトップ: サイドバーを「アイコンだけの細いレール」に折りたたむ（localStorage 永続）。
+  // 狭幅（820px以下）ではこのクラスは CSS 側で無効化し、従来のドロワー挙動を維持する。
+  const COLLAPSE_KEY = "ts.sidebar.collapsed";
+  const _coBtn = document.getElementById("sb-collapse");
+  const isNarrow = () => window.matchMedia("(max-width:820px)").matches;
+  const readCollapsed = () => { try { return localStorage.getItem(COLLAPSE_KEY) === "1"; } catch { return false; } };
+  const setCollapsed = (c, persist = true) => {
+    document.querySelector(".shell").classList.toggle("sb-collapsed", c);
+    if (_coBtn) {
+      _coBtn.setAttribute("aria-label", c ? "サイドバーを展開する" : "サイドバーを折りたたむ");
+      _coBtn.setAttribute("title", c ? "サイドバーを展開する" : "サイドバーを折りたたむ");
+    }
+    if (persist) { try { localStorage.setItem(COLLAPSE_KEY, c ? "1" : "0"); } catch { /* noop */ } }
+  };
+  // 初期反映: 広い画面のみ永続状態を適用（狭幅は常に展開＝ドロワーで開く）。
+  setCollapsed(!isNarrow() && readCollapsed(), false);
+  if (_coBtn) _coBtn.onclick = () => setCollapsed(!document.querySelector(".shell").classList.contains("sb-collapsed"));
+  // ☰ は広い画面では折りたたみトグル、狭幅ではドロワー開閉。
+  _tg.onclick = () => {
+    if (isNarrow()) setDrawer(!_sb.classList.contains("open"));
+    else setCollapsed(!document.querySelector(".shell").classList.contains("sb-collapsed"));
+  };
   // ダーク/ライト切替（CSS変数を html[data-theme] で反転＝再描画不要・localStorage永続）
   const themeTg = document.getElementById("theme-tg");
   const curTheme = () => document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
-  const paintThemeBtn = () => { themeTg.innerHTML = curTheme() === "dark" ? `${icon("sun", { size: 15 })} ライト` : `${icon("moon", { size: 15 })} ダーク`; };
+  const paintThemeBtn = () => { themeTg.innerHTML = curTheme() === "dark" ? `${icon("sun", { size: 15 })}<span class="nav-lb">ライト</span>` : `${icon("moon", { size: 15 })}<span class="nav-lb">ダーク</span>`; };
   paintThemeBtn();
   themeTg.onclick = () => {
     const next = curTheme() === "dark" ? "light" : "dark";
@@ -161,7 +192,7 @@ function shell() {
     if (!uid) return;
     const nav = document.getElementById("nav");
     if (nav) nav.insertAdjacentHTML("beforeend",
-      `<div class="navgrp">AI</div><a href="#/fable" data-k="fable">${icon("bot", { cls: "nav-ic" })} ${ROUTES.fable.label}</a>`);
+      `<div class="navgrp">AI</div><a href="#/fable" data-k="fable" title="${ROUTES.fable.label}"><span class="nav-ic">${icon("bot", { size: 17 })}</span><span class="nav-lb">${ROUTES.fable.label}</span></a>`);
   }).catch(() => {});
 }
 
