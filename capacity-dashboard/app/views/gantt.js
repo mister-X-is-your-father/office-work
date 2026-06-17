@@ -252,7 +252,6 @@ async function mount(root, opts) {
     const treeStyle = child && band ? ` style="--pj:${band}"` : "";
     return `<div class="row${r.over ? " delayed" : ""}${treeCls}" data-task="${t.id}"${treeStyle}>
       <div class="r-label r-label-sub">
-        <span class="r-pbar" style="background:${projColor(t.project_id)}"></span>
         <span class="r-text"><span class="r-name" title="${esc(t.title)}">${esc(t.title)}</span>
           <span class="r-meta"><span>見${fmtH(r.estH)}・実${fmtH(r.spentH)}・予${fmtH(r.planned.h)}</span>
           ${r.over ? `<span class="r-flag">超過</span>` : ""}</span></span>
@@ -928,7 +927,6 @@ function ganttStyles() {
   .gv .r-label{border-right:1px solid ${C.line};padding:0 12px;display:flex;align-items:center;gap:9px;overflow:hidden;position:sticky;left:0;z-index:7;background:#fff;cursor:pointer}
   .gv .row:hover .r-name{text-decoration:underline;text-decoration-color:${C.line}}
   .gv .r-label-sub{padding-left:24px}
-  .gv .r-pbar{width:4px;height:22px;border-radius:2px;flex:none}
   .gv .r-text{min-width:0}
   .gv .r-name{font-size:13.5px;font-weight:600;color:${C.ink};letter-spacing:.01em;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;line-height:1.25;word-break:break-word}
   .gv .r-meta{font-size:10.5px;color:${C.muted};display:flex;align-items:center;gap:6px;margin-top:1px;white-space:nowrap}
@@ -978,7 +976,7 @@ function ganttStyles() {
      (--line-strong)＝構造ガイドに徹する（プロジェクト色は見出しの .pj-band 四角で伝える）。
      縦線xは見出しの色四角(.mp-sub .pj-band)中心を実測した --mprail に揃える。実測不能時の
      フォールバックは padding-left=30px(grp-label) + caret/gap/四角半分 ≒ 41px の妥当値。 */
-  .gv .row.mp-child .r-label{padding-left:52px}
+  .gv .row.mp-child .r-label{padding-left:calc(var(--mprail,41px) + 18px)}  /* 名前開始をレール基準で右へ＝エルボー(レール+11px)と被らない */
   .gv .row.mp-child .r-label::before{content:"";position:absolute;left:var(--mprail,41px);top:0;bottom:0;width:2px;background:var(--pj,${C.lineStrong});opacity:.5}
   .gv .row.mp-child.last .r-label::before{bottom:auto;height:50%}
   /* エルボーの横線: 縦線から子ラベルへ向かう短い水平線（行の中央高さ） */
