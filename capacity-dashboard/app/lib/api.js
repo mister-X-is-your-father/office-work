@@ -126,7 +126,16 @@ export async function fetchAttachmentBlob(taskId, attId) {
 // レビュー依頼（ネイティブ機能のみ・スキーマ変更なし）: タスク作成＋ラベル＋担当＋関連リンク。
 export async function createTaskInProject(projectId, body) { return req(`/projects/${projectId}/tasks`, { method: "PUT", body }); }
 export async function getLabels() { return req("/labels"); }
-export async function createLabel(title) { return req("/labels", { method: "PUT", body: { title } }); }
+// 作成: hexColor は任意（#付き/無しどちらでも Vikunja 側で受ける）。互換のため第2引数は省略可。
+export async function createLabel(title, hexColor) {
+  const body = { title };
+  if (hexColor) body.hex_color = hexColor;
+  return req("/labels", { method: "PUT", body });
+}
+// 更新: 改名（{title}）／色変更（{hex_color}）。部分更新（patch のキーのみ送る）。
+export async function updateLabel(id, patch) { return req(`/labels/${id}`, { method: "POST", body: patch }); }
+// 削除: 使用中タスクからは自動で外れる（Vikunja 標準挙動）。
+export async function deleteLabel(id) { return req(`/labels/${id}`, { method: "DELETE" }); }
 export async function addTaskLabel(taskId, labelId) { return req(`/tasks/${taskId}/labels`, { method: "PUT", body: { label_id: labelId } }); }
 export async function removeTaskLabel(taskId, labelId) { return req(`/tasks/${taskId}/labels/${labelId}`, { method: "DELETE" }); }
 export async function addAssignee(taskId, userId) { return req(`/tasks/${taskId}/assignees`, { method: "PUT", body: { user_id: userId } }); }

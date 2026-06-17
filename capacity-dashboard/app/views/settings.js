@@ -4,7 +4,9 @@
 // チーム共有の保存先は taskstation-exec（許可ユーザーのみ書き込み可）。個人設定は localStorage＝exec が落ちていても使える。
 import { load, invalidate } from "../lib/store.js";
 import { getSettings, saveSettings } from "../lib/exec.js";
-import { getHolidays, createHoliday, deleteHoliday } from "../lib/api.js";
+import { getHolidays, createHoliday, deleteHoliday,
+  getLabels, createLabel, updateLabel, deleteLabel,
+  REVIEW_LABEL, WAITING_LABEL } from "../lib/api.js";
 import { parseSmartDate, fmtDisplayDow, attachDatePicker } from "../lib/form.js";
 import { notifyPrefs, saveNotifyPrefs } from "../lib/notify.js";
 import { C, esc } from "../lib/ui.js";
@@ -91,6 +93,8 @@ async function renderTeam(root) {
 
   // 祝日・休業日: id 付き生データを直接取得（削除のため）。store キャッシュとは別。
   const holidays = await getHolidays().catch(() => []);
+  // 分類（ラベル）: 生データを直接取得（予約ラベルは保護のためフィルタ前に持つ）。
+  const labels = await getLabels().catch(() => []);
 
   root.innerHTML = `
     <style>${css()}</style>
@@ -124,6 +128,8 @@ async function renderTeam(root) {
 
       ${holidaySection(holidays)}
 
+      ${labelSection(labels)}
+
       ${canEdit ? `
       <div class="sx-savebar">
         <span class="sx-savemeta">変更は<b>保存するまで反映されません</b></span>
@@ -133,6 +139,7 @@ async function renderTeam(root) {
     </div>`;
 
   wireHolidays(root, holidays, holidaysByDate);
+  wireLabels(root, labels);
 
   const btn = root.querySelector("#st-save");
   if (btn) btn.onclick = async () => {
@@ -255,6 +262,120 @@ function wireHolidays(root, holidays, holidaysByDate) {
   });
 }
 
+// 分類（ラベル）マスタ: ユーザー定義の分類ラベルを管理する自己完結セクション。
+// 予約ラベル（レビュー・連絡待ち）は kind/ステータス判定に使うので編集・削除させない（保護）。
+const RESERVED_LABELS = new Set([REVIEW_LABEL, WAITING_LABEL]);
+const isReserved = (l) => RESERVED_LABELS.has(l.title || "");
+// 色を #rrggbb に正規化（input type=color は # 必須。Vikunja は # 無しで返すことがある）。
+function normHex(c) {
+  if (!c) return "#3a86ff";
+  const h = String(c).startsWith("#") ? c : "#" + c;
+  return /^#[0-9a-fA-F]{6}$/.test(h) ? h.toLowerCase() : "#3a86ff";
+}
+
+function labelSection(labels) {
+  const all = [...(labels || [])].sort((a, b) => String(a.title || "").localeCompare(String(b.title || ""), "ja"));
+  const editable = all.filter((l) => !isReserved(l));
+  const reserved = all.filter(isReserved);
+  const rows = editable.length ? editable.map((l) => {
+    const hex = normHex(l.hex_color);
+    return `<div class="sx-lbrow" data-lb="${l.id}">
+      <input type="color" class="sx-lbcolor" value="${hex}" data-lb-color="${l.id}" title="色を変更">
+      <span class="sx-lbname">${esc(l.title || "")}</span>
+      <div class="sx-lbacts">
+        <button class="sx-lbbtn" data-lb-rename="${l.id}">改名</button>
+        <button class="sx-lbbtn sx-lbdel" data-lb-del="${l.id}">削除</button>
+      </div>
+    </div>`;
+  }).join("") : `<div class="sx-hempty">まだ分類がありません</div>`;
+  const reservedRows = reserved.map((l) => {
+    const hex = normHex(l.hex_color);
+    return `<div class="sx-lbrow res">
+      <span class="sx-lbsw" style="background:${hex}"></span>
+      <span class="sx-lbname">${esc(l.title || "")}</span>
+      <span class="sx-lbprot">${icon("lock", { size: 12 })} システム予約</span>
+    </div>`;
+  }).join("");
+  return `
+    <section class="sx-card">
+      <header class="sx-chd">
+        <div class="sx-ctitle">分類 <span class="sx-hcnt">${editable.length}</span></div>
+        <span class="sx-scope"><span class="dot" style="background:${C.fill}"></span>追加・変更は即反映</span>
+      </header>
+      <div class="sx-body">
+        <div class="sx-hhint">タスクに付ける分類（ラベル）を管理します。色は一覧やクロックで使われます。「レビュー」「連絡待ち」はシステムが使う予約分類のため変更できません。</div>
+        <div class="sx-hform">
+          <input id="lb-name" class="sx-in sx-hname" placeholder="分類名（例: エンジニア依頼）">
+          <input type="color" id="lb-color" class="sx-lbcolor" value="#3a86ff" title="色">
+          <button class="sx-hadd" id="lb-add">追加</button>
+        </div>
+        <div class="sx-herr" id="lb-err"></div>
+        <div class="sx-hlist">${rows}${reservedRows}</div>
+      </div>
+    </section>`;
+}
+
+function wireLabels(root, labels) {
+  const reload = () => { invalidate(); render(root); };
+  const addBtn = root.querySelector("#lb-add");
+  if (!addBtn) return;
+  const err = root.querySelector("#lb-err");
+  const byId = (id) => (labels || []).find((l) => l.id === id);
+
+  // 追加
+  addBtn.onclick = async () => {
+    err.textContent = "";
+    const name = root.querySelector("#lb-name").value.trim();
+    const color = root.querySelector("#lb-color").value;
+    if (!name) { err.textContent = "分類名を入力してください。"; return; }
+    if (RESERVED_LABELS.has(name)) { err.textContent = "その名前はシステム予約のため使用できません。"; return; }
+    if ((labels || []).some((l) => (l.title || "") === name)) { err.textContent = "同じ名前の分類が既にあります。"; return; }
+    addBtn.disabled = true;
+    try { await createLabel(name, color); reload(); }
+    catch (e) { addBtn.disabled = false; err.textContent = "× " + e.message; }
+  };
+
+  // 色変更（即保存）
+  root.querySelectorAll("[data-lb-color]").forEach((el) => {
+    el.onchange = async () => {
+      const id = +el.dataset.lbColor;
+      el.disabled = true;
+      try { await updateLabel(id, { hex_color: el.value }); invalidate(); }
+      catch (e) { err.textContent = "× " + e.message; }
+      el.disabled = false;
+    };
+  });
+
+  // 改名
+  root.querySelectorAll("[data-lb-rename]").forEach((b) => {
+    b.onclick = async () => {
+      const id = +b.dataset.lbRename;
+      const l = byId(id); if (!l) return;
+      const next = prompt("新しい分類名", l.title || "");
+      if (next == null) return;
+      const name = next.trim();
+      if (!name || name === (l.title || "")) return;
+      if (RESERVED_LABELS.has(name)) { err.textContent = "その名前はシステム予約のため使用できません。"; return; }
+      if ((labels || []).some((x) => x.id !== id && (x.title || "") === name)) { err.textContent = "同じ名前の分類が既にあります。"; return; }
+      b.disabled = true;
+      try { await updateLabel(id, { title: name }); reload(); }
+      catch (e) { b.disabled = false; err.textContent = "× " + e.message; }
+    };
+  });
+
+  // 削除（確認 → 使用中タスクからは自動で外れる）
+  root.querySelectorAll("[data-lb-del]").forEach((b) => {
+    b.onclick = async () => {
+      const id = +b.dataset.lbDel;
+      const l = byId(id); if (!l) return;
+      if (!confirm(`分類「${l.title}」を削除しますか？\n使用中のタスクからは自動で外れます。`)) return;
+      b.disabled = true;
+      try { await deleteLabel(id); reload(); }
+      catch (e) { b.disabled = false; err.textContent = "× " + e.message; }
+    };
+  });
+}
+
 function css() {
   return `
   .sx{max-width:680px}
@@ -343,6 +464,26 @@ function css() {
   .sx-hdel{font:inherit;font-size:11.5px;font-weight:600;padding:5px 12px;border-radius:8px;flex:none;
     border:1px solid var(--line-strong);background:var(--card);color:${C.muted};cursor:pointer;transition:border-color .12s,color .12s}
   .sx-hdel:hover{border-color:${C.over};color:${C.over}}
+
+  /* 分類（ラベル）マスタ: 色スウォッチ＋名前＋操作ボタン。予約ラベルは保護表示 */
+  .sx-lbcolor{flex:none;width:30px;height:30px;padding:0;border:1px solid var(--line-strong);
+    border-radius:8px;background:var(--card);cursor:pointer}
+  .sx-lbcolor::-webkit-color-swatch-wrapper{padding:3px}
+  .sx-lbcolor::-webkit-color-swatch{border:0;border-radius:5px}
+  .sx-lbcolor:disabled{opacity:.55;cursor:default}
+  .sx-lbrow{display:flex;align-items:center;gap:10px;padding:9px 2px;border-top:1px solid var(--line)}
+  .sx-lbrow:first-child{border-top:0}
+  .sx-lbsw{flex:none;width:14px;height:14px;border-radius:4px;border:1px solid rgba(0,0,0,.12)}
+  .sx-lbname{flex:1;min-width:0;font-size:13.5px;font-weight:700;color:${C.ink};overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sx-lbacts{display:flex;gap:6px;flex:none}
+  .sx-lbbtn{font:inherit;font-size:11.5px;font-weight:600;padding:5px 12px;border-radius:8px;
+    border:1px solid var(--line-strong);background:var(--card);color:${C.muted};cursor:pointer;transition:border-color .12s,color .12s}
+  .sx-lbbtn:hover{border-color:${C.fill};color:${C.fill}}
+  .sx-lbbtn:disabled{opacity:.55;cursor:default}
+  .sx-lbdel:hover{border-color:${C.over};color:${C.over}}
+  .sx-lbrow.res{opacity:.7}
+  .sx-lbprot{display:inline-flex;align-items:center;gap:4px;flex:none;font-size:11px;font-weight:700;color:${C.muted};
+    background:var(--track);border:1px solid var(--line);padding:4px 10px;border-radius:999px}
 
   /* ダークモード: ハードコードした淡色面/tintを反転（ライト値は不変） */
   html[data-theme="dark"] .sx-chd{background:var(--track)}`;
