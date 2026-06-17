@@ -1,5 +1,6 @@
 // スマートリスト（TickTick の Smart List をブラッシュアップ）。
-// 左レール=組み込みビュー＋保存したカスタムフィルタ。右=フィルタバー＋結果（インライン完了/フラグ/編集）。
+// 上部タブ=組み込みビュー＋保存したカスタムフィルタ（横セグメント・wrap/横スクロール対応）。下=フィルタバー＋結果（インライン完了/フラグ/編集）。
+// 左の縦レールは廃止（アプリ共通ナビと差別化、本文フル幅）。各タブ=icon＋ラベル＋件数バッジ、クリックでビュー切替。
 // 保存はローカル（localStorage・スキーマ変更なし）。完了/フラグは updateTask（#9 非破壊）。
 import { load, invalidate, projectName } from "../lib/store.js";
 import { updateTask } from "../lib/api.js";
@@ -12,6 +13,7 @@ import { C, esc, fmtH, member_color, todayISO } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
 
 const DOW_JA = ["日", "月", "火", "水", "木", "金", "土"];
+const ICON_X = icon("x", { size: 13 });
 
 const SEL_KEY = (uid) => `ts.smartlist.sel.${uid ?? "anon"}`;
 const LISTS_KEY = (uid) => `ts.smartlists.${uid ?? "anon"}`;
@@ -50,21 +52,25 @@ export async function render(root) {
   const matched = (tasks || []).filter((t) => taskMatches(t, state.filter, ctx) && (!catTitle || categoryLabels(t).some((l) => l.title === catTitle)));
   const sorted = sortTasks(matched, state.sort, today);
 
-  // 左レール件数（組み込み）
+  // タブ件数（組み込み）。保存リストもタブに件数を出す（カスタム filter で算出）。
   const countOf = (v) => (tasks || []).filter((t) => taskMatches(t, presetOf(v), ctx)).length;
+  const countOfList = (l) => {
+    const f = { ...EMPTY_FILTER, ...l.filter }, cat = f._cat || "";
+    return (tasks || []).filter((t) => taskMatches(t, f, ctx) && (!cat || categoryLabels(t).some((x) => x.title === cat))).length;
+  };
 
   const curName = currentViewName(state, lists);
 
   root.innerHTML = `
     <style>${css()}</style>
     <div class="sl">
-      <aside class="sl-rail">
-        <div class="sl-rgrp">ビュー</div>
-        ${BUILTIN_VIEWS.map((v) => railItem(v.key, icon(v.icon, { size: 16 }), v.label, countOf(v), state.sel === v.key)).join("")}
-        <div class="sl-rgrp">スマートリスト ${lists.length ? "" : `<span class="sl-rhint">条件を保存</span>`}</div>
-        ${lists.map((l) => railItem(l.id, icon("bookmark", { size: 16 }), l.name, null, state.sel === l.id, true)).join("") || `<div class="sl-rempty">右で条件を作って「保存」</div>`}
-      </aside>
       <section class="sl-main">
+        <div class="sl-tabs" role="tablist" aria-label="ビュー">
+          ${BUILTIN_VIEWS.map((v) => tabItem(v.key, icon(v.icon, { size: 14 }), v.label, countOf(v), state.sel === v.key)).join("")}
+          ${lists.map((l) => tabItem(l.id, icon("bookmark", { size: 14 }), l.name, countOfList(l), state.sel === l.id, true)).join("")}
+          ${state.sel === "adhoc" ? `<span class="sl-tab is-adhoc" aria-current="true">${icon("tag", { size: 14 })}<span class="sl-tlbl">${esc(curName.label)}</span></span>` : ""}
+          <button id="sl-savetab" class="sl-tabsave" title="現在の条件をスマートリストとして保存">${icon("save", { size: 14 })}<span class="sl-tlbl">保存</span></button>
+        </div>
         <div class="sl-head">
           <div class="sl-title">${curName.icon ? icon(curName.icon, { size: 20, cls: "sl-titic" }) + " " : ""}${esc(curName.label)} <span class="sl-count" id="sl-count">${sorted.length}</span></div>
           <div class="sl-sort">並べ替え
@@ -79,7 +85,7 @@ export async function render(root) {
           ${sel("sl-ws", String(state.filter.ws || ""), [["", "WS：すべて"], ...(projects || []).map((p) => [String(p.id), p.title])])}
           ${sel("sl-status", state.filter.status, [["undone", "未完了"], ["todo", "未着手"], ["doing", "進行中"], ["waiting", "連絡待ち"], ["done", "完了"], ["", "すべて"]])}
           <button id="sl-flag" class="sl-flagbtn${state.filter.flag ? " on" : ""}" title="フラグ付きのみ">${icon("flag", { size: 15 })}</button>
-          ${state.sel === "adhoc" ? `<button id="sl-save" class="sl-save">＋ 保存</button>` : ""}
+          ${state.sel === "adhoc" ? `<button id="sl-save" class="sl-save">${icon("save", { size: 14 })} 保存</button>` : ""}
           ${typeof state.sel === "number" ? `<button id="sl-del" class="sl-del">このリストを削除</button>` : ""}
         </div>
         <div class="sl-list" id="sl-results">${resultsHtml(sorted, projects, today, state.sort)}</div>
@@ -116,11 +122,12 @@ function sel(id, val, opts) {
   return `<select id="${id}" class="sl-in">${opts.map(([v, n]) => `<option value="${esc(v)}"${String(v) === String(val || "") ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>`;
 }
 
-function railItem(key, icon, label, count, on, custom) {
-  return `<button class="sl-ritem${on ? " on" : ""}" data-view="${esc(String(key))}"${custom ? ' data-custom="1"' : ""}>
-    <span class="sl-ric">${icon}</span><span class="sl-rlbl">${esc(label)}</span>
-    ${count != null ? `<span class="sl-rcnt">${count}</span>` : ""}
-    ${custom ? `<span class="sl-rdel" data-del="${esc(String(key))}" title="削除">×</span>` : ""}
+// 上部タブ（セグメント）。icon＋ラベル＋件数バッジ。アクティブは下線＋強調。カスタムは削除（×）付き。
+function tabItem(key, icon, label, count, on, custom) {
+  return `<button class="sl-tab${on ? " on" : ""}" role="tab" aria-selected="${on ? "true" : "false"}" data-view="${esc(String(key))}"${custom ? ' data-custom="1"' : ""}>
+    <span class="sl-tic">${icon}</span><span class="sl-tlbl">${esc(label)}</span>
+    ${count != null ? `<span class="sl-tcnt">${count}</span>` : ""}
+    ${custom ? `<span class="sl-tdel" data-del="${esc(String(key))}" title="このリストを削除" role="button" aria-label="削除">${ICON_X}</span>` : ""}
   </button>`;
 }
 
@@ -188,8 +195,8 @@ function wire(root, data, uid, lists, ctx) {
   const rerender = () => render(root);
   const persistSel = () => { try { localStorage.setItem(SEL_KEY(uid), String(state.sel)); } catch {} };
 
-  // 左レール選択
-  root.querySelectorAll(".sl-ritem").forEach((b) => {
+  // 上部タブ選択
+  root.querySelectorAll(".sl-tab").forEach((b) => {
     b.onclick = (e) => {
       if (e.target.closest("[data-del]")) return; // 削除は別ハンドラ
       const v = b.dataset.view;
@@ -221,9 +228,8 @@ function wire(root, data, uid, lists, ctx) {
   const sortEl = root.querySelector("#sl-sort");
   if (sortEl) sortEl.onchange = () => { state.sort = sortEl.value; paintResults(root, data, ctx); };
 
-  // 保存 / 削除
-  const saveBtn = root.querySelector("#sl-save");
-  if (saveBtn) saveBtn.onclick = () => {
+  // 保存 / 削除（保存はフィルタ行のボタンとタブ末尾ボタンの両方から）
+  const doSave = () => {
     const name = (prompt("スマートリスト名", suggestName(state.filter)) || "").trim();
     if (!name) return;
     const id = Date.now();
@@ -231,6 +237,10 @@ function wire(root, data, uid, lists, ctx) {
     const next = [...lists, { id, name, filter: { ...f, _cat } }];
     saveLists(uid, next); state.sel = id; persistSel(); rerender();
   };
+  const saveBtn = root.querySelector("#sl-save");
+  if (saveBtn) saveBtn.onclick = doSave;
+  const saveTab = root.querySelector("#sl-savetab");
+  if (saveTab) saveTab.onclick = doSave;
   const delBtn = root.querySelector("#sl-del");
   if (delBtn) delBtn.onclick = () => {
     const next = lists.filter((l) => l.id !== state.sel);
@@ -298,22 +308,22 @@ function suggestName(f) {
 
 function css() {
   return `
-  .sl{display:grid;grid-template-columns:220px 1fr;gap:16px;align-items:start}
-  .sl-rail{position:sticky;top:8px;background:${C.card};border:1px solid ${C.line};border-radius:14px;padding:8px;display:flex;flex-direction:column;gap:1px}
-  .sl-rgrp{font-size:10.5px;font-weight:700;color:${C.muted};letter-spacing:.04em;padding:10px 8px 4px;display:flex;justify-content:space-between;align-items:center}
-  .sl-rhint{font-weight:400}
-  .sl-rempty{font-size:11px;color:${C.muted};padding:4px 8px 8px}
-  .sl-ritem{display:flex;align-items:center;gap:9px;width:100%;border:0;background:transparent;font:inherit;font-size:13px;color:${C.ink};padding:7px 9px;border-radius:9px;cursor:pointer;text-align:left;position:relative}
-  .sl-ritem:hover{background:${C.track}}
-  .sl-ritem.on{background:${C.fill};color:#fff;font-weight:600}
-  .sl-ric{width:18px;text-align:center;flex:none}
-  .sl-rlbl{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .sl-rcnt{font-size:11px;font-variant-numeric:tabular-nums;background:rgba(0,0,0,.06);border-radius:9px;padding:0 7px;color:inherit}
-  .sl-ritem.on .sl-rcnt{background:rgba(255,255,255,.25)}
-  .sl-rdel{display:none;font-size:14px;color:inherit;opacity:.7;padding:0 2px}
-  .sl-ritem:hover .sl-rdel{display:inline}
-  .sl-rdel:hover{opacity:1}
+  .sl{display:block}
   .sl-main{min-width:0}
+  /* ===== 上部タブ（セグメント／フィルタ体裁。左の共通ナビと差別化＝塗りボタンではなく軽い下線強調） ===== */
+  .sl-tabs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;border-bottom:1px solid ${C.line};padding:0 0 2px;margin:0 0 14px;overflow-x:auto}
+  .sl-tab{display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;font:inherit;font-size:12.5px;color:${C.muted};padding:7px 11px;border-radius:9px 9px 0 0;cursor:pointer;white-space:nowrap;position:relative;border-bottom:2px solid transparent;margin-bottom:-3px}
+  .sl-tab:hover{background:${C.track};color:${C.ink}}
+  .sl-tab.on,.sl-tab.is-adhoc{color:${C.fill};font-weight:700;border-bottom-color:${C.fill}}
+  .sl-tic{flex:none;display:inline-flex}
+  .sl-tlbl{flex:none}
+  .sl-tcnt{font-size:10.5px;font-variant-numeric:tabular-nums;background:${C.track};border-radius:9px;padding:0 6px;color:${C.muted};font-weight:600}
+  .sl-tab.on .sl-tcnt{background:${C.fill};color:#fff}
+  .sl-tdel{display:none;align-items:center;opacity:.6;margin-left:1px;border-radius:5px}
+  .sl-tab:hover .sl-tdel{display:inline-flex}
+  .sl-tdel:hover{opacity:1;color:${C.over}}
+  .sl-tabsave{display:inline-flex;align-items:center;gap:5px;border:1px dashed ${C.line};background:transparent;font:inherit;font-size:12px;color:${C.muted};padding:6px 10px;border-radius:9px;cursor:pointer;white-space:nowrap;margin-bottom:1px}
+  .sl-tabsave:hover{border-color:${C.fill};color:${C.fill}}
   .sl-head{display:flex;align-items:center;justify-content:space-between;margin:2px 2px 12px}
   .sl-title{font-size:20px;font-weight:800;letter-spacing:-.01em}
   .sl-count{font-size:13px;font-weight:700;color:${C.muted};background:${C.track};border-radius:11px;padding:1px 10px;margin-left:6px;vertical-align:2px}
@@ -326,7 +336,7 @@ function css() {
   .sl-flagbtn{font:inherit;display:inline-flex;align-items:center;padding:7px 11px;border:1px solid ${C.line};border-radius:9px;background:#fff;cursor:pointer;color:${C.muted}}
   .sl-flagbtn.on{border-color:${C.over};background:#fff5f5;color:${C.over}}
   .sl-save,.sl-del{font:inherit;font-size:12.5px;font-weight:700;padding:7px 14px;border-radius:9px;cursor:pointer}
-  .sl-save{border:1px solid ${C.fill};background:${C.fill};color:#fff}
+  .sl-save{display:inline-flex;align-items:center;gap:5px;border:1px solid ${C.fill};background:${C.fill};color:#fff}
   .sl-del{border:1px solid ${C.line};background:#fff;color:${C.over}}
   .sl-list{display:flex;flex-direction:column;gap:6px}
   .sl-gh{font-size:11.5px;font-weight:700;color:${C.muted};letter-spacing:.03em;padding:10px 4px 2px;display:flex;align-items:center;gap:7px}
@@ -354,9 +364,9 @@ function css() {
   .sl-flagrow.on{color:${C.over}}
   .sl-empty{text-align:center;color:${C.muted};padding:50px 0;font-size:13px}
   .sl-empty-i{font-size:34px;margin-bottom:8px;filter:grayscale(.3) opacity(.6)}
-  @media(max-width:720px){.sl{grid-template-columns:1fr}.sl-rail{flex-direction:row;flex-wrap:wrap;position:static}}
+  @media(max-width:720px){.sl-tabs{flex-wrap:nowrap}}
   /* ===== ダークモード（ハードコード淡色を暗側に上書き。ライト不変） ===== */
-  html[data-theme="dark"] .sl-rcnt{background:rgba(255,255,255,.1)}
+  html[data-theme="dark"] .sl-tcnt{background:${C.track}}
   html[data-theme="dark"] .sl-sort select,html[data-theme="dark"] .sl-in{background:${C.card};color:${C.ink}}
   html[data-theme="dark"] .sl-flagbtn{background:${C.card}}
   html[data-theme="dark"] .sl-flagbtn.on{background:rgba(229,72,77,.18)}
