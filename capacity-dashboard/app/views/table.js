@@ -702,20 +702,20 @@ function openEstMenu(chipEl, id, tasks, root) {
   const syncGrid = (sec) => { const hf = sec / 3600; if (sec && hf >= 1 && hf <= 8 && Number.isInteger(hf * 4)) { const hi = Math.floor(hf); return { h: hi, m: Math.round((hf - hi) * 60) }; } return { h: null, m: null }; };
   let g = syncGrid(cur), h = g.h, mn = g.m;
   let hv = toHv(cur);
-  let dirty = false, chain = Promise.resolve();
-  let lastSec = cur; // 最後にコミットした見積（秒）＝閉じる時に履歴へ積む after
   const applyEst = (taskId, sec) => updateTask(taskId, { time_estimate: sec });
-  // 連続操作を直列化し、閉じる時に最後の保存完了を待ってから再描画（適用直後のレース防止）。
-  const commit = (sec) => { dirty = true; lastSec = sec; chain = chain.then(() => updateTask(id, { time_estimate: sec }).catch(() => {})); };
+  // 「適用」するまで保存しない: グリッド選択/直接入力は pending(h/mn/hv)のみ更新。適用・クリアで保存＋履歴記録、キャンセル/外側クリックは破棄。
+  const save = (sec) => { applyEst(id, sec).then(() => { if (sec !== cur) pushScalarEdit("見積変更", id, cur, sec, applyEst); invalidate(); render(root); }).catch(() => {}); };
   const build = () => [
     { input: "hmgrid", h, m: mn, hv, hOpts, mOpts: mBase,
-      onPick: (nh, nm) => { h = (nh == null ? 0 : nh); mn = (nm == null ? 0 : nm); const sec = h * 3600 + mn * 60; hv = toHv(sec); commit(sec); },
-      onHours: (hf) => { if (!isFinite(hf) || hf < 0) return; const sec = Math.round(hf * 3600); hv = hf || ""; const s = syncGrid(sec); h = s.h; mn = s.m; commit(sec); },
-      onClear: () => { updateTask(id, { time_estimate: 0 }).then(() => { if (cur !== 0) pushScalarEdit("見積変更", id, cur, 0, applyEst); invalidate(); render(root); }).catch(() => {}); } },
+      // グリッド選択は pending 更新のみ（保存しない）。hv に反映し再描画→直接入力欄にも出る＝適用時に拾える。
+      onPick: (nh, nm) => { h = (nh == null ? 0 : nh); mn = (nm == null ? 0 : nm); hv = toHv(h * 3600 + mn * 60); },
+      // 「適用」= 直接入力欄の値（グリッド選択も hv 経由で反映済み）で保存。
+      onHours: (hf) => { if (!isFinite(hf) || hf < 0) return; save(Math.round(hf * 3600)); },
+      onClear: () => { save(0); } },
   ];
   const r = chipEl.getBoundingClientRect();
-  // 閉じる時に最後にコミットした値(lastSec)で1アクションとして履歴へ積む（開いた時点 cur から変わった時だけ）。
-  openMenu(r.left, r.bottom + 4, build(), { keepOpen: true, rebuild: build, onClose: () => { if (dirty) chain.then(() => { if (lastSec !== cur) pushScalarEdit("見積変更", id, cur, lastSec, applyEst); invalidate(); render(root); }); } });
+  // onClose は保存しない（適用/クリアのみ保存。キャンセル・外側クリックは破棄）。
+  openMenu(r.left, r.bottom + 4, build(), { keepOpen: true, rebuild: build, onClose: () => {} });
 }
 
 // 多対多リレーション（担当/分類）の集合編集を1アクションとして履歴へ積む。
