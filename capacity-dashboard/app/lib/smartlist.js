@@ -3,21 +3,37 @@
 import { shiftISO, dateOnly, hasDate, hasStarted } from "./capacity.js";
 
 // フィルタの既定（空＝条件なし）
-export const EMPTY_FILTER = { text: "", due: "", prio: "", ws: 0, status: "undone", flag: false };
+export const EMPTY_FILTER = { text: "", due: "", prio: "", ws: 0, status: "undone", flag: false, unsorted: false };
+
+// AI（fable）担当の判定。lib/store.js の isAiUser と同義だが、循環 import を避けるため
+// ここに最小実装をインライン（AI_USERNAMES=["fable"] と同一基準。増えたら両方更新）。
+const isAiAssignee = (u) => !!u && (u.username === "fable");
+// 人間担当が1人でもいるか（AI=fable は段取り済み扱いしない）。
+const hasHumanAssignee = (t) => (t.assignees || []).some((a) => !isAiAssignee(a));
 
 // 組み込みビュー: TickTick の左レール相当。preset は taskMatches に渡すフィルタ。
-// ws=Inbox は呼び出し側で inboxWsId を differ で埋める（id は環境依存のため）。
+// desc は各ビューの1行説明（views/smartlist.js がタイトル直下に表示する）。
 // icon は共通アイコン名（views/smartlist.js が icon(name) で SVG 描画する）。
 export const BUILTIN_VIEWS = [
-  { key: "inbox", label: "未整理", icon: "inbox", inbox: true, filter: { status: "undone" } },
-  { key: "today", label: "今日", icon: "calendar", filter: { due: "today", status: "undone" } },
-  { key: "next7", label: "次の7日間", icon: "calendarDays", filter: { due: "next7", status: "undone" } },
-  { key: "overdue", label: "期限切れ", icon: "alertTriangle", filter: { due: "overdue", status: "undone" } },
-  { key: "important", label: "重要", icon: "star", filter: { prio: "high", status: "undone" } },
-  { key: "flagged", label: "フラグ", icon: "flag", filter: { flag: true, status: "undone" } },
-  { key: "nodate", label: "期限なし", icon: "inbox", filter: { due: "none", status: "undone" } },
-  { key: "waiting", label: "連絡待ち", icon: "hourglass", filter: { status: "waiting" } },
-  { key: "completed", label: "完了", icon: "check", filter: { status: "done" } },
+  // 未整理＝未完了で「人間担当が未設定 or 期限が未設定」＝まだ段取りされてないタスク（unsorted フラグで判定）。
+  { key: "inbox", label: "未整理", icon: "inbox", filter: { status: "undone", unsorted: true },
+    desc: "未完了で、担当か期限が未設定。ここから振り分ける。" },
+  { key: "today", label: "今日", icon: "calendar", filter: { due: "today", status: "undone" },
+    desc: "今日が期限の未完了タスク。" },
+  { key: "next7", label: "次の7日間", icon: "calendarDays", filter: { due: "next7", status: "undone" },
+    desc: "今日から7日以内が期限の未完了タスク。" },
+  { key: "overdue", label: "期限切れ", icon: "alertTriangle", filter: { due: "overdue", status: "undone" },
+    desc: "期限を過ぎた未完了タスク。早めに対応。" },
+  { key: "important", label: "重要", icon: "star", filter: { prio: "high", status: "undone" },
+    desc: "重要度「高」以上の未完了タスク。" },
+  { key: "flagged", label: "フラグ", icon: "flag", filter: { flag: true, status: "undone" },
+    desc: "フラグを付けた未完了タスク。" },
+  { key: "nodate", label: "期限なし", icon: "inbox", filter: { due: "none", status: "undone" },
+    desc: "期限が未設定の未完了タスク。" },
+  { key: "waiting", label: "連絡待ち", icon: "hourglass", filter: { status: "waiting" },
+    desc: "相手の返事・対応を待っているタスク。" },
+  { key: "completed", label: "完了", icon: "check", filter: { status: "done" },
+    desc: "完了したタスク。" },
 ];
 
 // 「次の7日間」= 今日を含む7日（today .. today+6）
@@ -50,6 +66,9 @@ export function taskMatches(t, f, ctx) {
 
   if (f.ws && t.project_id !== f.ws) return false;
   if (f.flag && !t.is_favorite) return false;
+
+  // 未整理（unsorted）= まだ段取りされてない＝「人間担当あり かつ 期限あり」を除外（担当なし or 期限なしのみ通す）。
+  if (f.unsorted && hasHumanAssignee(t) && due) return false;
 
   if (f.text) {
     const q = String(f.text).toLowerCase();

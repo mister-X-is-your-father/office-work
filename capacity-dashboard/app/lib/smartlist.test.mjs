@@ -54,8 +54,25 @@ test("複合条件（重要かつ今日）", () => {
   assert.equal(taskMatches(T({ priority: 1, due_date: due(TODAY) }), { prio: "high", due: "today" }, ctx), false);
 });
 
+test("unsorted（未整理）: 担当なし or 期限なし のみ通す", () => {
+  const human = [{ id: 1, username: "alice" }];
+  const ai = [{ id: 9, username: "fable" }];
+  // 人間担当あり かつ 期限あり → 段取り済み → 除外
+  assert.equal(taskMatches(T({ assignees: human, due_date: due(TODAY) }), { unsorted: true, status: "undone" }, ctx), false);
+  // 担当なし → 通す
+  assert.equal(taskMatches(T({ due_date: due(TODAY) }), { unsorted: true, status: "undone" }, ctx), true);
+  // 期限なし → 通す
+  assert.equal(taskMatches(T({ assignees: human }), { unsorted: true, status: "undone" }, ctx), true);
+  // AI(fable)担当のみ＝人間担当なし扱い → 期限ありでも通す
+  assert.equal(taskMatches(T({ assignees: ai, due_date: due(TODAY) }), { unsorted: true, status: "undone" }, ctx), true);
+  // 完了は status:undone で除外
+  assert.equal(taskMatches(T({ done: true }), { unsorted: true, status: "undone" }, ctx), false);
+});
+
 test("BUILTIN_VIEWS と EMPTY_FILTER の健全性", () => {
   assert.ok(BUILTIN_VIEWS.length >= 6);
-  assert.ok(BUILTIN_VIEWS.every((v) => v.key && v.label && v.filter));
+  assert.ok(BUILTIN_VIEWS.every((v) => v.key && v.label && v.filter && v.desc));
   assert.equal(EMPTY_FILTER.status, "undone");
+  // 未整理ビューは unsorted フラグを持つ
+  assert.equal(BUILTIN_VIEWS.find((v) => v.key === "inbox").filter.unsorted, true);
 });

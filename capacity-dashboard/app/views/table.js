@@ -10,6 +10,7 @@ import { shiftISO, buildTaskTree } from "../lib/capacity.js";
 import { openTaskForm, ensureStyle as ensureFormStyle } from "./taskform.js";
 import { summarizeRecurrence, openRecurrenceForm } from "./recurrenceform.js";
 import { hourInputHtml, wireHourInput } from "../lib/form.js";
+import { taskMatches, next7End, EMPTY_FILTER, BUILTIN_VIEWS } from "../lib/smartlist.js";
 import { icon } from "../lib/icons.js";
 
 const HOUR = 3600;
@@ -17,7 +18,8 @@ const MAX_SORTS = 5; // 組めるソート条件の上限（第1〜第5条件）
 const VKEY = (uid) => `ts.list.view.${uid ?? "anon"}`;
 function loadView(uid) {
   // doneMode: "show"=完了も表示 / "today"=完了は隠すが今日の完了は残す / "hide"=完了を隠す
-  const def = { sorts: [{ key: "due", dir: 1 }], manualMode: false, order: [], doneMode: "hide", proj: "", cat: "", qaWho: "", qaDue: "", mode: "table", q: "" };
+  // preset: スマートリスト風プリセットタブの選択（""=すべて / BUILTIN_VIEWS の key）。最上位の絞込レイヤー。
+  const def = { sorts: [{ key: "due", dir: 1 }], manualMode: false, order: [], doneMode: "hide", proj: "", cat: "", qaWho: "", qaDue: "", mode: "table", q: "", preset: "" };
   try {
     const raw = JSON.parse(localStorage.getItem(VKEY(uid)) || "null");
     if (!raw) return { ...def };                       // 初回のみ既定（期限）
@@ -67,6 +69,14 @@ const AXES = {
 };
 const stateRank = (r) => STATUS[r.status].rank; // 未着手→進行中→完了（kinds.js が SSoT）
 const tieBreak = (a, b) => (a.due || "9999").localeCompare(b.due || "9999") || a.t.id - b.t.id;
+
+// スマートリスト風プリセットタブ（icon＋ラベル＋件数バッジ＋アクティブ下線）。views/smartlist.js の tabItem と同趣旨。
+function presetTabHtml(key, iconHtml, label, count, on) {
+  return `<button class="tb-ptab${on ? " on" : ""}" role="tab" aria-selected="${on ? "true" : "false"}" data-preset="${esc(String(key))}">
+    <span class="tb-ptic">${iconHtml}</span><span class="tb-ptlbl">${esc(label)}</span>
+    ${count != null ? `<span class="tb-ptcnt">${count}</span>` : ""}
+  </button>`;
+}
 
 export async function render(root) {
   const { tasks, projects, members, me = null, settings = {}, labels = [], recurrences = [], holidaysByDate = null } = await load();
@@ -123,8 +133,20 @@ export async function render(root) {
     rows = rows.filter(hit);
   }
 
-  // 絞り込み（プロジェクト/分類/担当/期限/完了表示/検索）のいずれかがアクティブか。0件時の空状態出し分け用。
-  const filtersActive = !!(V.proj || V.cat || V.qaWho || V.qaDue || V.doneMode !== "hide" || q);
+  // スマートリスト風プリセットタブ（最上位の絞込レイヤー）。lib/smartlist.js の BUILTIN_VIEWS を流用し、
+  // その view.filter を lib/smartlist.js applyFilter（=taskMatches）で行に適用＝他の絞込とAND。
+  // 件数バッジは「他フィルタ適用後・プリセット適用前」の集合に対して各 view を当てて算出（タブ間で安定）。
+  const slCtx = { today, next7: next7End(today) };
+  const presetFilterOf = (v) => ({ ...EMPTY_FILTER, ...v.filter });
+  const presetCount = (v) => rows.filter((r) => taskMatches(r.t, presetFilterOf(v), slCtx)).length;
+  const presetCounts = BUILTIN_VIEWS.map((v) => ({ view: v, count: presetCount(v) }));
+  const presetAllCount = rows.length;
+  // 選択中プリセットを適用（""=すべて＝プリセット無し）。
+  const activePreset = BUILTIN_VIEWS.find((v) => v.key === V.preset) || null;
+  if (activePreset) rows = rows.filter((r) => taskMatches(r.t, presetFilterOf(activePreset), slCtx));
+
+  // 絞り込み（プロジェクト/分類/担当/期限/完了表示/検索/プリセット）のいずれかがアクティブか。0件時の空状態出し分け用。
+  const filtersActive = !!(V.proj || V.cat || V.qaWho || V.qaDue || V.doneMode !== "hide" || q || activePreset);
 
   const manual = V.manualMode && !isOutline; // アウトライン中はマイソート（手動順）を無効化（階層が順序）
   // 選択は表モード全般で有効（チェックボックス＋一括操作）。マイソート中はドラッグ移動にも併用。
@@ -179,6 +201,11 @@ export async function render(root) {
       <h1 class="vtitle">タスク一覧 <small>${rows.length}件 ${subtitle}</small></h1>
       <span class="tb-search">${icon("search", { size: 15, cls: "tb-search-ic" })}<input id="tb-q" class="tb-search-in" type="text" placeholder="タスクを検索（名前・PJ・分類・担当）" value="${esc(V.q || "")}">${V.q ? `<button id="tb-q-clr" class="tb-search-x" type="button" title="検索をクリア">×</button>` : ""}</span>
     </div>
+    <div class="tb-ptabs" role="tablist" aria-label="プリセット">
+      ${presetTabHtml("", icon("list", { size: 14 }), "すべて", presetAllCount, !activePreset)}
+      ${presetCounts.map((pc) => presetTabHtml(pc.view.key, icon(pc.view.icon, { size: 14 }), pc.view.label, pc.count, V.preset === pc.view.key)).join("")}
+    </div>
+    ${activePreset && activePreset.desc ? `<div class="tb-pdesc">${esc(activePreset.desc)}</div>` : ""}
     <div class="tb-tools">
       <span class="tb-grp">
         <button id="tb-add" class="tb-add">タスク追加</button>
@@ -239,6 +266,11 @@ export async function render(root) {
   const persist = () => saveView(UID, V);
   const reRender = () => { persist(); render(root); };
 
+  // プリセットタブ選択（最上位の絞込レイヤー）。同じタブ再クリックで「すべて」へ戻す。V.preset を localStorage 保持。
+  root.querySelectorAll(".tb-ptab").forEach((b) => {
+    b.onclick = () => { const k = b.dataset.preset || ""; V.preset = (V.preset === k) ? "" : k; reRender(); };
+  });
+
   // 表/アウトライン セグメント切替: V.modeを保存。#/outline 経由で来ていても、ここで選んだら #/list 正規へ寄せる。
   root.querySelectorAll(".tb-seg-b").forEach((b) => {
     b.onclick = () => {
@@ -273,7 +305,7 @@ export async function render(root) {
   if (qClr) qClr.onclick = () => { V.q = ""; reRender(); restoreSearchFocus(root, 0); };
   // 0件の空状態にある「絞り込みを解除」: 全フィルタをクリア＋完了表示を既定(hide)に戻して再描画
   const emptyClr = root.querySelector("#tb-empty-clr");
-  if (emptyClr) emptyClr.onclick = () => { V.proj = ""; V.cat = ""; V.qaWho = ""; V.qaDue = ""; V.doneMode = "hide"; reRender(); };
+  if (emptyClr) emptyClr.onclick = () => { V.proj = ""; V.cat = ""; V.qaWho = ""; V.qaDue = ""; V.doneMode = "hide"; V.preset = ""; reRender(); };
   root.querySelector("#tb-add").onclick = () => openTaskForm({ onSaved: () => render(root) });
   // 条件を追加（最大5件・5件到達時はセレクト自体を出さない）。マイソート中なら組み合わせソートに切替
   const addSel = root.querySelector("#tb-addsort");
@@ -1236,6 +1268,17 @@ function css() {
   .tb-search-in::placeholder{color:${C.muted}}
   .tb-search-x{position:absolute;right:7px;font:inherit;font-size:15px;line-height:1;color:${C.muted};background:transparent;border:0;padding:2px 5px;border-radius:6px;cursor:pointer}
   .tb-search-x:hover{color:${C.ink};background:${C.track}}
+  /* スマートリスト風プリセットタブ（最上位の絞込レイヤー）。views/smartlist.js の .sl-tabs と同趣旨 */
+  .tb-ptabs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;border-bottom:1px solid ${C.line};padding:0 0 2px;margin:0 0 14px;overflow-x:auto}
+  .tb-ptab{display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;font:inherit;font-size:12.5px;color:${C.muted};padding:7px 11px;border-radius:9px 9px 0 0;cursor:pointer;white-space:nowrap;border-bottom:2px solid transparent;margin-bottom:-3px}
+  .tb-ptab:hover{background:${C.track};color:${C.ink}}
+  .tb-ptab.on{color:${C.fill};font-weight:700;border-bottom-color:${C.fill}}
+  .tb-ptic{flex:none;display:inline-flex}
+  .tb-ptlbl{flex:none}
+  .tb-ptcnt{font-size:10.5px;font-variant-numeric:tabular-nums;background:${C.track};border-radius:9px;padding:0 6px;color:${C.muted};font-weight:600}
+  .tb-ptab.on .tb-ptcnt{background:${C.fill};color:#fff}
+  .tb-pdesc{font-size:12px;color:${C.muted};margin:-8px 2px 12px;line-height:1.4}
+  @media(max-width:720px){.tb-ptabs{flex-wrap:nowrap}}
   /* ツールバー＝関連コントロールを見出し付きグループにまとめ、区切りで整頓 */
   .tb-tools{display:flex;gap:10px;align-items:center;margin:0 0 14px;flex-wrap:wrap}
   .tb-grp{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;padding-right:12px;border-right:1px solid ${C.line}}

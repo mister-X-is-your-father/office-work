@@ -7,7 +7,6 @@ import { updateTask } from "../lib/api.js";
 import { taskMatches, next7End, EMPTY_FILTER, BUILTIN_VIEWS } from "../lib/smartlist.js";
 import { shiftISO } from "../lib/capacity.js";
 import { PRIO, categoryLabels, categoryColor } from "../lib/kinds.js";
-import { INBOX_WS } from "./quickadd.js";
 import { openTaskForm } from "./taskform.js";
 import { C, esc, fmtH, member_color, todayISO } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
@@ -29,11 +28,10 @@ export async function render(root) {
   const uid = (me && me.id) || 0;
   const today = todayISO();
   const ctx = { today, next7: next7End(today) };
-  const inboxWs = (projects || []).find((p) => p.title === INBOX_WS);
   const lists = loadLists(uid);
 
-  // 組み込みビューの実フィルタ（inbox は ws を解決）。
-  const presetOf = (v) => v.inbox ? { ...EMPTY_FILTER, ...v.filter, ws: inboxWs ? inboxWs.id : 0 } : { ...EMPTY_FILTER, ...v.filter };
+  // 組み込みビューの実フィルタ（未整理は v.filter.unsorted で判定。WS解決は不要）。
+  const presetOf = (v) => ({ ...EMPTY_FILTER, ...v.filter });
 
   if (!state) {
     let sel = "inbox"; try { sel = localStorage.getItem(SEL_KEY(uid)) || "inbox"; } catch {}
@@ -77,6 +75,7 @@ export async function render(root) {
             <select id="sl-sort">${SORTS.map(([k, n]) => `<option value="${k}"${state.sort === k ? " selected" : ""}>${n}</option>`).join("")}</select>
           </div>
         </div>
+        ${curName.desc ? `<div class="sl-desc">${esc(curName.desc)}</div>` : ""}
         <div class="sl-bar">
           <span class="sl-textwrap">${icon("search", { size: 14, cls: "sl-searchic" })}<input id="sl-text" class="sl-in sl-text" placeholder="このビュー内を検索" value="${esc(state.filter.text || "")}"></span>
           ${sel("sl-due", state.filter.due, [["", "期限：すべて"], ["today", "今日"], ["next7", "次の7日間"], ["overdue", "期限切れ"], ["hasdue", "期限あり"], ["none", "期限なし"]])}
@@ -106,13 +105,13 @@ function sortTasks(arr, sort, today) {
   return [...arr].sort(cmp);
 }
 
-// 現在ビューの { icon: アイコン名, label } を返す（adhoc/未知は icon 空）。
+// 現在ビューの { icon: アイコン名, label, desc } を返す（adhoc/未知は icon 空）。
 function currentViewName(state, lists) {
-  if (state.sel === "adhoc") return { icon: "", label: "カスタム条件" };
+  if (state.sel === "adhoc") return { icon: "", label: "カスタム条件", desc: "" };
   const bv = BUILTIN_VIEWS.find((v) => v.key === state.sel);
-  if (bv) return { icon: bv.icon, label: bv.label };
+  if (bv) return { icon: bv.icon, label: bv.label, desc: bv.desc || "" };
   const cv = lists.find((l) => l.id === state.sel);
-  return cv ? { icon: "bookmark", label: cv.name } : { icon: "", label: "ビュー" };
+  return cv ? { icon: "bookmark", label: cv.name, desc: "" } : { icon: "", label: "ビュー", desc: "" };
 }
 
 const catChoices = (labels) => [...new Set((labels || []).map((l) => l.title).filter((t) => t && t !== "レビュー" && t !== "連絡待ち"))]
@@ -327,6 +326,7 @@ function css() {
   .sl-head{display:flex;align-items:center;justify-content:space-between;margin:2px 2px 12px}
   .sl-title{font-size:20px;font-weight:800;letter-spacing:-.01em}
   .sl-count{font-size:13px;font-weight:700;color:${C.muted};background:${C.track};border-radius:11px;padding:1px 10px;margin-left:6px;vertical-align:2px}
+  .sl-desc{font-size:12px;color:${C.muted};margin:-6px 2px 12px;line-height:1.4}
   .sl-sort{font-size:12px;color:${C.muted};display:flex;align-items:center;gap:6px}
   .sl-sort select,.sl-in{font:inherit;font-size:12.5px;padding:7px 9px;border:1px solid ${C.line};border-radius:9px;background:#fff;color:${C.ink}}
   .sl-bar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;align-items:center}
