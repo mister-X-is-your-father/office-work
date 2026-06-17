@@ -17,9 +17,9 @@ const HOUR = 3600;
 const MAX_SORTS = 5; // 組めるソート条件の上限（第1〜第5条件）
 const VKEY = (uid) => `ts.list.view.${uid ?? "anon"}`;
 function loadView(uid) {
-  // doneMode: "show"=完了も表示 / "today"=完了は隠すが今日の完了は残す / "hide"=完了を隠す
+  // doneMode: "show"=完了も表示 / "today"=完了は非表示だが今日の完了は表示 / "hide"=完了を非表示
   // preset: スマートリスト風プリセットタブの選択（""=すべて / BUILTIN_VIEWS の key）。最上位の絞込レイヤー。
-  const def = { sorts: [{ key: "due", dir: 1 }], manualMode: false, order: [], doneMode: "hide", cat: "", qaWho: "", qaDue: "", mode: "table", q: "", preset: "" };
+  const def = { sorts: [{ key: "due", dir: 1 }], manualMode: false, order: [], doneMode: "today", cat: "", qaWho: "", qaDue: "", mode: "table", q: "", preset: "" };
   try {
     const raw = JSON.parse(localStorage.getItem(VKEY(uid)) || "null");
     if (!raw) return { ...def };                       // 初回のみ既定（期限）
@@ -143,7 +143,7 @@ export async function render(root) {
   if (activePreset) rows = rows.filter((r) => taskMatches(r.t, presetFilterOf(activePreset), slCtx));
 
   // 絞り込み（分類/担当/期限/完了表示/検索/プリセット）のいずれかがアクティブか。0件時の空状態出し分け用。
-  const filtersActive = !!(V.cat || V.qaWho || V.qaDue || V.doneMode !== "hide" || q || activePreset);
+  const filtersActive = !!(V.cat || V.qaWho || V.qaDue || V.doneMode !== "today" || q || activePreset);
 
   const manual = V.manualMode && !isOutline; // アウトライン中はマイソート（手動順）を無効化（階層が順序）
   // 選択は表モード全般で有効（チェックボックス＋一括操作）。マイソート中はドラッグ移動にも併用。
@@ -215,8 +215,8 @@ export async function render(root) {
         <select id="tb-cat">${catOpts}</select>
         <select id="tb-done" title="完了タスクの表示">
           <option value="show" ${V.doneMode === "show" ? "selected" : ""}>完了も表示</option>
-          <option value="today" ${V.doneMode === "today" ? "selected" : ""}>完了を隠す（今日の完了は残す）</option>
-          <option value="hide" ${V.doneMode === "hide" ? "selected" : ""}>完了を隠す</option>
+          <option value="today" ${V.doneMode === "today" ? "selected" : ""}>完了を非表示（今日の完了は表示）</option>
+          <option value="hide" ${V.doneMode === "hide" ? "selected" : ""}>完了を非表示</option>
         </select>
       </span>
       ${isOutline ? "" : `<span class="tb-grp${manual ? " dim" : ""}">

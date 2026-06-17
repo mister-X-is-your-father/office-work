@@ -847,7 +847,7 @@ function shell(members, memberIdx, mode, embedded = false, maxHeight) {
         ${gview.unit === "week" ? `<select class="gv-wsel" id="gv-weekstart" title="週の開始曜日">${DOW.map((d, i) => `<option value="${i}"${i === gview.weekStart ? " selected" : ""}>${d}曜始まり</option>`).join("")}</select>` : ""}
       </div>
       <div class="tbg"><span class="tbl">担当者</span><div class="chips">${memChips}</div></div>
-      <label class="tbg chk"><input type="checkbox" id="gv-hidedone"> 完了を隠す</label>
+      <label class="tbg chk"><input type="checkbox" id="gv-hidedone"> 完了を非表示</label>
     </div>
     <div class="gv-scroll"><div class="gantt" id="gv-gantt" style="--label-w:${LABEL_W_P}px;--col-w:${COL_W}px;--win:${WINDOW_DAYS}">
       <div class="grid-head" id="gv-head"></div>
