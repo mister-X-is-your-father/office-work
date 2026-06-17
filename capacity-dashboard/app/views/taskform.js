@@ -15,7 +15,16 @@ import { renderRecurrencePanel, ensureRecurrenceStyle } from "./recurrenceform.j
 export { parseSmartDate, fmtDisplay, splitMeta, joinMeta };
 
 const ZERO_DATE = "0001-01-01T00:00:00Z"; // Vikunja の「未設定」センチネル
-const WS_KEY = "ts.taskform.ws"; // 前回タスクを作ったワークスペース（選択UIの既定値）
+const INBOX_WS = "インボックス"; // 新規タスクの既定投入先WS（UIからは排除・project_id は裏で保持）
+
+// インボックスWSの取得（無ければ作成）。WSはUIに出さず、新規タスクは常にここへ投入。
+async function ensureInbox(projects) {
+  const found = (projects || []).find((p) => p.title === INBOX_WS);
+  if (found) return found;
+  const created = await createProject(INBOX_WS);
+  invalidate();
+  return created;
+}
 // Vikunja priority(0–5)。0=なし。4=MUST までを提示。
 const PRIO_OPTS = [[0, "なし"], [1, "低"], [2, "中"], [3, "高"], [4, "MUST"]];
 
@@ -45,15 +54,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
   ensureStyle();
   const wrap = document.createElement("div");
   wrap.className = "tf-modal";
-  // ワークスペース選択からテンプレートWSは除外（雛形置き場であって作業場所ではない）。
-  // 実質1つなら欄ごと非表示（自動選択）、2つ以上で選択UIが出現。既定値は前回使ったWSを記憶。
-  const wsList = (projects || []).filter((p) => !templateProject || p.id !== templateProject.id);
-  const wsSingle = wsList.length <= 1;
-  let lastWs = null; try { lastWs = +localStorage.getItem(WS_KEY) || null; } catch {}
-  const defWsId = task ? task.project_id
-    : (wsList.some((p) => p.id === lastWs) ? lastWs : (wsList[0] && wsList[0].id));
-  const projOpts = wsList.map((p) =>
-    `<option value="${p.id}"${p.id === defWsId ? " selected" : ""}>${esc(p.title)}</option>`).join("");
+  // ワークスペース(=API project)はUIから排除。新規は常にInbox WSへ投入、編集は既存 project_id を維持。
   const memOpts = `<option value="">（なし）</option>` + (members || []).map((m) =>
     `<option value="${m.id}"${m.id === curAssigneeId ? " selected" : ""}>${esc(m.name || m.username)}</option>`).join("");
   const aiLabel = (m) => `🤖 ${m.name || m.username}（AI）`;
@@ -137,10 +138,6 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
           <span class="tf-hint" id="tf-att-msg"></span>` : ""}
         </div>
         <div class="tf-side">
-          <div${wsSingle ? " hidden" : ""}>
-            <label class="tf-l">ワークスペース</label>
-            <select id="tf-proj" class="tf-in"${isEdit ? " disabled" : ""}>${projOpts}</select>
-          </div>
           <div class="tf-row">
             <div class="tf-col">
               <label class="tf-l">担当</label>
@@ -485,7 +482,6 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     const dueF = parseField("#tf-due", "期限"); if (!dueF.ok) return;
     const startISO = startF.iso, endISO = endF.iso, dueISO = dueF.iso;
     if (startISO && endISO && endISO < startISO) { err.textContent = "終了予定日は開始予定日以降にしてください。"; return; }
-    const pid = +$("#tf-proj").value;
     const asg = $("#tf-asg").value ? +$("#tf-asg").value : null;
     // 副担当: 入力欄テキストが選択時のラベルと一致している場合のみ有効（手で消したら解除）
     const sub = subSel && $("#tf-asg2").value.trim() === subSelLabel && subSel !== asg && asg ? subSel : null;
@@ -504,6 +500,9 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
     btn.disabled = true; err.textContent = "";
     try {
       const dt = (iso) => iso + "T00:00:00Z";
+      // 投入先WS(project_id): 新規=Inbox（無ければ作成）、編集=既存 project_id を維持。
+      // 親タスクの新規作成も同じWSへ。UIには出さず黙って解決する。
+      const pid = isEdit ? task.project_id : (await ensureInbox(projects)).id;
       let childId;
       if (!isEdit) {
         const body = { title, description: desc, priority: prio, time_estimate: estSec };
@@ -564,7 +563,6 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
         }
       }
 
-      if (!isEdit) try { localStorage.setItem(WS_KEY, String(pid)); } catch {}
       invalidate();
       close();
       onSaved && onSaved();

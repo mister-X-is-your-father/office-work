@@ -65,7 +65,7 @@ export async function renderInto(container, opts = {}) {
 async function mount(root, opts) {
   const embedded = !!opts.embedded;
   const editable = embedded ? !!opts.editable : true;   // 全画面=編集可。埋め込み=既定で閲覧主体。
-  const { tasks, members, projects, settings, holidaysSet, unavailabilityByMember } = await load();
+  const { tasks, members, settings, holidaysSet, unavailabilityByMember } = await load();
   const capH = (settings && settings.capH) || 8;
   const today = todayISO();
   // 全画面=gview（保存された表示状態）。埋め込み=固定の日表示・1ヶ月（gview に依存しない）。
@@ -119,7 +119,6 @@ async function mount(root, opts) {
     // 全画面=保持／埋め込み=固定。"task"モードは廃止なので member 以外は project に正規化。
     mode: (embedded ? (opts.mode || "member") : gview.mode) === "member" ? "member" : "project",
     hideDone: false,
-    projects: new Set(projects.map((p) => p.id)),
     members: new Set(members.map((m) => m.id)),
     // 埋め込みは描画ごとに使い捨ての Set（gview の共有状態を汚さない）
     collapsed: embedded ? new Set() : gview.collapsed,
@@ -129,7 +128,7 @@ async function mount(root, opts) {
   // 全折りたたみボタンはこれを state.collapsed に流し込む（paint 中に各見出しが登録する）。
   let collapsibleKeys = new Set();
 
-  root.innerHTML = shell(projects, members, memberIdx, state.mode, embedded, opts.maxHeight);
+  root.innerHTML = shell(members, memberIdx, state.mode, embedded, opts.maxHeight);
   const head = root.querySelector("#gv-head");
   const rowsEl = root.querySelector("#gv-rows");
   const ganttEl = root.querySelector("#gv-gantt");
@@ -204,7 +203,7 @@ async function mount(root, opts) {
 
   function visibleTasks() {
     return tasks.filter((t) => {
-      if (!state.projects.has(t.project_id)) return false;
+      // WSは常に全表示（UIから消したのでWSでのスコープは行わない）
       const aids = (t.assignees || []).map((a) => a.id);
       if (aids.length && !aids.some((id) => state.members.has(id))) return false;
       const r = rangeByTask.get(t.id);
@@ -384,7 +383,7 @@ async function mount(root, opts) {
     const unassigned = tasks.filter((t) => {
       if (t.done) return false;
       if (humanAssignees(t).length !== 0) return false;       // 人間担当が居るものは各人レーンに出る
-      if (!state.projects.has(t.project_id)) return false;
+      // WSは常に全表示（WSでのスコープは行わない）
       const r = rangeByTask.get(t.id);
       if (!r.planned.source) return false;
       if (!scale.intersects(r.planned.start, r.planned.end)) return false;
@@ -445,7 +444,7 @@ async function mount(root, opts) {
     collapsibleKeys = new Set();
     // ベースフィルタ（WS/担当/完了）。予定の有無は問わない＝プロジェクト構造を見せる。
     const passBase = (t) => {
-      if (!state.projects.has(t.project_id)) return false;
+      // WSは常に全表示（WSでのスコープは行わない）
       const aids = (t.assignees || []).map((a) => a.id);
       if (aids.length && !aids.some((id) => state.members.has(id))) return false;
       if (state.hideDone && rangeByTask.get(t.id).percent >= 100) return false;
@@ -617,9 +616,6 @@ async function mount(root, opts) {
   });
   const wsel = root.querySelector("#gv-weekstart");
   if (wsel) wsel.onchange = () => { gview.weekStart = +wsel.value; saveGV(); render(root); };
-  root.querySelectorAll("[data-proj]").forEach((b) => {
-    b.onclick = () => { toggleSet(state.projects, +b.dataset.proj, b); paint(); };
-  });
   root.querySelectorAll("[data-mem]").forEach((b) => {
     b.onclick = () => { toggleSet(state.members, +b.dataset.mem, b); paint(); };
   });
@@ -813,7 +809,7 @@ function toggleSet(set, id, btn) {
   else { set.add(id); btn.setAttribute("aria-pressed", "true"); }
 }
 
-function shell(projects, members, memberIdx, mode, embedded = false, maxHeight) {
+function shell(members, memberIdx, mode, embedded = false, maxHeight) {
   // 埋め込み: ツールバー/凡例/タイトル無し・100vh前提なしの最小シェル。高さはコンテナ駆動
   // （人別レーンの自然高で伸びる）。maxHeight 指定時のみ内側スクロール。
   if (embedded) {
@@ -829,8 +825,6 @@ function shell(projects, members, memberIdx, mode, embedded = false, maxHeight) 
     </div>
     ${ganttStyles()}`;
   }
-  const projChips = projects.map((p) =>
-    `<button class="chip" data-proj="${p.id}" aria-pressed="true">${esc(p.title)}</button>`).join("");
   const memChips = members.map((m) =>
     `<button class="chip" data-mem="${m.id}" aria-pressed="true"><span class="dot" style="background:${member_color(memberIdx.get(m.id))}"></span>${esc(m.name)}</button>`).join("")
     || `<span style="font-size:11px;color:${C.muted}">担当者なし</span>`;
@@ -852,7 +846,6 @@ function shell(projects, members, memberIdx, mode, embedded = false, maxHeight) 
         <div class="seg">${SPANS[gview.unit].map((p) => { const cur = gview.unit === "day" ? gview.spanDay : gview.spanWeek; return `<button data-span="${p.key}"${p.key === cur ? ' class="on"' : ""}>${p.label}</button>`; }).join("")}</div>
         ${gview.unit === "week" ? `<select class="gv-wsel" id="gv-weekstart" title="週の開始曜日">${DOW.map((d, i) => `<option value="${i}"${i === gview.weekStart ? " selected" : ""}>${d}曜始まり</option>`).join("")}</select>` : ""}
       </div>
-      <div class="tbg"><span class="tbl">ワークスペース</span><div class="chips">${projChips}</div></div>
       <div class="tbg"><span class="tbl">担当者</span><div class="chips">${memChips}</div></div>
       <label class="tbg chk"><input type="checkbox" id="gv-hidedone"> 完了を隠す</label>
     </div>

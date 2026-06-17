@@ -1,6 +1,6 @@
 // 総合ホーム（実データ）。縦積み: KPI / やること / 今日の稼働予定 / 稼働プラン / 月間ガント。
 // 各セクションは折りたたみヘッダ付き。開閉状態は本人ごと localStorage に保存・復元。
-import { load, isAiUser, projectName } from "../lib/store.js";
+import { load, isAiUser } from "../lib/store.js";
 import { loadByMember, estimateVsActual, triage } from "../lib/capacity.js";
 import { capacityOn } from "../lib/recurrence.js";
 import { whoami } from "../lib/api.js";
@@ -54,7 +54,6 @@ function todoRow(t, projects, day) {
     <span class="td-row-m">
       ${who ? `<span class="td-ava" style="background:${member_color(who.id)}" title="${esc(wn)}">${esc((wn[0] || "?").toUpperCase())}</span>` : ""}
       ${due ? `<span class="td-due${late ? " late" : ""}">${due.slice(5).replace("-", "/")}${late ? " 超過" : ""}</span>` : ""}
-      <span class="td-pj">${esc(projectName(projects, t.project_id))}</span>
     </span>
   </button>`;
 }
@@ -155,7 +154,6 @@ export async function render(root) {
       .td-row-m{display:flex;align-items:center;gap:7px;font-size:11px;color:${C.muted};min-width:0}
       .td-ava{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:50%;color:#fff;font-size:9px;font-weight:700;flex:none}
       .td-due.late{color:${C.over};font-weight:700}
-      .td-pj{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .td-more{display:inline-flex;align-items:center;gap:3px;margin-top:6px;font-size:11.5px;font-weight:600;color:${C.fill};text-decoration:none}
       .td-more:hover{text-decoration:underline}
     </style>`;

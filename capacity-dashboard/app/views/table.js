@@ -1,7 +1,7 @@
 // タスク一覧（表・mock60 相当）。**複数軸の組み合わせソート**＋**個人ごとの並び順**（マイソート＝手動）。
 // 並び設定（ソート軸の連なり・手動順・絞り込み）は **見ている本人ごとに localStorage 保存**＝
 // 共有データ（DB）は一切変えないので、誰がどう並べても他メンバーの見え方に影響しない（衝突しない）。
-import { load, invalidate, projectName, isAiUser } from "../lib/store.js";
+import { load, invalidate, isAiUser } from "../lib/store.js";
 import { savePresets } from "../lib/exec.js";
 import { updateTask, deleteTask, addAssignee, removeAssignee, addTaskLabel, removeTaskLabel, createLabel, setTaskWaiting, createTaskInProject, addRelation, removeRelation } from "../lib/api.js";
 import { PRIO, prioBucket, kindOf, isReviewTask, categoryLabels, categoryColor, REVIEW_LABEL, WAITING_LABEL, statusOf, STATUS } from "../lib/kinds.js";
@@ -19,12 +19,14 @@ const VKEY = (uid) => `ts.list.view.${uid ?? "anon"}`;
 function loadView(uid) {
   // doneMode: "show"=完了も表示 / "today"=完了は隠すが今日の完了は残す / "hide"=完了を隠す
   // preset: スマートリスト風プリセットタブの選択（""=すべて / BUILTIN_VIEWS の key）。最上位の絞込レイヤー。
-  const def = { sorts: [{ key: "due", dir: 1 }], manualMode: false, order: [], doneMode: "hide", proj: "", cat: "", qaWho: "", qaDue: "", mode: "table", q: "", preset: "" };
+  const def = { sorts: [{ key: "due", dir: 1 }], manualMode: false, order: [], doneMode: "hide", cat: "", qaWho: "", qaDue: "", mode: "table", q: "", preset: "" };
   try {
     const raw = JSON.parse(localStorage.getItem(VKEY(uid)) || "null");
     if (!raw) return { ...def };                       // 初回のみ既定（期限）
     const v = { ...def, ...raw };
     if (!Array.isArray(v.sorts)) v.sorts = [];          // 壊れてる時だけ空に（空配列=意図的な「条件なし」は保持）
+    // 廃止した WS/プロジェクト軸（ws/proj）を保存済みソートから除去（参照しても AXES に無いので壊れないが死にチップを残さない）。
+    v.sorts = v.sorts.filter((s) => s && AXES[s.key]);
     if (raw.doneMode === undefined) { v.doneMode = raw.hideDone === false ? "show" : "hide"; delete v.hideDone; } // 旧 hideDone(bool) からの移行
     return v;
   } catch { return { ...def }; }
@@ -56,8 +58,6 @@ const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date
 const AXES = {
   due:     { label: "期限",      cmp: (a, b) => (a.due || "9999").localeCompare(b.due || "9999"), dir: 1 },
   prio:    { label: "重要度",    cmp: (a, b) => a.prio - b.prio, dir: -1 },
-  ws:      { label: "WS",        cmp: (a, b) => (a.proj || "").localeCompare(b.proj || "", "ja"), dir: 1 },
-  proj:    { label: "プロジェクト", cmp: (a, b) => { const pa = (a.parent && a.parent.title) || "", pb = (b.parent && b.parent.title) || ""; if (!pa !== !pb) return pa ? -1 : 1; return pa.localeCompare(pb, "ja"); }, dir: 1 },
   cat:     { label: "分類",      cmp: (a, b) => ((a.cat && a.cat.title) || "～").localeCompare((b.cat && b.cat.title) || "～", "ja"), dir: 1 },
   who:     { label: "担当",      cmp: (a, b) => ((a.who && (a.who.name || a.who.username)) || "～").localeCompare((b.who && (b.who.name || b.who.username)) || "～", "ja"), dir: 1 },
   state:   { label: "ステータス",      cmp: (a, b) => stateRank(a) - stateRank(b), dir: 1 },
@@ -79,7 +79,7 @@ function presetTabHtml(key, iconHtml, label, count, on) {
 }
 
 export async function render(root) {
-  const { tasks, projects, members, me = null, settings = {}, labels = [], recurrences = [], holidaysByDate = null } = await load();
+  const { tasks, members, me = null, settings = {}, labels = [], recurrences = [], holidaysByDate = null } = await load();
   const presets = settings.sortPresets || [];   // グローバル共有プリセット
   const canEditPresets = !!settings.canEdit;     // 保存/削除は許可ユーザーのみ（適用は全員可）
   const today = todayISO();
@@ -96,7 +96,6 @@ export async function render(root) {
     t, title: t.title, who: (t.assignees || []).find((a) => !isAiUser(a)) || null,
     fable: execOk && !t.done && (t.assignees || []).some((a) => isAiUser(a))
       && ((t.created_by || {}).id || 0) === ((me && me.id) || -1),
-    proj: projectName(projects, t.project_id), pid: t.project_id,
     parent: (((t.related_tasks || {}).parenttask) || [])[0] || null,   // プロジェクト＝親タスク（related_tasks.parenttask）
     review: isReviewTask(t), prio: prioBucket(t.priority), cat: categoryLabels(t)[0] || null,
     due: dueISO(t), est: (t.time_estimate || 0) / HOUR, pct: t.percent_done || 0,
@@ -105,7 +104,6 @@ export async function render(root) {
   const doneToday = (t) => t.done && t.done_at && !t.done_at.startsWith("0001") && t.done_at.slice(0, 10) === today;
   if (V.doneMode === "hide") rows = rows.filter((r) => !r.done);
   else if (V.doneMode === "today") rows = rows.filter((r) => !r.done || doneToday(r.t));
-  if (V.proj) rows = rows.filter((r) => String(r.pid) === V.proj);
   if (V.cat) rows = rows.filter((r) => (r.cat ? r.cat.title : "") === V.cat);
   // クイック絞り込み（担当＝自分/担当なし/自分＋担当なし、期限＝今日＋期限なし/1週間以内/1ヶ月以内）。本人ごとに保存。
   const humanAssignees = (t) => (t.assignees || []).filter((a) => !isAiUser(a));
@@ -116,14 +114,13 @@ export async function render(root) {
   else if (V.qaDue === "7d") rows = rows.filter((r) => r.due && r.due <= shiftISO(today, 7));
   else if (V.qaDue === "30d") rows = rows.filter((r) => r.due && r.due <= shiftISO(today, 30));
 
-  // フリーワード検索（右上）。タイトル中心＋プロジェクト名/親(プロジェクト)名/分類/担当名を対象。
+  // フリーワード検索（右上）。タイトル中心＋親(プロジェクト)名/分類/担当名を対象。
   // 他フィルタの後（＝絞り込み済み集合）にAND併用。表/階層どちらも rows 由来なので両モードに効く。
   const q = (V.q || "").trim().toLowerCase();
   if (q) {
     const hit = (r) => {
       const parts = [
         r.title,
-        r.proj,
         r.parent && r.parent.title,
         r.cat && r.cat.title,
         ...(r.t.assignees || []).map((a) => a.name || a.username),
@@ -145,8 +142,8 @@ export async function render(root) {
   const activePreset = BUILTIN_VIEWS.find((v) => v.key === V.preset) || null;
   if (activePreset) rows = rows.filter((r) => taskMatches(r.t, presetFilterOf(activePreset), slCtx));
 
-  // 絞り込み（プロジェクト/分類/担当/期限/完了表示/検索/プリセット）のいずれかがアクティブか。0件時の空状態出し分け用。
-  const filtersActive = !!(V.proj || V.cat || V.qaWho || V.qaDue || V.doneMode !== "hide" || q || activePreset);
+  // 絞り込み（分類/担当/期限/完了表示/検索/プリセット）のいずれかがアクティブか。0件時の空状態出し分け用。
+  const filtersActive = !!(V.cat || V.qaWho || V.qaDue || V.doneMode !== "hide" || q || activePreset);
 
   const manual = V.manualMode && !isOutline; // アウトライン中はマイソート（手動順）を無効化（階層が順序）
   // 選択は表モード全般で有効（チェックボックス＋一括操作）。マイソート中はドラッグ移動にも併用。
@@ -168,8 +165,6 @@ export async function render(root) {
     });
   }
 
-  const projOpts = `<option value="">全ワークスペース</option>` +
-    (projects || []).map((p) => `<option value="${p.id}"${String(p.id) === V.proj ? " selected" : ""}>${esc(p.title)}</option>`).join("");
   const usedCats = [...new Map(rows.concat([]).map((r) => r.cat).filter(Boolean).map((c) => [c.title, c])).values()]
     .sort((a, b) => a.title.localeCompare(b.title, "ja"));
   const allCats = V.cat && !usedCats.some((c) => c.title === V.cat) ? usedCats.concat([{ title: V.cat, id: 0 }]) : usedCats;
@@ -217,7 +212,6 @@ export async function render(root) {
       </span>
       <span class="tb-grp">
         <span class="tb-glbl">絞込</span>
-        <select id="tb-proj">${projOpts}</select>
         <select id="tb-cat">${catOpts}</select>
         <select id="tb-done" title="完了タスクの表示">
           <option value="show" ${V.doneMode === "show" ? "selected" : ""}>完了も表示</option>
@@ -283,7 +277,6 @@ export async function render(root) {
   });
   const manBtn = root.querySelector("#tb-manual");
   if (manBtn) manBtn.onclick = () => { V.manualMode = !V.manualMode; reRender(); };
-  root.querySelector("#tb-proj").onchange = (e) => { V.proj = e.target.value; reRender(); };
   root.querySelector("#tb-cat").onchange = (e) => { V.cat = e.target.value; reRender(); };
   root.querySelectorAll(".tb-qa").forEach((b) => {
     b.onclick = () => {
@@ -305,7 +298,7 @@ export async function render(root) {
   if (qClr) qClr.onclick = () => { V.q = ""; reRender(); restoreSearchFocus(root, 0); };
   // 0件の空状態にある「絞り込みを解除」: 全フィルタをクリア＋完了表示を既定(hide)に戻して再描画
   const emptyClr = root.querySelector("#tb-empty-clr");
-  if (emptyClr) emptyClr.onclick = () => { V.proj = ""; V.cat = ""; V.qaWho = ""; V.qaDue = ""; V.doneMode = "hide"; V.preset = ""; reRender(); };
+  if (emptyClr) emptyClr.onclick = () => { V.cat = ""; V.qaWho = ""; V.qaDue = ""; V.doneMode = "hide"; V.preset = ""; reRender(); };
   root.querySelector("#tb-add").onclick = () => openTaskForm({ onSaved: () => render(root) });
   // 条件を追加（最大5件・5件到達時はセレクト自体を出さない）。マイソート中なら組み合わせソートに切替
   const addSel = root.querySelector("#tb-addsort");
@@ -387,10 +380,8 @@ export async function render(root) {
   root.querySelectorAll(".tb-priobtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openPrioMenu(b, +b.dataset.prio, tasks, root); }; });
   root.querySelectorAll(".tb-duebtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openDueMenu(b, +b.dataset.due, tasks, root, today); }; });
   root.querySelectorAll(".tb-estbtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openEstMenu(b, +b.dataset.est, tasks, root); }; });
-  // 行からプロジェクト変更（担当/分類/重要度セルと同様のクリックメニュー）。
-  root.querySelectorAll(".tb-projbtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openProjectMenu(b, +b.dataset.proj, tasks, projects, root); }; });
   // 複数選択（チェックボックス＋全選択＋Shift範囲）＋ 一括操作バー。表モードのみ。
-  if (!isOutline) { wireSelection(root, rows, () => render(root)); wireBulk(root, rows, tasks, projects, members, today); }
+  if (!isOutline) { wireSelection(root, rows, () => render(root)); wireBulk(root, rows, tasks, members, today); }
   root.querySelectorAll(".tb-fable").forEach((b) => {
     b.onclick = async (e) => {
       e.stopPropagation(); b.disabled = true;
@@ -707,20 +698,6 @@ function openCategoryMenu(chipEl, id, tasks, labels, root) {
   openMenu(r.left, r.bottom + 4, build(), { keepOpen: true, rebuild: build, onClose: () => { if (dirty) { invalidate(); render(root); } } });
 }
 
-// プロジェクト（=親タスク扱いの project）のワンクリック変更（単一選択・即反映）。候補=data.projects。
-function openProjectMenu(chipEl, id, tasks, projects, root) {
-  closeRowMenu();
-  const t = (tasks || []).find((x) => x.id === id); if (!t) return;
-  const reload = () => { invalidate(); render(root); };
-  const cur = t.project_id || 0;
-  const items = (projects || []).map((p) => ({
-    label: p.title, check: cur === p.id,
-    on: () => { if (cur === p.id) return reload(); updateTask(id, { project_id: p.id }).then(reload).catch(() => {}); },
-  }));
-  const r = chipEl.getBoundingClientRect();
-  openMenu(r.left, r.bottom + 4, items);
-}
-
 // ── 複数選択（チェックボックス＋全選択＋Shift範囲）。既存 selectedIds/anchorId を活用。 ──
 function wireSelection(root, rows, rerender) {
   const ids = rows.map((r) => r.t.id);
@@ -750,7 +727,7 @@ function wireSelection(root, rows, rerender) {
 }
 
 // ── 一括操作バー（選択タスク全件に適用）。各アクションは既存の単体ロジック/APIを流用。 ──
-function wireBulk(root, rows, tasks, projects, members, today) {
+function wireBulk(root, rows, tasks, members, today) {
   const bar = root.querySelector("#tb-bulk");
   if (!bar) return;
   const busy = root.querySelector("#tb-bk-busy");
@@ -810,12 +787,6 @@ function wireBulk(root, rows, tasks, projects, members, today) {
           openMenu(r.left, r.bottom + 4, (members || []).map((m) => ({
             label: m.name || m.username,
             on: () => runAll("担当変更", (id) => addAssignee(id, m.id)),
-          })));
-          break;
-        case "proj":
-          openMenu(r.left, r.bottom + 4, (projects || []).map((p) => ({
-            label: p.title,
-            on: () => runAll("プロジェクト変更", (id) => updateTask(id, { project_id: p.id })),
           })));
           break;
         case "status":
@@ -1041,7 +1012,7 @@ async function reparent(childId, oldParentId, newParentId, rerender) {
 }
 
 const cols = () => [
-  { k: "proj", label: "プロジェクト" }, { k: "title", label: "タスク" }, { k: "who", label: "担当" }, { k: null, label: "種別" },
+  { k: "title", label: "タスク" }, { k: "who", label: "担当" }, { k: null, label: "種別" },
   { k: "cat", label: "分類" }, { k: "prio", label: "重要度" }, { k: "due", label: "期限" },
   { k: "est", label: "見積" }, { k: "pct", label: "進捗" }, { k: "state", label: "ステータス" },
 ];
@@ -1058,9 +1029,6 @@ function restoreSearchFocus(root, pos) {
   el.focus();
   try { const p = Math.min(pos ?? el.value.length, el.value.length); el.setSelectionRange(p, p); } catch { /* noop */ }
 }
-// プロジェクト(=親タスク)別の色（親タスクidからパレットを引く）。一覧のプロジェクトチップ用。
-const PROJ_PAL = ["#3a86ff", "#2fa66b", "#b657d6", "#e5772d", "#0ea5e9", "#f5a623", "#ef476f", "#14b8a6"];
-const projColor = (pid) => PROJ_PAL[(pid || 0) % PROJ_PAL.length];
 // ヘッダに何番目のソート軸かを小さく表示（組み合わせの見える化）
 const th = (c, manual) => {
   if (!c.k) return `<th>${c.label}</th>`;
@@ -1091,7 +1059,6 @@ function bulkBarHtml(rows) {
     <span class="tb-bk-acts">
       ${btn("due", "期限")}
       ${btn("who", "担当者")}
-      ${btn("proj", "プロジェクト")}
       ${btn("status", "ステータス")}
       ${btn("prio", "重要度")}
       ${btn("del", "削除")}
@@ -1118,11 +1085,8 @@ function rowHtml(r, members, i, manual) {
   const estBtn = `<button class="tb-cell tb-num tb-estbtn" data-est="${id}" title="クリックで見積を変更">${r.est ? fmtH(r.est) : "—"}<span class="tb-cell-car">▾</span></button>`;
   const st = `<button class="tb-st tb-stbtn ${r.status}" data-st="${id}" title="クリックでステータス変更">${STATUS[r.status].label}<span class="tb-st-car">▾</span></button>`;
   const sel = selectedIds.has(id);
-  const projInner = r.parent ? `<span class="tb-pj"><i style="background:${projColor(r.parent.id)}"></i>${esc(r.parent.title)}</span>` : `<span class="tb-pj none">—</span>`;
-  const projBtn = `<button class="tb-cell tb-projbtn" data-proj="${id}" title="クリックでプロジェクトを変更">${projInner}<span class="tb-cell-car">▾</span></button>`;
   return `<tr data-id="${id}" class="${manual ? "tb-draggable" : ""}${sel ? " tb-sel" : ""}">
     <td class="tb-selcol"><span class="tb-rowck${sel ? " on" : ""}" data-ck="${id}" role="checkbox" aria-checked="${sel}" title="選択">${sel ? icon("check", { size: 12 }) : ""}</span></td>
-    <td>${projBtn}</td>
     <td class="tb-title">${esc(r.title)}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">${icon("flag", { size: 12 })}</span>` : ""}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">${icon("play", { size: 11 })}</button>` : ""}</td>
     <td>${whoBtn}</td>
     <td>${kind}</td>
@@ -1388,9 +1352,6 @@ function css() {
   .tb tbody tr:hover{background:#f7fbff}
   .tb-title{font-weight:600;min-width:180px}
   .tb-sub{font-size:11px;color:${C.muted};font-weight:400;margin-top:2px}
-  .tb-pj{display:inline-flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap}
-  .tb-pj i{width:8px;height:8px;border-radius:50%;flex:none}
-  .tb-pj.none{color:${C.muted}}
   .tb-ava{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;color:#fff;font-size:10px;font-weight:700;margin-right:6px;vertical-align:-5px}
   .tb-k{font-size:10.5px;color:${C.muted};border:1px solid ${C.line};border-radius:5px;padding:1px 6px;white-space:nowrap}
   .tb-k.review{color:${C.fill};border-color:#cfe0ff}

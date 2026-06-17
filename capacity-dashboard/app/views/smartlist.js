@@ -2,7 +2,7 @@
 // 上部タブ=組み込みビュー＋保存したカスタムフィルタ（横セグメント・wrap/横スクロール対応）。下=フィルタバー＋結果（インライン完了/フラグ/編集）。
 // 左の縦レールは廃止（アプリ共通ナビと差別化、本文フル幅）。各タブ=icon＋ラベル＋件数バッジ、クリックでビュー切替。
 // 保存はローカル（localStorage・スキーマ変更なし）。完了/フラグは updateTask（#9 非破壊）。
-import { load, invalidate, projectName } from "../lib/store.js";
+import { load, invalidate } from "../lib/store.js";
 import { updateTask } from "../lib/api.js";
 import { taskMatches, next7End, EMPTY_FILTER, BUILTIN_VIEWS } from "../lib/smartlist.js";
 import { shiftISO } from "../lib/capacity.js";
@@ -81,7 +81,6 @@ export async function render(root) {
           ${sel("sl-due", state.filter.due, [["", "期限：すべて"], ["today", "今日"], ["next7", "次の7日間"], ["overdue", "期限切れ"], ["hasdue", "期限あり"], ["none", "期限なし"]])}
           ${sel("sl-prio", state.filter.prio, [["", "重要度：すべて"], ["top", "MUST"], ["high", "高+"], ["mid", "中+"], ["none", "なし"]])}
           ${sel("sl-cat", catTitle, [["", "分類：すべて"], ...catChoices(labels)])}
-          ${sel("sl-ws", String(state.filter.ws || ""), [["", "WS：すべて"], ...(projects || []).map((p) => [String(p.id), p.title])])}
           ${sel("sl-status", state.filter.status, [["undone", "未完了"], ["todo", "未着手"], ["doing", "進行中"], ["waiting", "連絡待ち"], ["done", "完了"], ["", "すべて"]])}
           <button id="sl-flag" class="sl-flagbtn${state.filter.flag ? " on" : ""}" title="フラグ付きのみ">${icon("flag", { size: 15 })}</button>
           ${state.sel === "adhoc" ? `<button id="sl-save" class="sl-save">${icon("save", { size: 14 })} 保存</button>` : ""}
@@ -146,7 +145,6 @@ function rowHtml(t, projects, today) {
     <span class="sl-rtitle">${esc(t.title)}</span>
     <span class="sl-meta">
       ${cat ? `<span class="sl-cat" style="color:${categoryColor(cat)};border-color:${categoryColor(cat)}55">${esc(cat.title)}</span>` : ""}
-      <span class="sl-ws">${esc(projectName(projects, t.project_id))}</span>
       ${est ? `<span class="sl-est">${fmtH(est)}</span>` : ""}
     </span>
     ${dueTxt ? `<span class="sl-due ${dueCls}">${dueTxt}</span>` : `<span class="sl-due none"></span>`}
@@ -219,7 +217,7 @@ function wire(root, data, uid, lists, ctx) {
   const textEl = root.querySelector("#sl-text");
   if (textEl) textEl.oninput = () => { toAdhoc({ text: textEl.value }); paintResults(root, data, ctx); updateCount(root, data, ctx); };
   const onSel = (id, key, num) => { const el = root.querySelector("#" + id); if (el) el.onchange = () => { const v = num ? (+el.value || 0) : el.value; toAdhoc({ [key]: v }); rerender(); }; };
-  onSel("sl-due", "due"); onSel("sl-prio", "prio"); onSel("sl-ws", "ws", true); onSel("sl-status", "status");
+  onSel("sl-due", "due"); onSel("sl-prio", "prio"); onSel("sl-status", "status");
   const catEl = root.querySelector("#sl-cat");
   if (catEl) catEl.onchange = () => { toAdhoc({ _cat: catEl.value }); rerender(); };
   const flagBtn = root.querySelector("#sl-flag");
@@ -355,7 +353,6 @@ function css() {
   .sl-rtitle{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto}
   .sl-meta{display:flex;align-items:center;gap:8px;margin-left:auto;flex:none}
   .sl-cat{font-size:10.5px;border:1px solid;border-radius:5px;padding:1px 7px;font-weight:600;white-space:nowrap}
-  .sl-ws{font-size:11px;color:${C.muted};white-space:nowrap}
   .sl-est{font-size:11px;color:${C.muted};font-variant-numeric:tabular-nums}
   .sl-due{font-size:11.5px;font-weight:700;color:${C.muted};min-width:42px;text-align:right;flex:none;font-variant-numeric:tabular-nums}
   .sl-due.over{color:${C.over}}.sl-due.today{color:${C.amber}}.sl-due.none{min-width:42px}

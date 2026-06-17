@@ -2,7 +2,7 @@
 // URL を渡せば誰でもチームの現況を把握できる、中立的な状況サマリー。
 // 状況把握に効く順で 1 枚に集約: KPI / 遅延 / 今日のメンバー状況 / 今週の締切 / 直近の完了。
 // データは load() の共有キャッシュから算出（追加 fetch なし）。ロジックは home/report/capacity から再利用。
-import { load, isAiUser, projectName } from "../lib/store.js";
+import { load, isAiUser } from "../lib/store.js";
 import { loadByMember, triage } from "../lib/capacity.js";
 import { capacityOn } from "../lib/recurrence.js";
 import { statusOf } from "../lib/kinds.js";
@@ -60,7 +60,7 @@ function moreLine(total, shown) {
 const empty = (msg) => `<div class="st-empty">${esc(msg)}</div>`;
 
 export async function render(root) {
-  const { tasks, projects, members, plansByTask, holidaysSet, unavailabilityByMember, settings } = await load();
+  const { tasks, members, plansByTask, holidaysSet, unavailabilityByMember, settings } = await load();
   const day = todayISO();
   const weekStart = settings && Number.isInteger(settings.weekStart) ? settings.weekStart : null;
   const weekEnd = weekEndISO(day, weekStart);
@@ -125,8 +125,7 @@ export async function render(root) {
     ? empty("今週の締切なし")
     : `<div class="st-rows">${thisWeek.slice(0, MAX_ROWS).map((t) => {
         const d = dueISO(t);
-        const meta = `<span class="st-due${d === day ? " today" : ""}">${mdOf(d)}（${DOW[dowOf(d)]}）</span>
-          <span class="st-pj" title="${esc(projectName(projects, t.project_id))}">${esc(projectName(projects, t.project_id))}</span>`;
+        const meta = `<span class="st-due${d === day ? " today" : ""}">${mdOf(d)}（${DOW[dowOf(d)]}）</span>`;
         return taskRow(t, meta);
       }).join("")}</div>${moreLine(thisWeek.length, Math.min(MAX_ROWS, thisWeek.length))}`;
 
@@ -209,7 +208,6 @@ function css() {
   .st-due{font-variant-numeric:tabular-nums}
   .st-due.today{color:${C.over};font-weight:700}
   .st-doneat{color:${C.free};font-weight:600;font-variant-numeric:tabular-nums}
-  .st-pj{max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .st-more{font-size:11.5px;color:${C.muted};padding:6px 9px 2px}
 
   /* 今日の各メンバー状況: カードを並べる（可変幅・狭幅で 1 列）。 */

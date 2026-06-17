@@ -11,7 +11,7 @@ import { esc } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
 
 export const INBOX_WS = "インボックス";
-const PROJ_KEY = "ts.quickadd.proj"; // 既定投入先（ワークスペース）の保持キー。"" or 数値ID。
+// 新規タスクは常に Inbox WS へ投入（WSはUIから排除・project_id はデータとして裏で保持）。
 
 // 解析結果を実データに照合（WS/担当の解決）。store.load はキャッシュ済み前提で軽い。
 function resolveParsed(parsed, { projects, members }) {
@@ -53,26 +53,22 @@ function tokenChipHtml(t, r) {
   return `<button type="button" class="${cls}" data-raw="${esc(t.raw)}" title="${title}" aria-pressed="${t.applied ? "true" : "false"}">${ic}${prefix}${label}</button>`;
 }
 
-function chipsHtml(r, defaultProj) {
+function chipsHtml(r) {
   const c = [];
   if (!r.title) c.push(`<span class="qa-chip warn">タイトルを入力</span>`);
   else c.push(`<span class="qa-chip title">${esc(r.title)}</span>`);
-  // 認識トークン（適用/テキスト化トグル可）。入力順を保つ。
-  for (const t of (r.tokens || [])) c.push(tokenChipHtml(t, r));
+  // 認識トークン（適用/テキスト化トグル可）。入力順を保つ。WSトークンは投入先UIを出さない（裏でInboxへ）。
+  for (const t of (r.tokens || [])) if (t.kind !== "ws") c.push(tokenChipHtml(t, r));
   // links は解釈固定（トグル対象外）。
   for (const u of r.links) c.push(`<span class="qa-chip">${icon("link", { size: 13 })} ${esc(u.length > 30 ? u.slice(0, 28) + "…" : u)}</span>`);
-  // 投入先（>WS が無い or テキスト化された場合の既定行き先を明示）。
-  const wsApplied = (r.tokens || []).some((t) => t.kind === "ws" && t.applied);
-  if (!wsApplied) c.push(`<span class="qa-chip ws">${icon("folder", { size: 13 })} ${defaultProj ? esc(defaultProj.title) : INBOX_WS}</span>`);
   return c.join("") +
-    `<div class="qa-help">チップをクリックでテキスト扱いに（取り消し線＝適用しない）。構文: 明日15時 / 6/20 / 月曜 / #分類 / !高 / 1.5h / @担当 / &gt;ワークスペース / URL→資料</div>`;
+    `<div class="qa-help">チップをクリックでテキスト扱いに（取り消し線＝適用しない）。構文: 明日15時 / 6/20 / 月曜 / #分類 / !高 / 1.5h / @担当 / URL→資料</div>`;
 }
 
 // 構文ヘルプの早見表（実際にパーサが解釈する記法のみ）。lib/quickadd.js と整合させること。
 const HELP_ROWS = [
   ["#分類", "分類/タグ", "#会議"],
   ["@担当", "担当（人のみ）", "@田中"],
-  [">WS名", "投入先ワークスペース", ">チーム作業"],
   ["!重要度", "MUST/最優先/最/高/中/低", "!高"],
   ["1h・1.5h・30m", "見積時間（時間/分）", "1.5h"],
   ["明日15時", "日付＋時刻（予定も作成）", "明日15:30"],
@@ -100,10 +96,9 @@ async function ensureInbox(projects) {
   return created;
 }
 
-// 投入先の決定: 入力の明示 >WS名 が最優先、無ければセレクタで選んだ既定（defaultProj）、
-// それも無ければインボックス（無ければ作成）。
-async function createFromParsed(r, data, defaultProj) {
-  const proj = r.wsProject || defaultProj || await ensureInbox(data.projects);
+// 投入先は常にインボックスWS（無ければ作成）。WSはUIから排除＝新規は既定でInboxへ。
+async function createFromParsed(r, data) {
+  const proj = await ensureInbox(data.projects);
   const body = { title: r.title };
   if (r.dateISO) body.due_date = r.dateISO + "T00:00:00Z";
   if (r.priority) body.priority = r.priority;
@@ -134,14 +129,10 @@ export function mountQuickAdd(topbar, { onCreated } = {}) {
   wrap.innerHTML = `
     <input id="qa-in" autocomplete="off" placeholder="クイック追加（/ でフォーカス）例: 明日15時 MTG準備 #会議 1h" aria-label="クイック追加">
     <button type="button" id="qa-help-btn" class="qa-help-btn" title="入力構文ヘルプ" aria-label="入力構文ヘルプ" aria-expanded="false">${icon("lightbulb", { size: 15 })}</button>
-    <select id="qa-proj" class="qa-proj" title="投入先ワークスペース" aria-label="投入先ワークスペース">
-      <option value="">なし（${INBOX_WS}）</option>
-    </select>
     <div class="qa-pop" id="qa-pop" hidden></div>
     <div class="qa-tip" id="qa-tip" role="dialog" aria-label="入力構文の早見表" hidden>${helpTipHtml()}</div>`;
   who ? who.after(wrap) : topbar.prepend(wrap);
   const input = wrap.querySelector("#qa-in");
-  const sel = wrap.querySelector("#qa-proj");
   const pop = wrap.querySelector("#qa-pop");
   const helpBtn = wrap.querySelector("#qa-help-btn");
   const tip = wrap.querySelector("#qa-tip");
@@ -164,29 +155,6 @@ export function mountQuickAdd(topbar, { onCreated } = {}) {
   let ignore = new Set();   // テキスト扱いにした生トークン文字列
   let ignoreFor = "";       // ignore が有効な入力値（変わればリセット）
 
-  // セレクタで選んだ既定投入先プロジェクト（無効値はインボックス扱い＝null）。
-  const currentDefaultProj = () => {
-    const id = +sel.value;
-    if (!id) return null;
-    return (data && data.projects || []).find((p) => p.id === id) || null;
-  };
-
-  // 候補プロジェクトをマウント時に取得して option を生成。保存済み選択を復元（無ければ「なし」）。
-  const fillProjects = async () => {
-    if (!data) { try { data = await load(); } catch { data = { projects: [], members: [], me: null }; } }
-    const saved = localStorage.getItem(PROJ_KEY) || "";
-    const opts = ['<option value="">なし（' + esc(INBOX_WS) + '）</option>'];
-    for (const p of data.projects || []) opts.push(`<option value="${p.id}">${esc(p.title)}</option>`);
-    sel.innerHTML = opts.join("");
-    // 保存値が現在の候補に存在すれば復元（プロジェクト消滅・未ログイン時は「なし」へ）
-    sel.value = (data.projects || []).some((p) => String(p.id) === saved) ? saved : "";
-  };
-  fillProjects();
-  sel.addEventListener("change", () => {
-    localStorage.setItem(PROJ_KEY, sel.value);
-    if (resolved) { pop.innerHTML = chipsHtml(resolved, currentDefaultProj()); pop.hidden = false; }
-  });
-
   // 入力に応じてチップ帯を再描画。ignore（テキスト化したトークン）を反映して解析する。
   // 入力本文が変わったら ignore はリセット（同一入力内でのみ有効）。
   const refresh = async () => {
@@ -195,7 +163,7 @@ export function mountQuickAdd(topbar, { onCreated } = {}) {
     if (v !== ignoreFor) { ignore = new Set(); ignoreFor = v; }
     if (!data) { try { data = await load(); } catch { data = { projects: [], members: [], me: null }; } }
     resolved = resolveParsed(parseQuickAdd(v, { ignore }), data);
-    pop.innerHTML = chipsHtml(resolved, currentDefaultProj());
+    pop.innerHTML = chipsHtml(resolved);
     pop.hidden = false;
   };
   input.addEventListener("input", refresh);
@@ -213,7 +181,7 @@ export function mountQuickAdd(topbar, { onCreated } = {}) {
     if (ignore.has(raw)) ignore.delete(raw); else ignore.add(raw);
     ignoreFor = input.value; // 現入力に紐づけ
     resolved = resolveParsed(parseQuickAdd(input.value, { ignore }), data || { projects: [], members: [], me: null });
-    pop.innerHTML = chipsHtml(resolved, currentDefaultProj());
+    pop.innerHTML = chipsHtml(resolved);
     pop.hidden = false;
   });
 
@@ -223,8 +191,9 @@ export function mountQuickAdd(topbar, { onCreated } = {}) {
     input.disabled = true;
     pop.innerHTML = `<span class="qa-chip">追加中…</span>`;
     try {
-      // 投入先: 明示 >WS名 ＞ セレクタ既定 ＞ インボックス。直前のデータで作成。
-      await createFromParsed(resolved, data, currentDefaultProj());
+      // 投入先は常にインボックスWS（無ければ作成）。直前のデータで作成。
+      if (!data) { try { data = await load(); } catch { data = { projects: [], members: [], me: null }; } }
+      await createFromParsed(resolved, data);
       data = null; resolved = null; ignore = new Set(); ignoreFor = "";
       input.value = "";
       pop.innerHTML = `<span class="qa-chip ok">${icon("check", { size: 13 })} 追加しました</span>`;
@@ -265,9 +234,6 @@ function ensureStyle() {
     border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--ink)}
   .qa-wrap input:focus{outline:none;border-color:var(--fill);box-shadow:0 0 0 3px rgba(58,134,255,.12)}
   .qa-wrap input::placeholder{color:#a8b0bb}
-  .qa-proj{flex:none;max-width:160px;box-sizing:border-box;font:inherit;font-size:12px;padding:7px 8px;
-    border:1px solid var(--line);border-radius:9px;background:#fff;color:var(--ink);cursor:pointer}
-  .qa-proj:focus{outline:none;border-color:var(--fill);box-shadow:0 0 0 3px rgba(58,134,255,.12)}
   .qa-pop{position:absolute;z-index:8;top:calc(100% + 6px);left:0;right:0;background:#fff;
     border:1px solid var(--line);border-radius:11px;box-shadow:0 10px 30px rgba(20,30,50,.14);
     padding:10px 12px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}

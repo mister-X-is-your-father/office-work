@@ -2,7 +2,7 @@
 //  - "settings-team" を含む  → チーム設定モード = チーム共有設定 + 祝日・休業日（管理者保存バーはチーム設定でのみ）。
 //  - それ以外（settings-personal / 後方互換の素 settings）→ 個人設定モード = リマインダー通知（localStorage 即保存）。
 // チーム共有の保存先は taskstation-exec（許可ユーザーのみ書き込み可）。個人設定は localStorage＝exec が落ちていても使える。
-import { load, invalidate, TEMPLATE_WS } from "../lib/store.js";
+import { load, invalidate } from "../lib/store.js";
 import { getSettings, saveSettings } from "../lib/exec.js";
 import { getHolidays, createHoliday, deleteHoliday } from "../lib/api.js";
 import { parseSmartDate, fmtDisplayDow, attachDatePicker } from "../lib/form.js";
@@ -60,7 +60,7 @@ async function renderPersonal(root) {
 // ── チーム設定モード ─────────────────────────────────────────────
 // チーム共有設定（exec で管理者保存）＋ 祝日・休業日（即時CRUD）。
 async function renderTeam(root) {
-  const { projects, templateProject, holidaysByDate } = await load();
+  const { holidaysByDate } = await load();
   let cur = null, canEdit = false, execDown = false;
   try {
     const d = await getSettings();
@@ -86,8 +86,6 @@ async function renderTeam(root) {
     return;
   }
 
-  const wsList = (projects || []).filter((p) => !templateProject || p.id !== templateProject.id);
-  const excluded = new Set(cur.excluded_project_ids || []);
   const hourOpts = (sel) => Array.from({ length: 24 }, (_, h) =>
     `<option value="${h}"${h === sel ? " selected" : ""}>${h}:00</option>`).join("");
 
@@ -121,13 +119,6 @@ async function renderTeam(root) {
               <span class="sx-dash">〜</span>
               <select id="st-cal1" class="sx-in"${canEdit ? "" : " disabled"}>${hourOpts(cur.cal_end)}</select></div></div>
           </div>
-          <div class="sx-row col">
-            <div class="sx-label"><div class="sx-rt">集計対象ワークスペース</div>
-              <div class="sx-rd">チェックを外したワークスペースは負荷・空き・一覧から除外されます。「${esc(TEMPLATE_WS)}」は常に対象外です。</div></div>
-            <div class="sx-wsgrid">
-              ${wsList.map((p) => `<label class="sx-chk"><input type="checkbox" data-ws="${p.id}"${excluded.has(p.id) ? "" : " checked"}${canEdit ? "" : " disabled"}><span>${esc(p.title)}</span></label>`).join("")}
-            </div>
-          </div>
         </div>
       </section>
 
@@ -150,10 +141,10 @@ async function renderTeam(root) {
     const c0 = +root.querySelector("#st-cal0").value, c1 = +root.querySelector("#st-cal1").value;
     if (!isFinite(cap) || cap < 1 || cap > 24) { msg.className = "sx-msg err"; msg.textContent = "容量は1〜24で入力してください。"; return; }
     if (c1 <= c0) { msg.className = "sx-msg err"; msg.textContent = "カレンダーの終了は開始より後にしてください。"; return; }
-    const excludedIds = [...root.querySelectorAll("[data-ws]")].filter((b) => !b.checked).map((b) => +b.dataset.ws);
     btn.disabled = true;
     try {
-      await saveSettings({ cap_hours: cap, cal_start: c0, cal_end: c1, excluded_project_ids: excludedIds });
+      // WSはUIから廃止＝常に全WS集計（excluded は空で保存）
+      await saveSettings({ cap_hours: cap, cal_start: c0, cal_end: c1, excluded_project_ids: [] });
       invalidate(); // 全ビューに即反映
       msg.className = "sx-msg ok"; msg.innerHTML = `${icon("check", { size: 14 })} 保存しました（全員のビューに反映）`;
     } catch (e) {
@@ -168,7 +159,7 @@ function topHtml(mode) {
     return `
     <header class="sx-top">
       <h1 class="sx-title">チーム設定</h1>
-      <p class="sx-sub">容量・表示・集計対象などチーム全員で共有する<b>共通設定</b>と、<b>祝日・休業日</b>を管理します。共通設定の保存は許可ユーザーのみ。</p>
+      <p class="sx-sub">容量・表示などチーム全員で共有する<b>共通設定</b>と、<b>祝日・休業日</b>を管理します。共通設定の保存は許可ユーザーのみ。</p>
     </header>`;
   }
   return `
@@ -315,16 +306,6 @@ function css() {
   .sx-tg input:checked + .sl{background:${C.fill}}
   .sx-tg input:checked + .sl::before{transform:translateX(18px)}
 
-  /* ワークスペース選択: 統一されたチップ */
-  .sx-wsgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:8px;margin-top:12px}
-  .sx-chk{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line-strong);
-    border-radius:10px;background:var(--card);font-size:13px;font-weight:600;cursor:pointer;
-    transition:border-color .12s,background .12s,opacity .12s}
-  .sx-chk:hover{border-color:${C.fill};background:#f7faff}
-  .sx-chk:has(input:not(:checked)){opacity:.5}
-  .sx-chk:has(input:disabled){cursor:not-allowed}
-  .sx-chk input{width:16px;height:16px;accent-color:${C.fill};cursor:pointer;flex:none}
-
   .sx-note{padding:0 0 14px;font-size:11.5px;color:${C.muted};line-height:1.55}
   .sx-note.ok{color:${C.free};font-weight:600}
   .sx-note.warn{color:${C.over};font-weight:600;padding:14px 0}
@@ -364,6 +345,5 @@ function css() {
   .sx-hdel:hover{border-color:${C.over};color:${C.over}}
 
   /* ダークモード: ハードコードした淡色面/tintを反転（ライト値は不変） */
-  html[data-theme="dark"] .sx-chd{background:var(--track)}
-  html[data-theme="dark"] .sx-chk:hover{background:rgba(255,255,255,.06)}`;
+  html[data-theme="dark"] .sx-chd{background:var(--track)}`;
 }
