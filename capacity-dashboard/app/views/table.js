@@ -1409,7 +1409,7 @@ function css() {
   .ol-row{display:flex;align-items:center;gap:8px;padding:7px 14px 7px 0;border-bottom:1px solid ${C.line};font-size:13.5px;cursor:pointer}
   .ol-row:last-child{border-bottom:0}
   .ol-row:hover{background:#f7fbff}
-  .ol-tw{width:26px;height:26px;margin:-6px 0;flex:none;display:grid;place-items:center;color:${C.muted};cursor:pointer;font-size:13px;line-height:1;user-select:none;border-radius:6px}
+  .ol-tw{width:28px;height:28px;margin:-6px 0;flex:none;display:grid;place-items:center;color:${C.muted};cursor:pointer;font-size:16px;line-height:1;user-select:none;border-radius:6px}
   .ol-tw:not(.none):hover{background:#e7eef7;color:${C.fill}}
   .ol-tw.none{cursor:pointer;visibility:hidden}
   .ol-cb{width:15px;height:15px;border-radius:4px;flex:none;border:1.5px solid ${C.line};cursor:pointer;display:grid;place-items:center}

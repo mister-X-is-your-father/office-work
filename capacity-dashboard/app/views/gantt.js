@@ -1005,7 +1005,7 @@ function ganttStyles() {
   .gv .grp{display:grid;grid-template-columns:var(--label-w) repeat(var(--win), var(--col-w));height:${GRP_H}px;position:relative;background:#fbfcfd;border-bottom:1px solid ${C.line}}
   .gv .grp-label{border-right:1px solid ${C.line};padding:0 12px;display:flex;align-items:center;gap:9px;cursor:pointer;overflow:hidden;position:sticky;left:0;z-index:7;background:#fbfcfd}
   .gv .grp-label:hover{background:#f3f5f8}
-  .gv .grp .caret{font-size:10px;color:${C.muted};transition:transform .15s}
+  .gv .grp .caret{font-size:15px;color:${C.muted};transition:transform .15s}
   .gv .grp.collapsed .caret{transform:rotate(-90deg)}
   .gv .avatar{width:30px;height:30px;border-radius:50%;color:#fff;font-size:13px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;flex:none}
   .gv .pj-band{width:14px;height:30px;border-radius:4px;flex:none}

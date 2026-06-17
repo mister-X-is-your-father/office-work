@@ -106,7 +106,7 @@ export async function render(root) {
     return `
       <section class="home-sec card" data-sec="${id}">
         <button type="button" class="home-sec-head" data-toggle="${id}" aria-expanded="${open}">
-          <span class="home-chevron">${icon(open ? "chevronDown" : "chevronRight", { size: 16 }) || (open ? "▾" : "▸")}</span>
+          <span class="home-chevron">${icon(open ? "chevronDown" : "chevronRight", { size: 20 }) || (open ? "▾" : "▸")}</span>
           <span class="home-sec-title">${title}</span>
         </button>
         <div class="home-sec-body" data-body="${id}" ${open ? "" : "hidden"}></div>
@@ -198,7 +198,7 @@ export async function render(root) {
       writeFold(uid, fold);
       btn.setAttribute("aria-expanded", String(open));
       const chev = btn.querySelector(".home-chevron");
-      if (chev) chev.innerHTML = icon(open ? "chevronDown" : "chevronRight", { size: 16 }) || (open ? "▾" : "▸");
+      if (chev) chev.innerHTML = icon(open ? "chevronDown" : "chevronRight", { size: 20 }) || (open ? "▾" : "▸");
       if (open) {
         body.hidden = false;
         fill(id);                          // 初回 or 破棄後の再描画
