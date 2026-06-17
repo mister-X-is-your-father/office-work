@@ -125,6 +125,9 @@ async function mount(root, opts) {
     collapsed: embedded ? new Set() : gview.collapsed,
   };
   const memberIdx = new Map(members.map((m, i) => [m.id, i]));
+  // 直近の描画で出現した「折りたたみ可能な見出し」の data-toggle キー集合。
+  // 全折りたたみボタンはこれを state.collapsed に流し込む（paint 中に各見出しが登録する）。
+  let collapsibleKeys = new Set();
 
   root.innerHTML = shell(projects, members, memberIdx, state.mode, embedded, opts.maxHeight);
   const head = root.querySelector("#gv-head");
@@ -261,6 +264,7 @@ async function mount(root, opts) {
   // 親プロジェクトのサブグループ見出し（集約バー付き・既定展開）と、展開時の子タスク行。
   // toggleKey はメンバー折りたたみ "m"+id と衝突しない "mp"+m.id+"_"+pid。
   function parentSubgroup(toggleKey, pid, children, includeParentInAgg) {
+    collapsibleKeys.add(toggleKey);
     const parent = byIdAll.get(pid);
     const title = parent ? parent.title : "（不明なプロジェクト）";
     // サブグループは既定展開＝toggleKey の「存在」が折りたたみフラグ（メンバー/通常グループと同じ向き）。
@@ -312,6 +316,7 @@ async function mount(root, opts) {
   function paintMemberMode() {
     ganttEl.style.setProperty("--label-w", LABEL_W_P + "px");
     head.innerHTML = gridHead(LABEL_W_P);
+    collapsibleKeys = new Set();
     let html = "", rowOffset = 0;
     const sortByStart = (a, b) => {
       const sa = rangeByTask.get(a.id).planned.start || "9999", sb = rangeByTask.get(b.id).planned.start || "9999";
@@ -327,6 +332,7 @@ async function mount(root, opts) {
       const cap = scale.axis.reduce((s, a) => s + capOf(a.iso), 0);
       const pct = cap ? Math.round((winH / cap) * 100) : 0;
       const capCol = pct > 100 ? C.over : pct >= 70 ? C.amber : C.free;
+      collapsibleKeys.add("m" + m.id);
       const collapsed = state.collapsed.has("m" + m.id);
       // グループ日セル＝日別容量の可視化: 容量0(週末/祝日/休暇)=淡色、予定が容量超過=赤帯、
       // それ以外で予定ありは負荷比に応じた薄い帯。負荷バー(下の各タスク行)と容量を読み比べられる。
@@ -387,6 +393,7 @@ async function mount(root, opts) {
       return true;
     });
     if (unassigned.length) {
+      collapsibleKeys.add("unassigned");
       const uCollapsed = state.collapsed.has("unassigned");
       const ugcells = scale.axis.map((a) => `<div class="cell${a.weekend ? " weekend" : ""}${a.dow === weekStart ? " wk" : ""}"></div>`).join("");
       html += `<div class="grp grp-unassigned${uCollapsed ? " collapsed" : ""}" data-mid="unassigned">
@@ -436,6 +443,7 @@ async function mount(root, opts) {
   function paintProjectMode() {
     ganttEl.style.setProperty("--label-w", LABEL_W_P + "px");
     head.innerHTML = gridHead(LABEL_W_P);
+    collapsibleKeys = new Set();
     // ベースフィルタ（WS/担当/完了）。予定の有無は問わない＝プロジェクト構造を見せる。
     const passBase = (t) => {
       if (!state.projects.has(t.project_id)) return false;
@@ -474,6 +482,7 @@ async function mount(root, opts) {
         const r = rangeByTask.get(t.id);
         s.est += r.estH; s.spent += r.spentH; s.plan += r.planned.h; return s;
       }, { est: 0, spent: 0, plan: 0 });
+      collapsibleKeys.add("p" + g.pid);
       const collapsed = state.collapsed.has("p" + g.pid);
       const gcells = scale.axis.map((a) => `<div class="cell${a.weekend ? " weekend" : ""}${a.dow === weekStart ? " wk" : ""}"></div>`).join("");
       const band = g.pid ? projColor(g.ws) : C.muted;
@@ -616,6 +625,13 @@ async function mount(root, opts) {
     b.onclick = () => { toggleSet(state.members, +b.dataset.mem, b); paint(); };
   });
   root.querySelector("#gv-hidedone").onchange = (e) => { state.hideDone = e.target.checked; paint(); };
+  // 全展開 = collapsed を空に。全折りたたみ = 現モードで描画された全見出しキーを collapsed に流し込む。
+  // collapsibleKeys は直近 paint で各見出しが登録済み（mode 切替時も paint が再構築）。
+  // 全画面は collapsed=gview.collapsed の参照なので、書き換えがそのまま永続（saveGV 対象外＝意図通り）。
+  const expandAllBtn = root.querySelector("#gv-expand-all");
+  if (expandAllBtn) expandAllBtn.onclick = () => { state.collapsed.clear(); paint(); };
+  const collapseAllBtn = root.querySelector("#gv-collapse-all");
+  if (collapseAllBtn) collapseAllBtn.onclick = () => { for (const k of collapsibleKeys) state.collapsed.add(k); paint(); };
   } // end if(!embedded) — toolbar wiring
   // 人別ヘッダの折り畳みは再描画後に張り直すのでイベント委譲（埋め込みでも有効）
   rowsEl.addEventListener("click", (e) => {
@@ -828,6 +844,10 @@ function shell(projects, members, memberIdx, mode, embedded = false, maxHeight) 
       <div class="seg">
         ${seg("project", "プロジェクト別")}${seg("member", "人別")}
       </div>
+      <div class="seg">
+        <button id="gv-expand-all" title="すべて展開">${icon("chevronDown", { size: 14 })}全展開</button>
+        <button id="gv-collapse-all" title="すべて折りたたみ">${icon("chevronRight", { size: 14 })}全折りたたみ</button>
+      </div>
       <div class="tbg"><span class="tbl">表示</span>
         <div class="seg">${["day", "week"].map((u) => `<button data-unit="${u}"${gview.unit === u ? ' class="on"' : ""}>${u === "day" ? "日" : "週"}</button>`).join("")}</div>
         <div class="seg">${SPANS[gview.unit].map((p) => { const cur = gview.unit === "day" ? gview.spanDay : gview.spanWeek; return `<button data-span="${p.key}"${p.key === cur ? ' class="on"' : ""}>${p.label}</button>`; }).join("")}</div>
@@ -873,7 +893,8 @@ function ganttStyles() {
   .gv .legend{flex:none}
   .gv-toolbar{display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:12px 16px;border-bottom:1px solid ${C.line}}
   .gv .seg{display:inline-flex;border:1px solid ${C.line};border-radius:9px;overflow:hidden}
-  .gv .seg button{border:0;background:#fff;color:${C.muted};font-size:12px;font-weight:700;padding:7px 14px;cursor:pointer}
+  .gv .seg button{border:0;background:#fff;color:${C.muted};font-size:12px;font-weight:700;padding:7px 14px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+  .gv .seg button:hover{background:${C.track}}
   .gv .seg button.on{background:${C.fill};color:#fff}
   .gv .tbg{display:flex;align-items:center;gap:8px}
   .gv .tbl{font-size:11px;color:${C.muted};font-weight:600}
@@ -953,13 +974,15 @@ function ganttStyles() {
   .gv .grp.mp-sub .grp-name{font-size:12.5px;font-weight:700}
   .gv .grp.mp-sub .pj-band{width:11px;height:22px}
   /* 人別: サブグループ配下の子タスク行はさらに字下げ＝親の下に畳まれていると分かる。
-     ツリー接続線: 親見出し直下から伸びる縦線＋各子へのエルボー(┗)。色は親プロジェクト色(--pj)。
-     縦線xは見出しの色四角(.mp-sub .pj-band)中心を実測した --mprail に揃える。 */
+     ツリー接続線: 親見出し直下から伸びる縦線＋各子へのエルボー(┗)。色は中立的な淡いグレー
+     (--line-strong)＝構造ガイドに徹する（プロジェクト色は見出しの .pj-band 四角で伝える）。
+     縦線xは見出しの色四角(.mp-sub .pj-band)中心を実測した --mprail に揃える。実測不能時の
+     フォールバックは padding-left=30px(grp-label) + caret/gap/四角半分 ≒ 41px の妥当値。 */
   .gv .row.mp-child .r-label{padding-left:52px}
-  .gv .row.mp-child .r-label::before{content:"";position:absolute;left:var(--mprail,36px);top:0;bottom:0;width:2px;background:var(--pj,${C.line});opacity:.5}
+  .gv .row.mp-child .r-label::before{content:"";position:absolute;left:var(--mprail,41px);top:0;bottom:0;width:1px;background:${C.lineStrong};opacity:.7}
   .gv .row.mp-child.last .r-label::before{bottom:auto;height:50%}
   /* エルボーの横線: 縦線から子ラベルへ向かう短い水平線（行の中央高さ） */
-  .gv .row.mp-child .r-label::after{content:"";position:absolute;left:var(--mprail,36px);top:50%;width:11px;height:2px;background:var(--pj,${C.line});opacity:.5}
+  .gv .row.mp-child .r-label::after{content:"";position:absolute;left:var(--mprail,41px);top:50%;width:11px;height:1px;background:${C.lineStrong};opacity:.7}
   /* 未アサイングループ: 容量線/負荷帯なしの中立アバター */
   .gv .grp.grp-unassigned .avatar.avatar-none{background:${C.track};color:${C.muted};box-shadow:inset 0 0 0 1px ${C.line}}
   .gv-draglabel{position:fixed;z-index:9999;background:${C.ink};color:#fff;font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px;pointer-events:none;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.25);display:none}
@@ -993,11 +1016,13 @@ function ganttStyles() {
   .gv .grp[data-pid] .grp-name{font-weight:800}
   .gv .row.pj-child .r-label{padding-left:74px}   /* 親名(≈49px)よりはっきり右へ字下げ＝配下と一目で分かる。position は基底の sticky を継承 */
   .gv .row.pj-child .r-name{font-weight:600}
-  /* 縦線は子タスク行のみ。色四角の中心(ラベル左から33px)に揃える。最後の子の中央で止める */
-  .gv .row.pj-child .r-label::before{content:"";position:absolute;left:var(--pjrail,32px);top:0;bottom:0;width:2px;background:var(--pj);opacity:.5}
+  /* 縦線は子タスク行のみ。色四角(pj-band)の中心を実測した --pjrail に揃える。最後の子の中央で止める。
+     色は人別と統一して中立グレー(--line-strong)＝構造ガイドに徹する。フォールバックは
+     grp-label padding(12px)+caret(≈18px)+四角半分(7px) ≒ 33px の妥当値。 */
+  .gv .row.pj-child .r-label::before{content:"";position:absolute;left:var(--pjrail,33px);top:0;bottom:0;width:1px;background:${C.lineStrong};opacity:.7}
   .gv .row.pj-child.last .r-label::before{bottom:auto;height:50%}
   /* エルボーの横線: 縦線から子ラベルへ向かう短い水平線（人別と同一スタイル） */
-  .gv .row.pj-child .r-label::after{content:"";position:absolute;left:var(--pjrail,32px);top:50%;width:11px;height:2px;background:var(--pj);opacity:.5}
+  .gv .row.pj-child .r-label::after{content:"";position:absolute;left:var(--pjrail,33px);top:50%;width:11px;height:1px;background:${C.lineStrong};opacity:.7}
   .gv .grp-top{display:flex;align-items:center;gap:8px;min-width:0}
   .gv .grp-name{font-size:14px;font-weight:700;color:${C.ink};display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;line-height:1.25;word-break:break-word;min-width:0}
   .gv .grp-sub{font-size:10.5px;color:${C.muted};white-space:nowrap}
