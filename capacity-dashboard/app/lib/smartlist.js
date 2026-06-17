@@ -17,7 +17,7 @@ const hasHumanAssignee = (t) => (t.assignees || []).some((a) => !isAiAssignee(a)
 export const BUILTIN_VIEWS = [
   // 未整理＝未完了で「人間担当が未設定 or 期限が未設定」＝まだ段取りされてないタスク（unsorted フラグで判定）。
   { key: "inbox", label: "未整理", icon: "inbox", filter: { status: "undone", unsorted: true },
-    desc: "未完了で、担当か期限が未設定。ここから振り分ける。" },
+    desc: "未完了で、担当者 or 期限が未設定。" },
   { key: "today", label: "今日", icon: "calendar", filter: { due: "today", status: "undone" },
     desc: "今日が期限の未完了タスク。" },
   { key: "next7", label: "次の7日間", icon: "calendarDays", filter: { due: "next7", status: "undone" },
