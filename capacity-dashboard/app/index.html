@@ -53,10 +53,10 @@
   .nav-spacer{height:10px}
   /* 設定の直前に入れる区切り線＝最下部の独立感を出す。 */
   .nav-rule{height:1px;background:var(--line);margin:10px 8px 6px}
-  /* 設定リンクの強調（最下部・目立たせる）。 */
-  .nav a[data-k="settings"]{font-weight:700}
+  /* 設定リンク（個人設定/チーム設定）の強調（最下部・目立たせる）。 */
+  .nav a[data-k="settings-personal"],.nav a[data-k="settings-team"]{font-weight:700}
   /* 設定リンクのギア＝Lucide settings をマスクで currentColor 追従の単色アイコンに（旧 content:"⚙"）。 */
-  .nav a[data-k="settings"]::before{content:"";display:inline-block;width:15px;height:15px;margin-right:7px;vertical-align:-2px;background:currentColor;
+  .nav a[data-k="settings-personal"]::before,.nav a[data-k="settings-team"]::before{content:"";display:inline-block;width:15px;height:15px;margin-right:7px;vertical-align:-2px;background:currentColor;
     -webkit-mask:var(--ic-settings) center/contain no-repeat;mask:var(--ic-settings) center/contain no-repeat}
   .main{flex:1;min-width:0;display:flex;flex-direction:column}
   .topbar{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:10px 22px;

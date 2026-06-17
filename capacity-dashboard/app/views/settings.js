@@ -1,6 +1,7 @@
-// 設定（チーム共有＋個人設定）。チーム共有の保存先は taskstation-exec（許可ユーザーのみ書き込み可）。
-// 個人設定（リマインダー通知）は localStorage＝exec が落ちていても使える。
-// UI: 「個人設定 / チーム共有設定」の2グループに分け、各設定を行レイアウト＋明確な保存バーで構造化。
+// 設定。location.hash で「個人設定」/「チーム設定」を出し分ける（recurring.js と同作法）。
+//  - "settings-team" を含む  → チーム設定モード = チーム共有設定 + 祝日・休業日（管理者保存バーはチーム設定でのみ）。
+//  - それ以外（settings-personal / 後方互換の素 settings）→ 個人設定モード = リマインダー通知（localStorage 即保存）。
+// チーム共有の保存先は taskstation-exec（許可ユーザーのみ書き込み可）。個人設定は localStorage＝exec が落ちていても使える。
 import { load, invalidate, TEMPLATE_WS } from "../lib/store.js";
 import { getSettings, saveSettings } from "../lib/exec.js";
 import { getHolidays, createHoliday, deleteHoliday } from "../lib/api.js";
@@ -9,22 +10,24 @@ import { notifyPrefs, saveNotifyPrefs } from "../lib/notify.js";
 import { C, esc } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
 
+// チーム設定モードか否か（hash に "settings-team" を含むか）。
+function isTeamMode() {
+  return location.hash.includes("settings-team");
+}
+
 export async function render(root) {
-  const { projects, templateProject, me, holidaysByDate } = await load();
-  let cur = null, canEdit = false, execDown = false;
-  try {
-    const d = await getSettings();
-    cur = d.settings; canEdit = !!d.can_edit;
-  } catch {
-    execDown = true;
-    cur = { cap_hours: 8, cal_start: 8, cal_end: 20, excluded_project_ids: [] };
-  }
-  // 個人設定: リマインダー通知（自分の予定/会議のN分前・期限タスクは営業開始に）
+  if (isTeamMode()) return renderTeam(root);
+  return renderPersonal(root);
+}
+
+// ── 個人設定モード ───────────────────────────────────────────────
+// リマインダー通知のみ。exec に依存しないので load() の me だけで完結。
+async function renderPersonal(root) {
+  const { me } = await load();
   const np = notifyPrefs((me && me.id) || 0);
   const leadOpts = [1, 5, 10, 15, 30].map((n) =>
     `<option value="${n}"${n === np.lead ? " selected" : ""}>${n}分前</option>`).join("");
 
-  // 個人設定セクション（execDown でも使える＝localStorage）
   const personalSection = `
     <section class="sx-card">
       <header class="sx-chd">
@@ -45,12 +48,33 @@ export async function render(root) {
       </div>
     </section>`;
 
+  root.innerHTML = `
+    <style>${css()}</style>
+    <div class="sx">
+      ${topHtml("personal")}
+      ${personalSection}
+    </div>`;
+  wireNotify(root, me);
+}
+
+// ── チーム設定モード ─────────────────────────────────────────────
+// チーム共有設定（exec で管理者保存）＋ 祝日・休業日（即時CRUD）。
+async function renderTeam(root) {
+  const { projects, templateProject, holidaysByDate } = await load();
+  let cur = null, canEdit = false, execDown = false;
+  try {
+    const d = await getSettings();
+    cur = d.settings; canEdit = !!d.can_edit;
+  } catch {
+    execDown = true;
+    cur = { cap_hours: 8, cal_start: 8, cal_end: 20, excluded_project_ids: [] };
+  }
+
   if (execDown) {
     root.innerHTML = `
       <style>${css()}</style>
       <div class="sx">
-        ${topHtml()}
-        ${personalSection}
+        ${topHtml("team")}
         <section class="sx-card">
           <header class="sx-chd">
             <div class="sx-ctitle">チーム共有設定</div>
@@ -59,7 +83,6 @@ export async function render(root) {
           <div class="sx-body"><div class="sx-note warn">設定サービス（taskstation-exec）に接続できません。既定値（8h/平日・全WS集計）で動作中です。復旧後にこの画面を開き直してください。</div></div>
         </section>
       </div>`;
-    wireNotify(root, me);
     return;
   }
 
@@ -74,8 +97,7 @@ export async function render(root) {
   root.innerHTML = `
     <style>${css()}</style>
     <div class="sx">
-      ${topHtml()}
-      ${personalSection}
+      ${topHtml("team")}
 
       <section class="sx-card">
         <header class="sx-chd">
@@ -119,7 +141,6 @@ export async function render(root) {
       </div>` : ""}
     </div>`;
 
-  wireNotify(root, me);
   wireHolidays(root, holidays, holidaysByDate);
 
   const btn = root.querySelector("#st-save");
@@ -142,11 +163,18 @@ export async function render(root) {
   };
 }
 
-function topHtml() {
+function topHtml(mode) {
+  if (mode === "team") {
+    return `
+    <header class="sx-top">
+      <h1 class="sx-title">チーム設定</h1>
+      <p class="sx-sub">容量・表示・集計対象などチーム全員で共有する<b>共通設定</b>と、<b>祝日・休業日</b>を管理します。共通設定の保存は許可ユーザーのみ。</p>
+    </header>`;
+  }
   return `
     <header class="sx-top">
-      <h1 class="sx-title">設定</h1>
-      <p class="sx-sub">通知などの<b>個人設定</b>と、容量・表示・集計対象などチーム全員で共有する<b>共通設定</b>を管理します。</p>
+      <h1 class="sx-title">個人設定</h1>
+      <p class="sx-sub">この端末でのリマインダー<b>通知</b>などを管理します。変更は即保存され、あなたの端末にのみ反映されます。</p>
     </header>`;
 }
 

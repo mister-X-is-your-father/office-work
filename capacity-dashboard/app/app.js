@@ -31,11 +31,15 @@ const ROUTES = {
   "recurring-meeting": { label: "定期MTG",  grp: "その他", mod: "./views/recurring.js" },
   leave:    { label: "休暇",          grp: "その他", mod: "./views/leave.js" },
   export:   { label: "バックアップ",   grp: "その他", mod: "./views/export.js" },
+  // 旧「設定」は後方互換ルートとして残す（settings.js が hash で個人設定モードを描画）が、ORDER には載せない。
   settings: { label: "設定",          grp: "その他", mod: "./views/settings.js" },
+  // 設定を個人 / チームの2項目に分割。どちらも settings.js を読み、settings.js 側が location.hash で出し分ける。
+  "settings-personal": { label: "個人設定", grp: "その他", mod: "./views/settings.js" },
+  "settings-team":     { label: "チーム設定", grp: "その他", mod: "./views/settings.js" },
   // 隠しルート: ORDER に載せない＝通常ユーザーのナビには出ない。許可者のみ shell() がリンクを追加。
   fable:    { label: "Fable",         grp: "AI",     mod: "./views/fable.js" },
 };
-const ORDER = ["home", "smart", "today", "triage", "quad", "habits", "review", "calendar", "monthcal", "planner", "workplan", "summary", "estactual", "kanban", "list", "depgraph", "gantt", "recurring-task", "recurring-meeting", "leave", "export", "settings"];
+const ORDER = ["home", "smart", "today", "triage", "quad", "habits", "review", "calendar", "monthcal", "planner", "workplan", "summary", "estactual", "kanban", "list", "depgraph", "gantt", "recurring-task", "recurring-meeting", "leave", "export", "settings-personal", "settings-team"];
 
 const app = document.getElementById("app");
 
@@ -81,8 +85,8 @@ function shell() {
     `<div class="navgrp">${g}</div>` + keys.map(k => {
       // 定期MTG の直後に少し余白を入れ、定期(業務/MTG)と後続の休暇/設定等を視覚的に分ける。
       const sep = k === "recurring-meeting" ? `<div class="nav-spacer"></div>` : "";
-      // 設定は「その他」最下部に独立配置＝直前に区切り線を入れて強調。
-      const rule = k === "settings" ? `<div class="nav-rule"></div>` : "";
+      // 設定2項目は「その他」最下部に独立配置＝個人設定の直前に区切り線を入れて強調。
+      const rule = k === "settings-personal" ? `<div class="nav-rule"></div>` : "";
       return rule + link(k) + sep;
     }).join("")
   ).join("");
