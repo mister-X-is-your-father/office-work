@@ -1012,6 +1012,7 @@ async function reparent(childId, oldParentId, newParentId, rerender) {
 }
 
 const cols = () => [
+  { k: null, label: "プロジェクト" },
   { k: "title", label: "タスク" }, { k: "who", label: "担当" }, { k: null, label: "種別" },
   { k: "cat", label: "分類" }, { k: "prio", label: "重要度" }, { k: "due", label: "期限" },
   { k: "est", label: "見積" }, { k: "pct", label: "進捗" }, { k: "state", label: "ステータス" },
@@ -1087,6 +1088,7 @@ function rowHtml(r, members, i, manual) {
   const sel = selectedIds.has(id);
   return `<tr data-id="${id}" class="${manual ? "tb-draggable" : ""}${sel ? " tb-sel" : ""}">
     <td class="tb-selcol"><span class="tb-rowck${sel ? " on" : ""}" data-ck="${id}" role="checkbox" aria-checked="${sel}" title="選択">${sel ? icon("check", { size: 12 }) : ""}</span></td>
+    <td class="tb-proj" title="${r.parent ? esc(r.parent.title) : ""}">${r.parent ? esc(r.parent.title) : "—"}</td>
     <td class="tb-title">${esc(r.title)}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">${icon("flag", { size: 12 })}</span>` : ""}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">${icon("play", { size: 11 })}</button>` : ""}</td>
     <td>${whoBtn}</td>
     <td>${kind}</td>
@@ -1351,6 +1353,7 @@ function css() {
   .tb th:last-child,.tb td:last-child{padding-right:20px}
   .tb tbody tr:hover{background:#f7fbff}
   .tb-title{font-weight:600;min-width:180px}
+  .tb-proj{color:${C.muted};font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .tb-sub{font-size:11px;color:${C.muted};font-weight:400;margin-top:2px}
   .tb-ava{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;color:#fff;font-size:10px;font-weight:700;margin-right:6px;vertical-align:-5px}
   .tb-k{font-size:10.5px;color:${C.muted};border:1px solid ${C.line};border-radius:5px;padding:1px 6px;white-space:nowrap}
