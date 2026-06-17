@@ -284,7 +284,7 @@ async function mount(root, opts) {
           <span class="grp-sub">予${fmtH(totH)}</span>
         </span>
       </div>
-      ${aggBarHTML(ar)}
+      ${collapsed ? aggBarHTML(ar) : ""}
     </div>`;
     let rows = GRP_H;
     if (!collapsed) {
@@ -979,10 +979,10 @@ function ganttStyles() {
      縦線xは見出しの色四角(.mp-sub .pj-band)中心を実測した --mprail に揃える。実測不能時の
      フォールバックは padding-left=30px(grp-label) + caret/gap/四角半分 ≒ 41px の妥当値。 */
   .gv .row.mp-child .r-label{padding-left:52px}
-  .gv .row.mp-child .r-label::before{content:"";position:absolute;left:var(--mprail,41px);top:0;bottom:0;width:1px;background:${C.lineStrong};opacity:.7}
+  .gv .row.mp-child .r-label::before{content:"";position:absolute;left:var(--mprail,41px);top:0;bottom:0;width:2px;background:var(--pj,${C.lineStrong});opacity:.5}
   .gv .row.mp-child.last .r-label::before{bottom:auto;height:50%}
   /* エルボーの横線: 縦線から子ラベルへ向かう短い水平線（行の中央高さ） */
-  .gv .row.mp-child .r-label::after{content:"";position:absolute;left:var(--mprail,41px);top:50%;width:11px;height:1px;background:${C.lineStrong};opacity:.7}
+  .gv .row.mp-child .r-label::after{content:"";position:absolute;left:var(--mprail,41px);top:50%;width:11px;height:2px;background:var(--pj,${C.lineStrong});opacity:.5}
   /* 未アサイングループ: 容量線/負荷帯なしの中立アバター */
   .gv .grp.grp-unassigned .avatar.avatar-none{background:${C.track};color:${C.muted};box-shadow:inset 0 0 0 1px ${C.line}}
   .gv-draglabel{position:fixed;z-index:9999;background:${C.ink};color:#fff;font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px;pointer-events:none;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.25);display:none}
@@ -1019,10 +1019,10 @@ function ganttStyles() {
   /* 縦線は子タスク行のみ。色四角(pj-band)の中心を実測した --pjrail に揃える。最後の子の中央で止める。
      色は人別と統一して中立グレー(--line-strong)＝構造ガイドに徹する。フォールバックは
      grp-label padding(12px)+caret(≈18px)+四角半分(7px) ≒ 33px の妥当値。 */
-  .gv .row.pj-child .r-label::before{content:"";position:absolute;left:var(--pjrail,33px);top:0;bottom:0;width:1px;background:${C.lineStrong};opacity:.7}
+  .gv .row.pj-child .r-label::before{content:"";position:absolute;left:var(--pjrail,33px);top:0;bottom:0;width:2px;background:var(--pj,${C.lineStrong});opacity:.5}
   .gv .row.pj-child.last .r-label::before{bottom:auto;height:50%}
   /* エルボーの横線: 縦線から子ラベルへ向かう短い水平線（人別と同一スタイル） */
-  .gv .row.pj-child .r-label::after{content:"";position:absolute;left:var(--pjrail,33px);top:50%;width:11px;height:1px;background:${C.lineStrong};opacity:.7}
+  .gv .row.pj-child .r-label::after{content:"";position:absolute;left:var(--pjrail,33px);top:50%;width:11px;height:2px;background:var(--pj,${C.lineStrong});opacity:.5}
   .gv .grp-top{display:flex;align-items:center;gap:8px;min-width:0}
   .gv .grp-name{font-size:14px;font-weight:700;color:${C.ink};display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;line-height:1.25;word-break:break-word;min-width:0}
   .gv .grp-sub{font-size:10.5px;color:${C.muted};white-space:nowrap}
