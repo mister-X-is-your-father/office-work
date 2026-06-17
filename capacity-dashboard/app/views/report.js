@@ -40,6 +40,19 @@ function weekEndISO(day, weekStart) {
 // 対象セレクタの localStorage キー（本人ごと）。
 const targetKey = (uid) => `ts.report.target.${uid ?? "anon"}`;
 const doneRangeKey = "ts.report.donerange";
+// 報告文ヒアリング回答の localStorage キー（本人ごと・当日キー）。日が変われば別キー＝前日分は残るが参照しない。
+const hearingKey = (uid, day) => `ts.report.hearing.${uid ?? "anon"}.${day}`;
+// 報告文 / 素データ の表示モード（本人ごと）。
+const modeKey = (uid) => `ts.report.mode.${uid ?? "anon"}`;
+
+// 全体の手応えセレクト選択肢（value=保存値, label=報告文に出す文言）。
+const FEEL_OPTS = [
+  ["", "（未選択）"],
+  ["順調", "順調"],
+  ["ほぼ順調", "ほぼ順調"],
+  ["やや遅れ", "やや遅れ"],
+  ["遅れ気味", "遅れ気味"],
+];
 
 // バケット定義（見出しメタ）。order が表示順。
 const BUCKETS = [
@@ -117,6 +130,65 @@ function buildText(buckets, targetName, day, comment) {
   return text;
 }
 
+// 報告文ジェネレーター（純粋関数）: ヒアリング回答 hr＋バケット buckets を合体し、
+// 上司に伝わる噛みやすい箇条書き文字列を返す。AI 接続なしのテンプレ組み立て。
+// 0 件 / 未回答の行は省略。件数が多い項目は代表 MAX_REPORT 件＋「他n件」。
+// hr = { feel, doneNote, nextNote, lateNote, shareNote }（各文字列・任意）。
+const MAX_REPORT = 3;
+// バケットから代表タイトル列を「A / B / 他n件」形に。labeler は各タスクのラベル化関数。
+function repList(arr, labeler) {
+  if (!arr.length) return "";
+  const shown = arr.slice(0, MAX_REPORT).map(labeler);
+  const rest = arr.length - shown.length;
+  return shown.join(" / ") + (rest > 0 ? ` 他${rest}件` : "");
+}
+function buildReport(buckets, hr, day) {
+  const h = hr || {};
+  const trim = (s) => (s || "").trim();
+  const lines = [`お疲れさまです。本日(${mdOf(day)})の進捗です。`];
+
+  // 全体感: 回答があれば反映。無ければ省略。
+  const feel = trim(h.feel);
+  if (feel) lines.push(`■ 全体感: ${feel}`);
+
+  // 完了: 回答優先。未入力なら done バケットから自動補完。
+  const doneNote = trim(h.doneNote);
+  if (doneNote) lines.push(`■ 完了: ${doneNote}`);
+  else if (buckets.done.length) lines.push(`■ 完了: ${repList(buckets.done, (t) => t.title)}`);
+
+  // 本日対応中（今日中バケット）: 進捗% を添える。回答(これからやること)は別行で優先表示。
+  if (buckets.today.length) {
+    const lbl = (t) => { const p = t.percent_done || 0; return p > 0 ? `${t.title}（${p}%）` : t.title; };
+    lines.push(`■ 本日対応中: ${repList(buckets.today, lbl)}`);
+  }
+
+  // これからやること: 回答があれば反映。未入力時は今日中バケットを既に上で出しているので、
+  // 今日中が空かつ回答も空のときだけ「今週中」から軽く補完する。
+  const nextNote = trim(h.nextNote);
+  if (nextNote) lines.push(`■ これから: ${nextNote}`);
+
+  // 今週中: 期限を添えて。
+  if (buckets.week.length) {
+    const lbl = (t) => { const due = dueISO(t); return due ? `${t.title}（〜${mdOf(due)}）` : t.title; };
+    lines.push(`■ 今週中に: ${repList(buckets.week, lbl)}`);
+  }
+
+  // 遅延: データがあれば必ず出す。超過日数を添え、見通し(lateNote)があれば「→」で付ける。
+  if (buckets.late.length) {
+    const lbl = (t) => { const due = dueISO(t); return due ? `${t.title}（${overdueDays(due, day)}日遅れ）` : t.title; };
+    let line = `■ 遅延: ${repList(buckets.late, lbl)}`;
+    const lateNote = trim(h.lateNote);
+    if (lateNote) line += ` → ${lateNote}`;
+    lines.push(line);
+  }
+
+  // 共有/相談事項: 回答があれば反映。
+  const shareNote = trim(h.shareNote);
+  if (shareNote) lines.push(`■ 共有事項: ${shareNote}`);
+
+  return lines.join("\n");
+}
+
 export async function render(root) {
   const { tasks, members, settings } = await load();
   const day = todayISO();
@@ -152,6 +224,17 @@ export async function render(root) {
   let buckets = bucketize(scoped, day, weekEnd, doneRange);
   let comment = "";
 
+  // 報告文ヒアリング回答（本人ごと・当日キー）を復元。壊れた JSON は無視。
+  let hearing = { feel: "", doneNote: "", nextNote: "", lateNote: "", shareNote: "" };
+  try { const raw = localStorage.getItem(hearingKey(uid, day)); if (raw) hearing = { ...hearing, ...JSON.parse(raw) }; } catch { /* noop */ }
+
+  // 表示モード: report（報告文・既定）/ raw（素データ）。
+  let mode = "report";
+  try { mode = localStorage.getItem(modeKey(uid)) || "report"; } catch { /* noop */ }
+  if (!["report", "raw"].includes(mode)) mode = "report";
+
+  const hasLate = buckets.late.length > 0;
+
   const targetOpts = [
     `<option value="self"${target === "self" ? " selected" : ""}>自分${me ? `（${esc(me.name || me.username)}）` : ""}</option>`,
     `<option value="all"${target === "all" ? " selected" : ""}>全員</option>`,
@@ -160,6 +243,9 @@ export async function render(root) {
 
   const rangeOpts = [["today", "今日完了"], ["week", "今週完了"], ["all", "全部"]]
     .map(([v, l]) => `<option value="${v}"${doneRange === v ? " selected" : ""}>${l}</option>`).join("");
+
+  const feelOpts = FEEL_OPTS
+    .map(([v, l]) => `<option value="${esc(v)}"${hearing.feel === v ? " selected" : ""}>${esc(l)}</option>`).join("");
 
   root.innerHTML = `
     <h1 class="vtitle">報告 <small>${day}</small></h1>
@@ -175,13 +261,34 @@ export async function render(root) {
     <div class="rp-grid">
       <div class="rp-buckets" id="rp-buckets"></div>
       <div class="rp-copy card">
+        <div class="rp-hear">
+          <div class="rp-hear-h">${icon("message", { size: 14 })} 状況ヒアリング<span class="rp-hear-sub">任意・空欄は自動補完/省略</span></div>
+          <label class="rp-h-fld"><span>全体の手応え</span>
+            <select id="rp-feel">${feelOpts}</select>
+          </label>
+          <label class="rp-h-fld"><span>今日の成果（やったこと）</span>
+            <input id="rp-done" type="text" placeholder="未入力なら「完了」から自動補完" value="${esc(hearing.doneNote)}">
+          </label>
+          <label class="rp-h-fld"><span>これからやること</span>
+            <input id="rp-next" type="text" placeholder="例: 結合テストを進めます" value="${esc(hearing.nextNote)}">
+          </label>
+          <label class="rp-h-fld${hasLate ? "" : " rp-hide"}" id="rp-late-fld"><span>遅延の理由・挽回見通し</span>
+            <input id="rp-late" type="text" placeholder="例: 仕様確認待ち。6/20までに挽回予定" value="${esc(hearing.lateNote)}">
+          </label>
+          <label class="rp-h-fld"><span>共有 / 相談事項</span>
+            <input id="rp-share" type="text" placeholder="例: ◯◯のレビューをお願いしたいです" value="${esc(hearing.shareNote)}">
+          </label>
+        </div>
         <div class="rp-copy-h">
-          <span class="rp-copy-t">${icon("file", { size: 14 })} 報告テキスト</span>
+          <div class="rp-mode" role="tablist">
+            <button type="button" class="rp-mode-b${mode === "report" ? " on" : ""}" data-mode="report">報告文</button>
+            <button type="button" class="rp-mode-b${mode === "raw" ? " on" : ""}" data-mode="raw">素データ</button>
+          </div>
           <button id="rp-copybtn" class="rp-copybtn">${icon("save", { size: 14 })} コピー</button>
         </div>
         <textarea id="rp-text" class="rp-text" readonly></textarea>
-        <label class="rp-comment-l">見通し / コメント（任意・末尾に「→」で付きます）</label>
-        <textarea id="rp-comment" class="rp-comment" placeholder="例: 遅延分は◯日までに完了予定"></textarea>
+        <label class="rp-comment-l${mode === "raw" ? "" : " rp-hide"}" id="rp-comment-l">見通し / コメント（素データの末尾に「→」で付きます）</label>
+        <textarea id="rp-comment" class="rp-comment${mode === "raw" ? "" : " rp-hide"}" placeholder="例: 遅延分は◯日までに完了予定"></textarea>
       </div>
     </div>
     <style>
@@ -222,6 +329,19 @@ export async function render(root) {
       .rp-comment-l{display:block;margin:12px 0 5px;font-size:11.5px;font-weight:600;color:${C.muted}}
       .rp-comment{width:100%;box-sizing:border-box;min-height:54px;resize:vertical;font:inherit;font-size:12.5px;
         border:1px solid ${C.line};border-radius:8px;background:${C.bg};color:${C.ink};padding:8px 12px}
+      .rp-hide{display:none!important}
+      .rp-hear{display:flex;flex-direction:column;gap:9px;padding-bottom:12px;margin-bottom:12px;border-bottom:1px solid ${C.line}}
+      .rp-hear-h{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;color:${C.ink}}
+      .rp-hear-h .ic{color:${C.muted}}
+      .rp-hear-sub{margin-left:auto;font-size:10.5px;font-weight:600;color:${C.muted}}
+      .rp-h-fld{display:flex;flex-direction:column;gap:4px}
+      .rp-h-fld>span{font-size:11px;font-weight:600;color:${C.muted}}
+      .rp-h-fld select,.rp-h-fld input{width:100%;box-sizing:border-box;font:inherit;font-size:12.5px;padding:6px 9px;
+        border:1px solid ${C.line};border-radius:7px;background:${C.bg};color:${C.ink}}
+      .rp-mode{flex:1;display:inline-flex;gap:0;border:1px solid ${C.line};border-radius:8px;overflow:hidden}
+      .rp-mode-b{font:inherit;font-size:12px;font-weight:600;border:0;background:${C.bg};color:${C.muted};padding:5px 12px;cursor:pointer}
+      .rp-mode-b+.rp-mode-b{border-left:1px solid ${C.line}}
+      .rp-mode-b.on{background:${C.track};color:${C.ink};font-weight:700}
     </style>`;
 
   const bucketsEl = root.querySelector("#rp-buckets");
@@ -253,12 +373,46 @@ export async function render(root) {
     });
   }
 
+  // 表示テキスト: report=報告文ジェネレーター / raw=従来の素データ列挙。
   function paintText() {
-    textEl.value = buildText(buckets, targetName, day, comment);
+    textEl.value = mode === "raw"
+      ? buildText(buckets, targetName, day, comment)
+      : buildReport(buckets, hearing, day);
+  }
+
+  // ヒアリング回答を localStorage（本人ごと・当日キー）へ保存。
+  function saveHearing() {
+    try { localStorage.setItem(hearingKey(uid, day), JSON.stringify(hearing)); } catch { /* noop */ }
   }
 
   paintBuckets();
   paintText();
+
+  // ヒアリング入力 → hearing 更新 → 即再生成＋保存（再集計不要のためその場更新）。
+  const bindHear = (sel, field) => {
+    const el = root.querySelector(sel);
+    if (!el) return;
+    const ev = el.tagName === "SELECT" ? "onchange" : "oninput";
+    el[ev] = (e) => { hearing[field] = e.target.value; saveHearing(); paintText(); };
+  };
+  bindHear("#rp-feel", "feel");
+  bindHear("#rp-done", "doneNote");
+  bindHear("#rp-next", "nextNote");
+  bindHear("#rp-late", "lateNote");
+  bindHear("#rp-share", "shareNote");
+
+  // モード切替（報告文 / 素データ）。コメント欄は素データ時のみ表示。
+  root.querySelectorAll(".rp-mode-b[data-mode]").forEach((btn) => {
+    btn.onclick = () => {
+      mode = btn.dataset.mode;
+      try { localStorage.setItem(modeKey(uid), mode); } catch { /* noop */ }
+      root.querySelectorAll(".rp-mode-b").forEach((b) => b.classList.toggle("on", b.dataset.mode === mode));
+      const cl = root.querySelector("#rp-comment-l"), cm = root.querySelector("#rp-comment");
+      cl.classList.toggle("rp-hide", mode !== "raw");
+      cm.classList.toggle("rp-hide", mode !== "raw");
+      paintText();
+    };
+  });
 
   // 対象変更 → 再描画（render 全体を呼ぶと localStorage 反映＋再集計が最も簡単で副作用も少ない）。
   root.querySelector("#rp-target").onchange = (e) => {
