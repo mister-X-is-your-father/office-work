@@ -4,7 +4,7 @@
 import { load, invalidate, isAiUser } from "../lib/store.js";
 import { savePresets } from "../lib/exec.js";
 import { updateTask, deleteTask, addAssignee, removeAssignee, addTaskLabel, removeTaskLabel, createLabel, setTaskWaiting, createTaskInProject, addRelation, removeRelation, getTask } from "../lib/api.js";
-import { PRIO, prioBucket, kindOf, isReviewTask, categoryLabels, categoryColor, REVIEW_LABEL, WAITING_LABEL, statusOf, STATUS } from "../lib/kinds.js";
+import { PRIO, prioBucket, kindOf, kindRank, isReviewTask, categoryLabels, categoryColor, REVIEW_LABEL, WAITING_LABEL, statusOf, STATUS } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 import { shiftISO, buildTaskTree } from "../lib/capacity.js";
 import { openTaskForm, ensureStyle as ensureFormStyle } from "./taskform.js";
@@ -43,7 +43,7 @@ function loadView(uid) {
     if (!raw) return { ...def };                       // 初回のみ既定（期限）
     const v = { ...def, ...raw };
     if (!Array.isArray(v.sorts)) v.sorts = [];          // 壊れてる時だけ空に（空配列=意図的な「条件なし」は保持）
-    // 廃止した WS/プロジェクト軸（ws/proj）を保存済みソートから除去（参照しても AXES に無いので壊れないが死にチップを残さない）。
+    // AXES に存在しない軸（廃止した ws 軸など）を保存済みソートから除去（死にチップを残さない）。
     v.sorts = v.sorts.filter((s) => s && AXES[s.key]);
     if (raw.doneMode === undefined) { v.doneMode = raw.hideDone === false ? "show" : "hide"; delete v.hideDone; } // 旧 hideDone(bool) からの移行
     return v;
@@ -79,6 +79,8 @@ const AXES = {
   prio:    { label: "重要度",    cmp: (a, b) => a.prio - b.prio, dir: -1 },
   cat:     { label: "分類",      cmp: (a, b) => ((a.cat && a.cat.title) || "～").localeCompare((b.cat && b.cat.title) || "～", "ja"), dir: 1 },
   who:     { label: "担当",      cmp: (a, b) => ((a.who && (a.who.name || a.who.username)) || "～").localeCompare((b.who && (b.who.name || b.who.username)) || "～", "ja"), dir: 1 },
+  proj:    { label: "プロジェクト", cmp: (a, b) => ((a.parent && a.parent.title) || "～").localeCompare((b.parent && b.parent.title) || "～", "ja"), dir: 1 },
+  kind:    { label: "種別",      cmp: (a, b) => kindRank(kindOf(a.t)) - kindRank(kindOf(b.t)), dir: 1 },
   state:   { label: "ステータス",      cmp: (a, b) => stateRank(a) - stateRank(b), dir: 1 },
   pct:     { label: "進捗",      cmp: (a, b) => a.pct - b.pct, dir: -1 },
   est:     { label: "見積",      cmp: (a, b) => a.est - b.est, dir: -1 },
@@ -1139,8 +1141,8 @@ async function reparent(childId, oldParentId, newParentId, rerender) {
 }
 
 const cols = () => [
-  { k: null, label: "プロジェクト" },
-  { k: "title", label: "タスク" }, { k: "who", label: "担当" }, { k: null, label: "種別" },
+  { k: "proj", label: "プロジェクト" },
+  { k: "title", label: "タスク" }, { k: "who", label: "担当" }, { k: "kind", label: "種別" },
   { k: "cat", label: "分類" }, { k: "prio", label: "重要度" }, { k: "due", label: "期限" },
   { k: "est", label: "見積" }, { k: "pct", label: "進捗" }, { k: "state", label: "ステータス" },
 ];
