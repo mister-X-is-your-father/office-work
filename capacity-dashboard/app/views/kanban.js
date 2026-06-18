@@ -1,95 +1,231 @@
-// かんばん（mock59 相当・実データ）。Vikunja 0.24 のプロジェクトビュー＋バケットをそのまま使う。
-// 列=バケット（追加/名前変更/空なら削除）、カード=タスク（ドラッグで列移動・クリックで編集）。
+// かんばん（再設計）。「仕事の状況が一目でわかる道具」＝(1)期限がヤバいタスク (2)案件ごとの進み具合 を即答する。
+// 旧式（Vikunja bucket 依存・単一WS固定）をやめ、全タスクをフロントで「ステータス軸」にグルーピングして描画する。
+// データは壊さない＝bucket 系 API（getViewTasks/createBucket/moveTaskToBucket 等）はもう呼ばない（呼ばないだけ）。
 import { load, invalidate, isAiUser } from "../lib/store.js";
-import { getProjectDetail, getViewTasks, createBucket, renameBucket, deleteBucket, moveTaskToBucket } from "../lib/api.js";
-import { PRIO, prioBucket } from "../lib/kinds.js";
+import { getTasks, updateTask, getTask, setTaskWaiting, createTaskInProject, createProject } from "../lib/api.js";
+import { PRIO, prioBucket, STATUS, statusOf } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
+import { shiftISO } from "../lib/capacity.js";
+import { taskMatches, next7End } from "../lib/smartlist.js";
+import { icon } from "../lib/icons.js";
 import { openTaskForm } from "./taskform.js";
+import * as history from "../lib/history.js";
 
-const WS_KEY = "ts.kanban.ws";
-let _root, _pid, _vid;
+history.initHistoryHotkeys(); // Ctrl/Cmd+Z=取消・Ctrl+Y/Ctrl+Shift+Z=やり直し
+
+const INBOX_WS = "インボックス"; // 列内＋追加の投入先（quickadd.js / taskform.js と同名）
+
+// ── ローカル設定（本人ごと・スキーマ変更なし）──
+const SWIM_KEY = "ts.kanban.swim";     // 案件スイムレーン ON/OFF（2軸グリッド）
+const PRESET_KEY = "ts.kanban.preset"; // 絞り込みプリセット（既定=今週）
+const STATUS_ORDER = ["todo", "doing", "waiting", "done"];
+
+// 絞り込みプリセット（期限重視）。filter は smartlist.taskMatches に渡す形に正確に合わせる。
+// 完了タスクは「完了列には出すが、既定では件数を絞る」ため status は触らず due 軸だけで絞る方針
+// （完了列の表示制御は filterDoneFor で別途行う）。
+const PRESETS = [
+  { key: "all",     label: "すべて",   filter: {} },
+  { key: "today",   label: "今日",     filter: { due: "today" } },
+  { key: "week",    label: "今週",     filter: { due: "next7" } },
+  { key: "overdue", label: "期限切れ", filter: { due: "overdue", status: "undone" } },
+  { key: "inbox",   label: "未整理",   filter: { unsorted: true, status: "undone" } },
+];
+const DEFAULT_PRESET = "week";
+
+// WIP（進行中の詰まり）警告のしきい値（妥当な既定）。報告: 件数>8 または 合計見積>24h で ⚠。
+const WIP_COUNT = 8;
+const WIP_HOURS = 24;
+// 停滞しきい値（updated からの経過日数。状態遷移ログが無いので updated 基準で代用）。報告: 既定3日。
+const STALE_DAYS = 3;
+
+let _root;
+let _today = "";
 
 export async function render(root) {
   _root = root;
-  const { projects, templateProject, members } = await load();
-  const wsList = (projects || []).filter((p) => !templateProject || p.id !== templateProject.id);
-  if (!wsList.length) { root.innerHTML = `<h1 class="vtitle">かんばん</h1><div class="card"><div class="loading">ワークスペースがありません</div></div>`; return; }
-  let saved = null; try { saved = +localStorage.getItem(WS_KEY) || null; } catch { /* noop */ }
-  _pid = wsList.some((p) => p.id === saved) ? saved : wsList[0].id;
+  _today = todayISO();
+  const { members } = await load();
+  let tasks = [];
+  try { tasks = (await getTasks()) || []; } catch (e) { tasks = []; root.innerHTML = errHtml(e); return; }
 
-  const detail = await getProjectDetail(_pid);
-  const kanban = (detail.views || []).find((v) => v.view_kind === "kanban");
-  if (!kanban) { root.innerHTML = `<h1 class="vtitle">かんばん</h1><div class="card"><div class="loading">このワークスペースにかんばんビューがありません</div></div>`; return; }
-  _vid = kanban.id;
-  const buckets = await getViewTasks(_pid, _vid) || [];
   const memberIdx = new Map((members || []).map((m, i) => [m.id, i]));
-  const today = todayISO();
+  const preset = loadPreset();
+  const swim = loadSwim();
 
-  const wsOpts = wsList.map((p) => `<option value="${p.id}"${p.id === _pid ? " selected" : ""}>${esc(p.title)}</option>`).join("");
-  const bucketList = buckets.map((b) => ({ id: b.id, title: b.title }));
-  const colHtml = (b) => {
-    const tasks = (b.tasks || []);
-    const cards = tasks.map((t) => cardHtml(t, memberIdx, today, b.id, bucketList)).join("");
-    return `<div class="kb-col" data-bucket="${b.id}">
-      <div class="kb-colh">
-        <span class="kb-colt" data-rename="${b.id}" role="button" tabindex="0" title="クリックで名前変更">${esc(b.title)}</span>
-        <span class="kb-cnt">${tasks.length}</span>
-        ${tasks.length === 0 ? `<button class="kb-del" data-del="${b.id}" title="空の列を削除" aria-label="${esc(b.title)} の列を削除">×</button>` : ""}
-      </div>
-      <div class="kb-cards" data-bucket="${b.id}">${cards}</div>
-    </div>`;
+  // 絞り込み（完了は status を触らず別制御）。preset.filter を taskMatches へ。
+  const ctx = { today: _today, next7: next7End(_today) };
+  const presetDef = PRESETS.find((p) => p.key === preset) || PRESETS[0];
+  const filtered = (tasks || []).filter((t) => taskMatches(t, presetDef.filter, ctx));
+
+  // 完了列の絞り: 既定（すべて/今日/今週/未整理）では「今日完了 or 直近7日で更新」のみ。
+  // 「期限切れ」プリセットは完了を出さない（status:undone で既に除外済み）。多すぎる完了で画面が埋まらないように。
+  const showAllDone = preset === "all";
+  const doneVisible = (t) => {
+    if (!t.done) return true;
+    if (showAllDone) return true;
+    const u = (t.updated && !t.updated.startsWith("0001")) ? t.updated.slice(0, 10) : "";
+    const doneToday = t.done_at && !t.done_at.startsWith("0001") && t.done_at.slice(0, 10) === _today;
+    return doneToday || (u && u >= shiftISO(_today, -7));
   };
+  const visible = filtered.filter(doneVisible);
 
   root.innerHTML = `
     <style>${css()}</style>
-    <h1 class="vtitle">かんばん <small>ドラッグ／「列▾」で移動 ・ クリックで編集</small></h1>
-    <div class="kb-tools">
-      <select id="kb-ws" class="kb-sel">${wsOpts}</select>
-      <input id="kb-newcol" class="kb-newcol" placeholder="＋ 列を追加（名前を入れて Enter）">
-    </div>
-    <div class="kb-board">${buckets.map(colHtml).join("")}</div>`;
+    <h1 class="vtitle">かんばん <small>状況が一目でわかる ・ ドラッグで列移動 ・ クリックで編集</small></h1>
+    ${toolbarHtml(preset, swim)}
+    <div class="kb-wrap">${swim ? swimHtml(visible, memberIdx) : boardHtml(visible, memberIdx)}</div>`;
 
-  root.querySelector("#kb-ws").onchange = (e) => {
-    try { localStorage.setItem(WS_KEY, e.target.value); } catch { /* noop */ }
-    render(root);
-  };
-  root.querySelector("#kb-newcol").onkeydown = async (e) => {
-    if (e.key !== "Enter") return;
-    const title = e.target.value.trim();
-    if (!title) return;
-    await createBucket(_pid, _vid, title);
-    render(root);
-  };
-  root.querySelectorAll("[data-del]").forEach((b) => {
-    b.onclick = async () => {
-      if (!confirm("この空の列を削除しますか？")) return;
-      await deleteBucket(_pid, _vid, +b.dataset.del); render(root);
-    };
+  wireToolbar(root);
+  wireCards(root, tasks);
+  wireColumns(root, tasks);
+  wireAdd(root);
+}
+
+// ── ツールバー（プリセットタブ＋スイムレーントグル）──
+function toolbarHtml(preset, swim) {
+  const tabs = PRESETS.map((p) =>
+    `<button class="kb-tab${p.key === preset ? " on" : ""}" data-preset="${p.key}">${esc(p.label)}</button>`).join("");
+  return `<div class="kb-tools">
+    <div class="kb-tabs" role="tablist">${tabs}</div>
+    <button class="kb-swim${swim ? " on" : ""}" data-swim title="案件（親タスク）ごとに行を分けて進み具合を見る">
+      ${icon("folders", { size: 14 })}<span>案件レーン</span>
+    </button>
+  </div>`;
+}
+
+function wireToolbar(root) {
+  root.querySelectorAll("[data-preset]").forEach((b) => {
+    b.onclick = () => { savePreset(b.dataset.preset); render(_root); };
   });
-  root.querySelectorAll("[data-rename]").forEach((el) => {
-    const startRename = () => {
-      const cur = el.textContent;
-      const input = document.createElement("input");
-      input.className = "kb-renin";
-      input.value = cur;
-      el.replaceWith(input);
-      input.focus(); input.select();
-      const commit = async () => {
-        const v = input.value.trim();
-        if (v && v !== cur) await renameBucket(_pid, _vid, +el.dataset.rename, v);
-        render(_root);
-      };
-      input.onkeydown = (ev) => { if (ev.key === "Enter") commit(); if (ev.key === "Escape") render(_root); };
-      input.onblur = commit;
-    };
-    el.onclick = startRename;
-    el.onkeydown = (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); startRename(); } };
+  const sw = root.querySelector("[data-swim]");
+  if (sw) sw.onclick = () => { saveSwim(!loadSwim()); render(_root); };
+}
+
+// ── 通常ボード（ステータス列のみ）──
+function boardHtml(tasks, memberIdx) {
+  const cols = STATUS_ORDER.map((key) => {
+    const list = sortByDue(tasks.filter((t) => statusOf(t) === key));
+    return columnHtml(key, list, memberIdx, null);
   });
+  return `<div class="kb-board">${cols.join("")}</div>`;
+}
+
+// ── 案件スイムレーン（2軸グリッド: 行=親タスク × 列=ステータス）──
+// 親なしは「その他」行。各セルは期限昇順。行は「ヤバい度」（期限切れ/今日を含む行を上）で並べる。
+function swimHtml(tasks, memberIdx) {
+  // 親（案件）でグルーピング。親 = related_tasks.parenttask[0]（title/id を持つ）。
+  const lanes = new Map(); // key(parentId|"_none") -> { id, title, tasks:[] }
+  for (const t of tasks) {
+    const p = (((t.related_tasks || {}).parenttask) || [])[0] || null;
+    const key = p ? String(p.id) : "_none";
+    if (!lanes.has(key)) lanes.set(key, { id: p ? p.id : 0, title: p ? p.title : "その他（案件なし）", tasks: [] });
+    lanes.get(key).tasks.push(t);
+  }
+  // 行の並び: ヤバいタスク（期限切れ/今日）を含む案件を上へ。次に未完了件数の多い順。「その他」は末尾。
+  const urgency = (lane) => lane.tasks.reduce((s, t) => {
+    const d = dueOf(t);
+    if (!t.done && d && d < _today) return s + 100;
+    if (!t.done && d === _today) return s + 10;
+    return s;
+  }, 0);
+  const rows = [...lanes.values()].sort((a, b) => {
+    if (a.id === 0) return 1; if (b.id === 0) return -1; // その他は末尾
+    const u = urgency(b) - urgency(a); if (u) return u;
+    return b.tasks.length - a.tasks.length;
+  });
+
+  const headerCells = STATUS_ORDER.map((k) => `<div class="kb-shead">${esc(STATUS[k].label)}</div>`).join("");
+  const laneRows = rows.map((lane) => {
+    const cells = STATUS_ORDER.map((key) => {
+      const list = sortByDue(lane.tasks.filter((t) => statusOf(t) === key));
+      const cards = list.map((t) => cardHtml(t, memberIdx)).join("");
+      return `<div class="kb-scell kb-cards" data-status="${key}" data-lane="${lane.id}">${cards}</div>`;
+    }).join("");
+    const cnt = lane.tasks.filter((t) => !t.done).length;
+    const laneLabel = `<div class="kb-lanehd" title="${esc(lane.title)}">
+      ${icon("folder", { size: 13 })}<span class="kb-lanet">${esc(lane.title)}</span>
+      <span class="kb-lanecnt">${cnt}</span>
+    </div>`;
+    return `<div class="kb-lanegrid">${laneLabel}${cells}</div>`;
+  });
+  return `<div class="kb-swimboard">
+    <div class="kb-swimhd"><div class="kb-shead-corner"></div>${headerCells}</div>
+    ${laneRows.join("")}
+  </div>`;
+}
+
+// ── 1ステータス列（通常ボード用。ヘッダにキャパ集計＋WIP警告、フッタに＋追加）──
+function columnHtml(key, list, memberIdx, _laneId) {
+  const undone = list.filter((t) => !t.done);
+  const totH = undone.reduce((s, t) => s + (t.time_estimate || 0) / 3600, 0);
+  const warn = key === "doing" && (undone.length > WIP_COUNT || totH > WIP_HOURS);
+  const cards = list.map((t) => cardHtml(t, memberIdx)).join("");
+  return `<div class="kb-col" data-status="${key}">
+    <div class="kb-colh${warn ? " warn" : ""}">
+      <span class="kb-colt">${esc(STATUS[key].label)}</span>
+      <span class="kb-cnt">${list.length}</span>
+      ${totH > 0 ? `<span class="kb-sum">${fmtH(totH)}</span>` : ""}
+      ${warn ? `<span class="kb-wip" title="進行中が詰まっています（WIP過多）">${icon("alertTriangle", { size: 13 })}</span>` : ""}
+    </div>
+    <div class="kb-cards" data-status="${key}">${cards}</div>
+    <div class="kb-add" data-status="${key}">
+      <button class="kb-addbtn" data-addbtn="${key}" title="この列にタスクを追加">${icon("inbox", { size: 13 })} 追加</button>
+    </div>
+  </div>`;
+}
+
+// ── カード（本機能の肝: 期限ヒート / 停滞 / 案件 / 担当 / 見積）──
+function cardHtml(t, memberIdx) {
+  const due = dueOf(t);
+  const heat = heatOf(due, t.done);          // overdue|today|week|""
+  const pb = prioBucket(t.priority);
+  const est = t.time_estimate ? fmtH(t.time_estimate / 3600) : null;
+  const who = (t.assignees || []).find((a) => !isAiUser(a)) || null;
+  const ava = who
+    ? `<span class="kb-ava" style="background:${member_color(memberIdx.get(who.id) ?? 0)}" title="${esc(who.name || who.username || "")}">${esc((who.name || who.username || "?")[0])}</span>`
+    : "";
+  const parent = (((t.related_tasks || {}).parenttask) || [])[0] || null;
+  const projBadge = parent
+    ? `<span class="kb-proj" style="border-color:${projColor(parent.id)};color:${projColor(parent.id)}" title="案件: ${esc(parent.title)}">${esc(parent.title)}</span>`
+    : "";
+
+  // 期限バッジ（SVG＋文字。絵文字は使わない）。期限なしは無印。
+  const dueBadge = due
+    ? `<span class="kb-due heat-${heat || "none"}">${icon("calendar", { size: 11 })}${dueLabel(due)}</span>`
+    : "";
+
+  // 停滞バッジ: updated からの経過日数（状態遷移ログが無いので updated で代用）。
+  const stale = staleDays(t);
+  const isWaiting = statusOf(t) === "waiting";
+  let staleBadge = "";
+  if (!t.done && stale != null) {
+    if (isWaiting) {
+      staleBadge = `<span class="kb-stale wait" title="連絡待ちの経過日数">${icon("hourglass", { size: 11 })}${stale}日待ち</span>`;
+    } else if (stale >= STALE_DAYS) {
+      staleBadge = `<span class="kb-stale" title="${STALE_DAYS}日以上更新がありません（停滞）">${icon("alertTriangle", { size: 11 })}停滞${stale}日</span>`;
+    }
+  }
+
+  return `<div class="kb-card${t.done ? " done" : ""}${heat ? " h-" + heat : ""}" draggable="true" data-id="${t.id}" tabindex="0" role="button" aria-label="${esc(t.title)} を編集">
+    <div class="kb-ct"><i class="kb-prio" style="background:${pb ? PRIO[pb].c : "#c6cdd6"}"></i>${esc(t.title)}</div>
+    ${projBadge ? `<div class="kb-cr">${projBadge}</div>` : ""}
+    <div class="kb-cm">
+      ${ava}
+      ${dueBadge}
+      ${staleBadge}
+      ${est ? `<span class="kb-est">${icon("timer", { size: 11 })}${est}</span>` : ""}
+      ${t.done ? `<span class="kb-donetag">${icon("check", { size: 11 })}完了</span>` : ""}
+    </div>
+  </div>`;
+}
+
+// ── カードの操作（クリックで編集・ドラッグ開始）──
+function wireCards(root, tasks) {
   root.querySelectorAll(".kb-card").forEach((card) => {
     const edit = () => openTaskForm({ taskId: +card.dataset.id, onSaved: () => { invalidate(); render(_root); } });
     card.onclick = edit;
     card.addEventListener("keydown", (e) => {
-      if (e.target !== card) return; // 内部のコントロール由来は無視
+      if (e.target !== card) return;
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); edit(); }
     });
     card.addEventListener("dragstart", (e) => {
@@ -99,101 +235,249 @@ export async function render(root) {
     });
     card.addEventListener("dragend", () => card.classList.remove("kb-dragging"));
   });
-  // 列移動コントロール（ドラッグ以外の手段）: クリック編集と競合させない
-  root.querySelectorAll(".kb-move").forEach((sel) => {
-    sel.onclick = (e) => e.stopPropagation();
-    sel.onkeydown = (e) => e.stopPropagation();
-    sel.onchange = async (e) => {
-      e.stopPropagation();
-      const target = +sel.value;
-      const taskId = +sel.dataset.task;
-      if (!target || !taskId) return;
-      await moveTaskToBucket(_pid, _vid, target, taskId);
-      render(_root);
-    };
-  });
+}
+
+// ── 列（ドロップ先）: drop でステータス更新＋Undo/Redo（table.js の applyState と同じ副作用セット）──
+function wireColumns(root, tasks) {
   root.querySelectorAll(".kb-cards").forEach((col) => {
     col.addEventListener("dragover", (e) => { e.preventDefault(); col.classList.add("over"); });
     col.addEventListener("dragleave", () => col.classList.remove("over"));
     col.addEventListener("drop", async (e) => {
       e.preventDefault(); col.classList.remove("over");
       const taskId = +e.dataTransfer.getData("text/plain");
-      if (!taskId) return;
-      await moveTaskToBucket(_pid, _vid, +col.dataset.bucket, taskId);
-      render(_root);
+      const target = col.dataset.status;
+      if (!taskId || !target) return;
+      const t = (tasks || []).find((x) => x.id === taskId);
+      if (!t || statusOf(t) === target) return;
+      await moveStatus(t, target);
     });
   });
 }
 
-function cardHtml(t, memberIdx, today, curBucketId, bucketList) {
-  const who = (t.assignees || []).find((a) => !isAiUser(a)) || null; // AI担当(隠し要素)は出さない
-  const pb = prioBucket(t.priority);
-  const due = t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(0, 10) : null;
-  const overdue = due && due < today && !t.done;
-  const est = t.time_estimate ? fmtH(t.time_estimate / 3600) : null;
-  const ava = who ? `<span class="kb-ava" style="background:${member_color(memberIdx.get(who.id) ?? 0)}">${esc((who.name || who.username || "?")[0])}</span>` : "";
-  const others = (bucketList || []).filter((b) => b.id !== curBucketId);
-  const moveSel = others.length
-    ? `<select class="kb-move" data-task="${t.id}" title="別の列へ移動" aria-label="${esc(t.title)} を別の列へ移動">
-        <option value="" selected>列▾</option>
-        ${others.map((b) => `<option value="${b.id}">${esc(b.title)}</option>`).join("")}
-      </select>`
-    : "";
-  return `<div class="kb-card${t.done ? " done" : ""}" draggable="true" data-id="${t.id}" tabindex="0" role="button" aria-label="${esc(t.title)} を編集">
-    <div class="kb-ct"><i class="kb-prio" style="background:${pb ? PRIO[pb].c : "#c6cdd6"}"></i>${esc(t.title)}</div>
-    <div class="kb-cm">
-      ${ava}
-      ${due ? `<span class="kb-due${overdue ? " late" : ""}">${due.slice(5).replace("-", "/")}</span>` : ""}
-      ${est ? `<span class="kb-est">${est}</span>` : ""}
-      ${t.done ? `<span class="kb-donetag">完了</span>` : ""}
-      ${moveSel}
-    </div>
-  </div>`;
+// ステータス変更の単一経路（table.js:611-642 と同じ副作用セット）。before/after を history へ積む。
+// before/after = { done, percent_done, started_at, waiting }。applyState で適用（updateTask + setTaskWaiting）。
+async function moveStatus(t, key) {
+  const wasWaiting = statusOf(t) === "waiting";
+  const before = { done: !!t.done, percent_done: t.percent_done || 0, started_at: t.started_at || null, waiting: wasWaiting };
+  const after = stateFor(t, key);
+
+  const applyState = async (taskId, s) => {
+    await updateTask(taskId, { done: s.done, percent_done: s.percent_done, started_at: s.started_at });
+    let tt = null; try { tt = await getTask(taskId); } catch { tt = t; }
+    await setTaskWaiting(tt, !!s.waiting);
+  };
+
+  try {
+    await applyState(t.id, after);
+    history.push({
+      label: "ステータス変更",
+      undo: async () => { await applyState(t.id, before); rerender(); },
+      redo: async () => { await applyState(t.id, after); rerender(); },
+    });
+  } catch (e) {
+    alert("ステータス変更に失敗しました: " + (e && e.message ? e.message : ""));
+  }
+  rerender();
+}
+
+// status キー → {done, percent_done, started_at, waiting}（table.js stateOf と同義）。
+function stateFor(t, key) {
+  if (key === "waiting") {
+    return { done: false, percent_done: t.percent_done || 0, started_at: t.started_at || null, waiting: true };
+  }
+  const keepPct = (t.done || (t.percent_done || 0) >= 100) ? 0 : (t.percent_done || 0);
+  if (key === "done") return { done: true, percent_done: 100, started_at: t.started_at || null, waiting: false };
+  if (key === "doing") return { done: false, percent_done: keepPct, started_at: new Date().toISOString(), waiting: false };
+  return { done: false, percent_done: 0, started_at: null, waiting: false }; // todo
+}
+
+function rerender() { invalidate(); if (_root && _root.isConnected) render(_root); }
+
+// ── 列内「＋」インライン追加: input→Enter で createTaskInProject(inbox, {title})＋ステータス付与 ──
+function wireAdd(root) {
+  root.querySelectorAll("[data-addbtn]").forEach((btn) => {
+    btn.onclick = () => {
+      const key = btn.dataset.addbtn;
+      const box = btn.closest(".kb-add");
+      const input = document.createElement("input");
+      input.className = "kb-addin";
+      input.placeholder = "タスク名を入力して Enter";
+      box.replaceChildren(input);
+      input.focus();
+      const restore = () => { box.replaceChildren(makeAddBtn(key)); wireAdd(root); };
+      input.onkeydown = async (e) => {
+        if (e.key === "Escape") { restore(); return; }
+        if (e.key !== "Enter") return;
+        const title = input.value.trim();
+        if (!title) { restore(); return; }
+        input.disabled = true;
+        try {
+          const inbox = await ensureInbox();
+          const created = await createTaskInProject(inbox.id, { title });
+          // 作成後、その列のステータスを付与（todo は素のまま）。
+          if (key !== "todo") {
+            const after = stateFor(created, key);
+            await updateTask(created.id, { done: after.done, percent_done: after.percent_done, started_at: after.started_at });
+            if (after.waiting) await setTaskWaiting({ id: created.id, labels: [] }, true);
+          }
+          rerender();
+        } catch (err) {
+          alert("追加に失敗しました: " + (err && err.message ? err.message : ""));
+          restore();
+        }
+      };
+      input.onblur = () => setTimeout(restore, 120);
+    };
+  });
+}
+function makeAddBtn(key) {
+  const b = document.createElement("button");
+  b.className = "kb-addbtn"; b.dataset.addbtn = key; b.title = "この列にタスクを追加";
+  b.innerHTML = `${icon("inbox", { size: 13 })} 追加`;
+  return b;
+}
+
+// インボックスWS（無ければ作成）。quickadd.js / taskform.js の ensureInbox と同じ。
+let _inbox = null;
+async function ensureInbox() {
+  if (_inbox) return _inbox;
+  const { projects } = await load();
+  const found = (projects || []).find((p) => p.title === INBOX_WS);
+  if (found) { _inbox = found; return found; }
+  _inbox = await createProject(INBOX_WS);
+  invalidate();
+  return _inbox;
+}
+
+// ── 純ヘルパ ──
+function dueOf(t) { return (t.due_date && !t.due_date.startsWith("0001")) ? t.due_date.slice(0, 10) : ""; }
+// 期限ヒート: 過去=overdue(赤) / 今日=today(橙) / 7日内=week(黄) / それ以降=無色。完了は無色。
+function heatOf(due, done) {
+  if (!due || done) return "";
+  if (due < _today) return "overdue";
+  if (due === _today) return "today";
+  if (due <= shiftISO(_today, 7)) return "week";
+  return "";
+}
+// 期限ラベル: 期限切れ/今日/明日/曜日 or M/D。せっかちな上司に「いつまで」を即答。
+function dueLabel(due) {
+  if (due < _today) { const d = -daysBetween(_today, due); return `期限切れ${d > 0 ? d + "日" : ""}`; }
+  if (due === _today) return "今日";
+  if (due === shiftISO(_today, 1)) return "明日";
+  const diff = daysBetween(_today, due);
+  if (diff <= 6) return ["日", "月", "火", "水", "木", "金", "土"][new Date(due + "T00:00:00Z").getUTCDay()] + "曜";
+  return due.slice(5).replace("-", "/");
+}
+function daysBetween(a, b) { return Math.round((Date.parse(b + "T00:00:00Z") - Date.parse(a + "T00:00:00Z")) / 86400000); }
+// 停滞日数 = updated（最終更新）からの経過日数。updated 無しは null。
+function staleDays(t) {
+  const u = (t.updated && !t.updated.startsWith("0001")) ? t.updated.slice(0, 10) : "";
+  if (!u) return null;
+  const d = daysBetween(u, _today);
+  return d >= 0 ? d : 0;
+}
+// 列内ソート: 期限昇順（ヤバい順に上）、期限なしは末尾。完了列は完了日時の新しい順。
+function sortByDue(list) {
+  return [...list].sort((a, b) => {
+    const da = dueOf(a), db = dueOf(b);
+    if (da && db) return da < db ? -1 : da > db ? 1 : 0;
+    if (da) return -1;
+    if (db) return 1;
+    return 0;
+  });
+}
+// 案件バッジ色: 親IDをパレットに割り当て（kinds.categoryColor と同じ発想の固定パレット）。
+const PROJ_PAL = ["#3a86ff", "#2fa66b", "#b657d6", "#e5772d", "#0ea5e9", "#f5a623", "#ef476f", "#14b8a6"];
+function projColor(id) { return PROJ_PAL[(id || 0) % PROJ_PAL.length]; }
+
+// ── localStorage ──
+function loadPreset() { try { const v = localStorage.getItem(PRESET_KEY); return PRESETS.some((p) => p.key === v) ? v : DEFAULT_PRESET; } catch { return DEFAULT_PRESET; } }
+function savePreset(v) { try { localStorage.setItem(PRESET_KEY, v); } catch { /* noop */ } }
+function loadSwim() { try { return localStorage.getItem(SWIM_KEY) === "1"; } catch { return false; } }
+function saveSwim(on) { try { localStorage.setItem(SWIM_KEY, on ? "1" : "0"); } catch { /* noop */ } }
+
+function errHtml(e) {
+  return `<h1 class="vtitle">かんばん</h1><div class="card"><div class="loading">タスクの取得に失敗しました：${esc(e && e.message ? e.message : "")}</div></div>`;
 }
 
 function css() {
   return `
-  .kb-tools{display:flex;gap:10px;margin-bottom:14px;align-items:center}
-  .kb-sel{font:inherit;font-size:13px;padding:7px 10px;border:1px solid ${C.line};border-radius:9px;background:#fff}
-  .kb-newcol{font:inherit;font-size:12.5px;padding:7px 12px;border:1px dashed ${C.line};border-radius:9px;background:transparent;width:240px}
-  .kb-newcol:focus{outline:none;border-color:${C.fill};background:#fff}
+  .kb-tools{display:flex;gap:12px;margin-bottom:14px;align-items:center;flex-wrap:wrap}
+  .kb-tabs{display:flex;gap:4px;background:#f0f2f5;border:1px solid ${C.line};border-radius:10px;padding:3px}
+  .kb-tab{font:inherit;font-size:12.5px;padding:5px 12px;border:0;background:transparent;color:${C.muted};border-radius:7px;cursor:pointer;font-weight:600}
+  .kb-tab:hover{color:${C.ink}}
+  .kb-tab.on{background:#fff;color:${C.ink};box-shadow:0 1px 2px rgba(20,30,50,.08)}
+  .kb-swim{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:12.5px;font-weight:600;padding:6px 12px;border:1px solid ${C.line};border-radius:9px;background:#fff;color:${C.muted};cursor:pointer}
+  .kb-swim:hover{border-color:${C.fill};color:${C.fill}}
+  .kb-swim.on{background:${C.fill};border-color:${C.fill};color:#fff}
+
   .kb-board{display:flex;gap:12px;align-items:flex-start;overflow-x:auto;padding-bottom:10px}
-  .kb-col{flex:0 0 260px;background:#f0f2f5;border:1px solid ${C.line};border-radius:12px;padding:10px}
-  .kb-colh{display:flex;align-items:center;gap:7px;margin-bottom:8px;padding:0 2px}
-  .kb-colt{font-size:13px;font-weight:700;cursor:text}
-  .kb-cnt{font-size:11px;color:${C.muted};background:#fff;border:1px solid ${C.line};border-radius:10px;padding:1px 8px}
-  .kb-del{margin-left:auto;border:0;background:transparent;color:${C.muted};cursor:pointer;font-size:14px;line-height:1;padding:4px 8px;border-radius:6px}
-  .kb-del:hover{color:${C.over};background:#fff}
-  .kb-renin{font:inherit;font-size:13px;font-weight:700;border:1px solid ${C.fill};border-radius:6px;padding:2px 6px;width:140px}
-  .kb-cards{display:flex;flex-direction:column;gap:8px;min-height:60px;border-radius:8px}
-  .kb-cards.over{background:#e8f1ff}
-  .kb-card{background:#fff;border:1px solid ${C.line};border-radius:10px;padding:10px 12px;cursor:grab;box-shadow:0 1px 2px rgba(20,30,50,.06)}
+  .kb-col{flex:0 0 270px;background:#f0f2f5;border:1px solid ${C.line};border-radius:12px;padding:10px;display:flex;flex-direction:column}
+  .kb-colh{display:flex;align-items:center;gap:7px;margin-bottom:9px;padding:0 2px}
+  .kb-colh.warn{color:${C.over}}
+  .kb-colt{font-size:13px;font-weight:700}
+  .kb-cnt{font-size:11px;color:${C.muted};background:#fff;border:1px solid ${C.line};border-radius:10px;padding:1px 8px;font-variant-numeric:tabular-nums}
+  .kb-sum{font-size:11px;color:${C.muted};font-variant-numeric:tabular-nums}
+  .kb-colh.warn .kb-sum{color:${C.over};font-weight:700}
+  .kb-wip{margin-left:auto;color:${C.over};display:inline-flex;align-items:center}
+  .kb-cards{display:flex;flex-direction:column;gap:8px;min-height:48px;border-radius:8px;padding:2px}
+  .kb-cards.over{background:#e8f1ff;outline:2px dashed ${C.fill};outline-offset:-2px}
+  .kb-add{margin-top:8px}
+  .kb-addbtn{width:100%;font:inherit;font-size:12px;color:${C.muted};border:1px dashed ${C.line};border-radius:9px;background:transparent;padding:6px 8px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:5px}
+  .kb-addbtn:hover{border-color:${C.fill};color:${C.fill};background:#fff}
+  .kb-addin{width:100%;font:inherit;font-size:12.5px;padding:7px 10px;border:1px solid ${C.fill};border-radius:9px;background:#fff;box-sizing:border-box}
+  .kb-addin:focus{outline:none}
+
+  .kb-card{background:#fff;border:1px solid ${C.line};border-radius:10px;padding:9px 11px;cursor:grab;box-shadow:0 1px 2px rgba(20,30,50,.06);border-left:3px solid transparent}
   .kb-card:hover{border-color:${C.fill}}
   .kb-card:focus-visible{outline:2px solid ${C.fill};outline-offset:2px}
-  .kb-colt:focus-visible{outline:2px solid ${C.fill};outline-offset:2px;border-radius:4px}
-  .kb-move{margin-left:6px;font:inherit;font-size:11px;color:${C.muted};border:1px solid ${C.line};border-radius:7px;background:#f7f8fa;padding:1px 4px;cursor:pointer;max-width:96px}
-  .kb-move:hover{border-color:${C.fill};color:${C.fill}}
-  .kb-move:focus-visible{outline:2px solid ${C.fill};outline-offset:1px}
   .kb-card.kb-dragging{opacity:.5}
-  .kb-card.done{opacity:.55}
+  .kb-card.done{opacity:.6}
+  .kb-card.h-overdue{border-left-color:${C.over}}
+  .kb-card.h-today{border-left-color:${C.amber}}
+  .kb-card.h-week{border-left-color:#e8c14a}
   .kb-ct{font-size:12.5px;font-weight:600;line-height:1.35;display:flex;gap:6px;align-items:baseline}
   .kb-prio{width:8px;height:8px;border-radius:50%;flex:none;display:inline-block;transform:translateY(-1px)}
-  .kb-cm{display:flex;gap:8px;align-items:center;margin-top:7px;min-height:18px}
-  .kb-ava{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:10px;font-weight:700}
-  .kb-due{font-size:11px;color:${C.muted};font-variant-numeric:tabular-nums}
-  .kb-due.late{color:${C.over};font-weight:700}
-  .kb-est{font-size:11px;color:${C.muted};margin-left:auto;font-variant-numeric:tabular-nums}
-  .kb-donetag{font-size:10px;color:${C.free};border:1px solid ${C.free};border-radius:8px;padding:0 6px}
+  .kb-cr{margin-top:6px}
+  .kb-proj{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px;font-weight:600;border:1px solid;border-radius:7px;padding:0 6px;vertical-align:middle}
+  .kb-cm{display:flex;gap:7px;align-items:center;margin-top:8px;min-height:18px;flex-wrap:wrap}
+  .kb-ava{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:10px;font-weight:700;flex:none}
+  .kb-due{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:${C.muted};font-weight:600;font-variant-numeric:tabular-nums;border-radius:7px;padding:0 6px}
+  .kb-due.heat-overdue{color:#fff;background:${C.over}}
+  .kb-due.heat-today{color:#fff;background:${C.amber}}
+  .kb-due.heat-week{color:#7a5d00;background:#fbe6a8}
+  .kb-due.heat-none{color:${C.muted}}
+  .kb-stale{display:inline-flex;align-items:center;gap:3px;font-size:10.5px;font-weight:700;color:${C.over};border:1px solid ${C.over};border-radius:7px;padding:0 5px}
+  .kb-stale.wait{color:${C.amber};border-color:${C.amber}}
+  .kb-est{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:${C.muted};margin-left:auto;font-variant-numeric:tabular-nums}
+  .kb-donetag{display:inline-flex;align-items:center;gap:3px;font-size:10px;color:${C.free};border:1px solid ${C.free};border-radius:8px;padding:0 6px}
 
-  /* ---- ダークモード上書き（ライト値は上で維持。ここでハードコード淡色のみ反転） ---- */
-  html[data-theme="dark"] .kb-sel{background:var(--card)}
-  html[data-theme="dark"] .kb-newcol:focus{background:var(--card)}
+  /* ── 案件スイムレーン（2軸グリッド: 行=案件 × 列=ステータス）── */
+  .kb-swimboard{overflow-x:auto;padding-bottom:10px}
+  .kb-swimhd{display:grid;grid-template-columns:190px repeat(4,minmax(210px,1fr));gap:10px;padding:2px 0 6px}
+  .kb-shead{font-size:12px;font-weight:700;color:${C.muted};padding:5px 6px;background:#f0f2f5;border:1px solid ${C.line};border-radius:8px;text-align:center}
+  .kb-shead-corner{min-width:190px}
+  .kb-lanegrid{display:grid;grid-template-columns:190px repeat(4,minmax(210px,1fr));gap:10px;margin-bottom:10px;align-items:start}
+  .kb-lanehd{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;color:${C.ink};padding:8px 6px;background:#f0f2f5;border:1px solid ${C.line};border-radius:10px;align-self:stretch}
+  .kb-lanet{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .kb-lanecnt{margin-left:auto;font-size:10.5px;color:${C.muted};background:#fff;border:1px solid ${C.line};border-radius:9px;padding:0 7px;flex:none}
+  .kb-scell{background:#f6f7f9;border:1px solid ${C.line};border-radius:10px;padding:6px;min-height:44px}
+
+  /* ---- ダークモード上書き（淡色のみ反転） ---- */
+  html[data-theme="dark"] .kb-tabs{background:var(--track)}
+  html[data-theme="dark"] .kb-tab.on{background:var(--card)}
+  html[data-theme="dark"] .kb-swim{background:var(--card);border-color:var(--line)}
+  html[data-theme="dark"] .kb-swim.on{background:${C.fill};border-color:${C.fill};color:#fff}
   html[data-theme="dark"] .kb-col{background:var(--track)}
   html[data-theme="dark"] .kb-cnt{background:var(--card);border-color:var(--line)}
-  html[data-theme="dark"] .kb-del:hover{background:rgba(255,255,255,.06)}
   html[data-theme="dark"] .kb-cards.over{background:rgba(255,255,255,.06)}
+  html[data-theme="dark"] .kb-addbtn:hover{background:var(--card)}
+  html[data-theme="dark"] .kb-addin{background:var(--card)}
   html[data-theme="dark"] .kb-card{background:var(--card);border-color:var(--line);box-shadow:0 1px 2px rgba(0,0,0,.35)}
   html[data-theme="dark"] .kb-card:hover{border-color:${C.fill}}
-  html[data-theme="dark"] .kb-move{background:rgba(255,255,255,.05);border-color:var(--line)}
-  html[data-theme="dark"] .kb-move:hover{border-color:${C.fill}}`;
+  html[data-theme="dark"] .kb-shead{background:var(--track);border-color:var(--line)}
+  html[data-theme="dark"] .kb-lanehd{background:var(--track);border-color:var(--line)}
+  html[data-theme="dark"] .kb-lanecnt{background:var(--card);border-color:var(--line)}
+  html[data-theme="dark"] .kb-scell{background:var(--track);border-color:var(--line)}
+  html[data-theme="dark"] .kb-due.heat-week{color:#1a1400;background:#d8b94a}`;
 }
