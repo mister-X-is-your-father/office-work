@@ -33,6 +33,8 @@ export function getSettings() { return req("/settings"); }
 export function saveSettings(s) { return req("/settings", { method: "POST", body: s }); }
 // 一覧の共有ソートプリセット（グローバル）: [{name, sorts:[{key,dir}]}]。書き込みは許可ユーザーのみ。
 export function savePresets(sortPresets) { return req("/settings", { method: "POST", body: { sort_presets: sortPresets } }); }
+// メニュー表示制御: {"<userId>": ["hiddenRouteKey",...]}（各人の非表示メニュー集合）。書き込みは許可ユーザー（管理者）のみ。
+export function saveMenuVisibility(menuVisibility) { return req("/settings", { method: "POST", body: { menu_visibility: menuVisibility } }); }
 // 成果物（Fable作業ディレクトリのファイル）
 export function getFiles() { return req("/files"); }
 export function fileUrl(relPath) { return `${EXEC_BASE}/file/${encodeURIComponent(relPath)}?token=${encodeURIComponent(token())}`; }

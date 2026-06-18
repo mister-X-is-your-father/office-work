@@ -3,7 +3,7 @@
 //  - それ以外（settings-personal / 後方互換の素 settings）→ 個人設定モード = リマインダー通知（localStorage 即保存）。
 // チーム共有の保存先は taskstation-exec（許可ユーザーのみ書き込み可）。個人設定は localStorage＝exec が落ちていても使える。
 import { load, invalidate } from "../lib/store.js";
-import { getSettings, saveSettings } from "../lib/exec.js";
+import { getSettings, saveSettings, saveMenuVisibility } from "../lib/exec.js";
 import { getHolidays, createHoliday, deleteHoliday,
   getLabels, createLabel, updateLabel, deleteLabel,
   REVIEW_LABEL, WAITING_LABEL } from "../lib/api.js";
@@ -11,6 +11,7 @@ import { parseSmartDate, fmtDisplayDow, attachDatePicker } from "../lib/form.js"
 import { notifyPrefs, saveNotifyPrefs } from "../lib/notify.js";
 import { C, esc } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
+import { ROUTES, ORDER, ALWAYS_VISIBLE } from "../lib/routes.js";
 
 // チーム設定モードか否か（hash に "settings-team" を含むか）。
 function isTeamMode() {
@@ -62,7 +63,7 @@ async function renderPersonal(root) {
 // ── チーム設定モード ─────────────────────────────────────────────
 // チーム共有設定（exec で管理者保存）＋ 祝日・休業日（即時CRUD）。
 async function renderTeam(root) {
-  const { holidaysByDate } = await load();
+  const { holidaysByDate, members, me } = await load();
   let cur = null, canEdit = false, execDown = false;
   try {
     const d = await getSettings();
@@ -130,6 +131,8 @@ async function renderTeam(root) {
 
       ${labelSection(labels)}
 
+      ${canEdit ? menuVisibilitySection(members, me) : ""}
+
       ${canEdit ? `
       <div class="sx-savebar">
         <span class="sx-savemeta">変更は<b>保存するまで反映されません</b></span>
@@ -140,6 +143,7 @@ async function renderTeam(root) {
 
   wireHolidays(root, holidays, holidaysByDate);
   wireLabels(root, labels);
+  if (canEdit) wireMenuVisibility(root, members, me, (cur && cur.menu_visibility) || {});
 
   const btn = root.querySelector("#st-save");
   if (btn) btn.onclick = async () => {
@@ -376,6 +380,101 @@ function wireLabels(root, labels) {
   });
 }
 
+// ── メニュー表示（管理者専用）─────────────────────────────────────
+// 各メンバーごとに、左ナビに出すメニューを ON/OFF する。チェック=表示。保存先はチーム設定の
+// menu_visibility（非表示ルートキーの配列＝ブロックリスト）。未設定メンバーは全表示＝現状維持。
+// home は必須（ALWAYS_VISIBLE）なので常時 ON・変更不可。変更は即保存＝対象者の次回読み込みで反映。
+function menuVisibilitySection(members, me) {
+  const list = uniqMembers(members, me);
+  const opts = list.map((u) => `<option value="${u.id}">${esc(u.name || u.username || ("user" + u.id))}</option>`).join("");
+  return `
+    <section class="sx-card">
+      <header class="sx-chd">
+        <div class="sx-ctitle">メニュー表示</div>
+        <span class="sx-scope"><span class="dot" style="background:${C.free}"></span>変更は即保存・対象者の次回読み込みで反映</span>
+      </header>
+      <div class="sx-body">
+        <div class="sx-mvhint">メンバーごとに、左メニューに表示する項目を選べます（チェック＝表示）。<b>ホーム</b>は常に表示されます。</div>
+        ${list.length ? `
+        <div class="sx-mvpick">
+          <label class="sx-rt" for="mv-member">対象メンバー</label>
+          <select id="mv-member" class="sx-in">${opts}</select>
+          <span class="sx-msg" id="mv-msg"></span>
+        </div>
+        <div class="sx-mvgrid" id="mv-grid"></div>` : `<div class="sx-hempty">対象メンバーがいません（タスク担当・定期・休暇のいずれかを持つ人が対象です）。</div>`}
+      </div>
+    </section>`;
+}
+
+// メンバー一覧の重複排除（me を先頭に。id 無しは除外）。
+function uniqMembers(members, me) {
+  const out = [], seen = new Set();
+  const push = (u) => { if (u && u.id && !seen.has(u.id)) { seen.add(u.id); out.push(u); } };
+  push(me);
+  for (const u of members || []) push(u);
+  return out;
+}
+
+function wireMenuVisibility(root, members, me, mvInit) {
+  const sel = root.querySelector("#mv-member");
+  const grid = root.querySelector("#mv-grid");
+  const msg = root.querySelector("#mv-msg");
+  if (!sel || !grid) return;
+  // 非表示マップのローカル複製（{uid: [hiddenKey,...]}）。
+  const mv = {};
+  for (const k of Object.keys(mvInit || {})) mv[k] = [...(mvInit[k] || [])];
+  // ナビに出る対象ルート（ORDER）。home は必須なので常時 ON・無効化。
+  const keys = ORDER.slice();
+
+  const renderGrid = (uid) => {
+    const hidden = new Set(mv[String(uid)] || []);
+    // grp ごとにまとめる（ORDER 順を保つ）。
+    const groups = [];
+    const gmap = new Map();
+    for (const k of keys) {
+      const g = ROUTES[k].grp;
+      if (!gmap.has(g)) { gmap.set(g, []); groups.push(g); }
+      gmap.get(g).push(k);
+    }
+    grid.innerHTML = groups.map((g) => `
+      <div class="sx-mvgrp">
+        <div class="sx-mvgt">${esc(g)}</div>
+        <div class="sx-mvitems">${gmap.get(g).map((k) => {
+          const forced = ALWAYS_VISIBLE.has(k);
+          const on = forced || !hidden.has(k);
+          return `<label class="sx-mvit${forced ? " forced" : ""}">
+            <input type="checkbox" data-mvk="${k}"${on ? " checked" : ""}${forced ? " disabled" : ""}>
+            <span>${esc(ROUTES[k].label)}</span>
+          </label>`;
+        }).join("")}</div>
+      </div>`).join("");
+    grid.querySelectorAll("input[data-mvk]").forEach((cb) => {
+      cb.onchange = () => save(uid);
+    });
+  };
+
+  const save = async (uid) => {
+    // 現在のチェック状態から、この uid の非表示リスト（OFF のもの・home除く）を再構成。
+    const hidden = [];
+    grid.querySelectorAll("input[data-mvk]").forEach((cb) => {
+      const k = cb.dataset.mvk;
+      if (!cb.checked && !ALWAYS_VISIBLE.has(k)) hidden.push(k);
+    });
+    if (hidden.length) mv[String(uid)] = hidden; else delete mv[String(uid)];
+    if (msg) { msg.className = "sx-msg"; msg.textContent = "保存中…"; }
+    try {
+      await saveMenuVisibility(mv);
+      invalidate(); // 次回 load() で反映
+      if (msg) { msg.className = "sx-msg ok"; msg.innerHTML = `${icon("check", { size: 14 })} 保存しました`; }
+    } catch (e) {
+      if (msg) { msg.className = "sx-msg err"; msg.textContent = "× " + e.message; }
+    }
+  };
+
+  sel.onchange = () => { if (msg) msg.textContent = ""; renderGrid(+sel.value); };
+  renderGrid(+sel.value);
+}
+
 function css() {
   return `
   .sx{max-width:680px}
@@ -485,6 +584,21 @@ function css() {
   .sx-lbprot{display:inline-flex;align-items:center;gap:4px;flex:none;font-size:11px;font-weight:700;color:${C.muted};
     background:var(--track);border:1px solid var(--line);padding:4px 10px;border-radius:999px}
 
+  /* メニュー表示（管理者） */
+  .sx-mvhint{font-size:12.5px;color:${C.muted};line-height:1.5;margin-bottom:12px}
+  .sx-mvpick{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+  .sx-mvpick .sx-rt{flex:none}
+  .sx-mvpick .sx-in{min-width:200px}
+  .sx-mvgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px}
+  .sx-mvgrp{border:1px solid ${C.line};border-radius:10px;padding:10px 12px;background:var(--track)}
+  .sx-mvgt{font-size:11px;font-weight:700;color:${C.muted};margin-bottom:7px;letter-spacing:.02em}
+  .sx-mvitems{display:flex;flex-direction:column;gap:6px}
+  .sx-mvit{display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer}
+  .sx-mvit input{width:15px;height:15px;cursor:pointer;flex:none}
+  .sx-mvit.forced{color:${C.muted};cursor:default}
+  .sx-mvit.forced input{cursor:default}
+
   /* ダークモード: ハードコードした淡色面/tintを反転（ライト値は不変） */
-  html[data-theme="dark"] .sx-chd{background:var(--track)}`;
+  html[data-theme="dark"] .sx-chd{background:var(--track)}
+  html[data-theme="dark"] .sx-mvgrp{background:var(--card);border-color:var(--line)}`;
 }

@@ -39,6 +39,7 @@ export async function load(force = false) {
     calEnd: st.cal_end ?? SETTINGS_DEFAULT.calEnd,
     excludedWs: st.excluded_project_ids || [],
     sortPresets: st.sort_presets || [], // 一覧の共有ソートプリセット（グローバル）
+    menuVisibility: st.menu_visibility || {}, // {"<userId>": ["hiddenRouteKey",...]} 各人の非表示メニュー（管理者設定）
     canEdit: !!(settingsRaw && settingsRaw.can_edit),
   };
   // テンプレートWS（雛形置き場）＋習慣WS（習慣トラッカー）＋設定で除外されたWSは通常タスクから分離

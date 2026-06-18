@@ -2,48 +2,13 @@
 import * as vik from "./lib/api.js";
 import * as store from "./lib/store.js";
 import { icon } from "./lib/icons.js";
-
-const ROUTES = {
-  home:     { label: "ホーム",        grp: "総合",   mod: "./views/home.js", wide: true, ic: "home" },
-  smart:    { label: "スマートリスト", grp: "総合",   mod: "./views/smartlist.js", ic: "listChecks" },
-  today:    { label: "稼働予定",      grp: "今日",   mod: "./views/today.js", ic: "timer" },
-  triage:   { label: "トリアージ",    grp: "今日",   mod: "./views/triage.js", ic: "filter" },
-  quad:     { label: "優先度マトリクス", grp: "今日",   mod: "./views/quad.js", ic: "grid" },
-  habits:   { label: "習慣",          grp: "今日",   mod: "./views/habits.js", ic: "flame" },
-  review:   { label: "レビュー",      grp: "今日",   mod: "./views/review.js", ic: "eye" },
-  calendar: { label: "時刻カレンダー",grp: "今日",   mod: "./views/calendar.js", wide: true, ic: "calendar" },
-  monthcal: { label: "月カレンダー",  grp: "計画",   mod: "./views/monthcal.js", wide: true, ic: "calendarDays" },
-  planner:  { label: "週プランナー",  grp: "計画",   mod: "./views/planner.js", wide: true, ic: "calendarDays" },
-  workplan: { label: "稼働プラン",    grp: "計画",   mod: "./views/workplan.js", wide: true, ic: "hourglass" },
-  summary:  { label: "概要",          grp: "実績",   mod: "./views/summary.js", wide: true, ic: "trendingUp" },
-  estactual:{ label: "見積りvs実績",  grp: "実績",   mod: "./views/estactual.js", wide: true, ic: "ruler" },
-  report:   { label: "報告",          grp: "実績",   mod: "./views/report.js", wide: true, ic: "message" },
-  status:   { label: "ステータス",    grp: "実績",   mod: "./views/status.js", wide: true, ic: "activity" },
-  kanban:   { label: "かんばん",      grp: "仕事",   mod: "./views/kanban.js", wide: true, ic: "columns" },
-  list:     { label: "タスク一覧",    grp: "仕事",   mod: "./views/table.js", wide: true, ic: "list" },
-  // アウトラインは「タスク一覧」に統合（table.js が V.mode で表/アウトラインを切替）。
-  // 後方互換: #/outline で来たら table.js が起動し、ハッシュに "outline" を含むのでアウトライン表示で開く。
-  outline:  { label: "アウトライン",  grp: "仕事",   mod: "./views/table.js", wide: true, ic: "list" },
-  depgraph: { label: "依存グラフ",    grp: "仕事",   mod: "./views/depgraph.js", wide: true, ic: "network" },
-  gantt:    { label: "ガントチャート",    grp: "仕事",   mod: "./views/gantt.js", wide: true, ic: "barChart" },
-  // 旧「定期業務・定期MTG」は後方互換ルートとして残す（recurring.js が hash で全件表示）が、ORDER には載せない。
-  recurring:{ label: "定期業務・定期MTG", grp: "その他", mod: "./views/recurring.js", ic: "repeat" },
-  // 定期を業務 / MTG の2項目に分割。どちらも recurring.js を読み、recurring.js 側が location.hash で出し分ける。
-  "recurring-task":    { label: "定期業務", grp: "その他", mod: "./views/recurring.js", ic: "repeat" },
-  "recurring-meeting": { label: "定期MTG",  grp: "その他", mod: "./views/recurring.js", ic: "calendar" },
-  leave:    { label: "休暇",          grp: "その他", mod: "./views/leave.js", ic: "palmtree" },
-  export:   { label: "バックアップ",   grp: "その他", mod: "./views/export.js", ic: "save" },
-  // 旧「設定」は後方互換ルートとして残す（settings.js が hash で個人設定モードを描画）が、ORDER には載せない。
-  settings: { label: "設定",          grp: "その他", mod: "./views/settings.js", ic: "settings" },
-  // 設定を個人 / チームの2項目に分割。どちらも settings.js を読み、settings.js 側が location.hash で出し分ける。
-  "settings-personal": { label: "個人設定", grp: "その他", mod: "./views/settings.js", ic: "user" },
-  "settings-team":     { label: "チーム設定", grp: "その他", mod: "./views/settings.js", ic: "settings" },
-  // 隠しルート: ORDER に載せない＝通常ユーザーのナビには出ない。許可者のみ shell() がリンクを追加。
-  fable:    { label: "Fable",         grp: "AI",     mod: "./views/fable.js", ic: "bot" },
-};
-const ORDER = ["home", "smart", "today", "triage", "quad", "habits", "review", "calendar", "monthcal", "planner", "workplan", "summary", "estactual", "report", "status", "kanban", "list", "depgraph", "gantt", "recurring-task", "recurring-meeting", "leave", "export", "settings-personal", "settings-team"];
+import { ROUTES, ORDER, ALWAYS_VISIBLE } from "./lib/routes.js";
 
 const app = document.getElementById("app");
+
+// メニュー表示制御（チーム設定で管理者が各人別に設定）: 現ユーザーの非表示ルート集合。
+// shell() でナビを組んだ後 applyMenuVisibility() が非同期解決して隠す＋route() の直URLガードに使う。
+let _hidden = new Set();
 
 function showLogin(msg = "") { showAuth("login", msg); }
 
@@ -194,10 +159,45 @@ function shell() {
     if (nav) nav.insertAdjacentHTML("beforeend",
       `<div class="navgrp">AI</div><a href="#/fable" data-k="fable" title="${ROUTES.fable.label}"><span class="nav-ic">${icon("bot", { size: 17 })}</span><span class="nav-lb">${ROUTES.fable.label}</span></a>`);
   }).catch(() => {});
+  // メニュー表示制御: 管理者がチーム設定で各人別に隠したメニューを、本人のナビから除去する。
+  applyMenuVisibility();
+}
+
+// 現ユーザーの非表示メニューをナビから除去し、空になったグループ見出しも片付ける。
+// 直URLで隠しルートに来ていたらホームへフォールバック。設定/データ取得失敗時は何もしない（全表示で安全側）。
+async function applyMenuVisibility() {
+  try {
+    const { me, settings } = await store.load();
+    const mv = (settings && settings.menuVisibility) || {};
+    const hidden = new Set((me && mv[String(me.id)]) || []);
+    for (const k of ALWAYS_VISIBLE) hidden.delete(k); // 必須メニューは常時表示
+    _hidden = hidden;
+    const nav = document.getElementById("nav");
+    if (nav) {
+      nav.querySelectorAll("a[data-k]").forEach((a) => { if (hidden.has(a.dataset.k)) a.remove(); });
+      // リンクが1つも残っていないグループ見出し（と直後の区切り/余白）を除去。
+      nav.querySelectorAll(".navgrp").forEach((hd) => {
+        let hasLink = false;
+        for (let n = hd.nextElementSibling; n && !n.classList.contains("navgrp"); n = n.nextElementSibling) {
+          if (n.matches("a[data-k]")) { hasLink = true; break; }
+        }
+        if (!hasLink) {
+          let n = hd.nextElementSibling;
+          while (n && !n.classList.contains("navgrp")) { const next = n.nextElementSibling; n.remove(); n = next; }
+          hd.remove();
+        }
+      });
+    }
+    // 隠しルートを直URL/リロードで開いていたらホームへ。
+    const cur = location.hash.replace(/^#\//, "") || "home";
+    if (hidden.has(cur)) location.hash = "#/home";
+  } catch { /* 取得失敗時は全表示のまま（締め出さない） */ }
 }
 
 async function route() {
   const key = (location.hash.replace(/^#\//, "") || "home");
+  // 管理者に隠されたメニューへ直接遷移してきたらホームへ戻す（ナビからは既に消えている）。
+  if (_hidden.has(key)) { if (location.hash !== "#/home") { location.hash = "#/home"; return; } }
   const r = ROUTES[key] || ROUTES.home;
   document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("active", a.dataset.k === key));
   const content = document.getElementById("content");

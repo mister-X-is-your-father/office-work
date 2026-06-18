@@ -42,7 +42,7 @@ conf = json.load(open(CONF_PATH))
 ALLOWED = set(conf.get("allowed_user_ids", []))
 
 SETTINGS_PATH = f"{HOME}/.config/taskstation/settings.json"
-SETTINGS_DEFAULT = {"cap_hours": 8, "cal_start": 8, "cal_end": 20, "excluded_project_ids": []}
+SETTINGS_DEFAULT = {"cap_hours": 8, "cal_start": 8, "cal_end": 20, "excluded_project_ids": [], "sort_presets": [], "menu_visibility": {}}
 
 
 def load_settings():
@@ -499,6 +499,37 @@ class H(BaseHTTPRequestHandler):
                 return self._json(400, {"error": "営業時間が不正です"})
             if "excluded_project_ids" in body:
                 st["excluded_project_ids"] = [int(x) for x in (body["excluded_project_ids"] or [])][:50]
+            if "sort_presets" in body:
+                # グローバル共有のソートプリセット: [{name, sorts:[{key,dir}]}]（軽量・上限つき）
+                out = []
+                for p in (body["sort_presets"] or [])[:50]:
+                    name = str((p or {}).get("name", "")).strip()[:40]
+                    sorts = []
+                    for s in ((p or {}).get("sorts") or [])[:8]:
+                        k = str((s or {}).get("key", ""))[:16]
+                        if k:
+                            sorts.append({"key": k, "dir": -1 if int((s or {}).get("dir", 1)) < 0 else 1})
+                    if name and sorts:
+                        out.append({"name": name, "sorts": sorts})
+                st["sort_presets"] = out
+            if "menu_visibility" in body:
+                # メニュー表示制御: {"<userId>": ["hiddenRouteKey", ...]}（各人の非表示メニュー集合・ブロックリスト）。
+                # 未登録ユーザーは全表示＝現状維持。新規ルートも既定表示。上限つきでサニタイズ。
+                mv = body["menu_visibility"]
+                out = {}
+                if isinstance(mv, dict):
+                    for uid_key, keys in list(mv.items())[:200]:
+                        ukey = str(uid_key)[:12]
+                        if not ukey.lstrip("-").isdigit():
+                            continue
+                        seen = []
+                        for k in (keys or [])[:80]:
+                            ks = str(k)[:32]
+                            if ks and ks != "home" and ks not in seen:  # home は必須＝隠さない
+                                seen.append(ks)
+                        if seen:
+                            out[ukey] = seen
+                st["menu_visibility"] = out
             with open(SETTINGS_PATH, "w") as f:
                 json.dump(st, f, ensure_ascii=False)
             return self._json(200, {"settings": st})
