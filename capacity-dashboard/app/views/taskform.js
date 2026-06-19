@@ -32,11 +32,19 @@ const PRIO_OPTS = [[0, "なし"], [1, "低"], [2, "中"], [3, "高"], [4, "MUST"
 const fieldDisplay = (t, f) => (t && t[f] && !t[f].startsWith("0001") ? fmtDisplayDow(t[f].slice(0, 10)) : "");
 
 let _mounted = false;
+let _opening = false; // 多重起動ガード: 連打で load()/getTask() の await 中に複数モーダルが積層するのを防ぐ
 
 // taskId 省略=新規 / 指定=編集。保存後 onSaved() を呼ぶ。
 export async function openTaskForm({ taskId = null, onSaved } = {}) {
-  const { projects, members, tasks, templates = [], templateProject = null, holidaysByDate = null, aiMembers = [], me = null, labels = [] } = await load();
-  const task = taskId ? await getTask(taskId) : null;
+  // 既に開いている / 開く処理中なら無視（モーダルは常に1枚）。
+  if (_opening || document.querySelector(".tf-modal")) return;
+  _opening = true;
+  let loaded, task;
+  try {
+    loaded = await load();
+    task = taskId ? await getTask(taskId) : null;
+  } catch (e) { _opening = false; throw e; } // 失敗時はガードを必ず解放（恒久ロックを防ぐ）
+  const { projects, members, tasks, templates = [], templateProject = null, holidaysByDate = null, aiMembers = [], me = null, labels = [] } = loaded;
   const isEdit = !!task;
   const curAssignees = (task && task.assignees) || [];
   // AI担当（fable）は隠し要素: タスク作成者本人にしか見えない・触れない
@@ -192,6 +200,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
       </div>
     </div>`;
   document.body.appendChild(wrap);
+  _opening = false; // モーダルがDOMに載った＝以後の連打は上の .tf-modal チェックで弾ける
 
   const $ = (id) => wrap.querySelector(id);
   // Escで閉じる（候補コンボが開いてる時はそちらが消費＝モーダルは閉じない）。document bubble で受け、閉じる時に解除。
