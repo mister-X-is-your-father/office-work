@@ -32,7 +32,47 @@
   *::-webkit-scrollbar-thumb:hover{background:rgba(20,30,50,.36);background-clip:padding-box}
   *::-webkit-scrollbar-corner{background:transparent}
   /* キーボード操作時のフォーカス可視（全画面共通・マウス時は出ない）。各要素の独自focus指定があればそちら優先 */
-  :focus-visible{outline:2px solid var(--fill);outline-offset:2px}
+  *:focus-visible{outline:2px solid var(--fill);outline-offset:2px}
+  /* スクリーンリーダ専用（視覚的に隠すが読み上げは残す）。aria-live 領域等で使用 */
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+  /* スキップリンク: 通常は画面外、:focus でフォーカスすると左上に出現（キーボード操作時のみ） */
+  .skip-link{position:absolute;left:8px;top:-48px;z-index:100;background:var(--fill);color:#fff;
+    padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;
+    box-shadow:var(--shadow);transition:top .15s ease}
+  .skip-link:focus{top:8px}
+  /* モーション抑制設定（OS の「視差効果を減らす」に追従）: アニメ/トランジションを実質無効化 */
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important;scroll-behavior:auto!important}
+  }
+  /* 印刷時はナビ等を隠して本文を全幅に */
+  @media print{
+    .sidebar,.topbar,.skip-link{display:none!important}
+    .content{padding:0!important}
+  }
+  /* ===== 共通UI部品（lib/ui.js: emptyState / errorState / skeleton / avatar） ===== */
+  .ui-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
+    gap:8px;padding:48px 24px;color:var(--muted)}
+  .ui-empty-ic{color:var(--line-strong);line-height:0;margin-bottom:2px}
+  .ui-empty-title{font-size:15px;font-weight:700;color:var(--ink)}
+  .ui-empty-desc{font-size:13px;color:var(--muted);max-width:380px;line-height:1.6}
+  .ui-empty-act{display:inline-flex;align-items:center;margin-top:6px;padding:8px 16px;
+    background:var(--fill);color:#fff;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;transition:filter .15s}
+  .ui-empty-act:hover{filter:brightness(1.08)}
+  .ui-error{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:36px 24px}
+  .ui-error-ic{color:var(--over);line-height:0}
+  .ui-error-title{font-size:15px;font-weight:700;color:var(--ink)}
+  .ui-error-msg{font-size:13px;color:var(--muted);max-width:480px;line-height:1.6;word-break:break-word}
+  .ui-retry{margin-top:6px;padding:8px 18px;border:1px solid var(--line);border-radius:8px;
+    background:var(--card);color:var(--ink);font:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s}
+  .ui-retry:hover{background:var(--track);border-color:var(--line-strong)}
+  .ui-skel{display:flex;flex-direction:column;gap:10px;padding:8px 0}
+  .ui-skel-row{height:18px;border-radius:7px;
+    background:linear-gradient(90deg,var(--track) 25%,var(--line) 37%,var(--track) 63%);
+    background-size:400% 100%;animation:ui-shimmer 1.4s ease infinite}
+  @keyframes ui-shimmer{0%{background-position:100% 50%}100%{background-position:0 50%}}
+  .ui-ava{display:inline-flex;align-items:center;justify-content:center;flex:none;
+    border-radius:50%;color:#fff;font-weight:700;line-height:1;vertical-align:middle;
+    text-transform:uppercase;overflow:hidden}
   /* shell */
   .shell{display:flex;min-height:100vh}
   .sidebar{width:208px;flex:none;background:var(--card);border-right:1px solid var(--line);

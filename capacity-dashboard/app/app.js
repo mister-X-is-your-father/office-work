@@ -2,6 +2,7 @@
 import * as vik from "./lib/api.js";
 import * as store from "./lib/store.js";
 import { icon } from "./lib/icons.js";
+import { errorState } from "./lib/ui.js";
 import { ROUTES, ORDER, ALWAYS_VISIBLE } from "./lib/routes.js";
 
 const app = document.getElementById("app");
@@ -64,6 +65,7 @@ function shell() {
     }).join("")
   ).join("");
   app.innerHTML = `
+    <a href="#main" class="skip-link" id="skip-link">本文へスキップ</a>
     <div class="shell">
       <aside class="sidebar">
         <div class="sb-head">
@@ -80,8 +82,10 @@ function shell() {
           <span class="who" id="who"></span>
           <button id="refresh">↻ 再読込</button>
           <button id="logout">ログアウト</button>
+          <div id="ts-live" aria-live="polite" class="sr-only"></div>
+          <div id="ts-live-alert" aria-live="assertive" role="alert" class="sr-only"></div>
         </div>
-        <div class="content" id="content"><div class="loading">…</div></div>
+        <div class="content" id="content" role="main" tabindex="-1"><div class="loading">…</div></div>
       </div>
       <div class="sb-backdrop" id="sb-backdrop"></div>
     </div>`;
@@ -90,6 +94,14 @@ function shell() {
   const setDrawer = (o) => { _sb.classList.toggle("open", o); _bd.classList.toggle("open", o); _tg.setAttribute("aria-expanded", o ? "true" : "false"); };
   _bd.onclick = () => setDrawer(false);
   document.getElementById("nav").addEventListener("click", (e) => { if (e.target.closest("a")) setDrawer(false); });
+
+  // スキップリンク: SPA のハッシュルータを汚さずに本文へフォーカス移動（href の #main 遷移は抑止）。
+  const _skip = document.getElementById("skip-link");
+  if (_skip) _skip.addEventListener("click", (e) => {
+    e.preventDefault();
+    const c = document.getElementById("content");
+    if (c) { c.focus(); c.scrollIntoView({ block: "start" }); }
+  });
 
   // デスクトップ: サイドバーを「アイコンだけの細いレール」に折りたたむ（localStorage 永続）。
   // 狭幅（820px以下）ではこのクラスは CSS 側で無効化し、従来のドロワー挙動を維持する。
@@ -199,7 +211,11 @@ async function route() {
   // 管理者に隠されたメニューへ直接遷移してきたらホームへ戻す（ナビからは既に消えている）。
   if (_hidden.has(key)) { if (location.hash !== "#/home") { location.hash = "#/home"; return; } }
   const r = ROUTES[key] || ROUTES.home;
-  document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("active", a.dataset.k === key));
+  document.querySelectorAll("#nav a").forEach(a => {
+    const on = a.dataset.k === key;
+    a.classList.toggle("active", on);
+    if (on) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+  });
   const content = document.getElementById("content");
   if (!content) return;
   content.classList.toggle("wide", !!r.wide);   // ワイドな表（一覧など）はコンテンツ幅を広げる
@@ -211,7 +227,9 @@ async function route() {
     await mod.render(content);
   } catch (e) {
     if (e instanceof vik.AuthError) return showLogin("セッション切れ。再ログインしてください。");
-    content.innerHTML = `<div class="card"><div class="loading">エラー: ${e.message}</div></div>`;
+    content.innerHTML = errorState(e.message, { retryId: "route-retry" });
+    const rb = document.getElementById("route-retry");
+    if (rb) rb.onclick = () => { store.invalidate(); route(); };
     console.error(e);
   }
 }
