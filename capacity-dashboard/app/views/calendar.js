@@ -24,6 +24,7 @@ const min2top = (m) => ((m - H0 * 60) / 60) * HOURH;
 const hhmm = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 
 let _root, _data, _day;
+let _calBusy = false; // drop配置(place)の直列化ガード（飛行中の二度目ドロップで plan 重複を防ぐ）
 
 export async function render(root) {
   _root = root;
@@ -279,6 +280,7 @@ function wireDnD() {
 // recurrences.overrides[origISO] に {date, start_minute, duration_seconds} or {skip:true} を保存。
 // 基準値と同じ項目は保存しない（差分のみ）。全部基準値どおりなら例外を解除。
 function openOccurrenceEditor(recId, origISO) {
+  if (document.querySelector(".cal-ovm")) return; // モーダル積層防止（連打対策）
   const rec = (_data.recurrences || []).find((r) => r.id === recId);
   if (!rec) return;
   const ov = (rec.overrides || {})[origISO] || {};
@@ -317,19 +319,30 @@ function openOccurrenceEditor(recId, origISO) {
   wrap.querySelector(".cal-ovm-bg").onclick = close;
   $("#ov-cancel").onclick = close;
 
+  let _ovBusy = false;
   const saveOverrides = async (newOv) => {
-    const overrides = { ...(rec.overrides || {}) };
-    if (newOv) overrides[origISO] = newOv; else delete overrides[origISO];
-    await updateRecurrence(rec.id, {
-      title: rec.title, kind: rec.kind, rrule: rec.rrule, dtstart: rec.dtstart,
-      duration_seconds: rec.duration_seconds, project_id: rec.project_id,
-      assignee_ids: rec.assignee_ids, rotation: !!rec.rotation, note: rec.note || "",
-      overrides,
-    });
-    invalidate();
-    _data = await load();
-    close();
-    paint();
+    if (_ovBusy) return; // 二重PUT防止（連打対策）
+    _ovBusy = true;
+    const btns = wrap.querySelectorAll(".cal-ovm-acts button");
+    btns.forEach((b) => (b.disabled = true)); // await 前に無効化
+    try {
+      const overrides = { ...(rec.overrides || {}) };
+      if (newOv) overrides[origISO] = newOv; else delete overrides[origISO];
+      await updateRecurrence(rec.id, {
+        title: rec.title, kind: rec.kind, rrule: rec.rrule, dtstart: rec.dtstart,
+        duration_seconds: rec.duration_seconds, project_id: rec.project_id,
+        assignee_ids: rec.assignee_ids, rotation: !!rec.rotation, note: rec.note || "",
+        overrides,
+      });
+      invalidate();
+      _data = await load();
+      close();
+      paint();
+    } catch (e) {
+      _ovBusy = false; // 失敗時のみ復帰（再操作可能に）
+      btns.forEach((b) => (b.disabled = false));
+      throw e;
+    }
   };
 
   $("#ov-skip").onclick = () => saveOverrides({ skip: true });
@@ -364,17 +377,23 @@ async function resizePlan(taskId, planId, memberId, startMin, mins) {
 }
 
 async function place(drag, toMember, startMin) {
-  const seconds = drag.mins * 60;
-  // 既存の今日plan（このタスク×元担当）を削除してから時刻付きで作り直す（移動）。
-  const plans = (_data.plansByTask && _data.plansByTask.get && _data.plansByTask.get(drag.taskId)) || [];
-  const aids = ((_data.tasks.find((t) => t.id === drag.taskId) || {}).assignees || []).map((a) => a.id);
-  const sameDay = plans.filter((p) => dateOnly(p.plan_date) === _day &&
-    (p.user_id === drag.fromMember || p.user_id === toMember || !p.user_id || !aids.includes(p.user_id)));
-  for (const p of sameDay) await deletePlan(drag.taskId, p.id);
-  await logPlan(drag.taskId, seconds, _day, "", toMember, startMin);
-  invalidate();
-  _data = await load();
-  paint();
+  if (_calBusy) return; // 飛行中の二度目ドロップを無視（delete→create の重複防止）
+  _calBusy = true;
+  try {
+    const seconds = drag.mins * 60;
+    // 既存の今日plan（このタスク×元担当）を削除してから時刻付きで作り直す（移動）。
+    const plans = (_data.plansByTask && _data.plansByTask.get && _data.plansByTask.get(drag.taskId)) || [];
+    const aids = ((_data.tasks.find((t) => t.id === drag.taskId) || {}).assignees || []).map((a) => a.id);
+    const sameDay = plans.filter((p) => dateOnly(p.plan_date) === _day &&
+      (p.user_id === drag.fromMember || p.user_id === toMember || !p.user_id || !aids.includes(p.user_id)));
+    for (const p of sameDay) await deletePlan(drag.taskId, p.id);
+    await logPlan(drag.taskId, seconds, _day, "", toMember, startMin);
+    invalidate();
+    _data = await load();
+    paint();
+  } finally {
+    _calBusy = false;
+  }
 }
 
 function nowMinutes() {

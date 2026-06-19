@@ -65,7 +65,8 @@ export async function render(root) {
   root.querySelectorAll("[data-del]").forEach((b) => {
     b.onclick = async () => {
       if (!confirm("この習慣を削除しますか？（チェック履歴も見えなくなります）")) return;
-      try { await deleteTask(+b.dataset.del); invalidate(); await load(); render(root); } catch { /* noop */ }
+      b.disabled = true;
+      try { await deleteTask(+b.dataset.del); invalidate(); await load(); render(root); } catch { b.disabled = false; }
     };
   });
 }

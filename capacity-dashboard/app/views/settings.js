@@ -453,22 +453,49 @@ function wireMenuVisibility(root, members, me, mvInit) {
     });
   };
 
-  const save = async (uid) => {
-    // 現在のチェック状態から、この uid の非表示リスト（OFF のもの・home除く）を再構成。
+  // 保存の直列化＋デバウンス。
+  // ・連打しても最後の状態に収束するよう、保存は 350ms デバウンス。
+  // ・前の保存の完了を待ってから次を投げる（_mvSaving チェーン）ことで順序逆転を防ぐ。
+  // ・mv は各トグルで即時更新（applyToMv）するため、デバウンス発火時は常に最新スナップショットを送る。
+  let _mvSaving = Promise.resolve(); // 進行中の保存（直列化用）
+  let _mvTimer = null;               // デバウンスタイマー
+  const MV_DEBOUNCE = 350;
+
+  // 現在のチェック状態から、この uid の非表示リスト（OFF のもの・home除く）を mv に反映。
+  const applyToMv = (uid) => {
     const hidden = [];
     grid.querySelectorAll("input[data-mvk]").forEach((cb) => {
       const k = cb.dataset.mvk;
       if (!cb.checked && !ALWAYS_VISIBLE.has(k)) hidden.push(k);
     });
     if (hidden.length) mv[String(uid)] = hidden; else delete mv[String(uid)];
+  };
+
+  // mv の現在値を実際に永続化（直列化チェーンの末尾に積む）。
+  const flushSave = () => {
     if (msg) { msg.className = "sx-msg"; msg.textContent = "保存中…"; }
-    try {
-      await saveMenuVisibility(mv);
-      invalidate(); // 次回 load() で反映
-      if (msg) { msg.className = "sx-msg ok"; msg.innerHTML = `${icon("check", { size: 14 })} 保存しました`; }
-    } catch (e) {
-      if (msg) { msg.className = "sx-msg err"; msg.textContent = "× " + e.message; }
-    }
+    _mvSaving = _mvSaving
+      .catch(() => {}) // 前回失敗は飲み込み、後続は最新 mv で続行
+      .then(async () => {
+        // この時点での mv（最新スナップショット）を保存。
+        const snapshot = {};
+        for (const k of Object.keys(mv)) snapshot[k] = [...mv[k]];
+        try {
+          await saveMenuVisibility(snapshot);
+          invalidate(); // 次回 load() で反映
+          if (msg) { msg.className = "sx-msg ok"; msg.innerHTML = `${icon("check", { size: 14 })} 保存しました`; }
+        } catch (e) {
+          if (msg) { msg.className = "sx-msg err"; msg.textContent = "× " + e.message; }
+        }
+      });
+    return _mvSaving;
+  };
+
+  // トグル時に呼ぶ：mv を即時更新し、保存をデバウンス。
+  const save = (uid) => {
+    applyToMv(uid);
+    if (_mvTimer) clearTimeout(_mvTimer);
+    _mvTimer = setTimeout(() => { _mvTimer = null; flushSave(); }, MV_DEBOUNCE);
   };
 
   sel.onchange = () => { if (msg) msg.textContent = ""; renderGrid(+sel.value); };

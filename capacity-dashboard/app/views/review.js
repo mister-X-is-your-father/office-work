@@ -73,6 +73,12 @@ export async function render(root) {
     const box = root.querySelector(`.rq-inline[data-for="${id}"]`);
     if (!box) return;
     const reject = mode === "reject";
+    // M11: 既に入力中のテキストがある状態で再構築すると無警告で破棄される。
+    // 入力があるときは破棄確認し、キャンセルされたら現状を維持する。
+    const prevTa = !box.hidden && box.querySelector(".rq-inline-ta");
+    if (prevTa && prevTa.value.trim()) {
+      if (!confirm("入力中の内容があります。破棄してやり直しますか？")) return;
+    }
     box.hidden = false;
     box.innerHTML = `
       <div class="rq-inline-head">${reject ? "差し戻し（理由は必須）" : "承認（コメントは任意）"}</div>
@@ -128,16 +134,28 @@ export async function render(root) {
   // 💬 履歴トグル: クリックでコメント遅延ロード→その行の下に表示。再クリックで畳む。
   root.querySelectorAll(".rq-hist").forEach((b) => {
     b.onclick = async () => {
+      // M9: 連打ガード。読み込み中の同ボタンを再クリックしても二重リード／状態破壊しない。
+      if (b.dataset.loading === "1") return;
       const id = +b.dataset.id;
       const box = root.querySelector(`.rq-histbox[data-for="${id}"]`);
       if (!box) return;
+      // 既に開いている → 畳む（同期処理なのでガード不要）
       if (!box.hidden) { box.hidden = true; box.innerHTML = ""; return; }
       box.hidden = false;
       box.innerHTML = `<div class="rq-hist-empty">読み込み中…</div>`;
+      b.dataset.loading = "1";
       let list = null;
-      try { list = await getComments(id); } catch {
-        box.innerHTML = `<div class="rq-hist-empty">コメント取得失敗</div>`; return;
+      try { list = await getComments(id); }
+      catch {
+        // await 中にユーザーが畳んだ／別状態にした場合は上書きしない
+        if (b.dataset.loading === "1" && !box.hidden) {
+          box.innerHTML = `<div class="rq-hist-empty">コメント取得失敗</div>`;
+        }
+        return;
       }
+      finally { delete b.dataset.loading; }
+      // 描画前チェック: await の間に閉じられた／別リードが走った場合はスキップ
+      if (box.hidden) return;
       const items = (list || []).slice().sort((a, b) =>
         String(a.created || "").localeCompare(String(b.created || "")));
       if (!items.length) { box.innerHTML = `<div class="rq-hist-empty">コメントはまだありません。</div>`; return; }

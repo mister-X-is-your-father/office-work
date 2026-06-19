@@ -1685,9 +1685,11 @@ function openInlineSubtask(btn, parentId, projId, root) {
   const ta = box.querySelector(".ol-addinp");
   const err = box.querySelector(".ol-adderr");
   ta.focus();
+  let submitting = false; // 高速ダブルEnter等での submit() 再入を防ぐ（子タスク重複作成バグ対策）
   const submit = async () => {
+    if (submitting) return; submitting = true; // 再入ガード（成功時は closeInlineSubtask で DOM 消滅）
     const title = ta.value.trim();
-    if (!title) { closeInlineSubtask(); return; }
+    if (!title) { submitting = false; closeInlineSubtask(); return; }
     const ok = box.querySelector(".ol-addok");
     ok.disabled = true; err.textContent = "";
     try {
@@ -1695,7 +1697,7 @@ function openInlineSubtask(btn, parentId, projId, root) {
       await addRelation(parentId, child.id, "subtask"); // 親→子（subtask）= buildTaskTree が読む向き
       olCollapsed.delete(parentId); saveOlCollapsed(UID); // 追加後は親を開いて子を見せる
       closeInlineSubtask(); invalidate(); render(root);
-    } catch (e) { ok.disabled = false; err.textContent = "追加に失敗しました"; }
+    } catch (e) { submitting = false; ok.disabled = false; err.textContent = "追加に失敗しました"; }
   };
   box.querySelector(".ol-addok").onclick = (e) => { e.stopPropagation(); submit(); };
   box.querySelector(".ol-addng").onclick = (e) => { e.stopPropagation(); closeInlineSubtask(); };
