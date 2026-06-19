@@ -373,8 +373,15 @@ export function renderRecurrencePanel(el, mode, { members, onSaved, close, holid
 
 // 独立モーダル（管理ビューから定期/会議を新規作成・編集）。taskform のタブUIとは別に、
 // 単体で開ける軽量シェル。新規=種別タブ（定例MTG/定期タスク/MTG）、編集=種別を判定して単一パネル。
+let _rfOpening = false; // 多重起動ガード（taskform と同様。.tf-modal は taskform と共有）
+
 export async function openRecurrenceForm({ existing = null, members = [], holidaysByDate = null, onSaved } = {}) {
-  const { ensureStyle } = await import("./taskform.js"); // 基本スタイル(.tf-modal/.tf-in 等)を流用
+  // 既に何かのモーダルが開いている / 開く処理中なら無視（モーダルは常に1枚）。
+  if (_rfOpening || document.querySelector(".tf-modal")) return;
+  _rfOpening = true;
+  let ensureStyle;
+  try { ({ ensureStyle } = await import("./taskform.js")); } // 基本スタイル(.tf-modal/.tf-in 等)を流用
+  catch (e) { _rfOpening = false; throw e; }
   ensureStyle();
   ensureRecurrenceStyle();
   const isEdit = !!existing;
@@ -391,6 +398,7 @@ export async function openRecurrenceForm({ existing = null, members = [], holida
       <div class="tf-body tf-alt" id="rf-pane" style="padding:14px 22px 18px"></div>
     </div>`;
   document.body.appendChild(wrap);
+  _rfOpening = false; // DOMに載った＝以後の連打は上の .tf-modal チェックで弾ける
   const close = () => wrap.remove();
   wrap.querySelector("#rf-x").onclick = close;
   wrap.querySelector(".tf-bg").onclick = close;
