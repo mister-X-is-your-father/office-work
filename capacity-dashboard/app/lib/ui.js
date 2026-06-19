@@ -95,6 +95,88 @@ export function skeleton(opts = {}) {
   return out;
 }
 
+// ── 再取得オーバーレイ／フォーカストラップ ───────────────────────────────
+// CSS は index.html ではなく ここから 1 度だけ <style id="ui-overlay-style"> を注入する（冪等）。
+//   色は CSS 変数（--card/--line/--fill 等）参照＝ダーク対応。
+let _overlayStyleInjected = false;
+function ensureOverlayStyle() {
+  if (_overlayStyleInjected) return;
+  if (typeof document === "undefined" || !document.head) return;
+  _overlayStyleInjected = true;
+  const s = document.createElement("style");
+  s.id = "ui-overlay-style";
+  s.textContent = `
+  .ui-refresh-ov{position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
+    background:color-mix(in srgb, var(--card) 55%, transparent);backdrop-filter:saturate(120%) blur(.5px);
+    -webkit-backdrop-filter:saturate(120%) blur(.5px);animation:ui-ov-in .12s ease-out}
+  @keyframes ui-ov-in{from{opacity:0}to{opacity:1}}
+  .ui-refresh-spin{width:30px;height:30px;border-radius:50%;
+    border:3px solid var(--line);border-top-color:var(--fill);animation:ui-ov-rot .7s linear infinite}
+  @keyframes ui-ov-rot{to{transform:rotate(360deg)}}
+  @media (prefers-reduced-motion:reduce){
+    .ui-refresh-ov{animation:none}
+    .ui-refresh-spin{animation-duration:1.6s}
+  }`;
+  document.head.appendChild(s);
+}
+
+// 再取得オーバーレイ: rootEl に薄い半透明オーバーレイ＋スピナーを出し、await fn() の間表示。
+//   終了で必ず除去（finally）。rootEl が position:static のときだけ一時的に relative を当て、復帰させる。
+//   戻り値は fn() の解決値。fn が無ければ何もせず undefined。
+export async function withRefresh(rootEl, fn) {
+  if (typeof fn !== "function") return undefined;
+  if (!rootEl || typeof document === "undefined") return await fn();
+  ensureOverlayStyle();
+  const cs = (typeof getComputedStyle === "function") ? getComputedStyle(rootEl) : null;
+  const needsRel = cs && cs.position === "static";
+  const prevInlinePos = rootEl.style.position;
+  if (needsRel) rootEl.style.position = "relative";
+  const ov = document.createElement("div");
+  ov.className = "ui-refresh-ov";
+  ov.setAttribute("aria-hidden", "true");
+  ov.innerHTML = `<div class="ui-refresh-spin"></div>`;
+  rootEl.appendChild(ov);
+  try {
+    return await fn();
+  } finally {
+    ov.remove();
+    if (needsRel) {
+      if (prevInlinePos) rootEl.style.position = prevInlinePos;
+      else rootEl.style.removeProperty("position");
+    }
+  }
+}
+
+// フォーカストラップ: containerEl 内に Tab/Shift+Tab を閉じ込める。
+//   戻り値は解除関数（呼び出し側が閉じる時に必ず呼ぶ）。containerEl が無ければ no-op を返す。
+//   フォーカス可能要素は標準セレクタで都度収集（動的な内容にも追従）。
+export function trapFocus(containerEl) {
+  if (!containerEl || typeof document === "undefined") return () => {};
+  const SEL = [
+    "a[href]", "button:not([disabled])", "textarea:not([disabled])",
+    "input:not([disabled])", "select:not([disabled])",
+    '[tabindex]:not([tabindex="-1"])',
+  ].join(",");
+  const focusables = () => Array.prototype.filter.call(
+    containerEl.querySelectorAll(SEL),
+    (el) => el.offsetWidth > 0 || el.offsetHeight > 0 || el === document.activeElement
+  );
+  const onKey = (e) => {
+    if (e.key !== "Tab") return;
+    const list = focusables();
+    if (!list.length) { e.preventDefault(); containerEl.focus(); return; }
+    const first = list[0], last = list[list.length - 1];
+    const active = document.activeElement;
+    if (e.shiftKey) {
+      if (active === first || !containerEl.contains(active)) { e.preventDefault(); last.focus(); }
+    } else {
+      if (active === last || !containerEl.contains(active)) { e.preventDefault(); first.focus(); }
+    }
+  };
+  containerEl.addEventListener("keydown", onKey);
+  return () => containerEl.removeEventListener("keydown", onKey);
+}
+
 // メンバーのイニシャル・アバター（HTML文字列）。
 //   member: { id, name, username [, colorIndex] }、opts: { size = 18 }
 //   背景は member_color（colorIndex 優先、無ければ id ベース）。member が falsy なら空文字。

@@ -2,7 +2,7 @@
 import * as vik from "./lib/api.js";
 import * as store from "./lib/store.js";
 import { icon } from "./lib/icons.js";
-import { errorState } from "./lib/ui.js";
+import { errorState, withRefresh } from "./lib/ui.js";
 import { ROUTES, ORDER, ALWAYS_VISIBLE } from "./lib/routes.js";
 
 const app = document.getElementById("app");
@@ -138,7 +138,10 @@ function shell() {
     paintThemeBtn();
     route(); // 現在ビューを再描画（SVG等でJS算出した色＝円時計の中央数字などを即反映）
   };
-  document.getElementById("refresh").onclick = async () => { store.invalidate(); route(); };
+  document.getElementById("refresh").onclick = async () => {
+    const content = document.getElementById("content");
+    await withRefresh(content, async () => { store.invalidate(); await route(); });
+  };
   document.getElementById("addtask").onclick = async () => {
     const { openTaskForm } = await import("./views/taskform.js");
     openTaskForm({ onSaved: route });

@@ -138,6 +138,13 @@ export function attachDatePicker(input, { holidaysByDate = null } = {}) {
   let view = null; // {y, m}（表示中の月）
   const todayIso = new Date().toISOString().slice(0, 10);
   const holName = (iso) => (holidaysByDate && (holidaysByDate.get ? holidaysByDate.get(iso) : holidaysByDate[iso])) || null;
+  // ISO "YYYY-MM-DD" を日/月単位でずらす（UTC基準でparse/表示と一致）。
+  const shiftIso = (iso, { days = 0, months = 0 } = {}) => {
+    const d = new Date(iso + "T00:00:00Z");
+    if (months) d.setUTCMonth(d.getUTCMonth() + months);
+    if (days) d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  };
 
   const renderCal = () => {
     const sel = parseSmartDate(input.value);
@@ -190,11 +197,37 @@ export function attachDatePicker(input, { holidaysByDate = null } = {}) {
     renderCal();
   };
   const close = () => { pop.hidden = true; view = null; };
+  // キーボードで日付を移動: 現在値（無ければ今日）を基準にずらして入力欄へ反映。
+  // 既存の input イベント経由でハイライト/月表示が追従する（parseSmartDate がこの表示形式を読み戻せる）。
+  const moveBy = (opts) => {
+    const cur = parseSmartDate(input.value) || todayIso;
+    const next = shiftIso(cur, opts);
+    input.value = fmtDisplayDow(next);
+    view = { y: +next.slice(0, 4), m: +next.slice(5, 7) }; // 移動先の月へ追従
+    if (pop.hidden) open(); else renderCal(); // 開いてなければ開く（=renderCal も走る）
+    input.dispatchEvent(new Event("input")); // 他のリスナ（整形/曜日追従）にも変更を通知
+  };
   input.addEventListener("focus", open);
   input.addEventListener("click", open); // フォーカス済みの欄を再クリック（Escで閉じた後など）でも開く
   input.addEventListener("input", () => { if (!pop.hidden) renderCal(); }); // タイプ中も選択ハイライト追従
   input.addEventListener("blur", () => setTimeout(close, 120));
-  input.addEventListener("keydown", (ev) => { if (ev.key === "Escape") close(); });
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") { close(); return; }
+    if (ev.key === "ArrowUp") { ev.preventDefault(); moveBy({ days: -1 }); }
+    else if (ev.key === "ArrowDown") { ev.preventDefault(); moveBy({ days: 1 }); }
+    else if (ev.key === "PageUp") { ev.preventDefault(); moveBy({ months: -1 }); }
+    else if (ev.key === "PageDown") { ev.preventDefault(); moveBy({ months: 1 }); }
+    else if (ev.key === "Enter") {
+      // ピッカーが開いていれば確定（整形して閉じる）。閉じていれば既存のフォーム送信等に委ねる。
+      if (!pop.hidden) {
+        ev.preventDefault();
+        const cur = parseSmartDate(input.value);
+        if (cur) input.value = fmtDisplayDow(cur);
+        close();
+        input.dispatchEvent(new Event("blur")); // 既存の整形/曜日追従を発火
+      }
+    }
+  });
 }
 
 let _dpStyle = false;

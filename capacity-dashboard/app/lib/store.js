@@ -37,6 +37,24 @@ export const isAiUser = (u) => !!u && AI_USERNAMES.has(u.username);
 
 let cache = null;
 
+// 同時実行数を制限しながら map する（N+1 取得のバースト緩和）。結果は入力と同じ順序の配列で返す
+// ＝ Promise.all を置き換えても戻り値の形・順序・値は不変。失敗ハンドリングは各 fn 内（.catch）に委ねる。
+async function mapLimit(items, limit, fn) {
+  const arr = items || [];
+  const out = new Array(arr.length);
+  let next = 0;
+  const worker = async () => {
+    while (true) {
+      const i = next++;
+      if (i >= arr.length) return;
+      out[i] = await fn(arr[i], i);
+    }
+  };
+  const n = Math.max(1, Math.min(limit, arr.length));
+  await Promise.all(Array.from({ length: n }, worker));
+  return out;
+}
+
 let _loadInflight = null; // 飛行中の load() を合流させ、invalidate直後の並行呼び出しで N+1 取得が多重実行されるのを防ぐ
 export async function load(force = false) {
   if (cache && !force) return cache;
@@ -79,8 +97,10 @@ async function _loadImpl() {
   const habitTasks = habitProject ? (tasksAll || []).filter((t) => t.project_id === habitProject.id && !t.done) : [];
   // ID→ユーザー名の名簿（全ワークスペースの projectusers ∪）。assignees に出ない人の名前解決用（P2 #5）。
   const dir = new Map();
-  const dirLists = await Promise.all(
-    (projects || []).map((p) => vik.getProjectMembers(p.id).catch(() => []))
+  // 同時実行数を 8 に制限（実WSのみ・project_id は既に一意なので重複 fetch は無い）。
+  const dirLists = await mapLimit(
+    projects || [], 8,
+    (p) => vik.getProjectMembers(p.id).catch(() => [])
   );
   for (const list of dirLists) for (const u of list || []) {
     if (!dir.has(u.id)) dir.set(u.id, { id: u.id, username: u.username, name: u.name || u.username });
@@ -113,8 +133,10 @@ async function _loadImpl() {
 
   // 日別予定(plans)を持つタスクだけ N+1 で取得し plansByTask に集約（#4 単一真実の負荷源）。
   const plannedTasks = (tasks || []).filter((t) => (t.time_planned || 0) > 0);
-  const planPairs = await Promise.all(
-    plannedTasks.map((t) => vik.getPlans(t.id).then((p) => [t.id, p || []]).catch(() => [t.id, []]))
+  // 同時実行数を 8 に制限（task.id は一意＝重複 fetch は無い／現状踏襲で time_planned>0 のみ）。
+  const planPairs = await mapLimit(
+    plannedTasks, 8,
+    (t) => vik.getPlans(t.id).then((p) => [t.id, p || []]).catch(() => [t.id, []])
   );
   cache = {
     tasks: tasks || [], projects: projects || [], members: [...mmap.values()], aiMembers, me, settings,

@@ -6,6 +6,7 @@ import { invalidate } from "../lib/store.js";
 import { C, esc } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
 import { parseSmartDate, fmtDisplay, fmtDisplayDow, joinMeta, splitMeta, hourInputHtml, wireHourInput, docChipsHtml, wireDocChips, attachDatePicker } from "../lib/form.js";
+import { expandRecurrences } from "../lib/recurrence.js"; // 展開は lib に委譲（rrule.js 経由・自前計算しない）
 
 const BYDAY = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"]; // getUTCDay() の並び
 const DOW_JA = ["日", "月", "火", "水", "木", "金", "土"];
@@ -149,6 +150,7 @@ export function renderRecurrencePanel(el, mode, { members, onSaved, close, holid
       </div>
     </div>
     <div class="rf-prev" id="rf-prev"></div>
+    <div class="rf-occ" id="rf-occ" hidden></div>
     <div class="tf-row">
       <div class="tf-col">
         <label class="tf-l">開始日 <span class="tf-hint">（起点）</span></label>
@@ -188,6 +190,7 @@ export function renderRecurrencePanel(el, mode, { members, onSaved, close, holid
   // 単位に応じた詳細だけを表示: 週→曜日トグル / 月→「N日 or 第N曜日」ラジオ / 日→なし。
   // 既定値は開始日から提案し（曜日・日にち・第N曜）、ユーザーが触ったら追従を止める。
   const dateEl = $("#rf-date");
+  const untilEl = $("#rf-until"); // 発生日プレビュー(updateOccPreview)が参照するため早期に取得（TDZ回避）
   const unitEl = $("#rf-unit"), intEl = $("#rf-int");
   const dowBtns = [...el.querySelectorAll(".rf-dowbtn")];
   let touchedDow = false, touchedMonthly = false;
@@ -217,6 +220,41 @@ export function renderRecurrencePanel(el, mode, { members, onSaved, close, holid
     }
   };
 
+  // 今後の発生日プレビュー（B46）: 現在の設定値から先頭5件を算出してチップ表示。
+  // 展開は expandRecurrences（lib・rrule.js）に委譲。開始日を起点に、終了日(任意)も考慮した
+  // 仮の recurrence を組み、開始日〜十分先までの窓で展開して先頭5件を取り出す。
+  const PREVIEW_N = 5;
+  const updateOccPreview = () => {
+    const box = $("#rf-occ");
+    if (!box || !unitEl) return;
+    const st = readState();
+    const iso = startISO();
+    if (!iso) { box.hidden = true; box.innerHTML = ""; return; }
+    // 週次で曜日未選択など、展開不能な状態はプレビュー非表示（保存時バリデーションに委ねる）
+    if (st.unit === "weekly" && !st.weekdays.length) { box.hidden = true; box.innerHTML = ""; return; }
+    // 終了日: 入力欄が空なら無制限。窓上限は終了日 or 開始から約3年先（十分に5件拾える範囲）。
+    let untilISO = null;
+    if (untilEl && untilEl.value.trim()) {
+      const u = parseSmartDate(untilEl.value);
+      if (u && u >= iso) untilISO = u;
+    }
+    let rrule;
+    try { rrule = buildRRule({ ...st, untilISO }); } catch { box.hidden = true; box.innerHTML = ""; return; }
+    const horizon = new Date(iso + "T00:00:00Z");
+    horizon.setUTCFullYear(horizon.getUTCFullYear() + 3);
+    const toISO = untilISO && untilISO < horizon.toISOString().slice(0, 10) ? untilISO : horizon.toISOString().slice(0, 10);
+    let occs = [];
+    try {
+      occs = expandRecurrences([{ rrule, dtstart: `${iso}T00:00:00Z`, assignee_ids: [] }], iso, toISO);
+    } catch { box.hidden = true; box.innerHTML = ""; return; }
+    const days = occs.map((o) => o.dateISO).sort().slice(0, PREVIEW_N);
+    if (!days.length) { box.hidden = true; box.innerHTML = ""; return; }
+    const more = occs.length > days.length ? `<span class="rf-occ-more">…</span>` : "";
+    box.hidden = false;
+    box.innerHTML = `<span class="rf-occ-lbl">今後の発生日</span>` +
+      days.map((d) => `<span class="rf-occ-chip">${esc(fmtDisplayDow(d))}</span>`).join("") + more;
+  };
+
   const syncFreqUI = () => {
     if (!unitEl) return;
     const st = readState();
@@ -224,6 +262,7 @@ export function renderRecurrencePanel(el, mode, { members, onSaved, close, holid
     $("#rf-monthly").hidden = st.unit !== "monthly";
     const prev = $("#rf-prev");
     if (prev) prev.innerHTML = icon("repeat") + " " + esc(rruleText(st));
+    updateOccPreview();
   };
 
   if (unitEl) {
@@ -250,8 +289,7 @@ export function renderRecurrencePanel(el, mode, { members, onSaved, close, holid
     syncDefaults();
     syncFreqUI();
   };
-  const untilEl = $("#rf-until");
-  if (untilEl) untilEl.onblur = () => { const iso = parseSmartDate(untilEl.value); if (iso) untilEl.value = fmtDisplayDow(iso); };
+  if (untilEl) untilEl.onblur = () => { const iso = parseSmartDate(untilEl.value); if (iso) untilEl.value = fmtDisplayDow(iso); syncFreqUI(); };
   // カレンダーピッカー（土日祝色分け・祝日名ツールチップ）
   attachDatePicker(dateEl, { holidaysByDate });
   if (untilEl) attachDatePicker(untilEl, { holidaysByDate });
@@ -444,6 +482,11 @@ export function ensureRecurrenceStyle() {
   .rf-radio{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:${C.ink};cursor:pointer}
   .rf-mini{width:auto;padding:7px 8px}
   .rf-prev{margin-top:8px;font-size:12.5px;color:${C.fill};font-weight:600}
+  .rf-occ{margin-top:7px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .rf-occ[hidden]{display:none}
+  .rf-occ-lbl{font-size:11.5px;color:${C.muted};font-weight:600;margin-right:2px}
+  .rf-occ-chip{font-size:11.5px;color:${C.ink};background:#f1f4f8;border:1px solid ${C.line};border-radius:999px;padding:2px 9px;white-space:nowrap}
+  .rf-occ-more{font-size:12px;color:${C.muted};font-weight:700}
   .rf-members{display:flex;gap:14px;margin-top:6px;flex-wrap:wrap}
   .rf-mem{font-size:13px;color:${C.ink};display:inline-flex;align-items:center;gap:5px;cursor:pointer}
   .rf-order{margin-top:8px;border:1px solid ${C.line};border-radius:10px;padding:8px 10px;background:#fafbfc}
