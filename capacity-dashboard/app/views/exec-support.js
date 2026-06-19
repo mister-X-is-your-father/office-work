@@ -7,7 +7,7 @@
 //
 // 仕様: docs/exec-support-spec.md。データ形は固定（taskform/将来の一覧が依存）:
 //   prep = { next_step, steps, schedule, if_then, prereqs, obstacles, dod, score }
-import { getPrep, savePrep, getSettings } from "../lib/exec.js";
+import { getPrep, savePrep, getSettings, saveProtectedWindows } from "../lib/exec.js";
 import { updateTask } from "../lib/api.js";
 import { load, isAiUser } from "../lib/store.js";
 import { shiftISO } from "../lib/capacity.js";
@@ -301,6 +301,8 @@ const PLUGINS = [
             <button type="button" class="es-btn es-backbtn" data-act="backcast"${canBackcast ? "" : " disabled"}>${icon("calendarDays", { size: 15 })}逆算スケジュール</button>
             <span class="es-back-hint">${esc(hint)}</span>
           </div>
+          <button type="button" class="es-pw-link" data-act="pw-toggle" aria-expanded="false">${icon("lock", { size: 12 })} 保護時間帯を編集</button>
+          <div class="es-pw-host" data-pw-host></div>
         </div>`;
     },
     wire(root, data, ctx, save) {
@@ -345,6 +347,22 @@ const PLUGINS = [
           backBtn.dataset.busy = ""; backBtn.disabled = false;
         }
       });
+
+      // ── 保護時間帯エディタ（逆算が尊重する team 設定） ──
+      // コントローラを ctx に保持し、カード再描画をまたいで開閉状態を引き継ぐ。
+      const host = root.querySelector("[data-pw-host]");
+      const pwLink = root.querySelector('[data-act="pw-toggle"]');
+      if (host && pwLink) {
+        const pw = mountProtectedEditor(host);
+        const syncLink = (open) => pwLink.setAttribute("aria-expanded", open ? "true" : "false");
+        pwLink.addEventListener("click", async () => {
+          const open = await pw.toggle();
+          syncLink(open);
+          ctx._pwOpen = open;
+        });
+        // 再描画前に開いていたなら復元（DOM は作り直されているので toggle で開き直す）。
+        if (ctx && ctx._pwOpen) { pw.toggle().then(syncLink); }
+      }
     },
     score(data) { return nonEmpty(data.due) ? 15 : 0; },
   },
@@ -530,14 +548,36 @@ function loadEnabled() {
     const raw = JSON.parse(localStorage.getItem(ENABLED_KEY));
     if (Array.isArray(raw)) {
       const set = new Set(raw);
-      // 既知 id のみ採用（未知 id は無視）。
-      return PLUGINS.filter((p) => set.has(p.id)).map((p) => p.id);
+      // 既知 id のみ採用（未知 id は無視）。順序は order に従う（loadOrder で正規化）。
+      return loadOrder().filter((id) => set.has(id));
     }
   } catch { /* noop */ }
-  return PLUGINS.map((p) => p.id); // 既定 = 全部 ON
+  return loadOrder().slice(); // 既定 = 全部 ON（表示順）
 }
 function saveEnabled(ids) {
   try { localStorage.setItem(ENABLED_KEY, JSON.stringify(ids)); } catch { /* noop */ }
+}
+
+// ── 手法の表示順（個人・localStorage） ─────────────────────────────
+// pluginId 配列。未知 id は捨て、欠落 id は PLUGINS 定義順で末尾に補う（新プラグイン追加に強い）。
+const ORDER_KEY = "ts.execsupport.order";
+function normalizeOrder(arr) {
+  const known = new Set(PLUGINS.map((p) => p.id));
+  const seen = new Set();
+  const out = [];
+  for (const id of Array.isArray(arr) ? arr : []) {
+    if (known.has(id) && !seen.has(id)) { out.push(id); seen.add(id); }
+  }
+  // 欠落（=保存後に追加された新プラグイン）を定義順で末尾に補完。
+  for (const p of PLUGINS) if (!seen.has(p.id)) out.push(p.id);
+  return out;
+}
+function loadOrder() {
+  try { return normalizeOrder(JSON.parse(localStorage.getItem(ORDER_KEY))); }
+  catch { return PLUGINS.map((p) => p.id); }
+}
+function saveOrder(ids) {
+  try { localStorage.setItem(ORDER_KEY, JSON.stringify(normalizeOrder(ids))); } catch { /* noop */ }
 }
 
 // ── スコア計算 ────────────────────────────────────────────────────
@@ -554,12 +594,41 @@ function computeScore(prep, enabledIds) {
   return { got, max, pct };
 }
 
+// ── メーター演出（達成感）─────────────────────────────────────────
+// pct に応じた段階。tier は CSS クラス suffix（warn/warm/good/full）＝色を切り替える。
+//   低(～39)=注意 / 中(40～79)=進行 / 高(80～99)=好調 / 100%=達成（祝祭）。
+function meterTier(pct) {
+  if (pct >= 100) return "full";
+  if (pct >= 80) return "good";
+  if (pct >= 40) return "warm";
+  return "warn";
+}
 function meterLabel(pct) {
-  if (pct >= 100) return "実行されるしかない状態";
-  if (pct >= 75) return "ほぼ準備完了";
+  if (pct >= 100) return "もう実行されるしかない状態です";
+  if (pct >= 80) return "好調・あと少しで満点";
   if (pct >= 40) return "着手の不確実性が下がってきた";
   if (pct > 0) return "まだ埋める余地あり";
   return "まずは「次の一歩」から";
+}
+
+// 「次の一手」: 有効プラグインのうち未充足（sc<max）で、埋めると加点が最大（不足 pt が最大）の1つ。
+//   全体 max を分母に %換算した加点見込みも返す。100%（=全充足）なら null。
+function nextMove(prep, enabledIds) {
+  let totalMax = 0;
+  for (const id of enabledIds) { const p = PLUGIN_BY_ID[id]; if (p) totalMax += p.max; }
+  if (totalMax <= 0) return null;
+  let best = null;
+  for (const id of enabledIds) {
+    const p = PLUGIN_BY_ID[id];
+    if (!p) continue;
+    const sc = clampScore(p.score(prep[id] || p.defaults()), p.max);
+    const gap = p.max - sc;
+    if (gap <= 0) continue;
+    if (!best || gap > best.gap) best = { id, label: p.label, gap };
+  }
+  if (!best) return null;
+  best.deltaPct = Math.round((best.gap / totalMax) * 100);
+  return best;
 }
 
 // ── スタイル（1回だけ body/head へ注入） ───────────────────────────
@@ -580,21 +649,34 @@ export function ensureStyle() {
   .es-meter-sub{font-size:10.5px;color:var(--muted);margin-left:auto}
   .es-bar{position:relative;height:10px;background:var(--track);border-radius:6px;overflow:hidden}
   .es-bar-fill{position:absolute;left:0;top:0;bottom:0;border-radius:6px;background:#3a86ff;transition:width .25s ease,background .25s ease}
-  .es-bar-fill.warm{background:#f5a623}
-  .es-bar-fill.full{background:#2fa66b}
+  .es-bar-fill.warn{background:#e5793a}
+  .es-bar-fill.warm{background:#3a86ff}
+  .es-bar-fill.good{background:#2f9e6b}
+  .es-bar-fill.full{background:linear-gradient(90deg,#2fa66b,#37c98a);box-shadow:0 0 0 1px rgba(47,166,107,.45) inset}
+  .es-meter-pct.full{color:#2fa66b}
+  .es-meter-lab.full{color:#2fa66b}
+  .es-meter-done{display:none;align-items:center;gap:5px;font-size:11.5px;font-weight:700;color:#2fa66b}
+  .es-meter-done.show{display:inline-flex}
+  .es-meter-done svg{width:14px;height:14px}
+  /* 次の一手ヒント */
+  .es-next{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--ink);background:var(--track);border:1px solid var(--line);border-radius:9px;padding:7px 11px}
+  .es-next.hide{display:none}
+  .es-next-ic{line-height:0;color:var(--fill);flex:none}
+  .es-next b{font-weight:700}
+  .es-next .es-next-go{margin-left:auto;font:inherit;font-size:11px;font-weight:600;color:var(--fill);background:var(--card);border:1px solid var(--line);border-radius:7px;padding:4px 9px;cursor:pointer;flex:none}
+  .es-next .es-next-go:hover{border-color:#b9d4ff}
   .es-gear{border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:8px;cursor:pointer;padding:6px 9px;line-height:0}
   .es-gear:hover{color:var(--fill);border-color:#b9d4ff}
-  .es-toggles{display:none;flex-wrap:wrap;gap:6px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--track)}
+  .es-toggles{display:none;flex-direction:column;gap:6px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--track)}
   .es-toggles.open{display:flex}
-  .es-tg{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:5px 9px;cursor:pointer;user-select:none}
-  .es-tg input{margin:0}
-  .es-tg.off{opacity:.55}
   .es-card{border:1px solid var(--line);border-radius:11px;background:var(--card);overflow:hidden}
   .es-chd{display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--track);border-bottom:1px solid var(--line)}
   .es-chd-ic{line-height:0;color:var(--muted)}
   .es-ctitle{font-size:12.5px;font-weight:700;color:var(--ink)}
-  .es-cpts{font-size:10.5px;color:var(--muted);margin-left:auto;font-variant-numeric:tabular-nums}
+  .es-cpts{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;color:var(--muted);margin-left:auto;font-variant-numeric:tabular-nums}
   .es-cpts.met{color:var(--free,#2fa66b);font-weight:700}
+  .es-cpts .es-cpts-ck{display:none;line-height:0}
+  .es-cpts.met .es-cpts-ck{display:inline-flex;color:var(--free,#2fa66b)}
   .es-body{padding:11px 12px}
   .es-field{display:flex;flex-direction:column;gap:8px}
   .es-hint{font-size:11px;color:var(--muted);line-height:1.5}
@@ -651,6 +733,44 @@ export function ensureStyle() {
   .es-dx-b:active{transform:translateY(1px)}
   @keyframes es-flash{0%{box-shadow:0 0 0 0 rgba(58,134,255,.55);border-color:var(--fill)}100%{box-shadow:0 0 0 6px rgba(58,134,255,0);border-color:var(--line)}}
   .es-card.es-flash{animation:es-flash 1.4s ease-out;border-color:var(--fill)}
+  /* 手法セクション（ON/OFF＋並べ替え） */
+  .es-tgl-head{display:flex;align-items:center;gap:6px;width:100%;font-size:11px;font-weight:700;color:var(--muted);margin-bottom:8px;letter-spacing:.02em}
+  .es-tgl-rows{display:flex;flex-direction:column;gap:6px}
+  .es-tgrow{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:5px 8px}
+  .es-tgrow.off{opacity:.6}
+  .es-tgrow .es-tg-name{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink);cursor:pointer;user-select:none;flex:1;min-width:0}
+  .es-tgrow .es-tg-name input{margin:0;flex:none}
+  .es-tgrow .es-tg-ic{line-height:0;color:var(--muted);flex:none}
+  .es-tg-ord{display:inline-flex;gap:3px;flex:none}
+  .es-tg-ordb{border:1px solid var(--line);background:var(--track);color:var(--muted);cursor:pointer;padding:3px 5px;border-radius:6px;line-height:0}
+  .es-tg-ordb:hover:not(:disabled){color:var(--fill);border-color:#b9d4ff}
+  .es-tg-ordb:disabled{opacity:.3;cursor:default}
+  /* 保護時間帯エディタ */
+  .es-pw{border:1px dashed var(--line);border-radius:10px;background:var(--track);padding:11px 12px;display:none;flex-direction:column;gap:9px;margin-top:8px}
+  .es-pw.open{display:flex}
+  .es-pw-intro{font-size:11px;color:var(--muted);line-height:1.5}
+  .es-pw-deny{font-size:11px;color:var(--over,#e5484d);font-weight:600;display:flex;align-items:center;gap:5px}
+  .es-pw-deny svg{flex:none}
+  .es-pwrows{display:flex;flex-direction:column;gap:9px}
+  .es-pwrow{display:flex;flex-direction:column;gap:7px;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:9px 10px}
+  .es-pw-top{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .es-pw-dows{display:flex;gap:4px;flex-wrap:wrap}
+  .es-pw-dow{font:inherit;font-size:11px;min-width:26px;text-align:center;border:1px solid var(--line);background:var(--track);color:var(--muted);border-radius:6px;padding:4px 6px;cursor:pointer;user-select:none}
+  .es-pw-dow.on{background:var(--fill);border-color:var(--fill);color:#fff;font-weight:700}
+  .es-pw-dow:disabled{cursor:default}
+  .es-pw-time{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--muted)}
+  .es-pw-time input{font:inherit;font-size:12px;padding:5px 7px;border:1px solid var(--line);border-radius:7px;background:var(--card);color:var(--ink);box-sizing:border-box}
+  .es-pw-kind{font:inherit;font-size:12px;padding:5px 7px;border:1px solid var(--line);border-radius:7px;background:var(--card);color:var(--ink)}
+  .es-pwx{border:0;background:transparent;color:var(--muted);cursor:pointer;padding:3px;border-radius:6px;line-height:0;margin-left:auto;flex:none}
+  .es-pwx:hover:not(:disabled){color:var(--over,#e5484d);background:var(--track)}
+  .es-pwx:disabled{opacity:.4;cursor:default}
+  .es-pw-empty{font-size:11px;color:var(--muted);padding:4px 0}
+  .es-pw-foot{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .es-pw-msg{font-size:11px;font-weight:600}
+  .es-pw-msg.ok{color:var(--free,#2fa66b)}
+  .es-pw-msg.err{color:var(--over,#e5484d)}
+  .es-pw-link{font:inherit;font-size:11.5px;font-weight:600;color:var(--fill);background:transparent;border:0;border-bottom:1px dashed currentColor;padding:0 0 1px;cursor:pointer;align-self:flex-start}
+  .es-pw-link:hover{filter:brightness(1.1)}
   html[data-theme="dark"] .es-add:hover,html[data-theme="dark"] .es-gear:hover{background:var(--card)}`;
   document.head.appendChild(s);
 }
@@ -686,6 +806,166 @@ function makeSaver(taskId, getPrepObj, getEnabled, onChange) {
   return save;
 }
 
+// ── 保護時間帯エディタ（exec の team 設定・prep とは別系統） ─────────
+// トラブル想定枠（バッファ/ブロック）の編集 UI。逆算スケジュールがこの枠を尊重する。
+// 書き込みは管理者のみ（can_edit=false なら閲覧専用）。exec ダウン時は優しく失敗を握る。
+const DOW_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
+const PW_KINDS = [
+  { v: "buffer", label: "バッファ（緩衝）" },
+  { v: "block", label: "ブロック（固定）" },
+];
+// 保護枠の正規化（保存・逆算に渡す形）。__id 等の内部キーは落とす。
+function pwClean(w) {
+  const days = Array.isArray(w.days) ? w.days.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6) : [];
+  const kind = w.kind === "block" ? "block" : "buffer";
+  const out = { label: String(w.label || "").trim(), days, start: w.start || "", end: w.end || "", kind };
+  if (w.id != null && w.id !== "") out.id = w.id;
+  return out;
+}
+
+// 保護時間帯エディタを host 要素にマウントする。toggle ボタンで開閉。
+//   host = エディタを差し込むコンテナ要素。初回オープン時に getSettings を遅延ロード。
+function mountProtectedEditor(host) {
+  let state = null;     // { windows:[{__id,...}], canEdit } ロード済みか null
+  let loading = false;
+  let opened = false;
+
+  host.innerHTML = `<div class="es-pw" hidden></div>`;
+  const box = host.querySelector(".es-pw");
+
+  const setMsg = (el, text, ok) => {
+    el.textContent = text || "";
+    el.className = "es-pw-msg" + (text ? (ok ? " ok" : " err") : "");
+  };
+
+  const rowHtml = (w, dis) => {
+    const dows = DOW_LABELS.map((lab, d) =>
+      `<button type="button" class="es-pw-dow${w.days.includes(d) ? " on" : ""}" data-dow="${d}"
+        aria-label="${esc(lab)}曜" aria-pressed="${w.days.includes(d) ? "true" : "false"}"${dis ? " disabled" : ""}>${esc(lab)}</button>`
+    ).join("");
+    const kinds = PW_KINDS.map((k) =>
+      `<option value="${k.v}"${w.kind === k.v ? " selected" : ""}>${esc(k.label)}</option>`
+    ).join("");
+    return `
+      <div class="es-pwrow" data-id="${w.__id}">
+        <div class="es-pw-top">
+          <input class="es-in es-grow" data-k="label" type="text" placeholder="名称（例: 昼の対応枠）" value="${esc(w.label || "")}"${dis ? " disabled" : ""}>
+          <select class="es-pw-kind" data-k="kind" aria-label="種別"${dis ? " disabled" : ""}>${kinds}</select>
+          <button type="button" class="es-pwx" data-act="del" aria-label="この保護枠を削除"${dis ? " disabled" : ""}>${icon("x", { size: 15 })}</button>
+        </div>
+        <div class="es-pw-dows" role="group" aria-label="曜日">${dows}</div>
+        <div class="es-pw-time">
+          <input data-k="start" type="time" value="${esc(w.start || "")}" aria-label="開始時刻"${dis ? " disabled" : ""}>
+          <span aria-hidden="true">〜</span>
+          <input data-k="end" type="time" value="${esc(w.end || "")}" aria-label="終了時刻"${dis ? " disabled" : ""}>
+        </div>
+      </div>`;
+  };
+
+  const render = () => {
+    if (loading) { box.innerHTML = `<div class="es-pw-intro">読み込み中…</div>`; return; }
+    if (!state) {
+      box.innerHTML = `<div class="es-pw-deny">${icon("alertTriangle", { size: 14 })} 保護時間帯を読み込めませんでした（保存サービスに接続できません）。</div>`;
+      return;
+    }
+    const dis = !state.canEdit;
+    const rows = state.windows.length
+      ? state.windows.map((w) => rowHtml(w, dis)).join("")
+      : `<div class="es-pw-empty">保護時間帯はまだありません。${dis ? "" : "「追加」で作成できます。"}</div>`;
+    box.innerHTML = `
+      <div class="es-pw-intro">トラブルが来やすい時間帯（例: 昼の対応）を保護し、重要タスクをそこに置かない／バッファを確保します。逆算スケジュールがこの枠を避けて作業日を割り当てます。</div>
+      ${dis ? `<div class="es-pw-deny">${icon("lock", { size: 14 })} 保護時間帯の編集は管理者のみです（閲覧のみ可能）。</div>` : ""}
+      <div class="es-pwrows">${rows}</div>
+      <div class="es-pw-foot">
+        ${dis ? "" : `<button type="button" class="es-add" data-act="add">${icon("arrowUp", { size: 13, cls: "es-add-ic" })}保護時間帯を追加</button>`}
+        ${dis ? "" : `<button type="button" class="es-btn primary" data-act="save">${icon("save", { size: 14 })}保存</button>`}
+        <span class="es-pw-msg" data-msg></span>
+      </div>`;
+    if (!dis) wireRows();
+  };
+
+  const wireRows = () => {
+    const msg = box.querySelector("[data-msg]");
+    box.querySelectorAll(".es-pwrow").forEach((rowEl) => {
+      const w = state.windows.find((x) => x.__id === rowEl.dataset.id);
+      if (!w) return;
+      rowEl.querySelector('[data-k="label"]').addEventListener("input", (e) => { w.label = e.target.value; setMsg(msg, ""); });
+      rowEl.querySelector('[data-k="kind"]').addEventListener("change", (e) => { w.kind = e.target.value; setMsg(msg, ""); });
+      rowEl.querySelector('[data-k="start"]').addEventListener("change", (e) => { w.start = e.target.value; setMsg(msg, ""); });
+      rowEl.querySelector('[data-k="end"]').addEventListener("change", (e) => { w.end = e.target.value; setMsg(msg, ""); });
+      rowEl.querySelectorAll(".es-pw-dow").forEach((db) => {
+        db.addEventListener("click", () => {
+          const d = +db.dataset.dow;
+          const on = w.days.includes(d);
+          if (on) w.days = w.days.filter((x) => x !== d); else w.days.push(d);
+          db.classList.toggle("on", !on);
+          db.setAttribute("aria-pressed", !on ? "true" : "false");
+          setMsg(msg, "");
+        });
+      });
+      rowEl.querySelector('[data-act="del"]').addEventListener("click", () => {
+        const i = state.windows.findIndex((x) => x.__id === w.__id);
+        if (i >= 0) state.windows.splice(i, 1);
+        render();
+      });
+    });
+    const addBtn = box.querySelector('[data-act="add"]');
+    if (addBtn) addBtn.addEventListener("click", () => {
+      state.windows.push({ __id: uid(), label: "", days: [], start: "12:00", end: "13:00", kind: "buffer" });
+      render();
+      const last = box.querySelectorAll('.es-pwrow [data-k="label"]');
+      if (last.length) last[last.length - 1].focus();
+    });
+    const saveBtn = box.querySelector('[data-act="save"]');
+    if (saveBtn) saveBtn.addEventListener("click", async () => {
+      if (saveBtn.dataset.busy === "1") return;
+      saveBtn.dataset.busy = "1"; saveBtn.disabled = true;
+      setMsg(msg, "保存中…", true);
+      try {
+        const payload = state.windows.map(pwClean);
+        const res = await saveProtectedWindows(payload);
+        const saved = (res && res.settings && res.settings.protected_windows) || payload;
+        state.windows = saved.map((w) => ({ __id: uid(), ...pwClean(w) }));
+        render();
+        const m2 = box.querySelector("[data-msg]");
+        setMsg(m2, "保存しました。逆算スケジュールに反映されます。", true);
+      } catch {
+        setMsg(msg, "保存に失敗しました（権限または接続をご確認ください）。", false);
+      } finally {
+        saveBtn.dataset.busy = ""; saveBtn.disabled = false;
+      }
+    });
+  };
+
+  const ensureLoaded = async () => {
+    if (state || loading) return;
+    loading = true; render();
+    try {
+      const d = await getSettings();
+      const windows = ((d && d.settings) || {}).protected_windows || [];
+      state = {
+        windows: windows.map((w) => ({ __id: uid(), ...pwClean(w) })),
+        canEdit: !!(d && d.can_edit),
+      };
+    } catch {
+      state = null;
+    } finally {
+      loading = false; render();
+    }
+  };
+
+  return {
+    toggle: async () => {
+      opened = !opened;
+      box.toggleAttribute("hidden", !opened);
+      box.classList.toggle("open", opened);
+      if (opened) await ensureLoaded();
+      return opened;
+    },
+    isOpen: () => opened,
+  };
+}
+
 // ── メイン描画 ────────────────────────────────────────────────────
 export async function renderExecSupport(container, { taskId, task = null, onChange } = {}) {
   ensureStyle();
@@ -717,44 +997,73 @@ export async function renderExecSupport(container, { taskId, task = null, onChan
   // ── メーター更新（プラグイン値が変わるたび即時） ──
   const updateMeter = () => {
     const { got, max, pct } = computeScore(prep, enabled);
+    const tier = meterTier(pct);
+    const isFull = pct >= 100;
     const fill = container.querySelector(".es-bar-fill");
+    const bar = container.querySelector(".es-bar");
     const pctEl = container.querySelector(".es-meter-pct");
     const labEl = container.querySelector(".es-meter-lab");
     const subEl = container.querySelector(".es-meter-sub");
+    const doneEl = container.querySelector(".es-meter-done");
     const footEl = container.querySelector(".es-foot-score b");
     if (fill) {
       fill.style.width = pct + "%";
-      fill.classList.toggle("full", pct >= 100);
-      fill.classList.toggle("warm", pct >= 40 && pct < 100);
+      // 段階クラスを排他更新（warn/warm/good/full）。
+      fill.classList.remove("warn", "warm", "good", "full");
+      fill.classList.add(tier);
     }
-    if (pctEl) pctEl.textContent = pct + "%";
-    if (labEl) labEl.textContent = meterLabel(pct);
+    if (bar) bar.setAttribute("aria-valuenow", String(pct));
+    if (pctEl) { pctEl.textContent = pct + "%"; pctEl.classList.toggle("full", isFull); }
+    if (labEl) { labEl.textContent = meterLabel(pct); labEl.classList.toggle("full", isFull); }
     if (subEl) subEl.textContent = `${got} / ${max} pt`;
+    if (doneEl) { doneEl.classList.toggle("show", isFull); doneEl.setAttribute("aria-hidden", isFull ? "false" : "true"); }
     if (footEl) footEl.textContent = `${got} / ${max} pt（${pct}%）`;
-    // 各カードの達成バッジも更新。
+    // 各カードの達成バッジも更新（pt 数だけ差し替え・check アイコン span は残す）。
     for (const id of enabled) {
       const p = PLUGIN_BY_ID[id];
       const badge = container.querySelector(`.es-card[data-pid="${id}"] .es-cpts`);
       if (!badge || !p) continue;
       const sc = clampScore(p.score(prep[id] || p.defaults()), p.max);
+      const ck = badge.querySelector(".es-cpts-ck");
       badge.textContent = `${sc} / ${p.max} pt`;
+      if (ck) badge.appendChild(ck); // textContent でクリアされた check を戻す
       badge.classList.toggle("met", sc >= p.max);
     }
+    // 「次の一手」ヒントを更新。
+    refreshNext();
+  };
+
+  // 次の一手ヒントを再計算して描き替える（100%＝未充足なし なら隠す）。
+  const refreshNext = () => {
+    const nextEl = container.querySelector("#es-next");
+    if (!nextEl) return;
+    const nm = nextMove(prep, enabled);
+    if (!nm) { nextEl.classList.add("hide"); return; }
+    nextEl.classList.remove("hide");
+    const txt = nextEl.querySelector(".es-next-txt");
+    if (txt) txt.innerHTML = `次の一手: <b>${esc(nm.label)}</b> を埋めると +${nm.deltaPct}%`;
+    const go = nextEl.querySelector(".es-next-go");
+    if (go) go.dataset.next = nm.id;
   };
 
   // save をラップして「保存＋メーター即更新」をひとまとめに（各プラグインに渡す save）。
   const saveAndMeter = () => { updateMeter(); save(); };
   saveAndMeter.flushNow = save.flushNow;
 
-  // ── カード群 HTML ──
-  const cardsHtml = () => PLUGINS.filter((p) => enabled.includes(p.id)).map((p) => {
-    const sc = clampScore(p.score(prep[p.id] || p.defaults()), p.max);
+  // 有効プラグインを表示順（order→enabled）で返す。
+  const orderedEnabled = () => loadOrder().filter((id) => enabled.includes(id));
+
+  // ── カード群 HTML ──（order→enabled の順で並べる）
+  const cardsHtml = () => orderedEnabled().map((id) => {
+    const p = PLUGIN_BY_ID[id];
+    if (!p) return "";
+    const sc = clampScore(p.score(prep[id] || p.defaults()), p.max);
     return `
       <section class="es-card" data-pid="${p.id}">
         <header class="es-chd">
           <span class="es-chd-ic">${icon(p.icon, { size: 16 })}</span>
           <span class="es-ctitle">${esc(p.label)}</span>
-          <span class="es-cpts${sc >= p.max ? " met" : ""}">${sc} / ${p.max} pt</span>
+          <span class="es-cpts${sc >= p.max ? " met" : ""}">${sc} / ${p.max} pt<span class="es-cpts-ck">${icon("check", { size: 13 })}</span></span>
         </header>
         <div class="es-body" data-body="${p.id}"></div>
       </section>`;
@@ -779,31 +1088,55 @@ export async function renderExecSupport(container, { taskId, task = null, onChan
       </div>`;
   };
 
-  // ── トグル（手法 ON/OFF）HTML ──
-  const togglesHtml = () => PLUGINS.map((p) => {
-    const on = enabled.includes(p.id);
-    return `<label class="es-tg${on ? "" : " off"}">
-      <input type="checkbox" data-tg="${p.id}"${on ? " checked" : ""}>
-      ${esc(p.label)}
-    </label>`;
-  }).join("");
+  // ── 手法セクション（ON/OFF＋並べ替え）HTML ──
+  // 並び＝表示順（order）。↑↓で順序入替（localStorage ts.execsupport.order に保存）。
+  const togglesHtml = () => {
+    const ord = loadOrder();
+    const n = ord.length;
+    const rows = ord.map((id, i) => {
+      const p = PLUGIN_BY_ID[id];
+      if (!p) return "";
+      const on = enabled.includes(id);
+      return `<div class="es-tgrow${on ? "" : " off"}" data-pid="${id}">
+        <span class="es-tg-ord">
+          <button type="button" class="es-tg-ordb" data-ord="up" aria-label="${esc(p.label)}を上へ"${i === 0 ? " disabled" : ""}>${icon("arrowUp", { size: 12 })}</button>
+          <button type="button" class="es-tg-ordb" data-ord="down" aria-label="${esc(p.label)}を下へ"${i === n - 1 ? " disabled" : ""}>${icon("chevronDown", { size: 12 })}</button>
+        </span>
+        <label class="es-tg-name">
+          <input type="checkbox" data-tg="${id}"${on ? " checked" : ""} aria-label="${esc(p.label)}を有効にする">
+          <span class="es-tg-ic">${icon(p.icon, { size: 14 })}</span>
+          ${esc(p.label)}
+        </label>
+      </div>`;
+    }).join("");
+    return `<div class="es-tgl-head">${icon("settings", { size: 13 })} 手法の取捨と表示順</div>
+      <div class="es-tgl-rows">${rows}</div>`;
+  };
 
   const { got, max, pct } = computeScore(prep, enabled);
+  const tier0 = meterTier(pct);
+  const nm0 = nextMove(prep, enabled);
 
   container.innerHTML = `
     <div class="es">
       <div class="es-top">
         <div class="es-meter">
           <div class="es-meter-h">
-            <span class="es-meter-pct">${pct}%</span>
-            <span class="es-meter-lab">${esc(meterLabel(pct))}</span>
+            <span class="es-meter-pct${pct >= 100 ? " full" : ""}">${pct}%</span>
+            <span class="es-meter-lab${pct >= 100 ? " full" : ""}">${esc(meterLabel(pct))}</span>
+            <span class="es-meter-done${pct >= 100 ? " show" : ""}" aria-hidden="${pct >= 100 ? "false" : "true"}">${icon("check", { size: 14 })}達成</span>
             <span class="es-meter-sub">${got} / ${max} pt</span>
           </div>
           <div class="es-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-label="実行可能性メーター">
-            <div class="es-bar-fill ${pct >= 100 ? "full" : pct >= 40 ? "warm" : ""}" style="width:${pct}%"></div>
+            <div class="es-bar-fill ${tier0}" style="width:${pct}%"></div>
           </div>
         </div>
         <button type="button" class="es-gear" id="es-gear" aria-label="手法のON/OFF" title="手法のON/OFF">${icon("settings", { size: 16 })}</button>
+      </div>
+      <div class="es-next${nm0 ? "" : " hide"}" id="es-next">
+        <span class="es-next-ic">${icon("lightbulb", { size: 14 })}</span>
+        <span class="es-next-txt">${nm0 ? `次の一手: <b>${esc(nm0.label)}</b> を埋めると +${nm0.deltaPct}%` : ""}</span>
+        ${nm0 ? `<button type="button" class="es-next-go" data-next="${esc(nm0.id)}">ここへ</button>` : ""}
       </div>
       <div class="es-toggles" id="es-toggles">${togglesHtml()}</div>
       ${diagnosticsHtml()}
@@ -835,26 +1168,78 @@ export async function renderExecSupport(container, { taskId, task = null, onChan
   };
   wireCards();
 
-  // ── 歯車トグルの開閉＋ON/OFF配線 ──
+  // ── 手法セクション（歯車で開閉・ON/OFF・並べ替え）配線 ──
   const gear = container.querySelector("#es-gear");
   const togglesBox = container.querySelector("#es-toggles");
   gear.addEventListener("click", () => togglesBox.classList.toggle("open"));
-  togglesBox.querySelectorAll("[data-tg]").forEach((cb) => {
-    cb.addEventListener("change", () => {
-      const id = cb.dataset.tg;
-      if (cb.checked) { if (!enabled.includes(id)) enabled.push(id); }
-      else { enabled = enabled.filter((x) => x !== id); }
-      // PLUGINS 定義順に正規化して保存。
-      enabled = PLUGINS.filter((p) => enabled.includes(p.id)).map((p) => p.id);
-      saveEnabled(enabled);
-      cb.closest(".es-tg").classList.toggle("off", !cb.checked);
-      // カード群を再構築（有効集合が変わったので render/wire/メーター全部）。
-      container.querySelector("#es-cards").innerHTML = cardsHtml();
-      wireCards();
-      updateMeter();
-      save(); // score 再計算分を保存
+
+  // 有効集合を「表示順」で正規化（order に従い enabled を並べ替え）。
+  const normEnabled = () => { enabled = loadOrder().filter((id) => enabled.includes(id)); };
+
+  // カード群を再構築（有効集合・順序が変わったとき）。
+  const rebuildCards = () => {
+    container.querySelector("#es-cards").innerHTML = cardsHtml();
+    wireCards();
+    updateMeter();
+  };
+  // 手法パネルを再描画＋再配線（順序変更で↑↓の disabled も更新するため作り直す）。
+  const rebuildToggles = () => {
+    togglesBox.innerHTML = togglesHtml();
+    wireToggles();
+  };
+
+  function wireToggles() {
+    togglesBox.querySelectorAll("[data-tg]").forEach((cb) => {
+      cb.addEventListener("change", () => {
+        const id = cb.dataset.tg;
+        if (cb.checked) { if (!enabled.includes(id)) enabled.push(id); }
+        else { enabled = enabled.filter((x) => x !== id); }
+        normEnabled();
+        saveEnabled(enabled);
+        const row = cb.closest(".es-tgrow");
+        if (row) row.classList.toggle("off", !cb.checked);
+        rebuildCards();
+        save(); // score 再計算分を保存
+      });
     });
-  });
+    // 並べ替え（↑↓）: order を入替えて保存 → 両パネル＋カードを再構築。
+    togglesBox.querySelectorAll("[data-ord]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (btn.disabled) return;
+        const row = btn.closest(".es-tgrow");
+        const id = row && row.dataset.pid;
+        if (!id) return;
+        const ord = loadOrder();
+        const i = ord.indexOf(id);
+        const j = btn.dataset.ord === "up" ? i - 1 : i + 1;
+        if (i < 0 || j < 0 || j >= ord.length) return;
+        const t = ord[i]; ord[i] = ord[j]; ord[j] = t;
+        saveOrder(ord);
+        normEnabled();
+        rebuildToggles();
+        rebuildCards();
+      });
+    });
+  }
+  wireToggles();
+
+  // ── 「次の一手」ヒントの「ここへ」配線（委譲・ボタンは更新で差し替わるため） ──
+  const nextEl = container.querySelector("#es-next");
+  if (nextEl) {
+    nextEl.addEventListener("click", (e) => {
+      const go = e.target.closest && e.target.closest(".es-next-go");
+      if (!go) return;
+      const id = go.dataset.next;
+      if (!id) return;
+      const card = container.querySelector(`.es-card[data-pid="${id}"]`);
+      if (!card) return;
+      card.scrollIntoView({ block: "center", behavior: "smooth" });
+      card.classList.remove("es-flash"); void card.offsetWidth; card.classList.add("es-flash");
+      setTimeout(() => card.classList.remove("es-flash"), 1500);
+      const main = card.querySelector(".es-body input, .es-body textarea");
+      if (main) { try { main.focus({ preventScroll: true }); } catch { main.focus(); } }
+    });
+  }
 
   // ── 診断「何が止めてる?」配線 ──
   // 折りたたみトグル＋症状ボタン（症状→手法を有効化＆スクロール＆ハイライト）。
