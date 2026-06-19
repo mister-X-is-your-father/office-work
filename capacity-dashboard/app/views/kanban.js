@@ -2,7 +2,7 @@
 // 旧式（Vikunja bucket 依存・単一WS固定）をやめ、全タスクをフロントで「ステータス軸」にグルーピングして描画する。
 // データは壊さない＝bucket 系 API（getViewTasks/createBucket/moveTaskToBucket 等）はもう呼ばない（呼ばないだけ）。
 import { load, invalidate, isAiUser } from "../lib/store.js";
-import { getTasks, updateTask, getTask, setTaskWaiting, createTaskInProject, createProject } from "../lib/api.js";
+import { getTasks, updateTask, getTask, setTaskWaiting, createTaskInProject, createProject, addRelation, removeRelation } from "../lib/api.js";
 import { PRIO, prioBucket, STATUS, statusOf } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 import { shiftISO } from "../lib/capacity.js";
@@ -40,6 +40,7 @@ const STALE_DAYS = 3;
 
 let _root;
 let _today = "";
+let _moving = false;
 
 export async function render(root) {
   _root = root;
@@ -244,12 +245,26 @@ function wireColumns(root, tasks) {
     col.addEventListener("dragleave", () => col.classList.remove("over"));
     col.addEventListener("drop", async (e) => {
       e.preventDefault(); col.classList.remove("over");
+      if (_moving) return;
       const taskId = +e.dataTransfer.getData("text/plain");
       const target = col.dataset.status;
       if (!taskId || !target) return;
       const t = (tasks || []).find((x) => x.id === taskId);
-      if (!t || statusOf(t) === target) return;
-      await moveStatus(t, target);
+      if (!t) return;
+      const laneAttr = col.dataset.lane;
+      const newParentId = laneAttr != null ? +laneAttr : null;
+      const cur = (((t.related_tasks || {}).parenttask) || [])[0]?.id || 0;
+      const needLane = newParentId != null && cur !== newParentId;
+      const needStatus = statusOf(t) !== target;
+      if (!needLane && !needStatus) return;
+      _moving = true;
+      try {
+        if (needLane) await moveLane(t, newParentId);
+        if (needStatus) await applyStatusChange(t, target);
+      } finally {
+        _moving = false;
+      }
+      rerender();
     });
   });
 }
@@ -257,9 +272,21 @@ function wireColumns(root, tasks) {
 // ステータス変更の単一経路（table.js:611-642 と同じ副作用セット）。before/after を history へ積む。
 // before/after = { done, percent_done, started_at, waiting }。applyState で適用（updateTask + setTaskWaiting）。
 async function moveStatus(t, key) {
-  const wasWaiting = statusOf(t) === "waiting";
-  const before = { done: !!t.done, percent_done: t.percent_done || 0, started_at: t.started_at || null, waiting: wasWaiting };
-  const after = stateFor(t, key);
+  if (_moving) return;
+  _moving = true;
+  try { await applyStatusChange(t, key); }
+  finally { _moving = false; }
+  rerender();
+}
+
+// ステータス変更の本体（_moving ガードと rerender は呼び出し側で管理）。
+// まず最新タスクを取得（fresh-before スナップショット）してから before/after を組み立てる。
+async function applyStatusChange(t, key) {
+  let fresh = t;
+  try { fresh = await getTask(t.id); } catch { /* keep t */ }
+  const wasWaiting = statusOf(fresh) === "waiting";
+  const before = { done: !!fresh.done, percent_done: fresh.percent_done || 0, started_at: fresh.started_at || null, waiting: wasWaiting };
+  const after = stateFor(fresh, key);
 
   const applyState = async (taskId, s) => {
     await updateTask(taskId, { done: s.done, percent_done: s.percent_done, started_at: s.started_at });
@@ -277,7 +304,18 @@ async function moveStatus(t, key) {
   } catch (e) {
     alert("ステータス変更に失敗しました: " + (e && e.message ? e.message : ""));
   }
-  rerender();
+}
+
+// スイムレーンのレーン跨ぎ＝親（案件＝親タスク）の付け替え。_moving ガードは呼び出し側(drop)で管理。
+async function moveLane(t, newParentId) {
+  const cur = (((t.related_tasks || {}).parenttask) || [])[0]?.id || 0;
+  if (cur === newParentId) return;
+  try {
+    if (cur) await removeRelation(cur, "subtask", t.id);
+    if (newParentId) await addRelation(newParentId, t.id, "subtask");
+  } catch (e) {
+    alert("案件の付け替えに失敗しました: " + (e && e.message ? e.message : ""));
+  }
 }
 
 // status キー → {done, percent_done, started_at, waiting}（table.js stateOf と同義）。
