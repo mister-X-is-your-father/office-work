@@ -42,7 +42,7 @@ conf = json.load(open(CONF_PATH))
 ALLOWED = set(conf.get("allowed_user_ids", []))
 
 SETTINGS_PATH = f"{HOME}/.config/taskstation/settings.json"
-SETTINGS_DEFAULT = {"cap_hours": 8, "cal_start": 8, "cal_end": 20, "excluded_project_ids": [], "sort_presets": [], "menu_visibility": {}}
+SETTINGS_DEFAULT = {"cap_hours": 8, "cal_start": 8, "cal_end": 20, "excluded_project_ids": [], "sort_presets": [], "menu_visibility": {}, "protected_windows": []}
 
 
 def load_settings():
@@ -565,6 +565,26 @@ class H(BaseHTTPRequestHandler):
                         if seen:
                             out[ukey] = seen
                 st["menu_visibility"] = out
+            if "protected_windows" in body:
+                # 保護時間帯（トラブル想定枠/バッファ）: [{id,label,days:[0..6],start:"HH:MM",end:"HH:MM",kind}]。
+                # 逆算スケジュールが尊重して重要タスクを置かない/バッファ確保する。曜日0=日。上限つきでサニタイズ。
+                import re as _re
+                hhmm = _re.compile(r"^([01]?\d|2[0-3]):[0-5]\d$")
+                out = []
+                for w in (body["protected_windows"] or [])[:50]:
+                    w = w or {}
+                    label = str(w.get("label", "")).strip()[:40]
+                    start = str(w.get("start", "")).strip()
+                    end = str(w.get("end", "")).strip()
+                    if not (hhmm.match(start) and hhmm.match(end)) or start >= end:
+                        continue
+                    days = sorted({int(d) for d in (w.get("days") or []) if str(d).lstrip("-").isdigit() and 0 <= int(d) <= 6})
+                    if not days:
+                        continue
+                    kind = w.get("kind") if w.get("kind") in ("buffer", "block") else "buffer"
+                    wid = str(w.get("id", "")).strip()[:24] or f"{start}-{end}-{''.join(map(str,days))}"
+                    out.append({"id": wid, "label": label, "days": days, "start": start, "end": end, "kind": kind})
+                st["protected_windows"] = out
             with open(SETTINGS_PATH, "w") as f:
                 json.dump(st, f, ensure_ascii=False)
             return self._json(200, {"settings": st})

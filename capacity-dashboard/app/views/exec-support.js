@@ -7,8 +7,10 @@
 //
 // 仕様: docs/exec-support-spec.md。データ形は固定（taskform/将来の一覧が依存）:
 //   prep = { next_step, steps, schedule, if_then, prereqs, obstacles, dod, score }
-import { getPrep, savePrep } from "../lib/exec.js";
+import { getPrep, savePrep, getSettings } from "../lib/exec.js";
 import { updateTask } from "../lib/api.js";
+import { load, isAiUser } from "../lib/store.js";
+import { shiftISO } from "../lib/capacity.js";
 import { esc } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
 import { fmtDisplayDow, parseSmartDate } from "../lib/form.js";
@@ -28,6 +30,130 @@ function dueLabel(iso) {
 function smartToIso(raw) {
   if (!raw) return "";
   return parseSmartDate(raw) || "";
+}
+
+// 見積り(h) を数値化。空・不正は null（＝「1日1件」扱いの目印）。
+function estHours(v) {
+  if (v == null || String(v).trim() === "") return null;
+  const n = Number(String(v).trim());
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+// その曜日(0=日)に重なる保護時間帯の合計時間(h)。windows=[{days,start,end}]。
+function protectedHoursOnDow(windows, dow) {
+  let total = 0;
+  for (const w of windows || []) {
+    if (!w || !Array.isArray(w.days) || !w.days.includes(dow)) continue;
+    const s = hhmmToH(w.start), e = hhmmToH(w.end);
+    if (s == null || e == null || e <= s) continue;
+    total += e - s;
+  }
+  return total;
+}
+function hhmmToH(s) {
+  if (!s || typeof s !== "string") return null;
+  const m = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  return +m[1] + +m[2] / 60;
+}
+
+// その日(iso)が担当の休暇日か（unavailRanges=[{start,end}] 日付のみ・両端含む）。
+function isUnavailable(iso, unavailRanges) {
+  for (const r of unavailRanges || []) {
+    if (r && r.start && r.end && r.start <= iso && iso <= r.end) return true;
+  }
+  return false;
+}
+
+// その日に作業できるか（営業日＝土日除外・祝日除外・休暇除外）。
+function isWorkDay(iso, holidaysSet, unavailRanges) {
+  const dow = new Date(iso + "T00:00:00Z").getUTCDay();
+  if (dow === 0 || dow === 6) return false;
+  if (holidaysSet && holidaysSet.has && holidaysSet.has(iso)) return false;
+  if (isUnavailable(iso, unavailRanges)) return false;
+  return true;
+}
+
+// ── 逆算スケジュール（純関数・TDD対象） ─────────────────────────────
+// 締切日から後ろ向きに営業日（土日/祝日/担当の休暇を除外）を辿り、
+// 手順を逆順（最後の手順が締切寄り）に各日の作業可能時間へ詰める。
+//   1日の作業可能時間 = capH − その曜日に重なる保護時間帯の合計（下限0）。
+//   見積り無しの手順は「1日1件」扱い（その日の残量を使い切る＝1日1件で次の日へ）。
+// 引数: { steps:[{est}], deadlineIso, capH, windows, holidaysSet, unavailRanges }
+// 返り値: { dueByIndex: Map<stepIndex, iso>, unplaced: number }
+export function backcast({ steps, deadlineIso, capH = 8, windows = [], holidaysSet = null, unavailRanges = [] }) {
+  const dueByIndex = new Map();
+  const list = steps || [];
+  if (!list.length || !deadlineIso || deadlineIso.startsWith("0001")) {
+    return { dueByIndex, unplaced: list.length };
+  }
+  // 締切日から後ろ向きに営業日を生成するイテレータ。
+  let cursor = deadlineIso;
+  let guard = 0;
+  const nextWorkDay = () => {
+    // 現在の cursor 以前で最初の作業可能日を返し、cursor をその前日へ進める。
+    while (guard++ < 4000) {
+      if (isWorkDay(cursor, holidaysSet, unavailRanges)) {
+        const day = cursor;
+        cursor = shiftISO(cursor, -1);
+        return day;
+      }
+      cursor = shiftISO(cursor, -1);
+    }
+    return null;
+  };
+  const capOf = (iso) => {
+    const dow = new Date(iso + "T00:00:00Z").getUTCDay();
+    return Math.max(0, capH - protectedHoursOnDow(windows, dow));
+  };
+
+  // 手順を逆順（末尾＝締切寄り）に詰める。
+  let curDay = null, remain = 0;
+  let unplaced = 0;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const est = estHours(list[i] && list[i].est); // null=見積り無し（1日1件）
+    if (curDay == null) {
+      curDay = nextWorkDay();
+      if (curDay == null) { unplaced = i + 1; break; }
+      remain = capOf(curDay);
+    }
+    if (est == null) {
+      // 見積り無し: その日に置いて翌（前）営業日へ送る（1日1件）。
+      dueByIndex.set(i, curDay);
+      curDay = null; remain = 0;
+      continue;
+    }
+    // 見積りがその日の残量に収まらなければ前の作業日へ送る。
+    if (est > remain + 1e-9) {
+      // 残量0の日に1日丸ごと使っても収まらない巨大手順も、1日に置く（無限ループ回避）。
+      const fresh = nextWorkDay();
+      if (fresh == null) { unplaced = i + 1; break; }
+      curDay = fresh; remain = capOf(curDay);
+      // 新しい日でも収まらない（est > 1日容量）場合はその日に置いて消費しきる。
+      if (est > remain + 1e-9) {
+        dueByIndex.set(i, curDay);
+        curDay = null; remain = 0;
+        continue;
+      }
+    }
+    dueByIndex.set(i, curDay);
+    remain -= est;
+    if (remain <= 1e-9) { curDay = null; remain = 0; }
+  }
+  return { dueByIndex, unplaced };
+}
+
+// 逆算に必要なデータをまとめて取得（store.load + exec の保護時間帯）。
+//   ctx.task.assignees の非AI先頭を担当に、無ければ me。担当の休暇レンジを引く。
+async function loadBackcastCtx(ctx) {
+  const { settings, holidaysSet, unavailabilityByMember, me } = await load();
+  let windows = [];
+  try { windows = ((await getSettings()).settings || {}).protected_windows || []; } catch { /* exec ダウン時は保護枠無しで続行 */ }
+  const assignees = (ctx && ctx.task && ctx.task.assignees) || [];
+  const owner = assignees.find((a) => !isAiUser(a)) || me || null;
+  const uid = owner && owner.id;
+  const unavailRanges = (uid != null && unavailabilityByMember.get) ? (unavailabilityByMember.get(uid) || []) : [];
+  return { capH: settings.capH || 8, windows, holidaysSet, unavailRanges };
 }
 
 // ── プラグイン・レジストリ ─────────────────────────────────────────
@@ -77,9 +203,13 @@ const PLUGINS = [
     defaults: () => ({ items: [] }),
     render(data) {
       ensureRowIds(data.items || (data.items = []));
-      const rows = data.items.map((it) => `
+      const n = data.items.length;
+      const rows = data.items.map((it, i) => `
         <div class="es-row" data-id="${it.__id}">
-          <span class="es-grip" aria-hidden="true">${icon("list", { size: 13 })}</span>
+          <span class="es-ord">
+            <button type="button" class="es-ordb" data-act="up" aria-label="上へ移動"${i === 0 ? " disabled" : ""}>${icon("arrowUp", { size: 13 })}</button>
+            <button type="button" class="es-ordb" data-act="down" aria-label="下へ移動"${i === n - 1 ? " disabled" : ""}>${icon("chevronDown", { size: 13 })}</button>
+          </span>
           <input class="es-in es-grow" data-k="title" type="text" placeholder="手順" value="${esc(it.title || "")}">
           <input class="es-in es-w64" data-k="est" type="text" inputmode="decimal" placeholder="見積h" value="${esc(it.est || "")}">
           <input class="es-in es-w120" data-k="due" type="text" placeholder="期日" value="${esc(it.due ? dueLabel(it.due) : "")}">
@@ -94,6 +224,12 @@ const PLUGINS = [
     wire(root, data, ctx, save) {
       const list = root.querySelector(".es-rows");
       const rerender = () => { root.querySelector(".es-field").outerHTML = this.render(data); this.wire(root, data, ctx, save); };
+      // 配列内で i↔j を入替（端は何もしない）。
+      const swap = (i, j) => {
+        if (i < 0 || j < 0 || i >= data.items.length || j >= data.items.length) return;
+        const t = data.items[i]; data.items[i] = data.items[j]; data.items[j] = t;
+        save(); rerender();
+      };
       list.querySelectorAll(".es-row").forEach((rowEl) => {
         const it = data.items.find((x) => x.__id === rowEl.dataset.id);
         if (!it) return;
@@ -106,15 +242,26 @@ const PLUGINS = [
           dueEl.value = iso ? dueLabel(iso) : "";
           save();
         });
+        rowEl.querySelector('[data-act="up"]').addEventListener("click", () => {
+          const i = data.items.findIndex((x) => x.__id === it.__id);
+          swap(i, i - 1);
+        });
+        rowEl.querySelector('[data-act="down"]').addEventListener("click", () => {
+          const i = data.items.findIndex((x) => x.__id === it.__id);
+          swap(i, i + 1);
+        });
         rowEl.querySelector('[data-act="del"]').addEventListener("click", () => {
           const i = data.items.findIndex((x) => x.__id === it.__id);
           if (i >= 0) data.items.splice(i, 1);
           save(); rerender();
+          // 逆算ボタンの有効/無効は手順数に依るので予定化カードも更新。
+          if (ctx && typeof ctx.rerenderCard === "function") ctx.rerenderCard("schedule");
         });
       });
       root.querySelector('[data-act="add"]').addEventListener("click", () => {
         data.items.push({ __id: uid(), title: "", est: "", due: "" });
         save(); rerender();
+        if (ctx && typeof ctx.rerenderCard === "function") ctx.rerenderCard("schedule");
         const inputs = root.querySelectorAll('.es-row [data-k="title"]');
         if (inputs.length) inputs[inputs.length - 1].focus();
       });
@@ -130,7 +277,17 @@ const PLUGINS = [
     max: 15,
     symptoms: ["計画が予定に落ちてない"],
     defaults: () => ({ due: "", note: "" }),
-    render(data) {
+    render(data, ctx) {
+      // 締切＝タスク本体の due_date（"0001" センチネルは無効）。
+      const taskDue = (ctx && ctx.task && ctx.task.due_date) || "";
+      const deadlineIso = taskDue && !taskDue.startsWith("0001") ? taskDue.slice(0, 10) : "";
+      const steps = (ctx && ctx.prep && ctx.prep.steps && ctx.prep.steps.items) || [];
+      const hasSteps = steps.length > 0;
+      const canBackcast = !!deadlineIso && hasSteps;
+      let hint;
+      if (!deadlineIso) hint = "先に期日（このカードの「期日」）を設定すると、締切から逆算して各手順に日付を割り当てられます。";
+      else if (!hasSteps) hint = "段取りに手順を1つ以上追加すると、締切から逆算して各手順に日付を割り当てられます。";
+      else hint = `締切 ${dueLabel(deadlineIso)} から逆算して、各手順に作業日を割り当てます（土日・祝日・休暇・保護時間帯を考慮）。`;
       return `
         <div class="es-field">
           <div class="es-hint">いつやるか日付を決める。設定するとタスク本体の期日にも反映されます。</div>
@@ -139,6 +296,10 @@ const PLUGINS = [
               placeholder="期日（例: 612）" value="${esc(data.due ? dueLabel(data.due) : "")}">
             <input class="es-in es-grow" data-k="note" type="text" autocomplete="off"
               placeholder="メモ（任意・どの枠に入れる等）" value="${esc(data.note || "")}">
+          </div>
+          <div class="es-back">
+            <button type="button" class="es-btn es-backbtn" data-act="backcast"${canBackcast ? "" : " disabled"}>${icon("calendarDays", { size: 15 })}逆算スケジュール</button>
+            <span class="es-back-hint">${esc(hint)}</span>
           </div>
         </div>`;
     },
@@ -158,6 +319,32 @@ const PLUGINS = [
         }
       });
       noteEl.addEventListener("input", () => { data.note = noteEl.value; save(); });
+
+      // ── 逆算スケジュール ──
+      const backBtn = root.querySelector('[data-act="backcast"]');
+      if (backBtn) backBtn.addEventListener("click", async () => {
+        if (backBtn.disabled || backBtn.dataset.busy === "1") return;
+        const taskDue = (ctx && ctx.task && ctx.task.due_date) || "";
+        const deadlineIso = taskDue && !taskDue.startsWith("0001") ? taskDue.slice(0, 10) : "";
+        const stepsData = ctx && ctx.prep && ctx.prep.steps;
+        const steps = (stepsData && stepsData.items) || [];
+        if (!deadlineIso || !steps.length) return;
+        if (typeof confirm === "function" && !confirm(`締切 ${dueLabel(deadlineIso)} から逆算して、${steps.length} 手順に作業日を割り当てます。各手順の既存の期日は上書きされます。実行しますか？`)) return;
+        backBtn.dataset.busy = "1"; backBtn.disabled = true;
+        try {
+          const { capH, windows, holidaysSet, unavailRanges } = await loadBackcastCtx(ctx);
+          const { dueByIndex, unplaced } = backcast({ steps, deadlineIso, capH, windows, holidaysSet, unavailRanges });
+          steps.forEach((it, i) => { if (dueByIndex.has(i)) it.due = dueByIndex.get(i); });
+          save();
+          // 段取りカードを再描画して新しい期日を表示（タスク本体の due_date は変更しない）。
+          if (ctx && typeof ctx.rerenderCard === "function") ctx.rerenderCard("steps");
+          if (unplaced > 0) {
+            if (typeof alert === "function") alert(`容量／期間が不足しています。${unplaced} 手順が未配置のままです（締切までの営業日と1日の作業可能時間が足りません）。配置できた分だけ期日を設定しました。`);
+          }
+        } finally {
+          backBtn.dataset.busy = ""; backBtn.disabled = false;
+        }
+      });
     },
     score(data) { return nonEmpty(data.due) ? 15 : 0; },
   },
@@ -400,6 +587,10 @@ export function ensureStyle() {
   .es-pair{display:flex;gap:8px;flex-wrap:wrap}
   .es-rows{display:flex;flex-direction:column;gap:7px}
   .es-row{display:flex;align-items:center;gap:7px}
+  .es-ord{display:inline-flex;flex-direction:column;gap:2px;flex:none}
+  .es-ordb{border:1px solid var(--line);background:var(--card);color:var(--muted);cursor:pointer;padding:1px 3px;border-radius:5px;line-height:0}
+  .es-ordb:hover:not(:disabled){color:var(--fill);border-color:#b9d4ff}
+  .es-ordb:disabled{opacity:.35;cursor:default}
   .es-grip{color:var(--muted);line-height:0;flex:none}
   .es-arrow{color:var(--muted);line-height:0;flex:none}
   .es-grow{flex:1;min-width:80px}
@@ -414,6 +605,9 @@ export function ensureStyle() {
   .es-add{align-self:flex-start;display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:11.5px;font-weight:600;color:var(--fill);background:transparent;border:1px dashed var(--line);border-radius:8px;padding:6px 10px;cursor:pointer}
   .es-add:hover{border-color:#b9d4ff;background:var(--track)}
   .es-add-ic{transform:rotate(90deg)}
+  .es-back{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:2px}
+  .es-backbtn{font-size:12px;padding:7px 11px}
+  .es-back-hint{font-size:10.5px;color:var(--muted);line-height:1.4;flex:1;min-width:140px}
   .es-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding-top:2px}
   .es-foot-score{font-size:11.5px;color:var(--muted)}
   .es-foot-score b{color:var(--ink);font-variant-numeric:tabular-nums}
@@ -462,6 +656,8 @@ function makeSaver(taskId, getPrepObj, getEnabled, onChange) {
 // ── メイン描画 ────────────────────────────────────────────────────
 export async function renderExecSupport(container, { taskId, task = null, onChange } = {}) {
   ensureStyle();
+  // ctx は各プラグインへ渡る共有文脈。逆算スケジュールが steps を読み書き＋再描画するため
+  // prep 参照と単一カードの再描画フックを載せる（他プラグインは無視＝後方互換）。
   const ctx = { taskId, task };
 
   // 既存 prep を取得（失敗＝exec ダウンでも空状態で続行）。
@@ -569,13 +765,20 @@ export async function renderExecSupport(container, { taskId, task = null, onChan
     </div>`;
 
   // ── 各プラグインを汎用ループで render → wire ──
+  const wireCard = (p) => {
+    const body = container.querySelector(`[data-body="${p.id}"]`);
+    if (!body) return;
+    body.innerHTML = p.render(prep[p.id], ctx);
+    try { p.wire(body, prep[p.id], ctx, saveAndMeter); } catch { /* 1プラグインの不具合で全体を壊さない */ }
+  };
   const wireCards = () => {
-    for (const p of PLUGINS.filter((x) => enabled.includes(x.id))) {
-      const body = container.querySelector(`[data-body="${p.id}"]`);
-      if (!body) continue;
-      body.innerHTML = p.render(prep[p.id], ctx);
-      try { p.wire(body, prep[p.id], ctx, saveAndMeter); } catch { /* 1プラグインの不具合で全体を壊さない */ }
-    }
+    for (const p of PLUGINS.filter((x) => enabled.includes(x.id))) wireCard(p);
+  };
+  // 逆算スケジュール → steps[].due 反映後に段取りカードだけ再描画させるフック。
+  ctx.prep = prep;
+  ctx.rerenderCard = (id) => {
+    const p = PLUGIN_BY_ID[id];
+    if (p && enabled.includes(id)) wireCard(p);
   };
   wireCards();
 
