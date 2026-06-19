@@ -3,7 +3,7 @@
 import { load, invalidate, isAiUser } from "../lib/store.js";
 import { icon } from "../lib/icons.js";
 import * as vik from "../lib/api.js";
-import { taskRanges, dependencyEdges, dayScale, toMemberDayEntries, sumByMemberDay, shiftISO, applyBarDrag, dateOnly, hasDate } from "../lib/capacity.js";
+import { taskRanges, dependencyEdges, depLayers, dayScale, toMemberDayEntries, sumByMemberDay, shiftISO, applyBarDrag, dateOnly, hasDate } from "../lib/capacity.js";
 import { capacityOn } from "../lib/recurrence.js";
 import { fmtDisplayDow } from "../lib/form.js";
 import { openTaskForm } from "./taskform.js";
@@ -28,6 +28,25 @@ const SPANS = {
   ],
 };
 
+// B42: plans/times の N+1 取得結果を module キャッシュ化。span/unit/週開始の軸変更は
+// render(root) を呼び直すが、データ（store.load の tasks 配列）が同一参照なら再取得せず paint のみ。
+// 編集後の reload() は invalidate()→load() で tasks が新配列になる＝キー不一致でキャッシュミス→再取得。
+let _ganttFetchCache = null;   // { key, plansById, timesById, plansArr, timesArr }
+async function fetchPlansTimes(tasks) {
+  // tasks 配列の参照を世代キーに（store.invalidate 後は新配列＝別参照になる）。
+  if (_ganttFetchCache && _ganttFetchCache.key === tasks) return _ganttFetchCache;
+  const planTasks = tasks.filter((t) => (t.time_planned || 0) > 0);
+  const timeTasks = tasks.filter((t) => (t.time_spent || 0) > 0);
+  const [plansArr, timesArr] = await Promise.all([
+    Promise.all(planTasks.map((t) => vik.getPlans(t.id).then((p) => [t, p || []]).catch(() => [t, []]))),
+    Promise.all(timeTasks.map((t) => vik.getTimes(t.id).then((p) => [t, p || []]).catch(() => [t, []]))),
+  ]);
+  const plansById = new Map(plansArr.map(([t, p]) => [t.id, p]));
+  const timesById = new Map(timesArr.map(([t, p]) => [t.id, p]));
+  _ganttFetchCache = { key: tasks, plansById, timesById, plansArr, timesArr };
+  return _ganttFetchCache;
+}
+
 const projColor = (id) => ["#3a86ff", "#2fa66b", "#b657d6", "#e5772d", "#0ea5e9", "#f5a623"][((id || 0) % 6 + 6) % 6];
 const initial = (name) => (name ? String(name).trim().slice(0, 1) : "?");
 // 人間担当（AI担当 fable は担当とみなさない＝未アサイン扱い。store.js の isAiUser を踏襲）。
@@ -44,9 +63,13 @@ const gview = {
   spanDay: SPANS.day.some((p) => p.key === _gv.spanDay) ? _gv.spanDay : "1m",
   spanWeek: SPANS.week.some((p) => p.key === _gv.spanWeek) ? _gv.spanWeek : "3m",
   weekStart: Number.isInteger(_gv.weekStart) && _gv.weekStart >= 0 && _gv.weekStart <= 6 ? _gv.weekStart : 1,
+  // B39: 依存(follows/precedes)矢印の表示。B40: クリティカルパス強調。B41: 人別レーンの未予定タスク行表示。
+  withDeps: _gv.withDeps === true,
+  critical: _gv.critical === true,
+  showUnscheduled: _gv.showUnscheduled === true,
 };
 function saveGV() {
-  try { localStorage.setItem(GV_KEY, JSON.stringify({ unit: gview.unit, spanDay: gview.spanDay, spanWeek: gview.spanWeek, weekStart: gview.weekStart })); } catch { /* localStorage 不可でも続行 */ }
+  try { localStorage.setItem(GV_KEY, JSON.stringify({ unit: gview.unit, spanDay: gview.spanDay, spanWeek: gview.spanWeek, weekStart: gview.weekStart, withDeps: gview.withDeps, critical: gview.critical, showUnscheduled: gview.showUnscheduled })); } catch { /* localStorage 不可でも続行 */ }
 }
 
 // 全画面エントリ（#/gantt）。従来どおり root.innerHTML をシェルで差し替え、編集可・全機能。
@@ -91,15 +114,9 @@ async function mount(root, opts) {
   }
   const scale = dayScale(startISO, WINDOW_DAYS);
 
-  // N+1: plans/times を持つタスクだけ個別取得（planner.js と同方式）
-  const planTasks = tasks.filter((t) => (t.time_planned || 0) > 0);
-  const timeTasks = tasks.filter((t) => (t.time_spent || 0) > 0);
-  const [plansArr, timesArr] = await Promise.all([
-    Promise.all(planTasks.map((t) => vik.getPlans(t.id).then((p) => [t, p || []]).catch(() => [t, []]))),
-    Promise.all(timeTasks.map((t) => vik.getTimes(t.id).then((p) => [t, p || []]).catch(() => [t, []]))),
-  ]);
-  const plansById = new Map(plansArr.map(([t, p]) => [t.id, p]));
-  const timesById = new Map(timesArr.map(([t, p]) => [t.id, p]));
+  // N+1: plans/times を持つタスクだけ個別取得（planner.js と同方式）。B42: module キャッシュ経由で
+  // 軸変更（span/unit/週開始）の render 再実行時はネットワーク再取得せず paint のみにする。
+  const { plansById, timesById, plansArr, timesArr } = await fetchPlansTimes(tasks);
   const rangeByTask = new Map(tasks.map((t) => [t.id, taskRanges(t, plansById.get(t.id) || [], timesById.get(t.id) || [])]));
   const edges = dependencyEdges(tasks);
   // プロジェクト=親タスク（related_tasks.subtask の親）。子→親 / 親集合 を作る（プロジェクト別レーン用）。
@@ -122,7 +139,13 @@ async function mount(root, opts) {
     members: new Set(members.map((m) => m.id)),
     // 埋め込みは描画ごとに使い捨ての Set（gview の共有状態を汚さない）
     collapsed: embedded ? new Set() : gview.collapsed,
+    // B39/B40/B41: 全画面のみ操作可（埋め込みは閲覧主体＝既定 off）。
+    withDeps: embedded ? false : gview.withDeps,
+    critical: embedded ? false : gview.critical,
+    showUnscheduled: embedded ? false : gview.showUnscheduled,
   };
+  // B40: クリティカルパス（依存グラフの最長鎖）。窓に依存しないので render 単位で一度だけ算出。
+  const critById = depLayers(tasks.map((t) => t.id), edges).critical;
   const memberIdx = new Map(members.map((m, i) => [m.id, i]));
   // 直近の描画で出現した「折りたたみ可能な見出し」の data-toggle キー集合。
   // 全折りたたみボタンはこれを state.collapsed に流し込む（paint 中に各見出しが登録する）。
@@ -219,6 +242,18 @@ async function mount(root, opts) {
     });
   }
 
+  // B41: 当該メンバー担当だが「予定が無い」または「予定が窓外」で visibleTasks に出ないタスク。
+  // 完了は除外（hideDone と無関係に未予定リストでは完了を出さない＝行動対象のみ）。
+  function memberUnscheduled(m) {
+    return tasks.filter((t) => {
+      if (t.done) return false;
+      if (!(t.assignees || []).some((a) => a.id === m.id)) return false;
+      const r = rangeByTask.get(t.id);
+      if (r.planned.source && scale.intersects(r.planned.start, r.planned.end)) return false; // 予定あり＝通常行に出る
+      return true;
+    });
+  }
+
   // 子タスク群（＋親に予定があれば親も）から「集約バー」用の合成レンジを作る。
   // start=最早予定開始 / end=最遅予定終了 / h=予定合計。窓と交差する予定だけ集約。
   function aggRange(tasksForAgg) {
@@ -266,7 +301,8 @@ async function mount(root, opts) {
 
   // 親プロジェクトのサブグループ見出し（集約バー付き・既定展開）と、展開時の子タスク行。
   // toggleKey はメンバー折りたたみ "m"+id と衝突しない "mp"+m.id+"_"+pid。
-  function parentSubgroup(toggleKey, pid, children, includeParentInAgg) {
+  // startY/rowYById を渡すと展開中の子タスク行の中央y(px)を記録（B39 依存矢印の終点用）。
+  function parentSubgroup(toggleKey, pid, children, includeParentInAgg, startY, rowYById) {
     collapsibleKeys.add(toggleKey);
     const parent = byIdAll.get(pid);
     const title = parent ? parent.title : "（不明なプロジェクト）";
@@ -292,7 +328,11 @@ async function mount(root, opts) {
     let rows = GRP_H;
     if (!collapsed) {
       const band = projColor(parent ? parent.project_id : 0);
-      children.forEach((t, i) => { h += memberTaskRow(t, true, i === children.length - 1, band); rows += ROW_H; });
+      children.forEach((t, i) => {
+        h += memberTaskRow(t, true, i === children.length - 1, band);
+        if (rowYById && startY != null) rowYById.set(t.id, startY + rows + ROW_H / 2);
+        rows += ROW_H;
+      });
     }
     return { html: h, rows };
   }
@@ -321,6 +361,7 @@ async function mount(root, opts) {
     head.innerHTML = gridHead(LABEL_W_P);
     collapsibleKeys = new Set();
     let html = "", rowOffset = 0;
+    const rowYById = new Map();   // B39: タスクid→バー行中央y(px)。依存矢印の端点に使う。
     const sortByStart = (a, b) => {
       const sa = rangeByTask.get(a.id).planned.start || "9999", sb = rangeByTask.get(b.id).planned.start || "9999";
       return sa < sb ? -1 : sa > sb ? 1 : a.id - b.id;
@@ -364,7 +405,11 @@ async function mount(root, opts) {
       if (!collapsed) {
         const { direct, childByParent } = groupByParent(mtasks);
         // 親なしタスク（従来どおりメンバー直下の行）
-        for (const t of direct.sort(sortByStart)) { html += memberTaskRow(t, false); rowOffset += ROW_H; }
+        for (const t of direct.sort(sortByStart)) {
+          html += memberTaskRow(t, false);
+          rowYById.set(t.id, rowOffset + ROW_H / 2);   // B39: バー行中央y
+          rowOffset += ROW_H;
+        }
         // 子タスク群（親サブグループ配下にネスト・既定折りたたみ・集約バー）
         const parents = [...childByParent.keys()].sort((a, b) => {
           const ta = (byIdAll.get(a) || {}).title || "", tb = (byIdAll.get(b) || {}).title || "";
@@ -375,8 +420,34 @@ async function mount(root, opts) {
           // 親自身がこのメンバー担当かつ予定があれば集約に含める（dayMap集計とは別物＝二重計上しない）
           const parent = byIdAll.get(pid);
           const includeParent = !!parent && humanAssignees(parent).some((a) => a.id === m.id);
-          const sg = parentSubgroup("mp" + m.id + "_" + pid, pid, kids, includeParent);
+          const sg = parentSubgroup("mp" + m.id + "_" + pid, pid, kids, includeParent, rowOffset, rowYById);
           html += sg.html; rowOffset += sg.rows;
+        }
+        // B41: 未予定タスク行をオプション表示。当人担当だが予定（plans/期間/締切）が無い or 窓外で
+        // 通常の mtasks(=visibleTasks) に出ないものを、折りたためる小見出しの下にまとめる。
+        if (state.showUnscheduled) {
+          const us = memberUnscheduled(m).sort((a, b) => a.id - b.id);
+          if (us.length) {
+            const usKey = "mu" + m.id;
+            collapsibleKeys.add(usKey);
+            const usCol = state.collapsed.has(usKey);
+            html += `<div class="grp mp-sub mp-unsched${usCol ? " collapsed" : ""}">
+              <div class="grp-label mp-sublabel" data-toggle="${usKey}">
+                <span class="caret">▾</span>
+                <span class="pj-band pj-band-none"></span>
+                <span class="grp-text"><span class="grp-top"><span class="grp-name">未予定タスク</span>
+                  <span class="grp-sub">${us.length}件</span></span>
+                  <span class="grp-sub">日程が未設定（クリックで設定）</span></span>
+              </div>
+            </div>`;
+            rowOffset += GRP_H;
+            if (!usCol) {
+              us.forEach((t, i) => {
+                html += memberTaskRow(t, true, i === us.length - 1, C.lineStrong);
+                rowOffset += ROW_H;   // 未予定＝バー無しなので依存矢印端点(rowYById)には載せない
+              });
+            }
+          }
         }
       }
     }
@@ -413,7 +484,11 @@ async function mount(root, opts) {
       rowOffset += GRP_H;
       if (!uCollapsed) {
         const { direct, childByParent } = groupByParent(unassigned);
-        for (const t of direct.sort(sortByStart)) { html += memberTaskRow(t, false); rowOffset += ROW_H; }
+        for (const t of direct.sort(sortByStart)) {
+          html += memberTaskRow(t, false);
+          rowYById.set(t.id, rowOffset + ROW_H / 2);   // B39
+          rowOffset += ROW_H;
+        }
         const parents = [...childByParent.keys()].sort((a, b) => {
           const ta = (byIdAll.get(a) || {}).title || "", tb = (byIdAll.get(b) || {}).title || "";
           return ta.localeCompare(tb, "ja");
@@ -422,7 +497,7 @@ async function mount(root, opts) {
           const kids = childByParent.get(pid).sort(sortByStart);
           const parent = byIdAll.get(pid);
           const includeParent = !!parent && humanAssignees(parent).length === 0 && unassigned.includes(parent);
-          const sg = parentSubgroup("up_" + pid, pid, kids, includeParent);
+          const sg = parentSubgroup("up_" + pid, pid, kids, includeParent, rowOffset, rowYById);
           html += sg.html; rowOffset += sg.rows;
         }
       }
@@ -438,7 +513,7 @@ async function mount(root, opts) {
       const off = bb.left + bb.width / 2 - lab.getBoundingClientRect().left; // ラベル左端からの四角中心
       rowsEl.style.setProperty('--mprail', (off - 1) + 'px'); // 2px線の左端＝中心-1
     }
-    overlays(0, null, null, ROW_H, rowOffset, false);
+    overlays(rowOffset, rowYById);
   }
 
   // プロジェクト別レーン（人別レーンと同型）。プロジェクト=親タスク(related_tasks.subtask)。
@@ -475,6 +550,7 @@ async function mount(root, opts) {
       .sort((a, b) => (a.pid === 0 ? 1 : b.pid === 0 ? -1 : a.title.localeCompare(b.title, "ja")));
 
     let html = "", rowOffset = 0;
+    const rowYById = new Map();   // B39: タスクid→バー行中央y(px)
     for (const g of groups) {
       const items = g.items.slice().sort((a, b) => {
         // 予定ありを開始日順で先頭、未予定は末尾へ。
@@ -524,6 +600,7 @@ async function mount(root, opts) {
           </div>
           ${barsHTML(r, t.id)}
         </div>`;
+        rowYById.set(t.id, rowOffset + ROW_H / 2);   // B39: バー行中央y
         rowOffset += ROW_H;
       }
     }
@@ -537,12 +614,12 @@ async function mount(root, opts) {
       const off = bb.left + bb.width / 2 - lab.getBoundingClientRect().left; // ラベル左端からの四角中心
       rowsEl.style.setProperty('--pjrail', (off - 1) + 'px'); // 2px線の左端＝中心-1
     }
-    overlays(0, null, null, ROW_H, rowOffset, false);
+    overlays(rowOffset, rowYById);
   }
 
-  // 今日線（＋タスクモードのみ依存矢印SVG）
-  function overlays(rowCount, rowIndexById, list, rowH, totalHeightPx, withDeps) {
-    const totalH = totalHeightPx || rowCount * rowH;
+  // 今日線（＋B39 依存矢印SVG）。rowYById: タスクid→そのバー行の中央y(px)。行高は見出し(GRP_H)と
+  // タスク行(ROW_H)が混在するため uniform index ではなく実測した行中央yで線を引く（人別/プロジェクト両対応）。
+  function overlays(totalH, rowYById) {
     // 今日線
     const ti = scale.indexOf(today);
     if (ti >= 0 && ti < WINDOW_DAYS && totalH > 0) {
@@ -550,20 +627,31 @@ async function mount(root, opts) {
       rowsEl.insertAdjacentHTML("beforeend",
         `<div class="today-line" style="left:${left}px;height:${totalH}px"><span class="tl-cap">今日</span></div>`);
     }
-    if (!withDeps || !rowIndexById) return;
-    // 依存矢印（予定バー right→left のL字）
-    const paths = edges.filter((e) => rowIndexById.has(e.from) && rowIndexById.has(e.to)).map((e) => {
+    if (!state.withDeps || !rowYById || !rowYById.size) return;
+    // 依存矢印（予定バー right→left のL字）。両端が「予定あり＆この描画で可視」な辺のみ描く。
+    // B40: クリティカルパス上の辺（from/to 両方が critById）は太線・濃色・実線で強調。
+    const critOn = state.critical;
+    const paths = edges.filter((e) => rowYById.has(e.from) && rowYById.has(e.to)).map((e) => {
       const rf = rangeByTask.get(e.from), rt = rangeByTask.get(e.to);
+      if (!rf || !rt || !rf.planned.source || !rt.planned.source) return "";
       const fg = scale.range(rf.planned.start, rf.planned.end), tg = scale.range(rt.planned.start, rt.planned.end);
       const x1 = fg.toIdx * COL_W + COL_W - 2, x2 = tg.fromIdx * COL_W + 2;
-      const y1 = rowIndexById.get(e.from) * rowH + rowH / 2, y2 = rowIndexById.get(e.to) * rowH + rowH / 2;
+      const y1 = rowYById.get(e.from), y2 = rowYById.get(e.to);
       const midX = Math.max(x1 + 14, x2 - 14);
-      return `<path d="M${x1} ${y1} H${midX} V${y2} H${x2}" fill="none" stroke="${C.capline}" stroke-width="1.4" stroke-dasharray="3 3" marker-end="url(#gv-arrow)"/>`;
-    }).join("");
+      const isCrit = critOn && critById.has(e.from) && critById.has(e.to);
+      const stroke = isCrit ? C.over : C.capline;
+      const sw = isCrit ? 2.2 : 1.4;
+      const dash = isCrit ? "" : ` stroke-dasharray="3 3"`;
+      const marker = isCrit ? "gv-arrow-c" : "gv-arrow";
+      return `<path d="M${x1} ${y1} H${midX} V${y2} H${x2}" fill="none" stroke="${stroke}" stroke-width="${sw}"${dash} marker-end="url(#${marker})"/>`;
+    }).filter(Boolean).join("");
     if (paths) {
       rowsEl.insertAdjacentHTML("beforeend",
         `<svg class="deps" style="width:${WINDOW_DAYS * COL_W}px;height:${totalH}px">
-          <defs><marker id="gv-arrow" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 z" fill="${C.capline}"/></marker></defs>
+          <defs>
+            <marker id="gv-arrow" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 z" fill="${C.capline}"/></marker>
+            <marker id="gv-arrow-c" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0 0 L8 4 L0 8 z" fill="${C.over}"/></marker>
+          </defs>
           ${paths}</svg>`);
     }
   }
@@ -637,6 +725,18 @@ async function mount(root, opts) {
     b.onclick = () => { toggleSet(state.members, +b.dataset.mem, b); paint(); };
   });
   root.querySelector("#gv-hidedone").onchange = (e) => { state.hideDone = e.target.checked; paint(); };
+  // B39/B40/B41: 依存矢印 / クリティカルパス / 未予定行のトグル。データ再取得は不要＝paint のみ。選択は記憶。
+  const depsChk = root.querySelector("#gv-deps");
+  const critChk = root.querySelector("#gv-crit");
+  if (depsChk) depsChk.onchange = (e) => {
+    state.withDeps = gview.withDeps = e.target.checked; saveGV();
+    // 依存矢印 off ならクリティカルパス強調は意味がない＝チェックボックスを無効化（状態は保持）。
+    if (critChk) critChk.disabled = !e.target.checked;
+    paint();
+  };
+  if (critChk) critChk.onchange = (e) => { state.critical = gview.critical = e.target.checked; saveGV(); paint(); };
+  const unschedChk = root.querySelector("#gv-unsched");
+  if (unschedChk) unschedChk.onchange = (e) => { state.showUnscheduled = gview.showUnscheduled = e.target.checked; saveGV(); paint(); };
   // 全展開 = collapsed を空に。全折りたたみ = 現モードで描画された全見出しキーを collapsed に流し込む。
   // collapsibleKeys は直近 paint で各見出しが登録済み（mode 切替時も paint が再構築）。
   // 全画面は collapsed=gview.collapsed の参照なので、書き換えがそのまま永続（saveGV 対象外＝意図通り）。
@@ -874,6 +974,9 @@ function shell(members, memberIdx, mode, embedded = false, maxHeight) {
       </div>
       <div class="tbg"><span class="tbl">担当者</span><div class="chips">${memChips}</div></div>
       <label class="tbg chk"><input type="checkbox" id="gv-hidedone"> 完了を非表示</label>
+      <label class="tbg chk"><input type="checkbox" id="gv-deps"${gview.withDeps ? " checked" : ""}> 依存矢印</label>
+      <label class="tbg chk"><input type="checkbox" id="gv-crit"${gview.critical ? " checked" : ""}${gview.withDeps ? "" : " disabled"}> クリティカルパス</label>
+      <label class="tbg chk"><input type="checkbox" id="gv-unsched"${gview.showUnscheduled ? " checked" : ""}> 未予定（人別）</label>
     </div>
     <div class="gv-scroll"><div class="gantt" id="gv-gantt" style="--label-w:${LABEL_W_P}px;--col-w:${COL_W}px;--win:${WINDOW_DAYS}">
       <div class="grid-head" id="gv-head"></div>
@@ -991,6 +1094,9 @@ function ganttStyles() {
   .gv .grp.mp-sub .grp-label:hover{background:#eef2f7}
   .gv .grp.mp-sub .grp-name{font-size:12.5px;font-weight:700}
   .gv .grp.mp-sub .pj-band{width:11px;height:22px}
+  /* B41: 人別レーンの「未予定タスク」サブグループ。日程未設定＝点線枠の中立バンドで通常PJと区別 */
+  .gv .grp.mp-unsched .grp-name{color:${C.muted}}
+  .gv .pj-band.pj-band-none{background:transparent;border:1.5px dashed ${C.line}}
   /* 人別: サブグループ配下の子タスク行はさらに字下げ＝親の下に畳まれていると分かる。
      ツリー接続線: 親見出し直下から伸びる縦線＋各子へのエルボー(┗)。色は中立的な淡いグレー
      (--line-strong)＝構造ガイドに徹する（プロジェクト色は見出しの .pj-band 四角で伝える）。

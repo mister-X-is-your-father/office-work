@@ -37,7 +37,8 @@ const VKEY = (uid) => `ts.list.view.${uid ?? "anon"}`;
 function loadView(uid) {
   // doneMode: "show"=完了も表示 / "today"=完了は非表示だが今日の完了は表示 / "hide"=完了を非表示
   // preset: スマートリスト風プリセットタブの選択（""=すべて / BUILTIN_VIEWS の key）。最上位の絞込レイヤー。
-  const def = { sorts: [{ key: "due", dir: 1 }], manualMode: false, order: [], doneMode: "today", cat: "", qaWho: "", qaDue: "", mode: "table", q: "", preset: "" };
+  // colOrder: 列の表示順（COLDEF の key 配列）／hiddenCols: 非表示にした列の key 配列。既定は現状の全列・全表示。
+  const def = { sorts: [{ key: "due", dir: 1 }], manualMode: false, order: [], doneMode: "today", cat: "", qaWho: "", qaDue: "", mode: "table", q: "", preset: "", colOrder: [], hiddenCols: [] };
   try {
     const raw = JSON.parse(localStorage.getItem(VKEY(uid)) || "null");
     if (!raw) return { ...def };                       // 初回のみ既定（期限）
@@ -46,6 +47,8 @@ function loadView(uid) {
     // AXES に存在しない軸（廃止した ws 軸など）を保存済みソートから除去（死にチップを残さない）。
     v.sorts = v.sorts.filter((s) => s && AXES[s.key]);
     if (raw.doneMode === undefined) { v.doneMode = raw.hideDone === false ? "show" : "hide"; delete v.hideDone; } // 旧 hideDone(bool) からの移行
+    if (!Array.isArray(v.colOrder)) v.colOrder = [];
+    if (!Array.isArray(v.hiddenCols)) v.hiddenCols = [];
     return v;
   } catch { return { ...def }; }
 }
@@ -259,6 +262,9 @@ export async function render(root) {
         <span class="tb-sortwrap${manual ? " dim" : ""}"><span class="tb-chips">${chips || `<span class="tb-sc-none">なし（既定: 期限順）</span>`}</span>
           ${V.sorts.length < MAX_SORTS ? `<select id="tb-addsort" class="tb-addsort">${addOpts}</select>` : `<span class="tb-sc-none">最大${MAX_SORTS}件</span>`}</span>
       </span>`}
+      ${isOutline ? "" : `<span class="tb-grp">
+        <button id="tb-cols" class="tb-colsbtn" type="button" title="列の表示／並べ替え">${icon("settings", { size: 15 })} 列</button>
+      </span>`}
     </div>
     <div class="tb-quick">
       <span class="tb-ql">クイック絞り込み</span>
@@ -311,6 +317,9 @@ export async function render(root) {
   });
   const manBtn = root.querySelector("#tb-manual");
   if (manBtn) manBtn.onclick = () => { V.manualMode = !V.manualMode; reRender(); };
+  // 列の表示/非表示・並べ替え（歯車メニュー）。変更は V.colOrder/V.hiddenCols に保存→再描画。
+  const colsBtn = root.querySelector("#tb-cols");
+  if (colsBtn) colsBtn.onclick = () => openColumnsMenu(colsBtn, () => reRender());
   root.querySelector("#tb-cat").onchange = (e) => { V.cat = e.target.value; reRender(); };
   root.querySelectorAll(".tb-qa").forEach((b) => {
     b.onclick = () => {
@@ -443,8 +452,27 @@ export async function render(root) {
   root.querySelectorAll(".tb-priobtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openPrioMenu(b, +b.dataset.prio, tasks, root); }; });
   root.querySelectorAll(".tb-duebtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openDueMenu(b, +b.dataset.due, tasks, root, today); }; });
   root.querySelectorAll(".tb-estbtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openEstMenu(b, +b.dataset.est, tasks, root); }; });
+  // 進捗バーのクリック=クリック位置から 0/25/50/75/100 をクイックセット。←→/Home/End/Space も対応。
+  root.querySelectorAll(".tb-pctbar").forEach((bar) => {
+    bar.onclick = (e) => { e.stopPropagation(); setProgress(bar, +bar.dataset.pct, root, e.clientX, tasks); };
+    bar.ondblclick = (e) => { e.stopPropagation(); }; // 行のダブルクリック（編集フォーム）に伝播させない
+    bar.onpointerdown = (e) => { e.stopPropagation(); }; // 手動ソート中のドラッグ検知に拾われない（保険）
+    bar.onkeydown = (e) => {
+      const id = +bar.dataset.pct, cur = +bar.getAttribute("aria-valuenow") || 0;
+      let next = null;
+      if (e.key === "ArrowRight" || e.key === "ArrowUp") next = Math.min(100, cur + 25);
+      else if (e.key === "ArrowLeft" || e.key === "ArrowDown") next = Math.max(0, cur - 25);
+      else if (e.key === "Home") next = 0;
+      else if (e.key === "End") next = 100;
+      else if (e.key === " " || e.key === "Enter") next = (cur + 25) > 100 ? 0 : cur + 25;
+      if (next === null) return;
+      e.preventDefault(); e.stopPropagation();
+      const rc = bar.getBoundingClientRect();
+      setProgress(bar, id, root, rc.left + rc.width * (next / 100), tasks);
+    };
+  });
   // 複数選択（チェックボックス＋全選択＋Shift範囲）＋ 一括操作バー。表モードのみ。
-  if (!isOutline) { wireSelection(root, rows, () => render(root)); wireBulk(root, rows, tasks, members, today); }
+  if (!isOutline) { wireSelection(root, rows, () => render(root)); wireBulk(root, rows, tasks, members, today, labels); }
   // Excel風グリッド編集（キーボード移動・インライン編集・コピペ・フィルダウン）。表モードのみ。
   if (!isOutline) wireGrid(root, rows, tasks, members, labels, today);
   root.querySelectorAll(".tb-fable").forEach((b) => {
@@ -559,6 +587,7 @@ function openMenu(x, y, items, opts = {}) {
   const paint = (its) => {
     m.innerHTML = its.map((it, i) => {
       if (it.sep) return `<div class="tb-ctx-sep"></div>`;
+      if (it.header) return `<div class="tb-ctx-hd">${esc(it.label)}</div>`;
       if (it.input === "date") return `<label class="tb-ctx-inp">${esc(it.label)}<input type="date" data-i="${i}" value="${it.value || ""}"></label>`;
       if (it.input === "hmgrid") return `<div class="tb-hg">`
         + `<div class="tb-hg-cols">`
@@ -872,6 +901,88 @@ function openProjectMenu(chipEl, id, tasks, root) {
   openMenu(rc.left, rc.bottom + 4, items);
 }
 
+// ── 列の表示/非表示・並べ替えメニュー（歯車）。本人ごと（V.colOrder/V.hiddenCols）に保存。 ──
+// チェックで表示/非表示（タスク名は固定＝常に表示）、▲▼で並べ替え。変更ごとに保存＋onApply で再描画。
+function openColumnsMenu(anchorEl, onApply) {
+  closeRowMenu();
+  const m = document.createElement("div");
+  m.className = "tb-ctx tb-colsmenu";
+  const apply = () => { saveView(UID, V); onApply && onApply(); };
+  const paint = () => {
+    const order = orderedColKeys(V);
+    const hidden = new Set(V.hiddenCols || []);
+    const rows = order.map((k, i) => {
+      const c = colByKey(k); if (!c) return "";
+      const on = c.fixed || !hidden.has(k);
+      return `<div class="tb-colrow" data-k="${esc(k)}">
+        <button class="tb-colck${on ? " on" : ""}${c.fixed ? " fixed" : ""}" data-ck="${esc(k)}" ${c.fixed ? "disabled title=\"タスク名は常に表示\"" : `title="${on ? "クリックで非表示" : "クリックで表示"}"`}>${on ? icon("check", { size: 12 }) : ""}</button>
+        <span class="tb-collbl">${esc(c.label)}</span>
+        <span class="tb-colmv">
+          <button class="tb-colup" data-up="${esc(k)}" ${i === 0 ? "disabled" : ""} title="上へ">▲</button>
+          <button class="tb-coldn" data-dn="${esc(k)}" ${i === order.length - 1 ? "disabled" : ""} title="下へ">▼</button>
+        </span>
+      </div>`;
+    }).join("");
+    m.innerHTML = `<div class="tb-colhd">列の表示・並べ替え</div>${rows}
+      <div class="tb-colft"><button class="tb-colreset" type="button">既定に戻す</button></div>`;
+    // 表示/非表示トグル
+    m.querySelectorAll(".tb-colck:not(.fixed)").forEach((b) => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        const k = b.dataset.ck; const h = new Set(V.hiddenCols || []);
+        h.has(k) ? h.delete(k) : h.add(k); V.hiddenCols = [...h];
+        apply(); paint();
+      };
+    });
+    // 並べ替え（▲▼）。順序は orderedColKeys を起点に隣と入れ替えて保存。
+    const reorder = (k, delta) => {
+      const ord = orderedColKeys(V); const i = ord.indexOf(k); const j = i + delta;
+      if (i < 0 || j < 0 || j >= ord.length) return;
+      [ord[i], ord[j]] = [ord[j], ord[i]];
+      V.colOrder = ord; apply(); paint();
+    };
+    m.querySelectorAll(".tb-colup").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); reorder(b.dataset.up, -1); }; });
+    m.querySelectorAll(".tb-coldn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); reorder(b.dataset.dn, +1); }; });
+    const reset = m.querySelector(".tb-colreset");
+    if (reset) reset.onclick = (e) => { e.stopPropagation(); V.colOrder = []; V.hiddenCols = []; apply(); paint(); };
+  };
+  document.body.appendChild(m);
+  _ctxEl = m;
+  paint();
+  const mw = m.offsetWidth, mh = m.offsetHeight;
+  const r = anchorEl.getBoundingClientRect();
+  m.style.left = Math.max(6, Math.min(r.left, window.innerWidth - mw - 8)) + "px";
+  m.style.top = Math.max(6, Math.min(r.bottom + 4, window.innerHeight - mh - 8)) + "px";
+  const onDown = (ev) => { if (!m.contains(ev.target)) closeRowMenu(); };
+  const onKey = (ev) => { if (ev.key === "Escape") closeRowMenu(); };
+  setTimeout(() => { document.addEventListener("pointerdown", onDown, true); document.addEventListener("keydown", onKey); }, 0);
+  _ctxCleanup = () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); };
+}
+
+// ── 進捗(%)のインライン編集 ──────────────────────────────────────────
+// 進捗バーをクリック→押した横位置から 0/25/50/75/100 をクイックセット（クリック位置に最も近い段階）。
+// updateTask(percent_done) ＋ history.push（取消/やり直し対応）。完了/未完了の done は自動連動しない
+// （ステータス列の責務）が、100%にしたら完了・100%未満から下げたら未完了へ寄せる＝直感に合わせる。
+function setProgress(barEl, id, root, clientX, tasks) {
+  const t = (tasks || (gCtx && gCtx.tasks) || []).find((x) => x.id === id) || null;
+  const beforeT = t || {};
+  const before = { percent_done: beforeT.percent_done || 0, done: !!beforeT.done };
+  // クリック横位置を 0..100 に量子化（0/25/50/75/100）。位置が取れなければ次段階へ巡回。
+  let pct;
+  if (typeof clientX === "number") {
+    const rc = barEl.getBoundingClientRect();
+    const ratio = rc.width ? Math.min(1, Math.max(0, (clientX - rc.left) / rc.width)) : 0;
+    pct = Math.round(ratio * 4) * 25;
+  } else {
+    const steps = [0, 25, 50, 75, 100];
+    pct = steps[(steps.indexOf(before.percent_done) + 1) % steps.length] ?? 0;
+  }
+  const after = { percent_done: pct, done: pct >= 100 };
+  if (after.percent_done === before.percent_done && after.done === before.done) return; // 変化なし＝何もしない
+  const applyPct = (taskId, s) => updateTask(taskId, { percent_done: s.percent_done, done: s.done });
+  applyPct(id, after).then(() => { pushScalarEdit("進捗変更", id, before, after, applyPct); invalidate(); render(root); }).catch(() => {});
+}
+
 // ══ Excel風グリッド編集 ══════════════════════════════════════════════
 // 表モードのタスク一覧を、キーボードでセル移動しながら高速編集する層。
 // - 矢印=移動 / Shift+矢印=矩形選択 / Enter=確定して下 / Tab=右 / F2・直接入力=編集 / Esc=取消
@@ -897,6 +1008,14 @@ function findGTask(id) { return (gCtx && gCtx.tasks || []).find((x) => x.id === 
 function nonAiAssignees(t) { return (t.assignees || []).filter((a) => !isAiUser(a)); }
 function userCats(t) { return (t.labels || []).filter((l) => (l.title || "") !== REVIEW_LABEL && (l.title || "") !== WAITING_LABEL); }
 function orderedIds(root) { return [...root.querySelectorAll("table tr[data-id]")].map((tr) => +tr.dataset.id); }
+// グリッドのナビ対象列＝今 DOM に出ている編集可能列を描画順で取得（列の表示/非表示・並べ替えに自動追従）。
+// 先頭行の td.tb-gc[data-col] から拾う。行が無ければ GCOLS（全列）にフォールバック。
+function gCols(root) {
+  const tr = root && root.querySelector("table tbody tr[data-id]");
+  if (!tr) return GCOLS;
+  const ks = [...tr.querySelectorAll("td.tb-gc[data-col]")].map((td) => td.dataset.col);
+  return ks.length ? ks : GCOLS;
+}
 function gCellEl(root, id, col) { return root.querySelector(`tr[data-id="${id}"] td.tb-gc[data-col="${col}"]`); }
 
 // セルの論理値（before/after・rawSet で使う型）
@@ -1019,14 +1138,16 @@ function gridHighlight() {
   root.querySelectorAll(".tb-gc-active, .tb-gc-insel").forEach((el) => el.classList.remove("tb-gc-active", "tb-gc-insel"));
   if (!gActive) return;
   const order = orderedIds(root);
-  if (!order.includes(gActive.id)) { gActive = null; gAnchor = null; return; }
+  const COLS = gCols(root);
+  // アクティブ列が今は非表示なら選択を解除（列を隠したら宙に浮かない）。
+  if (!order.includes(gActive.id) || !COLS.includes(gActive.col)) { gActive = null; gAnchor = null; return; }
   const anc = gAnchor || gActive;
   const r0 = order.indexOf(gActive.id), r1 = order.indexOf(anc.id);
-  const c0 = GCOLS.indexOf(gActive.col), c1 = GCOLS.indexOf(anc.col);
-  if (order.includes(anc.id) && (r0 !== r1 || c0 !== c1)) {
+  const c0 = COLS.indexOf(gActive.col), c1 = COLS.indexOf(anc.col);
+  if (order.includes(anc.id) && COLS.includes(anc.col) && (r0 !== r1 || c0 !== c1)) {
     for (let r = Math.min(r0, r1); r <= Math.max(r0, r1); r++)
       for (let c = Math.min(c0, c1); c <= Math.max(c0, c1); c++) {
-        const el = gCellEl(root, order[r], GCOLS[c]); if (el) el.classList.add("tb-gc-insel");
+        const el = gCellEl(root, order[r], COLS[c]); if (el) el.classList.add("tb-gc-insel");
       }
   }
   const act = gCellEl(root, gActive.id, gActive.col);
@@ -1037,14 +1158,15 @@ function gridHighlight() {
 function gridMove(dir, extend) {
   const root = gCtx && gCtx.root; if (!root || !gActive) return;
   const order = orderedIds(root);
-  let r = order.indexOf(gActive.id), c = GCOLS.indexOf(gActive.col);
-  if (r < 0) return;
+  const COLS = gCols(root);
+  let r = order.indexOf(gActive.id), c = COLS.indexOf(gActive.col);
+  if (r < 0 || c < 0) return;
   if (dir === "up") r = Math.max(0, r - 1);
   else if (dir === "down") r = Math.min(order.length - 1, r + 1);
   else if (dir === "left") c = Math.max(0, c - 1);
-  else if (dir === "right") c = Math.min(GCOLS.length - 1, c + 1);
+  else if (dir === "right") c = Math.min(COLS.length - 1, c + 1);
   if (extend) { if (!gAnchor) gAnchor = { ...gActive }; } else { gAnchor = null; }
-  gActive = { id: order[r], col: GCOLS[c] };
+  gActive = { id: order[r], col: COLS[c] };
   gridHighlight();
 }
 
@@ -1075,9 +1197,9 @@ function gridInline(cell, id, col, initial) {
     if (done) return; done = true; gEditing = false;
     const after = commit ? gParseText(col, input.value) : null;
     const before = gReadVal(col, t);
-    if (move) { const order = orderedIds(gCtx.root); let r = order.indexOf(id), c = GCOLS.indexOf(col);
-      if (move === "down") r = Math.min(order.length - 1, r + 1); else if (move === "right") c = Math.min(GCOLS.length - 1, c + 1); else if (move === "left") c = Math.max(0, c - 1);
-      gAnchor = null; gActive = { id: order[r] ?? id, col: GCOLS[c] }; }
+    if (move) { const order = orderedIds(gCtx.root); const COLS = gCols(gCtx.root); let r = order.indexOf(id), c = COLS.indexOf(col); if (c < 0) c = 0;
+      if (move === "down") r = Math.min(order.length - 1, r + 1); else if (move === "right") c = Math.min(COLS.length - 1, c + 1); else if (move === "left") c = Math.max(0, c - 1);
+      gAnchor = null; gActive = { id: order[r] ?? id, col: COLS[c] }; }
   if (commit && after !== null && !gEqual(after, before)) { await gridApply(GLABEL[col], [{ id, col, before, after }]); return; } // 再描画＋ハイライト済
     cell.classList.remove("tb-gc-editing"); cell.innerHTML = prev; gridHighlight();
   };
@@ -1093,13 +1215,14 @@ function gridInline(cell, id, col, initial) {
 // 矩形選択の範囲（[{id,col}...] の2次元）を返す。
 function gridRange(root) {
   const order = orderedIds(root);
+  const COLS = gCols(root);
   const anc = gAnchor || gActive;
   const r0 = order.indexOf(gActive.id), r1 = order.indexOf(anc.id);
-  const c0 = GCOLS.indexOf(gActive.col), c1 = GCOLS.indexOf(anc.col);
+  const c0 = COLS.indexOf(gActive.col), c1 = COLS.indexOf(anc.col);
   const rows = [];
   for (let r = Math.min(r0, r1); r <= Math.max(r0, r1); r++) {
     const cells = [];
-    for (let c = Math.min(c0, c1); c <= Math.max(c0, c1); c++) cells.push({ id: order[r], col: GCOLS[c] });
+    for (let c = Math.min(c0, c1); c <= Math.max(c0, c1); c++) cells.push({ id: order[r], col: COLS[c] });
     rows.push(cells);
   }
   return rows;
@@ -1114,7 +1237,9 @@ function gridCopy(root) {
 async function gridPaste(root) {
   if (!gActive || !gClip) return;
   const order = orderedIds(root);
-  const baseR = order.indexOf(gActive.id), baseC = GCOLS.indexOf(gActive.col);
+  const COLS = gCols(root);
+  const baseR = order.indexOf(gActive.id), baseC = COLS.indexOf(gActive.col);
+  if (baseC < 0) return;
   // 選択範囲があればその大きさまでタイル、無ければクリップそのままのサイズ。
   const sel = gridRange(root);
   const spanR = Math.max(sel.length, gClip.rows.length);
@@ -1122,8 +1247,8 @@ async function gridPaste(root) {
   const edits = [];
   for (let i = 0; i < spanR; i++) for (let j = 0; j < spanC; j++) {
     const rr = baseR + i, cc = baseC + j;
-    if (rr >= order.length || cc >= GCOLS.length) continue;
-    const col = GCOLS[cc];
+    if (rr >= order.length || cc >= COLS.length) continue;
+    const col = COLS[cc];
     const text = gClip.rows[i % gClip.rows.length][j % gClip.cols.length];
     const after = gParseText(col, text);
     if (after === null) continue;
@@ -1238,7 +1363,7 @@ function wireSelection(root, rows, rerender) {
 }
 
 // ── 一括操作バー（選択タスク全件に適用）。各アクションは既存の単体ロジック/APIを流用。 ──
-function wireBulk(root, rows, tasks, members, today) {
+function wireBulk(root, rows, tasks, members, today, labels) {
   const bar = root.querySelector("#tb-bulk");
   if (!bar) return;
   const busy = root.querySelector("#tb-bk-busy");
@@ -1268,7 +1393,7 @@ function wireBulk(root, rows, tasks, members, today) {
   const ZERO = "0001-01-01T00:00:00Z";
   const snapshot = (t) => ({
     id: t.id, done: !!t.done, percent_done: t.percent_done || 0, started_at: t.started_at || null,
-    priority: t.priority || 0,
+    priority: t.priority || 0, is_favorite: !!t.is_favorite,
     due_date: (t.due_date && !t.due_date.startsWith("0001")) ? t.due_date : ZERO,
     waiting: (t.labels || []).some((l) => (l.title || "") === WAITING_LABEL),
     assignees: (t.assignees || []).map((a) => a.id), labels: (t.labels || []).map((l) => l.id),
@@ -1276,7 +1401,7 @@ function wireBulk(root, rows, tasks, members, today) {
   // スナップショットへ復元（現在 API 状態から差分適用）。担当/分類は add/remove で集合一致させる。
   const restoreSnap = async (s) => {
     let cur = null; try { cur = await getTask(s.id); } catch { /* 既存 tasks で代替 */ cur = taskOf(s.id); }
-    await updateTask(s.id, { done: s.done, percent_done: s.percent_done, started_at: s.started_at, priority: s.priority, due_date: s.due_date }).catch(() => {});
+    await updateTask(s.id, { done: s.done, percent_done: s.percent_done, started_at: s.started_at, priority: s.priority, due_date: s.due_date, is_favorite: s.is_favorite }).catch(() => {});
     await setTaskWaiting(cur || { id: s.id, labels: [] }, s.waiting).catch(() => {});
     const curAs = ((cur && cur.assignees) || []).map((a) => a.id), tAs = new Set(s.assignees);
     for (const a of curAs) if (!tAs.has(a)) await removeAssignee(s.id, a).catch(() => {});
@@ -1327,11 +1452,55 @@ function wireBulk(root, rows, tasks, members, today) {
             { label: "クリア（期限なし）", danger: true, on: () => runAllH("期限変更", (id) => setDue(id, null)) },
           ]);
           break;
-        case "who":
-          openMenu(r.left, r.bottom + 4, (members || []).map((m) => ({
-            label: m.name || m.username,
-            on: () => runAllH("担当変更", (id) => addAssignee(id, m.id)),
-          })));
+        case "who": {
+          // 追加（既存担当に足す）／置換（既存を外してその人だけ）／全員外す。
+          const addOne = (uid) => runAllH("担当変更", (id) => addAssignee(id, uid));
+          const replaceOne = (uid) => runAllH("担当変更", async (id) => {
+            const t = taskOf(id); const cur = ((t && t.assignees) || []).filter((a) => !isAiUser(a)).map((a) => a.id);
+            for (const x of cur) if (x !== uid) await removeAssignee(id, x).catch(() => {});
+            if (!cur.includes(uid)) await addAssignee(id, uid).catch(() => {});
+          });
+          const removeAll = () => runAllH("担当変更", async (id) => {
+            const t = taskOf(id); const cur = ((t && t.assignees) || []).filter((a) => !isAiUser(a)).map((a) => a.id);
+            for (const x of cur) await removeAssignee(id, x).catch(() => {});
+          });
+          const ms = (members || []).filter((m) => !isAiUser(m));
+          openMenu(r.left, r.bottom + 4, [
+            { header: true, label: "追加（足す）" },
+            ...ms.map((m) => ({ label: m.name || m.username, on: () => addOne(m.id) })),
+            { sep: true },
+            { header: true, label: "置換（この人だけに）" },
+            ...ms.map((m) => ({ label: m.name || m.username, on: () => replaceOne(m.id) })),
+            { sep: true },
+            { label: "全員外す（担当なし）", danger: true, on: removeAll },
+          ]);
+          break;
+        }
+        case "cat": {
+          // 分類（ラベル）一括: 追加／削除。レビュー/連絡待ちは予約語なので候補から除外。
+          const cats = (labels || []).filter((l) => (l.title || "") !== REVIEW_LABEL && (l.title || "") !== WAITING_LABEL);
+          const addCat = (lid) => runAllH("分類変更", async (id) => {
+            const t = taskOf(id); const cur = ((t && t.labels) || []).map((l) => l.id);
+            if (!cur.includes(lid)) await addTaskLabel(id, lid);
+          });
+          const removeCat = (lid) => runAllH("分類変更", async (id) => {
+            const t = taskOf(id); const cur = ((t && t.labels) || []).map((l) => l.id);
+            if (cur.includes(lid)) await removeTaskLabel(id, lid);
+          });
+          const items = [{ header: true, label: "追加" }];
+          cats.forEach((l) => items.push({ label: l.title, on: () => addCat(l.id) }));
+          if (cats.length) {
+            items.push({ sep: true }, { header: true, label: "外す" });
+            cats.forEach((l) => items.push({ label: l.title, danger: true, on: () => removeCat(l.id) }));
+          } else { items.push({ header: true, label: "（分類がありません）" }); }
+          openMenu(r.left, r.bottom + 4, items);
+          break;
+        }
+        case "flag":
+          openMenu(r.left, r.bottom + 4, [
+            { label: "フラグを付ける", on: () => runAllH("フラグ変更", (id) => updateTask(id, { is_favorite: true })) },
+            { label: "フラグを外す", danger: true, on: () => runAllH("フラグ変更", (id) => updateTask(id, { is_favorite: false })) },
+          ]);
           break;
         case "status":
           openMenu(r.left, r.bottom + 4, [
@@ -1375,7 +1544,7 @@ function wireDrag(root, rerender) {
   rowsArr().forEach((dragRow) => {
     dragRow.addEventListener("pointerdown", (e) => {
       if (e.button && e.button !== 0) return;
-      if (e.target.closest("button, a, input, select, .tb-rowck")) return; // ▶やリンク・チェック等は各自のクリックに任せる
+      if (e.target.closest("button, a, input, select, .tb-rowck, .tb-pctbar")) return; // ▶やリンク・チェック・進捗バー等は各自のクリックに任せる
       const dragId = +dragRow.dataset.id;
       // 修飾キー＝選択操作（ドラッグしない）
       if (e.ctrlKey || e.metaKey) { e.preventDefault(); toggleSel(dragId); return; }
@@ -1555,12 +1724,28 @@ async function reparent(childId, oldParentId, newParentId, rerender) {
   }
 }
 
-const cols = () => [
+// 列マスタ（既定の表示順）。fixed=非表示/移動不可（タスク名は表の主軸なので固定）。
+// 列の表示/非表示・並べ替えは本人ごと（V.colOrder / V.hiddenCols）に localStorage 永続。共有データは変えない。
+const COLDEF = [
   { k: "proj", label: "プロジェクト" },
-  { k: "title", label: "タスク" }, { k: "who", label: "担当" }, { k: "kind", label: "種別" },
+  { k: "title", label: "タスク", fixed: true },
+  { k: "who", label: "担当" }, { k: "kind", label: "種別" },
   { k: "cat", label: "分類" }, { k: "prio", label: "重要度" }, { k: "due", label: "期限" },
   { k: "est", label: "見積" }, { k: "pct", label: "進捗" }, { k: "state", label: "ステータス" },
 ];
+const COLDEF_KEYS = COLDEF.map((c) => c.k);
+const colByKey = (k) => COLDEF.find((c) => c.k === k);
+// V.colOrder（保存済みの並び）を起点に、未知キー除去＋新規列を末尾補完して正規の順序配列を返す。
+function orderedColKeys(v) {
+  const saved = (v && Array.isArray(v.colOrder) ? v.colOrder : []).filter((k) => COLDEF_KEYS.includes(k));
+  const rest = COLDEF_KEYS.filter((k) => !saved.includes(k));
+  return [...saved, ...rest];
+}
+// 実際に描画する列（順序適用＋非表示除外）。タスク名(fixed)は常に表示。
+const cols = (v = V) => {
+  const hidden = new Set((v && v.hiddenCols) || []);
+  return orderedColKeys(v).filter((k) => { const c = colByKey(k); return c && (c.fixed || !hidden.has(k)); }).map(colByKey);
+};
 // 0件時の空状態行。フィルタがアクティブなら「条件に一致するタスクがありません」＋解除ボタン、無ければ「タスクがありません」のみ。
 const emptyRow = (filtersActive) => `<tr><td colspan="${cols().length + 1}" class="tb-empty">`
   + (filtersActive
@@ -1604,8 +1789,10 @@ function bulkBarHtml(rows) {
     <span class="tb-bk-acts">
       ${btn("due", "期限")}
       ${btn("who", "担当者")}
+      ${btn("cat", "分類")}
       ${btn("status", "ステータス")}
       ${btn("prio", "重要度")}
+      ${btn("flag", "フラグ")}
       ${btn("del", "削除")}
     </span>
     <span class="tb-bk-busy" id="tb-bk-busy"></span>
@@ -1630,18 +1817,23 @@ function rowHtml(r, members, i, manual) {
   const estBtn = `<button class="tb-cell tb-num tb-estbtn" data-est="${id}" title="クリックで見積を変更">${r.est ? fmtH(r.est) : "—"}<span class="tb-cell-car">▾</span></button>`;
   const st = `<button class="tb-st tb-stbtn ${r.status}" data-st="${id}" title="クリックでステータス変更">${STATUS[r.status].label}<span class="tb-st-car">▾</span></button>`;
   const sel = selectedIds.has(id);
+  // 列ごとの <td> をマップで持ち、cols() の順序（表示/非表示・並べ替え反映）で出力する。
+  const cellOf = {
+    proj: `<td class="tb-proj tb-gc" data-col="proj"><button class="tb-cell tb-projbtn" data-proj="${id}" title="クリックでプロジェクト（親タスク）を変更">${r.parent ? esc(r.parent.title) : "—"}<span class="tb-cell-car">▾</span></button></td>`,
+    title: `<td class="tb-title tb-gc" data-col="title">${esc(r.title)}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">${icon("flag", { size: 12 })}</span>` : ""}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">${icon("play", { size: 11 })}</button>` : ""}</td>`,
+    who: `<td class="tb-gc" data-col="who">${whoBtn}</td>`,
+    kind: `<td>${kind}</td>`,
+    cat: `<td class="tb-gc" data-col="cat">${catBtn}</td>`,
+    prio: `<td class="tb-gc" data-col="prio">${prioBtn}</td>`,
+    due: `<td class="tb-gc" data-col="due">${dueBtn}</td>`,
+    est: `<td class="tb-gc" data-col="est">${estBtn}</td>`,
+    pct: `<td><div class="tb-bar tb-pctbar" data-pct="${id}" role="slider" tabindex="0" aria-valuenow="${r.pct}" aria-valuemin="0" aria-valuemax="100" title="クリックで進捗を変更（0/25/50/75/100）"><i style="width:${r.pct}%"></i></div><span class="tb-pct">${r.pct}%</span></td>`,
+    state: `<td class="tb-gc" data-col="state">${st}</td>`,
+  };
+  const body = cols().map((c) => cellOf[c.k] || "").join("");
   return `<tr data-id="${id}" class="${manual ? "tb-draggable" : ""}${sel ? " tb-sel" : ""}">
     <td class="tb-selcol"><span class="tb-rowck${sel ? " on" : ""}" data-ck="${id}" role="checkbox" aria-checked="${sel}" title="選択">${sel ? icon("check", { size: 12 }) : ""}</span></td>
-    <td class="tb-proj tb-gc" data-col="proj"><button class="tb-cell tb-projbtn" data-proj="${id}" title="クリックでプロジェクト（親タスク）を変更">${r.parent ? esc(r.parent.title) : "—"}<span class="tb-cell-car">▾</span></button></td>
-    <td class="tb-title tb-gc" data-col="title">${esc(r.title)}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">${icon("flag", { size: 12 })}</span>` : ""}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">${icon("play", { size: 11 })}</button>` : ""}</td>
-    <td class="tb-gc" data-col="who">${whoBtn}</td>
-    <td>${kind}</td>
-    <td class="tb-gc" data-col="cat">${catBtn}</td>
-    <td class="tb-gc" data-col="prio">${prioBtn}</td>
-    <td class="tb-gc" data-col="due">${dueBtn}</td>
-    <td class="tb-gc" data-col="est">${estBtn}</td>
-    <td><div class="tb-bar"><i style="width:${r.pct}%"></i></div><span class="tb-pct">${r.pct}%</span></td>
-    <td class="tb-gc" data-col="state">${st}</td>
+    ${body}
   </tr>`;
 }
 
@@ -1862,6 +2054,35 @@ function css() {
   .tb-bk-busy{font-size:11.5px;color:${C.muted};font-variant-numeric:tabular-nums}
   .tb-bk-clr{font:inherit;font-size:12px;font-weight:600;margin-left:auto;padding:6px 12px;border:1px solid transparent;border-radius:8px;background:transparent;color:${C.muted};cursor:pointer}
   .tb-bk-clr:hover{color:${C.ink};background:${C.track}}
+  /* 列の表示・並べ替え（歯車）ボタン＋メニュー */
+  .tb-colsbtn{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:12.5px;font-weight:600;padding:6px 12px;border:1px solid ${C.line};border-radius:8px;background:#fff;color:${C.muted};cursor:pointer}
+  .tb-colsbtn:hover{border-color:#d7dde6;color:${C.ink}}
+  .tb-colsmenu{min-width:236px;padding:6px}
+  .tb-colhd{font-size:10.5px;font-weight:700;letter-spacing:.04em;color:${C.muted};padding:5px 8px 6px}
+  .tb-colrow{display:flex;align-items:center;gap:8px;padding:3px 6px;border-radius:7px}
+  .tb-colrow:hover{background:${C.track}}
+  .tb-colck{display:inline-grid;place-items:center;width:18px;height:18px;flex:none;border-radius:5px;border:1.5px solid ${C.line};background:#fff;color:#fff;cursor:pointer;padding:0}
+  .tb-colck:hover:not(:disabled){border-color:${C.fill};box-shadow:0 0 0 3px rgba(58,134,255,.12)}
+  .tb-colck.on{background:${C.fill};border-color:${C.fill}}
+  .tb-colck.fixed{opacity:.45;cursor:default}
+  .tb-collbl{flex:1 1 auto;font-size:13px;color:${C.ink}}
+  .tb-colmv{display:inline-flex;gap:3px;flex:none}
+  .tb-colup,.tb-coldn{font:inherit;font-size:11px;line-height:1;width:24px;height:24px;border:1px solid ${C.line};border-radius:6px;background:#fff;color:${C.muted};cursor:pointer;padding:0}
+  .tb-colup:hover:not(:disabled),.tb-coldn:hover:not(:disabled){border-color:${C.fill};color:${C.fill}}
+  .tb-colup:disabled,.tb-coldn:disabled{opacity:.3;cursor:default}
+  .tb-colft{margin-top:4px;border-top:1px solid ${C.line};padding-top:6px;display:flex}
+  .tb-colreset{font:inherit;font-size:12px;font-weight:600;color:${C.muted};background:transparent;border:0;border-radius:7px;padding:6px 8px;cursor:pointer;margin-left:auto}
+  .tb-colreset:hover{color:${C.fill};background:${C.track}}
+  /* メニュー内の小見出し（一括: 追加/置換/外す 等） */
+  .tb-ctx-hd{font-size:10px;font-weight:700;letter-spacing:.04em;color:${C.muted};padding:6px 12px 3px}
+  /* 進捗バー＝クリック/キーで 0/25/50/75/100 のクイックセット */
+  .tb-pctbar{cursor:pointer;transition:box-shadow .12s}
+  .tb-pctbar:hover{box-shadow:0 0 0 2px rgba(58,134,255,.25)}
+  .tb-pctbar:focus-visible{outline:none;box-shadow:0 0 0 2px ${C.fill}}
+  html[data-theme="dark"] .tb-colsbtn{background:var(--card)}
+  html[data-theme="dark"] .tb-colsmenu .tb-colck{background:var(--card)}
+  html[data-theme="dark"] .tb-colsmenu .tb-colck.on{background:${C.fill}}
+  html[data-theme="dark"] .tb-colup,html[data-theme="dark"] .tb-coldn{background:var(--card)}
   .tb-ghost-badge{position:absolute;top:-8px;right:-8px;min-width:20px;height:20px;border-radius:10px;background:${C.over};color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 5px;box-shadow:0 2px 6px rgba(0,0,0,.3)}
   /* 元の場所＝ギャップ: 文字も枠も無く、ただ柔らかい影が落ちているだけに見せる */
   /* 落下ギャップ＝フラットな薄いグレーの空き帯（グラデ無し・継ぎ目無し） */

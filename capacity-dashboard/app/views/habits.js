@@ -3,12 +3,15 @@
 // チェック=実績エントリ（logged_on の日付・60秒固定）→ 直近7日ストリップ＋🔥ストリーク表示。
 // 習慣WSのタスクは store.load が通常タスクから除外（負荷・空き・一覧に混ざらない）。
 import { load, invalidate } from "../lib/store.js";
-import { createProject, createTaskInProject, addAssignee, getTimes, logTime, deleteTime, deleteTask } from "../lib/api.js";
+import { createProject, createTaskInProject, addAssignee, getTimes, logTime, deleteTime, deleteTask, updateTask } from "../lib/api.js";
 import { habitStreak, lastDays, HABIT_WS } from "../lib/habits.js";
 import { dateOnly } from "../lib/capacity.js";
 import { DOW_JA } from "../lib/form.js";
 import { C, esc, todayISO } from "../lib/ui.js";
+import { push as pushHistory } from "../lib/history.js";
 import { icon } from "../lib/icons.js";
+
+const HEATMAP_DAYS = 84; // B47: 直近84日（12週）のコントリビューショングリッド
 
 export async function render(root) {
   const { habitTasks, habitProject, me } = await load();
@@ -28,6 +31,7 @@ export async function render(root) {
   root.innerHTML = `
     <style>${css()}</style>
     <h1 class="vtitle">習慣 <small>毎日の積み重ね ・ 今日の○をクリックでチェック</small></h1>
+    ${hist.length ? summaryHtml(hist, today) : ""}
     <div class="hb-add card">
       <input id="hb-in" class="hb-input" autocomplete="off" placeholder="新しい習慣（例: 朝のレビュー15分）を入力して Enter">
       <div id="hb-err" class="hb-err" role="alert" hidden></div>
@@ -58,6 +62,14 @@ export async function render(root) {
       input.focus();
       showErr("追加に失敗しました: " + (e && e.message ? e.message : e));
     }
+  };
+
+  // B49: 今日の達成サマリ更新（行のチェック切替後にローカルで再計算して反映）
+  const refreshSummary = () => {
+    const sumEl = root.querySelector(".hb-sum");
+    if (!sumEl || !hist.length) return;
+    const fresh = document.createRange().createContextualFragment(summaryHtml(hist, today)).firstElementChild;
+    sumEl.replaceWith(fresh);
   };
 
   // 各行にイベントをバインド（行単位ローカル更新のため再利用可能なヘルパに）
@@ -93,8 +105,14 @@ export async function render(root) {
         const fresh = document.createRange().createContextualFragment(rowHtml(h.t, h.dates, h.total, today)).firstElementChild;
         rowEl.replaceWith(fresh);
         bindRow(fresh);
+        refreshSummary(); // B49: サマリも更新
       } catch { cb.disabled = false; }
     };
+
+    // B48: 習慣名のインライン編集（dblclick→input→updateTask({title})。履歴/データ保持）
+    const nameEl = rowEl.querySelector(".hb-name-text");
+    if (nameEl) nameEl.ondblclick = () => startInlineEdit(rowEl, nameEl);
+
     // 習慣の削除（履歴ごと見えなくなる・soft delete）
     const db = rowEl.querySelector("[data-del]");
     if (db) db.onclick = async () => {
@@ -103,15 +121,120 @@ export async function render(root) {
       try { await deleteTask(+db.dataset.del); invalidate(); await load(); render(root); } catch { db.disabled = false; }
     };
   };
+
+  // B48: インライン編集の本体。元タイトルを保持し、保存成功で履歴(Undo/Redo)へ積む。
+  function startInlineEdit(rowEl, nameEl) {
+    const h = hist.find((x) => x.t.id === +nameEl.dataset.id);
+    if (!h) return;
+    const orig = h.t.title;
+    const ed = document.createElement("input");
+    ed.className = "hb-name-edit";
+    ed.value = orig;
+    ed.setAttribute("aria-label", "習慣名を編集");
+    nameEl.replaceWith(ed);
+    ed.focus();
+    ed.select();
+
+    let settled = false; // commit/cancel の二重発火ガード
+    const restore = (title) => {
+      // ローカルの title を反映してから名前要素を作り直して差し替える
+      h.t.title = title;
+      const frag = document.createRange().createContextualFragment(nameHtml(h.t.id, title)).firstElementChild;
+      ed.replaceWith(frag);
+      frag.ondblclick = () => startInlineEdit(rowEl, frag);
+    };
+    const applyTitle = async (taskId, title) => {
+      await updateTask(taskId, { title });
+      // store の habitTasks 上の同一タスクにも反映（次 render まで整合）
+      const ref = (habitTasks || []).find((x) => x.id === taskId);
+      if (ref) ref.title = title;
+      const hh = hist.find((x) => x.t.id === taskId);
+      if (hh) hh.t.title = title;
+    };
+    const commit = async () => {
+      if (settled) return;
+      const next = ed.value.trim();
+      if (!next || next === orig) { settled = true; restore(orig); return; }
+      settled = true;
+      ed.disabled = true;
+      try {
+        await applyTitle(h.t.id, next);
+        restore(next);
+        // 履歴へ（Undo=元に戻す / Redo=やり直す。どちらも updateTask + 表示更新）
+        pushHistory({
+          label: "習慣名の編集",
+          undo: async () => { await applyTitle(h.t.id, orig); reflectName(h.t.id, orig); },
+          redo: async () => { await applyTitle(h.t.id, next); reflectName(h.t.id, next); },
+        });
+      } catch (e) {
+        // 失敗時は編集に戻す（入力テキストは保持）
+        settled = false;
+        ed.disabled = false;
+        ed.focus();
+        showErr("習慣名の変更に失敗しました: " + (e && e.message ? e.message : e));
+      }
+    };
+    const cancel = () => { if (settled) return; settled = true; restore(orig); };
+
+    ed.onkeydown = (ev) => {
+      if (ev.key === "Enter") { ev.preventDefault(); commit(); }
+      else if (ev.key === "Escape") { ev.preventDefault(); cancel(); }
+    };
+    ed.onblur = commit;
+  }
+
+  // Undo/Redo 経由でタイトルが変わったとき、画面上の該当行の名前を更新（再描画なし）。
+  function reflectName(taskId, title) {
+    const el = root.querySelector(`.hb-name-text[data-id="${taskId}"]`);
+    if (!el) return;
+    const frag = document.createRange().createContextualFragment(nameHtml(taskId, title)).firstElementChild;
+    el.replaceWith(frag);
+    const rowEl = frag.closest(".hb-row");
+    frag.ondblclick = () => startInlineEdit(rowEl, frag);
+  }
+
   root.querySelectorAll(".hb-row").forEach(bindRow);
+
+  // B47: 月間ヒートマップを開閉（各行の「📈」で展開・閉じる）
+  root.querySelectorAll("[data-heat]").forEach((btn) => {
+    btn.onclick = () => {
+      const wrap = btn.closest(".hb-row").querySelector(".hb-heat");
+      if (!wrap) return;
+      const open = wrap.hidden;
+      wrap.hidden = !open;
+      btn.classList.toggle("on", open);
+      btn.setAttribute("aria-expanded", String(open));
+    };
+  });
+}
+
+// B49: 今日の達成サマリ（「今日 N/M 達成」＋プログレス・全達成で緑＋祝福）
+function summaryHtml(hist, today) {
+  const total = hist.length;
+  const done = hist.filter((h) => h.dates.has(today)).length;
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  const all = total > 0 && done === total;
+  return `<div class="card hb-sum${all ? " all" : ""}">
+    <div class="hb-sum-head">
+      <span class="hb-sum-label">今日 <b>${done}</b>/<b>${total}</b> 達成</span>
+      ${all ? `<span class="hb-sum-celebrate">${icon("check", { size: 15 })} 今日のぶん、全部できました！</span>` : `<span class="hb-sum-pct">${pct}%</span>`}
+    </div>
+    <div class="hb-sum-bar"><div class="hb-sum-fill${all ? " all" : ""}" style="width:${pct}%"></div></div>
+  </div>`;
+}
+
+// 習慣名の表示要素（dblclick で編集に切り替わる）。インライン編集差し替えの単位。
+function nameHtml(id, title) {
+  return `<span class="hb-name-text" data-id="${id}" title="ダブルクリックで名前を編集">${esc(title)}</span>`;
 }
 
 function rowHtml(t, dates, total, today) {
   const streak = habitStreak(dates, today);
   const week = lastDays(dates, today, 7);
   return `<div class="hb-row">
-    <div class="hb-name">${esc(t.title)}
+    <div class="hb-name">${nameHtml(t.id, t.title)}
       <span class="hb-meta">${streak ? `${icon("flame", { size: 14 })} ${streak}日連続` : "—"} ・ 計${total}回</span>
+      <div class="hb-heat" hidden>${heatmapHtml(dates, today)}</div>
     </div>
     <div class="hb-week">
       ${week.map((d, i) => {
@@ -125,7 +248,27 @@ function rowHtml(t, dates, total, today) {
         </div>`;
       }).join("")}
     </div>
+    <button class="hb-heat-btn" data-heat="${t.id}" title="月間ヒートマップを表示" aria-expanded="false" aria-label="月間ヒートマップを表示">${icon("trendingUp", { size: 15 })}</button>
     <button class="hb-x" data-del="${t.id}" title="習慣を削除">×</button>
+  </div>`;
+}
+
+// B47: 直近HEATMAP_DAYS日のコントリビューショングリッド（GitHub風・週=列／曜日=行）＋達成率。
+function heatmapHtml(dates, today) {
+  const days = lastDays(dates, today, HEATMAP_DAYS); // 古い→新しい（末尾=today）
+  const doneCount = days.filter((d) => d.done).length;
+  const rate = Math.round((doneCount / HEATMAP_DAYS) * 100);
+  // 先頭の曜日に合わせて空セルでパディング（列=週・行=曜日 日〜土）。
+  const firstDow = new Date(days[0].iso + "T00:00:00Z").getUTCDay();
+  const cells = [];
+  for (let i = 0; i < firstDow; i++) cells.push(`<span class="hb-hm-cell pad" aria-hidden="true"></span>`);
+  for (const d of days) {
+    const isToday = d.iso === today;
+    cells.push(`<span class="hb-hm-cell${d.done ? " on" : ""}${isToday ? " today" : ""}" title="${d.iso}${d.done ? "：達成" : ""}"></span>`);
+  }
+  return `<div class="hb-hm">
+    <div class="hb-hm-head">直近${HEATMAP_DAYS}日 ・ 達成 ${doneCount}/${HEATMAP_DAYS}（<b>${rate}%</b>）</div>
+    <div class="hb-hm-grid">${cells.join("")}</div>
   </div>`;
 }
 
@@ -135,10 +278,27 @@ function css() {
   .hb-input{width:100%;box-sizing:border-box;font:inherit;font-size:13.5px;padding:9px 13px;border:1px solid ${C.line};border-radius:9px;background:#fff}
   .hb-input:focus{outline:none;border-color:${C.fill};box-shadow:0 0 0 3px rgba(58,134,255,.12)}
   .hb-err{margin-top:8px;font-size:12.5px;color:#c0392b;font-weight:600}
+
+  /* B49: 今日の達成サマリ */
+  .hb-sum{padding:13px 16px;margin-bottom:14px}
+  .hb-sum-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:9px}
+  .hb-sum-label{font-size:14px;font-weight:600}
+  .hb-sum-label b{font-weight:800}
+  .hb-sum-pct{font-size:13px;font-weight:700;color:${C.muted}}
+  .hb-sum-celebrate{display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:700;color:#2fa66b}
+  .hb-sum-bar{height:8px;border-radius:99px;background:#eef1f5;overflow:hidden}
+  .hb-sum-fill{height:100%;border-radius:99px;background:${C.fill};transition:width .3s ease}
+  .hb-sum-fill.all{background:#2fa66b}
+  .hb-sum.all{box-shadow:0 0 0 1.5px rgba(47,166,107,.4) inset}
+
   .hb-list{padding:6px 18px}
   .hb-row{display:flex;align-items:center;gap:16px;padding:13px 0;border-bottom:1px solid ${C.line}}
   .hb-row:last-child{border-bottom:0}
   .hb-name{flex:1;min-width:0;font-size:14px;font-weight:600}
+  .hb-name-text{cursor:text;border-radius:4px;padding:1px 3px;margin:-1px -3px}
+  .hb-name-text:hover{background:rgba(58,134,255,.08)}
+  .hb-name-edit{font:inherit;font-size:14px;font-weight:600;width:min(100%,360px);box-sizing:border-box;padding:3px 7px;border:1px solid ${C.fill};border-radius:7px;background:#fff;color:inherit}
+  .hb-name-edit:focus{outline:none;box-shadow:0 0 0 3px rgba(58,134,255,.12)}
   .hb-meta{display:block;font-size:11.5px;color:${C.muted};font-weight:500;margin-top:2px}
   .hb-week{display:flex;gap:7px}
   .hb-day{display:flex;flex-direction:column;align-items:center;gap:3px}
@@ -148,14 +308,33 @@ function css() {
   .hb-c.today{border:1.5px solid ${C.fill};background:#fff;color:${C.fill};cursor:pointer;font-weight:700}
   .hb-c.today:hover{background:#eef4ff}
   .hb-c.today.on{background:#2fa66b;border-color:#2fa66b;color:#fff}
+  .hb-heat-btn{border:0;background:transparent;color:${C.muted};cursor:pointer;opacity:.5;padding:4px;border-radius:6px;display:inline-flex;transition:opacity .12s,background .12s}
+  .hb-row:hover .hb-heat-btn{opacity:1}
+  .hb-heat-btn:hover{background:rgba(58,134,255,.1);color:${C.fill}}
+  .hb-heat-btn.on{opacity:1;color:${C.fill};background:rgba(58,134,255,.12)}
+  .hb-heat-btn:focus-visible{opacity:1}
   .hb-x{border:0;background:transparent;color:${C.muted};font-size:15px;cursor:pointer;opacity:.35;padding:4px;transition:opacity .12s}
   .hb-row:hover .hb-x{opacity:1}
   .hb-x:focus-visible{opacity:1}
+
+  /* B47: 月間ヒートマップ（GitHub風コントリビューショングリッド） */
+  .hb-heat{margin-top:10px}
+  .hb-hm-head{font-size:11.5px;color:${C.muted};font-weight:500;margin-bottom:6px}
+  .hb-hm-head b{color:${C.ink || "inherit"};font-weight:700}
+  .hb-hm-grid{display:grid;grid-template-rows:repeat(7,11px);grid-auto-flow:column;grid-auto-columns:11px;gap:3px}
+  .hb-hm-cell{width:11px;height:11px;border-radius:3px;background:#eef1f5}
+  .hb-hm-cell.pad{background:transparent}
+  .hb-hm-cell.on{background:#2fa66b}
+  .hb-hm-cell.today{box-shadow:0 0 0 1.5px ${C.fill}}
 
   /* ダークモード: 入力面=card / 未チェックの○=track / 今日ボタン面=card。済(.on)の緑は維持 */
   html[data-theme="dark"] .hb-input{background:var(--card);color:var(--ink)}
   html[data-theme="dark"] .hb-err{color:#ff8a80}
   html[data-theme="dark"] .hb-c{background:var(--track);color:var(--muted)}
   html[data-theme="dark"] .hb-c.today{background:var(--card);color:${C.fill}}
-  html[data-theme="dark"] .hb-c.today:hover{background:rgba(58,134,255,.16)}`;
+  html[data-theme="dark"] .hb-c.today:hover{background:rgba(58,134,255,.16)}
+  html[data-theme="dark"] .hb-name-text:hover{background:rgba(58,134,255,.16)}
+  html[data-theme="dark"] .hb-name-edit{background:var(--card);color:var(--ink)}
+  html[data-theme="dark"] .hb-sum-bar{background:var(--track)}
+  html[data-theme="dark"] .hb-hm-cell{background:var(--track)}`;
 }

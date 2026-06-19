@@ -6,7 +6,7 @@ import { load, invalidate } from "../lib/store.js";
 import { todayItemsByMember } from "../lib/today_items.js";
 import { expandRecurrences } from "../lib/recurrence.js";
 import { PRIO, NEUTRAL, KINDS } from "../lib/kinds.js";
-import { dateOnly } from "../lib/capacity.js";
+import { dateOnly, shiftISO } from "../lib/capacity.js";
 import { deletePlan, logPlan, updateRecurrence } from "../lib/api.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 import { splitMeta } from "../lib/form.js"; // note の "[資料] URL" 行を抽出
@@ -93,6 +93,34 @@ function bucketFromItem(itemMap, mid, taskId) {
   return it ? { kind: it.kind, prio: it.prio } : { kind: "task", prio: 1 };
 }
 
+// B9: 同時刻に重なるブロックをレーン分割。各 item に { lane, lanes } を付与し
+// blockHtml で横幅・左位置に反映する（重なると潰れていた破綻を解消）。
+// アルゴリズム: 開始時刻順に並べ、重なりが切れたところで「クラスタ」を区切る。
+// クラスタ内は空きレーン（終了済み）を再利用し、クラスタの最大同時数を lanes にする。
+function layoutLanes(items) {
+  const sorted = items.slice().sort((a, b) => a.startMin - b.startMin || a.mins - b.mins);
+  let cluster = [];        // 現クラスタの item 群
+  let laneEnd = [];        // 各レーンの「現在の終了時刻」
+  let clusterMax = 0;      // 現クラスタの同時最大レーン数
+  const flush = () => {
+    for (const it of cluster) it.lanes = clusterMax;
+    cluster = []; laneEnd = []; clusterMax = 0;
+  };
+  for (const it of sorted) {
+    // どのレーンも埋まっていない(=全部 it.startMin 以前に終了)ならクラスタを締める
+    if (laneEnd.length && laneEnd.every((end) => end <= it.startMin)) flush();
+    // 空きレーンを探す（終了済みを再利用）。無ければ新規レーン。
+    let lane = laneEnd.findIndex((end) => end <= it.startMin);
+    if (lane === -1) { lane = laneEnd.length; laneEnd.push(0); }
+    laneEnd[lane] = it.startMin + it.mins;
+    it.lane = lane;
+    cluster.push(it);
+    if (laneEnd.length > clusterMax) clusterMax = laneEnd.length;
+  }
+  flush();
+  return sorted;
+}
+
 function paint() {
   const { members, placed, tray, meetings } = buildModel();
   const nowMin = nowMinutes();
@@ -103,8 +131,12 @@ function paint() {
   for (let h = H0; h < H1; h++) grid.push(`<div class="cal-line" style="top:${(h - H0) * HOURH}px"></div>`);
 
   const cols = members.map((m, i) => {
-    const blocks = meetings.filter((b) => b.memberId === m.id).map((b) => blockHtml(b)).join("")
-      + placed.filter((b) => b.memberId === m.id).map((b) => blockHtml(b)).join("");
+    // B9: 会議＋配置済みを同じレーン空間でまとめて分割（互いの重なりも横並びに）
+    const mine = layoutLanes([
+      ...meetings.filter((b) => b.memberId === m.id),
+      ...placed.filter((b) => b.memberId === m.id),
+    ]);
+    const blocks = mine.map((b) => blockHtml(b)).join("");
     return `<div class="cal-col" data-member="${m.id}">
       <div class="cal-colh"><span class="cal-ava" style="background:${member_color(i)}">${esc((m.name || m.username || "?")[0])}</span>${esc(m.name || m.username)}</div>
       <div class="cal-colbody" data-member="${m.id}" style="height:${GRIDH}px">${blocks}</div>
@@ -137,7 +169,13 @@ function paint() {
 
   _root.innerHTML = `
     <style>${css()}</style>
-    <h1 class="vtitle">今日の時刻カレンダー <small>${_day} ・ ドラッグで時刻・担当を配置</small></h1>
+    <h1 class="vtitle">時刻カレンダー <small>${dayLabel(_day)} ・ ドラッグで時刻・担当を配置</small></h1>
+    <div class="cal-nav">
+      <button class="cal-nav-btn" id="cal-prev" title="前日" aria-label="前日">‹</button>
+      <button class="cal-nav-btn cal-nav-today" id="cal-today" title="今日へ">今日</button>
+      <button class="cal-nav-btn" id="cal-next" title="翌日" aria-label="翌日">›</button>
+      <input type="date" id="cal-date" class="cal-nav-date" value="${_day}" aria-label="表示日">
+    </div>
     <div class="cal-tray"><div class="cal-tray-h">未配置（${tray.length}）</div><div class="cal-tray-list" id="cal-tray">${trayHtml}</div></div>
     <div class="cal-pool">
       <div class="cal-pool-hd">
@@ -162,26 +200,59 @@ function paint() {
     });
   };
 
+  // B10: 日付ナビ（前日/今日/翌日＋ピッカー）。_day を変えて paint するだけ（モデルAPIは無改修）。
+  const goto = (iso) => { if (iso && iso !== _day) { _day = iso; paint(); } };
+  const prev = _root.querySelector("#cal-prev");
+  const next = _root.querySelector("#cal-next");
+  const todayBtn = _root.querySelector("#cal-today");
+  const picker = _root.querySelector("#cal-date");
+  if (prev) prev.onclick = () => goto(shiftISO(_day, -1));
+  if (next) next.onclick = () => goto(shiftISO(_day, 1));
+  if (todayBtn) todayBtn.onclick = () => goto(todayISO());
+  if (picker) picker.onchange = (e) => goto(e.target.value);
+
   wireDnD();
 }
 
+// 表示日ラベル: 今日/明日/昨日は注記を添える（それ以外は曜日付き）。
+function dayLabel(iso) {
+  const W = ["日", "月", "火", "水", "木", "金", "土"];
+  const d = new Date(iso + "T00:00:00Z");
+  const wd = W[d.getUTCDay()];
+  const t = todayISO();
+  const rel = iso === t ? "（今日）" : iso === shiftISO(t, 1) ? "（明日）" : iso === shiftISO(t, -1) ? "（昨日）" : "";
+  return `${iso}（${wd}）${rel}`;
+}
+
+// B9: レーン情報(lane/lanes)から横位置を算出（3px の左右余白を保ちつつ等分）。
+// lanes 未設定（=単独）は従来どおり left:3px;right:3px のまま。
+function lanePos(b) {
+  const lanes = b.lanes || 1;
+  if (lanes <= 1) return "left:3px;right:3px;";
+  const GAP = 3;                         // レーン間の隙間(px)
+  const wPct = 100 / lanes;
+  // calc で「均等割 - 余白」。左 3px・右 3px の外枠は維持。
+  return `left:calc(3px + ${(b.lane || 0) * wPct}% );width:calc(${wPct}% - ${GAP + (6 / lanes)}px);right:auto;`;
+}
 function blockHtml(b) {
   const top = min2top(b.startMin), h = Math.max(18, (b.mins / 60) * HOURH);
   const pat = KINDS[b.kind] ? KINDS[b.kind].pattern : "task";
   const hatch = pat === "meeting" ? "cal-hatch" : (pat === "routine" ? "cal-dots" : "");
   const timeLabel = `${hhmm(b.startMin)}–${hhmm(b.startMin + b.mins)} ・ ${fmtH(b.mins / 60)}`;
+  const pos = lanePos(b);
   if (b.fixed) {
     // 会議/定例: ドラッグ移動・リサイズ不可。クリックで「この回だけ変更」。資料リンクは 📎 で開ける。
     const links = (b.links || []).map((u) => /^https?:\/\//i.test(u)
       ? `<a href="${esc(u)}" target="_blank" rel="noopener" title="${esc(u)}" style="color:#fff;text-decoration:none">${icon("paperclip", { size: 13 })}</a>`
       : `<span title="${esc(u)}">${icon("paperclip", { size: 13 })}</span>`).join(" ");
     return `<div class="cal-block cal-fixed ${hatch}${b.hasOverride ? " cal-ovr" : ""}" data-rec="${b.recId}" data-orig="${b.origISO}"
-        style="top:${top}px;height:${h}px;background:${itemColor(b)}" title="${esc(b.title)}（${KINDS[b.kind] ? KINDS[b.kind].label : "会議"}・クリックでこの回だけ変更）">
+        style="top:${top}px;height:${h}px;${pos}background:${itemColor(b)}" title="${esc(b.title)}（${KINDS[b.kind] ? KINDS[b.kind].label : "会議"}・クリックでこの回だけ変更）">
       <div class="cal-bt">${b.hasOverride ? "✱ " : ""}${esc(b.title)}${links ? " " + links : ""}</div><div class="cal-bh">${timeLabel}</div>
     </div>`;
   }
   return `<div class="cal-block ${hatch}" draggable="true" data-task="${b.taskId}" data-member="${b.memberId}" data-mins="${b.mins}" data-start="${b.startMin}" data-plan="${b.planId}"
-      style="top:${top}px;height:${h}px;background:${itemColor(b)}">
+      style="top:${top}px;height:${h}px;${pos}background:${itemColor(b)}">
+    <button class="cal-unplace" title="未配置に戻す" aria-label="未配置に戻す">×</button>
     <div class="cal-bt">${esc(b.title)}</div><div class="cal-bh">${timeLabel}</div>
     <div class="cal-rs" draggable="false" title="ドラッグで所要時間を変更"></div>
   </div>`;
@@ -238,6 +309,19 @@ function wireDnD() {
       };
       document.addEventListener("mousemove", move);
       document.addEventListener("mouseup", up);
+    });
+  });
+  // B11: × で配置済みブロックを未配置（トレイ）へ戻す。
+  // mousedown で drag 開始を止め、click で unplace。block の dragstart は別途 resizing 同様にガード不要だが、
+  // ボタン上から掴んだ時に block の dragstart が走らないよう mousedown で stopPropagation する。
+  _root.querySelectorAll(".cal-unplace").forEach((btn) => {
+    btn.addEventListener("mousedown", (e) => { e.stopPropagation(); });
+    btn.addEventListener("dragstart", (e) => { e.preventDefault(); e.stopPropagation(); });
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation(); e.preventDefault();
+      const blk = btn.closest(".cal-block");
+      if (!blk) return;
+      await unplace(+blk.dataset.task, +blk.dataset.plan, +blk.dataset.member, +blk.dataset.mins);
     });
   });
   // 会議/定例: クリックで「この回だけ変更」（📎リンクは除く）
@@ -382,6 +466,22 @@ async function resizePlan(taskId, planId, memberId, startMin, mins) {
   }
 }
 
+// B11: 配置済み→未配置。時刻付き plan を消し、start_minute 無しで作り直す（今日の負荷は維持）。
+// 担当・所要はそのまま。これで buildModel のトレイ側（start_minute 無し）へ戻る。
+async function unplace(taskId, planId, memberId, mins) {
+  if (_calBusy) return; // place/resizePlan と共用ガード（delete→create の重複防止）
+  _calBusy = true;
+  try {
+    await deletePlan(taskId, planId);
+    await logPlan(taskId, mins * 60, _day, "", memberId, null); // 時刻なし＝未配置
+    invalidate();
+    _data = await load();
+    paint();
+  } finally {
+    _calBusy = false;
+  }
+}
+
 async function place(drag, toMember, startMin) {
   if (_calBusy) return; // 飛行中の二度目ドロップを無視（delete→create の重複防止）
   _calBusy = true;
@@ -410,6 +510,12 @@ function nowMinutes() {
 
 function css() {
   return `
+  .cal-nav{display:flex;align-items:center;gap:6px;margin:0 0 12px}
+  .cal-nav-btn{font:inherit;font-size:13px;line-height:1;min-width:30px;height:30px;padding:0 8px;border:1px solid ${C.line};background:#fff;color:${C.ink};border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+  .cal-nav-btn:hover{border-color:${C.fill};color:${C.fill}}
+  .cal-nav-today{font-weight:700}
+  .cal-nav-date{font:inherit;font-size:12.5px;padding:5px 8px;border:1px solid ${C.line};border-radius:8px;background:#fff;color:${C.ink};margin-left:4px}
+  .cal-nav-date:focus{outline:none;border-color:${C.fill};box-shadow:0 0 0 3px rgba(58,134,255,.12)}
   .cal-tray{margin:0 0 14px}
   .cal-tray-h{font-size:11.5px;color:${C.muted};font-weight:600;margin-bottom:6px}
   .cal-tray-list{display:flex;gap:8px;flex-wrap:wrap;min-height:34px;background:#fafbfc;border:1px dashed ${C.line};border-radius:10px;padding:8px}
@@ -449,6 +555,9 @@ function css() {
   .cal-block.cal-fixed{cursor:pointer;opacity:.88;z-index:1}
   .cal-block.cal-fixed:hover{opacity:1}
   .cal-block.cal-ovr{outline:2px dashed rgba(255,255,255,.8);outline-offset:-2px}
+  .cal-unplace{position:absolute;top:2px;right:2px;width:16px;height:16px;padding:0;border:none;border-radius:4px;background:rgba(0,0,0,.18);color:#fff;font-size:13px;line-height:14px;cursor:pointer;opacity:0;transition:opacity .12s;z-index:3;display:flex;align-items:center;justify-content:center}
+  .cal-block:hover .cal-unplace{opacity:1}
+  .cal-unplace:hover{background:rgba(0,0,0,.42)}
   .cal-rs{position:absolute;left:0;right:0;bottom:0;height:7px;cursor:ns-resize}
   .cal-rs::after{content:"";position:absolute;left:50%;bottom:2px;width:22px;height:3px;margin-left:-11px;border-radius:2px;background:rgba(255,255,255,.65)}
   .cal-ovm{position:fixed;inset:0;z-index:70;display:flex;align-items:center;justify-content:center}

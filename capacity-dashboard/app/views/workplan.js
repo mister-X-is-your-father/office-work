@@ -2,10 +2,12 @@
 // 「全員」はメンバーを合算せず、各メンバーのチャートを別々に並べる（共通Y軸で比較）。
 // 期間で粒度自動切替（≤14日=日別 / それ超=週別集計）。容量線は列ごと（=capH×営業日数）。
 // 集計は capacity.js を変更せず weekLoadByMember を重要度バケット×メンバーで呼んで再利用。重要度色は kinds.PRIO(SSoT)。
-import { load } from "../lib/store.js";
-import { weekLoadByMember, shiftISO, isBusinessDay, daysUntil } from "../lib/capacity.js";
+import { load, invalidate } from "../lib/store.js";
+import { weekLoadByMember, taskPlannedHoursByMemberOn, shiftISO, isBusinessDay, daysUntil } from "../lib/capacity.js";
+import { capacityOn } from "../lib/recurrence.js";
 import { PRIO, prioBucket } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color } from "../lib/ui.js";
+import { openTaskForm } from "./taskform.js";
 
 const WHO_KEY = "ts.workplan.who", PRESET_KEY = "ts.workplan.preset", FROM_KEY = "ts.workplan.from", TO_KEY = "ts.workplan.to", GRAIN_KEY = "ts.workplan.grain";
 const WD = ["日", "月", "火", "水", "木", "金", "土"];
@@ -69,20 +71,48 @@ function bizDaysList(from, to, holidays) {
   return out;
 }
 
-// 1メンバーの期間内 重要度別 列データ（日別 or 週別集計）。cap は列ごと（capH×営業日数）。
-function colsForMember(member, bdays, granularity, tasks, plans, holidays) {
+// plansByTask（Map or obj）から該当タスクの plan 配列を引く（capacity.js の内部ヘルパと同形）。
+function planEntriesOf(plans, taskId) {
+  if (!plans) return null;
+  return (plans.get ? plans.get(taskId) : plans[taskId]) || null;
+}
+
+// 1メンバーの期間内 重要度別 列データ（日別 or 週別集計）。
+// cap は **実キャパ**＝Σ capacityOn（週末/祝日に加え、そのメンバーの休暇日も 0 になる）。B17。
+// 各列に contrib（その列・その人に寄与するタスク [{id,title,h}] 降順）を付ける（バークリックのドリルダウン用）。B18。
+function colsForMember(member, bdays, granularity, tasks, plans, holidays, unavailabilityByMember) {
+  const availOpt = { holidays, unavailabilityByMember, capH: CAP };
   const perBucketDaily = BUCKETS.map((b) => {
     const ts = (tasks || []).filter((t) => prioBucket(t.priority) === b);
     const wl = weekLoadByMember(ts, [member], bdays, CAP, plans, { holidays });
     const days = bdays.map((day, di) => ({ day, h: round1((wl[0] && wl[0].days[di].h) || 0) }));
     return { b, days };
   });
+  // day index -> Map<taskId,{id,title,h}>（その日のこのメンバーへの寄与）。B18 ドリルダウン用。
+  const contribDaily = bdays.map((day) => {
+    const m = new Map();
+    for (const t of tasks || []) {
+      const byMember = taskPlannedHoursByMemberOn(t, day, planEntriesOf(plans, t.id), { holidays });
+      const h = byMember.get(member.id) || 0;
+      if (h > 0) { const prev = m.get(t.id); m.set(t.id, { id: t.id, title: t.title, h: (prev ? prev.h : 0) + h }); }
+    }
+    return m;
+  });
+  // 複数 day の寄与 Map を 1 本のタスク配列（h 降順）に畳む。
+  const foldContrib = (idxs) => {
+    const agg = new Map();
+    for (const di of idxs) for (const [id, c] of contribDaily[di]) {
+      const prev = agg.get(id);
+      agg.set(id, { id, title: c.title, h: (prev ? prev.h : 0) + c.h });
+    }
+    return [...agg.values()].map((c) => ({ ...c, h: round1(c.h) })).sort((a, b) => b.h - a.h);
+  };
   if (granularity === "day") {
     return bdays.map((day, di) => {
       const segs = perBucketDaily.map((pb) => ({ b: pb.b, h: pb.days[di].h })).filter((s) => s.h > 0);
       const total = round1(segs.reduce((s, x) => s + x.h, 0));
-      const cap = CAP;
-      return { label: day.slice(5).replace("-", "/"), sub: WD[dowOf(day)], segs, total, cap, free: round1(Math.max(0, cap - total)), over: total > cap + 1e-6 };
+      const cap = round1(capacityOn(member, day, availOpt));
+      return { label: day.slice(5).replace("-", "/"), sub: WD[dowOf(day)], segs, total, cap, free: round1(Math.max(0, cap - total)), over: total > cap + 1e-6, contrib: foldContrib([di]) };
     });
   }
   const groups = new Map(); // weekStart -> [dayIndex]
@@ -92,8 +122,8 @@ function colsForMember(member, bdays, granularity, tasks, plans, holidays) {
     for (const di of idxs) for (const pb of perBucketDaily) segMap[pb.b] = (segMap[pb.b] || 0) + pb.days[di].h;
     const segs = BUCKETS.map((b) => ({ b, h: round1(segMap[b] || 0) })).filter((s) => s.h > 0);
     const total = round1(segs.reduce((s, x) => s + x.h, 0));
-    const cap = CAP * idxs.length;
-    return { label: ws.slice(5).replace("-", "/") + "週", sub: `${idxs.length}日`, segs, total, cap, free: round1(Math.max(0, cap - total)), over: total > cap + 1e-6 };
+    const cap = round1(idxs.reduce((s, di) => s + capacityOn(member, bdays[di], availOpt), 0));
+    return { label: ws.slice(5).replace("-", "/") + "週", sub: `${idxs.length}日`, segs, total, cap, free: round1(Math.max(0, cap - total)), over: total > cap + 1e-6, contrib: foldContrib(idxs) };
   });
 }
 
@@ -113,7 +143,7 @@ export async function renderInto(container, opts = {}) {
 
 async function renderState(root, state, rerender, view = {}) {
   const embedded = !!view.embedded;
-  const { tasks, members, plansByTask, settings, holidaysSet, me } = await load();
+  const { tasks, members, plansByTask, settings, holidaysSet, unavailabilityByMember, me } = await load();
   CAP = settings.capH;
 
   // 期間: プリセット(今日からの相対)を既定とし、custom のときだけ日付指定を使う。
@@ -150,7 +180,7 @@ async function renderState(root, state, rerender, view = {}) {
   else if (WHO === "self") targets = selfMember ? [selfMember] : [];
   else { const one = activeMembers.find((m) => String(m.id) === String(WHO)) || selfMember; targets = one ? [one] : []; }
 
-  const perMember = targets.map((m) => ({ m, cols: colsForMember(m, bdays, granularity, tasks, plansByTask, holidaysSet) }));
+  const perMember = targets.map((m) => ({ m, cols: colsForMember(m, bdays, granularity, tasks, plansByTask, holidaysSet, unavailabilityByMember) }));
   const allCols = perMember.flatMap((x) => x.cols);
   const yMax = Math.max(1, ...allCols.map((c) => Math.max(c.cap, c.total))) * 1.12;
   // 既定の各チャート高（全員=190 / 個人=300）。fluid(ホーム埋め込み)=固定px箱をやめ、
@@ -175,22 +205,22 @@ async function renderState(root, state, rerender, view = {}) {
   const granLabel = granularity === "day" ? "日別" : "週別集計";
   const title = mode === "all" ? "全員（メンバー別）" : (targets[0] ? esc(mName(targets[0])) : "個人");
 
-  const chartHtml = (cols) => `<div class="wp-chart" style="height:${H + 44}px">
+  const chartHtml = (cols, mi) => `<div class="wp-chart" style="height:${H + 44}px">
       <div class="wp-yaxis" style="height:${H}px">${ticks}</div>
-      <div class="wp-cols" style="height:${H}px">${cols.map((c) => colHtml(c, pxPerH)).join("") || `<div class="wp-empty">営業日がありません</div>`}</div>
+      <div class="wp-cols" style="height:${H}px">${cols.map((c, ci) => colHtml(c, pxPerH, mi, ci)).join("") || `<div class="wp-empty">営業日がありません</div>`}</div>
     </div>`;
 
   let body;
   if (mode === "all") {
-    body = `<div class="wp-grid">${perMember.map((x) => {
+    body = `<div class="wp-grid">${perMember.map((x, mi) => {
       const sum = round1(x.cols.reduce((s, c) => s + c.total, 0));
       return `<div class="wp-member">
         <div class="wp-mname"><i class="wp-who-av" style="background:${member_color(x.m.id)}">${esc(mName(x.m)[0])}</i>${esc(mName(x.m))}<small>計 ${fmtH(sum)}</small></div>
-        ${chartHtml(x.cols)}
+        ${chartHtml(x.cols, mi)}
       </div>`;
     }).join("") || `<div class="wp-empty">メンバーがいません</div>`}</div>`;
   } else {
-    body = `<div class="card wp-card">${chartHtml(perMember[0] ? perMember[0].cols : [])}</div>`;
+    body = `<div class="card wp-card">${chartHtml(perMember[0] ? perMember[0].cols : [], 0)}</div>`;
   }
   const sumH = round1(allCols.reduce((s, c) => s + c.total, 0));
 
@@ -239,14 +269,78 @@ async function renderState(root, state, rerender, view = {}) {
   const fromEl = root.querySelector("#wp-from"), toEl = root.querySelector("#wp-to");
   if (fromEl) fromEl.onchange = () => { setCustom(); state.FROM = fromEl.value || state.FROM; state.save(FROM_KEY, state.FROM); rerender(); };
   if (toEl) toEl.onchange = () => { setCustom(); state.TO = toEl.value || state.TO; state.save(TO_KEY, state.TO); rerender(); };
+
+  // B18: バー/列クリック → その人・その列に寄与するタスク一覧ポップオーバー → openTaskForm。
+  const openCol = (col) => {
+    const mi = +col.dataset.mi, ci = +col.dataset.ci;
+    const pm = perMember[mi]; const c = pm && pm.cols[ci];
+    if (!pm || !c || !(c.contrib && c.contrib.length)) return;
+    openDrill(root, col, pm.m, c, rerender);
+  };
+  root.querySelectorAll(".wp-col.clickable").forEach((col) => {
+    col.onclick = () => openCol(col);
+    col.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCol(col); } };
+  });
 }
 
-function colHtml(c, pxPerH) {
+// 列ドリルダウンのポップオーバー。寄与タスクを h 降順で並べ、各行クリックで openTaskForm。B18。
+function closeDrill(root) {
+  const pop = root.querySelector(".wp-pop");
+  if (!pop) return;
+  if (pop._cleanup) pop._cleanup();
+  pop.remove();
+}
+function openDrill(root, anchor, member, col, rerender) {
+  closeDrill(root);
+  const pop = document.createElement("div");
+  pop.className = "wp-pop";
+  const head = `${esc(mName(member))} ・ ${esc(col.label)}${col.sub ? " " + esc(col.sub) : ""}`;
+  const capLabel = col.cap > 1e-6 ? `${fmtH(col.total)} / ${fmtH(col.cap)}` : `${fmtH(col.total)}（容量0＝休み）`;
+  pop.innerHTML = `
+    <div class="wp-pop-hd"><b>${head}</b><span class="wp-pop-cap${col.over ? " over" : ""}">${capLabel}</span><button type="button" class="wp-pop-x" aria-label="閉じる">×</button></div>
+    <div class="wp-pop-list">
+      ${col.contrib.map((t) => `<button type="button" class="wp-pop-row" data-id="${t.id}"><span class="wp-pop-t">${esc(t.title || "(無題)")}</span><span class="wp-pop-h">${fmtH(t.h)}</span></button>`).join("")}
+    </div>`;
+
+  if (getComputedStyle(root).position === "static") root.style.position = "relative";
+  root.appendChild(pop);
+  const rr = root.getBoundingClientRect();
+  const ar = anchor.getBoundingClientRect();
+  const W = pop.offsetWidth || 240;
+  let left = ar.left - rr.left + ar.width / 2 - W / 2;
+  left = Math.max(0, Math.min(left, rr.width - W));
+  let top = ar.bottom - rr.top + 4;
+  if (ar.bottom + (pop.offsetHeight || 0) > window.innerHeight) {
+    top = Math.max(0, ar.top - rr.top - (pop.offsetHeight || 0) - 4);
+  }
+  pop.style.left = left + "px";
+  pop.style.top = top + "px";
+
+  pop.querySelector(".wp-pop-x").onclick = (e) => { e.stopPropagation(); closeDrill(root); };
+  pop.querySelectorAll(".wp-pop-row").forEach((row) => {
+    row.onclick = (e) => {
+      e.stopPropagation();
+      const id = +row.dataset.id;
+      closeDrill(root);
+      openTaskForm({ taskId: id, onSaved: async () => { invalidate(); await load(); rerender(); } });
+    };
+  });
+  const onDoc = (e) => { if (!pop.contains(e.target) && !anchor.contains(e.target)) closeDrill(root); };
+  const onKey = (e) => { if (e.key === "Escape") closeDrill(root); };
+  pop._cleanup = () => { document.removeEventListener("mousedown", onDoc, true); document.removeEventListener("keydown", onKey, true); };
+  setTimeout(() => { document.addEventListener("mousedown", onDoc, true); document.addEventListener("keydown", onKey, true); }, 0);
+}
+
+function colHtml(c, pxPerH, mi, ci) {
   const segs = c.segs.map((s) =>
     `<div class="wp-seg" style="height:${s.h * pxPerH}px;background:${PRIO[s.b].c}" title="${PRIO[s.b].n} ${fmtH(s.h)}"><span>${s.h >= 1 ? fmtH(s.h) : ""}</span></div>`).join("");
   const gap = c.free > 0 ? `<div class="wp-seg gap" style="height:${c.free * pxPerH}px"><span>${c.free >= 1 ? "空 " + fmtH(c.free) : ""}</span></div>` : "";
-  const capLine = `<div class="wp-capline" style="bottom:${c.cap * pxPerH}px"></div>`;
-  return `<div class="wp-col">
+  // cap=0（週末/祝日/休暇）は容量線を描かない（B17：休暇日に空き容量を見せない）。
+  const capLine = c.cap > 1e-6 ? `<div class="wp-capline" style="bottom:${c.cap * pxPerH}px"></div>` : "";
+  const n = (c.contrib && c.contrib.length) || 0;
+  // 寄与タスクがある列だけクリック可（ドリルダウン B18）。off 日（cap=0 かつ負荷0）はバー高0で押せない。
+  const clickable = n > 0;
+  return `<div class="wp-col${clickable ? " clickable" : ""}${c.cap <= 1e-6 ? " off" : ""}"${clickable ? ` data-mi="${mi}" data-ci="${ci}" role="button" tabindex="0" title="${n}件のタスク（クリックで内訳）"` : ""}>
     <div class="wp-barwrap" style="height:${Math.max(c.cap, c.total) * pxPerH}px">${segs}${gap}${capLine}</div>
     <div class="wp-foot"><div class="wp-dow">${c.label}<small>${c.sub ? " " + c.sub : ""}</small></div><div class="wp-tot ${c.over ? "over" : ""}">${fmtH(c.total)}</div></div>
   </div>`;
@@ -297,6 +391,26 @@ function css() {
   .wp-dow{font-size:11px;font-weight:600}.wp-dow small{color:${C.muted};font-weight:400}
   .wp-tot{font-size:10.5px;color:${C.muted};font-variant-numeric:tabular-nums;margin-top:1px}.wp-tot.over{color:${C.over};font-weight:700}
   .wp-empty{margin:auto;color:${C.muted};font-size:12px}
+  .wp-col.clickable{cursor:pointer}
+  .wp-col.clickable .wp-barwrap{transition:filter .12s,box-shadow .12s}
+  .wp-col.clickable:hover .wp-barwrap{filter:brightness(1.04);box-shadow:0 2px 8px rgba(31,45,61,.14)}
+  .wp-col.clickable:focus-visible{outline:none}
+  .wp-col.clickable:focus-visible .wp-barwrap{box-shadow:0 0 0 2px ${C.fill}}
+  .wp-col.off .wp-dow{color:${C.muted}}
+  /* B18 ドリルダウン ポップオーバー */
+  .wp-pop{position:absolute;z-index:50;width:240px;max-width:86vw;background:#fff;border:1px solid ${C.line};border-radius:12px;box-shadow:0 10px 32px rgba(31,45,61,.22);overflow:hidden;animation:wp-pop-in .1s ease-out}
+  @keyframes wp-pop-in{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
+  .wp-pop-hd{display:flex;align-items:center;gap:8px;padding:9px 10px 9px 12px;border-bottom:1px solid ${C.line};font-size:12.5px}
+  .wp-pop-hd b{font-weight:700;color:${C.ink};white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .wp-pop-cap{margin-left:auto;font-size:11px;font-weight:700;color:${C.muted};font-variant-numeric:tabular-nums;white-space:nowrap}
+  .wp-pop-cap.over{color:${C.over}}
+  .wp-pop-x{flex:none;border:0;background:transparent;color:${C.muted};font-size:16px;line-height:1;cursor:pointer;padding:0 2px}
+  .wp-pop-x:hover{color:${C.ink}}
+  .wp-pop-list{max-height:300px;overflow:auto;padding:5px}
+  .wp-pop-row{display:flex;align-items:center;gap:8px;width:100%;text-align:left;font:inherit;font-size:12.5px;padding:7px 8px;border:0;border-radius:8px;background:transparent;color:${C.ink};cursor:pointer}
+  .wp-pop-row:hover{background:#f1f5fb}
+  .wp-pop-t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wp-pop-h{flex:none;font-size:11px;font-weight:700;color:${C.muted};font-variant-numeric:tabular-nums}
   .wp-legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:14px;font-size:11.5px;color:${C.muted};align-items:center}
   .wp-legend .it{display:inline-flex;align-items:center;gap:6px}
   .wp-legend .it i{width:11px;height:11px;border-radius:3px;display:inline-block}
@@ -307,5 +421,7 @@ function css() {
   html[data-theme="dark"] .wp-who-b:hover,html[data-theme="dark"] .wp-pchip:hover{border-color:var(--line-strong)}
   html[data-theme="dark"] .wp-member{background:var(--card)}
   html[data-theme="dark"] .wp-seg.gap{background:repeating-linear-gradient(135deg,rgba(255,255,255,.04),rgba(255,255,255,.04) 5px,rgba(255,255,255,.08) 5px,rgba(255,255,255,.08) 10px);color:var(--muted)}
-  html[data-theme="dark"] .wp-legend .gap{background:repeating-linear-gradient(135deg,rgba(255,255,255,.04),rgba(255,255,255,.04) 4px,rgba(255,255,255,.08) 4px,rgba(255,255,255,.08) 8px)}`;
+  html[data-theme="dark"] .wp-legend .gap{background:repeating-linear-gradient(135deg,rgba(255,255,255,.04),rgba(255,255,255,.04) 4px,rgba(255,255,255,.08) 4px,rgba(255,255,255,.08) 8px)}
+  html[data-theme="dark"] .wp-pop{background:var(--card)}
+  html[data-theme="dark"] .wp-pop-row:hover{background:rgba(255,255,255,.06)}`;
 }

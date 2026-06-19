@@ -13,6 +13,65 @@ import { C, esc } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
 import { ROUTES, ORDER, ALWAYS_VISIBLE } from "../lib/routes.js";
 
+// ── 外観・起動の個人設定（この端末のみ・localStorage）───────────────
+// テーマ: モードを ts.thememode（light/dark/system）に保存。index.html / app.js の従来トグルは
+// ts.theme（解決後の light/dark）を読む・書くので、互換維持のため両方を更新する。
+//   - mode=system のときは OS 設定（prefers-color-scheme）で解決し、html[data-theme] に即反映。
+// 起動既定ビュー: ts.startview に保存（app.js の boot がハッシュ未指定時にこれを採用する想定）。
+const THEME_MODE_KEY = "ts.thememode";
+const THEME_RESOLVED_KEY = "ts.theme"; // 既存（index.html bootstrap / app.js トグルと共有）
+const STARTVIEW_KEY = "ts.startview";
+const THEME_MODES = [
+  { v: "light", label: "ライト" },
+  { v: "dark", label: "ダーク" },
+  { v: "system", label: "OSに合わせる" },
+];
+function getThemeMode() {
+  try {
+    const m = localStorage.getItem(THEME_MODE_KEY);
+    if (m === "light" || m === "dark" || m === "system") return m;
+    // 後方互換: 旧 ts.theme(dark/light) しか無い端末はそれをモードとして扱う。
+    const legacy = localStorage.getItem(THEME_RESOLVED_KEY);
+    return legacy === "dark" ? "dark" : "light";
+  } catch { return "light"; }
+}
+function systemPrefersDark() {
+  try { return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches; }
+  catch { return false; }
+}
+function resolveTheme(mode) {
+  return mode === "system" ? (systemPrefersDark() ? "dark" : "light") : mode;
+}
+// テーマを即反映＋永続化（再描画は app.js のトグルと同じく呼び出し側で route 等は行わない＝CSS変数のみ）。
+function applyThemeMode(mode) {
+  const resolved = resolveTheme(mode);
+  if (resolved === "dark") document.documentElement.setAttribute("data-theme", "dark");
+  else document.documentElement.removeAttribute("data-theme");
+  try {
+    localStorage.setItem(THEME_MODE_KEY, mode);
+    localStorage.setItem(THEME_RESOLVED_KEY, resolved); // 既存トグル/bootstrap 互換
+  } catch { /* noop */ }
+}
+function getStartView() {
+  try {
+    const v = localStorage.getItem(STARTVIEW_KEY);
+    return v && ROUTES[v] ? v : "home";
+  } catch { return "home"; }
+}
+// 起動既定ビューの選択肢（ORDER 順・grp ごとに optgroup）。home を先頭に。
+function startViewOptionsHtml(cur) {
+  const groups = [];
+  const gmap = new Map();
+  for (const k of ORDER) {
+    const r = ROUTES[k]; if (!r) continue;
+    const g = r.grp || "その他";
+    if (!gmap.has(g)) { gmap.set(g, []); groups.push(g); }
+    gmap.get(g).push(k);
+  }
+  return groups.map((g) => `<optgroup label="${esc(g)}">${gmap.get(g).map((k) =>
+    `<option value="${k}"${k === cur ? " selected" : ""}>${esc(ROUTES[k].label)}</option>`).join("")}</optgroup>`).join("");
+}
+
 // チーム設定モードか否か（hash に "settings-team" を含むか）。
 function isTeamMode() {
   return location.hash.includes("settings-team");
@@ -56,14 +115,51 @@ async function renderPersonal(root) {
     <div class="sx">
       ${topHtml("personal")}
       ${personalSection}
+      ${appearanceSection()}
     </div>`;
   wireNotify(root, me);
+  wireAppearance(root);
+}
+
+// 外観・起動（テーマ＋起動既定ビュー）。変更は即 localStorage 保存・即反映。
+function appearanceSection() {
+  const mode = getThemeMode();
+  const themeOpts = THEME_MODES.map((m) =>
+    `<option value="${m.v}"${m.v === mode ? " selected" : ""}>${m.label}</option>`).join("");
+  return `
+    <section class="sx-card">
+      <header class="sx-chd">
+        <div class="sx-ctitle">外観・起動</div>
+        <span class="sx-scope"><span class="dot" style="background:${C.fill}"></span>この端末のみ・変更は即保存</span>
+      </header>
+      <div class="sx-body">
+        <div class="sx-row">
+          <div class="sx-label"><div class="sx-rt">テーマ</div>
+            <div class="sx-rd">画面の配色。「OSに合わせる」は端末のダーク/ライト設定に追従します。</div></div>
+          <div class="sx-rc"><select id="st-theme" class="sx-in">${themeOpts}</select></div>
+        </div>
+        <div class="sx-row">
+          <div class="sx-label"><div class="sx-rt">起動時に開くビュー</div>
+            <div class="sx-rd">アプリを開いたときに最初に表示する画面。</div></div>
+          <div class="sx-rc"><select id="st-startview" class="sx-in">${startViewOptionsHtml(getStartView())}</select></div>
+        </div>
+      </div>
+    </section>`;
+}
+
+function wireAppearance(root) {
+  const theme = root.querySelector("#st-theme");
+  const startview = root.querySelector("#st-startview");
+  if (theme) theme.onchange = () => applyThemeMode(theme.value);
+  if (startview) startview.onchange = () => {
+    try { localStorage.setItem(STARTVIEW_KEY, startview.value); } catch { /* noop */ }
+  };
 }
 
 // ── チーム設定モード ─────────────────────────────────────────────
 // チーム共有設定（exec で管理者保存）＋ 祝日・休業日（即時CRUD）。
 async function renderTeam(root) {
-  const { holidaysByDate, members, me } = await load();
+  const { holidaysByDate, members, me, tasks } = await load();
   let cur = null, canEdit = false, execDown = false;
   try {
     const d = await getSettings();
@@ -96,6 +192,8 @@ async function renderTeam(root) {
   const holidays = await getHolidays().catch(() => []);
   // 分類（ラベル）: 生データを直接取得（予約ラベルは保護のためフィルタ前に持つ）。
   const labels = await getLabels().catch(() => []);
+  // 分類の使用件数（タスクの labels から集計＝label.id -> 件数）。store の tasks は除外WSを除いた本番タスク。
+  const labelCounts = countLabelUsage(tasks);
 
   root.innerHTML = `
     <style>${css()}</style>
@@ -129,7 +227,7 @@ async function renderTeam(root) {
 
       ${holidaySection(holidays)}
 
-      ${labelSection(labels)}
+      ${labelSection(labels, labelCounts)}
 
       ${canEdit ? menuVisibilitySection(members, me) : ""}
 
@@ -142,7 +240,7 @@ async function renderTeam(root) {
     </div>`;
 
   wireHolidays(root, holidays, holidaysByDate);
-  wireLabels(root, labels);
+  wireLabels(root, labels, labelCounts);
   if (canEdit) wireMenuVisibility(root, members, me, (cur && cur.menu_visibility) || {});
 
   const btn = root.querySelector("#st-save");
@@ -210,19 +308,14 @@ function wireNotify(root, me) {
 // チーム共有設定の管理者専用 savebar には紐づけず、create/delete API を直接叩く（manage.js と同挙動）。
 function holidaySection(holidays) {
   const sorted = [...(holidays || [])].sort((a, b) => String(a.date).localeCompare(String(b.date)));
-  const todayISO = new Date().toISOString().slice(0, 10);
-  const rows = sorted.length ? sorted.map((h) => {
-    const iso = String(h.date).slice(0, 10);
-    const past = iso < todayISO;
-    return `<div class="sx-hrow${past ? " past" : ""}">
-      <div class="sx-hmain"><div class="sx-ht">${fmtDisplayDow(iso)}</div><div class="sx-hsub">${esc(h.name)}</div></div>
-      <button class="sx-hdel" data-hol-del="${h.id}">削除</button>
-    </div>`;
-  }).join("") : `<div class="sx-hempty">まだありません</div>`;
+  // 年の選択肢（祝日が属する年・降順）。
+  const years = [...new Set(sorted.map((h) => String(h.date).slice(0, 4)))].sort((a, b) => b.localeCompare(a));
+  const yearOpts = `<option value="">すべての年</option>` +
+    years.map((y) => `<option value="${y}">${y}年</option>`).join("");
   return `
     <section class="sx-card">
       <header class="sx-chd">
-        <div class="sx-ctitle">祝日・休業日 <span class="sx-hcnt">${sorted.length}</span></div>
+        <div class="sx-ctitle">祝日・休業日 <span class="sx-hcnt" id="hol-cnt">${sorted.length}</span></div>
         <span class="sx-scope"><span class="dot" style="background:${C.fill}"></span>追加・削除は即反映</span>
       </header>
       <div class="sx-body">
@@ -233,7 +326,12 @@ function holidaySection(holidays) {
           <button class="sx-hadd" id="hol-save">追加</button>
         </div>
         <div class="sx-herr" id="hol-err"></div>
-        <div class="sx-hlist">${rows}</div>
+        <div class="sx-hfilter">
+          <div class="sx-hsearch">${icon("search", { size: 14 })}<input id="hol-q" class="sx-in" placeholder="名称で検索" autocomplete="off"></div>
+          <select id="hol-year" class="sx-in">${yearOpts}</select>
+          <label class="sx-hchk"><input type="checkbox" id="hol-hidepast"><span>過去を隠す</span></label>
+        </div>
+        <div class="sx-hlist" id="hol-list"></div>
       </div>
     </section>`;
 }
@@ -256,20 +354,66 @@ function wireHolidays(root, holidays, holidaysByDate) {
     try { await createHoliday({ date: iso + "T00:00:00Z", name }); reload(); }
     catch (e) { btn.disabled = false; err.textContent = "× " + e.message; }
   };
-  root.querySelectorAll("[data-hol-del]").forEach((b) => {
-    b.onclick = async () => {
-      const h = sorted.find((x) => x.id === +b.dataset.holDel);
-      if (!h || !confirm(`祝日「${h.name}」を削除しますか？`)) return;
-      b.disabled = true;
-      try { await deleteHoliday(h.id); reload(); } catch (e) { b.disabled = false; alert("削除に失敗: " + e.message); }
-    };
-  });
+
+  // 検索・年フィルタ・「過去を隠す」: クライアント側で絞り込み、リストを描き直す（CRUDは壊さない）。
+  const listEl = root.querySelector("#hol-list");
+  const cntEl = root.querySelector("#hol-cnt");
+  const qEl = root.querySelector("#hol-q");
+  const yearEl = root.querySelector("#hol-year");
+  const hidePastEl = root.querySelector("#hol-hidepast");
+  const todayISO = new Date().toISOString().slice(0, 10);
+
+  const renderList = () => {
+    const q = (qEl.value || "").trim().toLowerCase();
+    const year = yearEl.value || "";
+    const hidePast = !!hidePastEl.checked;
+    const shown = sorted.filter((h) => {
+      const iso = String(h.date).slice(0, 10);
+      if (q && !String(h.name || "").toLowerCase().includes(q)) return false;
+      if (year && iso.slice(0, 4) !== year) return false;
+      if (hidePast && iso < todayISO) return false;
+      return true;
+    });
+    if (cntEl) cntEl.textContent = shown.length === sorted.length ? String(sorted.length) : `${shown.length}/${sorted.length}`;
+    if (!shown.length) {
+      listEl.innerHTML = `<div class="sx-hempty">${sorted.length ? "条件に一致する項目がありません" : "まだありません"}</div>`;
+      return;
+    }
+    listEl.innerHTML = shown.map((h) => {
+      const iso = String(h.date).slice(0, 10);
+      const past = iso < todayISO;
+      return `<div class="sx-hrow${past ? " past" : ""}">
+        <div class="sx-hmain"><div class="sx-ht">${fmtDisplayDow(iso)}</div><div class="sx-hsub">${esc(h.name)}</div></div>
+        <button class="sx-hdel" data-hol-del="${h.id}">削除</button>
+      </div>`;
+    }).join("");
+    listEl.querySelectorAll("[data-hol-del]").forEach((b) => {
+      b.onclick = async () => {
+        const h = sorted.find((x) => x.id === +b.dataset.holDel);
+        if (!h || !confirm(`祝日「${h.name}」を削除しますか？`)) return;
+        b.disabled = true;
+        try { await deleteHoliday(h.id); reload(); } catch (e) { b.disabled = false; alert("削除に失敗: " + e.message); }
+      };
+    });
+  };
+  qEl.oninput = renderList;
+  yearEl.onchange = renderList;
+  hidePastEl.onchange = renderList;
+  renderList();
 }
 
 // 分類（ラベル）マスタ: ユーザー定義の分類ラベルを管理する自己完結セクション。
 // 予約ラベル（レビュー・連絡待ち）は kind/ステータス判定に使うので編集・削除させない（保護）。
 const RESERVED_LABELS = new Set([REVIEW_LABEL, WAITING_LABEL]);
 const isReserved = (l) => RESERVED_LABELS.has(l.title || "");
+// 分類の使用件数: タスクの labels[] を走査して label.id -> 件数 を作る（store の tasks＝本番タスク）。
+function countLabelUsage(tasks) {
+  const m = new Map();
+  for (const t of tasks || []) for (const l of t.labels || []) {
+    if (l && l.id != null) m.set(l.id, (m.get(l.id) || 0) + 1);
+  }
+  return m;
+}
 // 色を #rrggbb に正規化（input type=color は # 必須。Vikunja は # 無しで返すことがある）。
 function normHex(c) {
   if (!c) return "#3a86ff";
@@ -277,26 +421,38 @@ function normHex(c) {
   return /^#[0-9a-fA-F]{6}$/.test(h) ? h.toLowerCase() : "#3a86ff";
 }
 
-function labelSection(labels) {
+// 1分類行（編集可）。使用件数バッジ付き（0件は淡色「未使用」）。
+function labelRowHtml(l, counts) {
+  const hex = normHex(l.hex_color);
+  const n = (counts && counts.get(l.id)) || 0;
+  const cnt = n > 0
+    ? `<span class="sx-lbcnt" title="このラベルが付いたタスク数">${n}件</span>`
+    : `<span class="sx-lbcnt zero" title="使用中のタスクはありません">未使用</span>`;
+  return `<div class="sx-lbrow" data-lb="${l.id}" data-lbtitle="${esc((l.title || "").toLowerCase())}">
+    <input type="color" class="sx-lbcolor" value="${hex}" data-lb-color="${l.id}" title="色を変更">
+    <span class="sx-lbname">${esc(l.title || "")}</span>
+    ${cnt}
+    <div class="sx-lbacts">
+      <button class="sx-lbbtn" data-lb-rename="${l.id}">改名</button>
+      <button class="sx-lbbtn sx-lbdel" data-lb-del="${l.id}">削除</button>
+    </div>
+  </div>`;
+}
+
+function labelSection(labels, counts) {
   const all = [...(labels || [])].sort((a, b) => String(a.title || "").localeCompare(String(b.title || ""), "ja"));
   const editable = all.filter((l) => !isReserved(l));
   const reserved = all.filter(isReserved);
-  const rows = editable.length ? editable.map((l) => {
-    const hex = normHex(l.hex_color);
-    return `<div class="sx-lbrow" data-lb="${l.id}">
-      <input type="color" class="sx-lbcolor" value="${hex}" data-lb-color="${l.id}" title="色を変更">
-      <span class="sx-lbname">${esc(l.title || "")}</span>
-      <div class="sx-lbacts">
-        <button class="sx-lbbtn" data-lb-rename="${l.id}">改名</button>
-        <button class="sx-lbbtn sx-lbdel" data-lb-del="${l.id}">削除</button>
-      </div>
-    </div>`;
-  }).join("") : `<div class="sx-hempty">まだ分類がありません</div>`;
+  const rows = editable.length
+    ? editable.map((l) => labelRowHtml(l, counts)).join("")
+    : `<div class="sx-hempty">まだ分類がありません</div>`;
   const reservedRows = reserved.map((l) => {
     const hex = normHex(l.hex_color);
-    return `<div class="sx-lbrow res">
+    const n = (counts && counts.get(l.id)) || 0;
+    return `<div class="sx-lbrow res" data-lbtitle="${esc((l.title || "").toLowerCase())}">
       <span class="sx-lbsw" style="background:${hex}"></span>
       <span class="sx-lbname">${esc(l.title || "")}</span>
+      ${n > 0 ? `<span class="sx-lbcnt">${n}件</span>` : ""}
       <span class="sx-lbprot">${icon("lock", { size: 12 })} システム予約</span>
     </div>`;
   }).join("");
@@ -314,17 +470,47 @@ function labelSection(labels) {
           <button class="sx-hadd" id="lb-add">追加</button>
         </div>
         <div class="sx-herr" id="lb-err"></div>
-        <div class="sx-hlist">${rows}${reservedRows}</div>
+        <div class="sx-hfilter">
+          <div class="sx-hsearch">${icon("search", { size: 14 })}<input id="lb-q" class="sx-in" placeholder="分類名で検索" autocomplete="off"></div>
+        </div>
+        <div class="sx-hlist" id="lb-list">${rows}${reservedRows}</div>
       </div>
     </section>`;
 }
 
-function wireLabels(root, labels) {
+function wireLabels(root, labels, counts) {
   const reload = () => { invalidate(); render(root); };
   const addBtn = root.querySelector("#lb-add");
   if (!addBtn) return;
   const err = root.querySelector("#lb-err");
   const byId = (id) => (labels || []).find((l) => l.id === id);
+
+  // 分類名で検索（クライアント側で行を表示/非表示。CRUDのハンドラは行に残したまま）。
+  const qEl = root.querySelector("#lb-q");
+  const listEl = root.querySelector("#lb-list");
+  if (qEl && listEl) {
+    qEl.oninput = () => {
+      const q = (qEl.value || "").trim().toLowerCase();
+      let shown = 0;
+      listEl.querySelectorAll(".sx-lbrow").forEach((row) => {
+        const hit = !q || (row.dataset.lbtitle || "").includes(q);
+        row.style.display = hit ? "" : "none";
+        if (hit) shown++;
+      });
+      let empty = listEl.querySelector(".sx-lbnohit");
+      if (!shown && q) {
+        if (!empty) {
+          empty = document.createElement("div");
+          empty.className = "sx-hempty sx-lbnohit";
+          empty.textContent = "条件に一致する分類がありません";
+          listEl.appendChild(empty);
+        }
+        empty.style.display = "";
+      } else if (empty) {
+        empty.style.display = "none";
+      }
+    };
+  }
 
   // 追加
   addBtn.onclick = async () => {
@@ -372,7 +558,11 @@ function wireLabels(root, labels) {
     b.onclick = async () => {
       const id = +b.dataset.lbDel;
       const l = byId(id); if (!l) return;
-      if (!confirm(`分類「${l.title}」を削除しますか？\n使用中のタスクからは自動で外れます。`)) return;
+      const n = (counts && counts.get(id)) || 0;
+      const impact = n > 0
+        ? `この分類は ${n}件のタスクに付いています。\n削除すると、それらのタスクからは自動で外れます。`
+        : `使用中のタスクはありません。`;
+      if (!confirm(`分類「${l.title}」を削除しますか？\n${impact}`)) return;
       b.disabled = true;
       try { await deleteLabel(id); reload(); }
       catch (e) { b.disabled = false; err.textContent = "× " + e.message; }
@@ -386,7 +576,6 @@ function wireLabels(root, labels) {
 // home は必須（ALWAYS_VISIBLE）なので常時 ON・変更不可。変更は即保存＝対象者の次回読み込みで反映。
 function menuVisibilitySection(members, me) {
   const list = uniqMembers(members, me);
-  const opts = list.map((u) => `<option value="${u.id}">${esc(u.name || u.username || ("user" + u.id))}</option>`).join("");
   return `
     <section class="sx-card">
       <header class="sx-chd">
@@ -394,14 +583,15 @@ function menuVisibilitySection(members, me) {
         <span class="sx-scope"><span class="dot" style="background:${C.free}"></span>変更は即保存・対象者の次回読み込みで反映</span>
       </header>
       <div class="sx-body">
-        <div class="sx-mvhint">メンバーごとに、左メニューに表示する項目を選べます（チェック＝表示）。<b>ホーム</b>は常に表示されます。</div>
+        <div class="sx-mvhint">行＝メンバー、列＝メニュー項目のマトリクスです（チェック＝表示）。各行・各列の見出しで一括ON/OFF、左上で全員一括もできます。<b>ホーム</b>は常に表示されます。</div>
         ${list.length ? `
-        <div class="sx-mvpick">
-          <label class="sx-rt" for="mv-member">対象メンバー</label>
-          <select id="mv-member" class="sx-in">${opts}</select>
+        <div class="sx-mvbulk">
+          <button class="sx-mvbtn" id="mv-all-on">全員すべて表示</button>
+          <button class="sx-mvbtn" id="mv-all-off">全員すべて非表示</button>
           <span class="sx-msg" id="mv-msg"></span>
         </div>
-        <div class="sx-mvgrid" id="mv-grid"></div>` : `<div class="sx-hempty">対象メンバーがいません（タスク担当・定期・休暇のいずれかを持つ人が対象です）。</div>`}
+        <div class="sx-mvtblwrap"><div id="mv-matrix"></div></div>`
+        : `<div class="sx-hempty">対象メンバーがいません（タスク担当・定期・休暇のいずれかを持つ人が対象です）。</div>`}
       </div>
     </section>`;
 }
@@ -416,59 +606,105 @@ function uniqMembers(members, me) {
 }
 
 function wireMenuVisibility(root, members, me, mvInit) {
-  const sel = root.querySelector("#mv-member");
-  const grid = root.querySelector("#mv-grid");
+  const host = root.querySelector("#mv-matrix");
   const msg = root.querySelector("#mv-msg");
-  if (!sel || !grid) return;
+  if (!host) return;
   // 非表示マップのローカル複製（{uid: [hiddenKey,...]}）。
   const mv = {};
   for (const k of Object.keys(mvInit || {})) mv[k] = [...(mvInit[k] || [])];
-  // ナビに出る対象ルート（ORDER）。home は必須なので常時 ON・無効化。
+  // 行＝メンバー、列＝ナビに出る対象ルート（ORDER）。home は必須なので常時 ON・無効化。
+  const list = uniqMembers(members, me);
   const keys = ORDER.slice();
+  // grp ごとに列をまとめる（ORDER 順を保つ）。ヘッダのグループ行に使う。
+  const groups = [];
+  const gmap = new Map();
+  for (const k of keys) {
+    const g = ROUTES[k].grp;
+    if (!gmap.has(g)) { gmap.set(g, []); groups.push(g); }
+    gmap.get(g).push(k);
+  }
+  const memberName = (u) => esc(u.name || u.username || ("user" + u.id));
 
-  const renderGrid = (uid) => {
-    const hidden = new Set(mv[String(uid)] || []);
-    // grp ごとにまとめる（ORDER 順を保つ）。
-    const groups = [];
-    const gmap = new Map();
-    for (const k of keys) {
-      const g = ROUTES[k].grp;
-      if (!gmap.has(g)) { gmap.set(g, []); groups.push(g); }
-      gmap.get(g).push(k);
-    }
-    grid.innerHTML = groups.map((g) => `
-      <div class="sx-mvgrp">
-        <div class="sx-mvgt">${esc(g)}</div>
-        <div class="sx-mvitems">${gmap.get(g).map((k) => {
-          const forced = ALWAYS_VISIBLE.has(k);
-          const on = forced || !hidden.has(k);
-          return `<label class="sx-mvit${forced ? " forced" : ""}">
-            <input type="checkbox" data-mvk="${k}"${on ? " checked" : ""}${forced ? " disabled" : ""}>
-            <span>${esc(ROUTES[k].label)}</span>
-          </label>`;
-        }).join("")}</div>
-      </div>`).join("");
-    grid.querySelectorAll("input[data-mvk]").forEach((cb) => {
-      cb.onchange = () => save(uid);
+  // マトリクス（table）を1回だけ構築。チェック状態は mv から初期化、その後はDOMが真実源。
+  const buildMatrix = () => {
+    const grpHeader = groups.map((g) =>
+      `<th class="sx-mvgrph" colspan="${gmap.get(g).length}">${esc(g)}</th>`).join("");
+    const colHeader = keys.map((k) => {
+      const forced = ALWAYS_VISIBLE.has(k);
+      // 列見出し＝項目名。クリックでその列を全員一括トグル（forced列は無効）。
+      return `<th class="sx-mvch${forced ? " forced" : ""}"${forced ? "" : ` data-mvcol="${k}" title="クリックでこの列を全員一括"`}>
+        <span class="sx-mvchl">${esc(ROUTES[k].label)}</span>
+      </th>`;
+    }).join("");
+    const bodyRows = list.map((u) => {
+      const hidden = new Set(mv[String(u.id)] || []);
+      const cells = keys.map((k) => {
+        const forced = ALWAYS_VISIBLE.has(k);
+        const on = forced || !hidden.has(k);
+        return `<td class="sx-mvtd">
+          <input type="checkbox" data-mv-uid="${u.id}" data-mvk="${k}"${on ? " checked" : ""}${forced ? " disabled" : ""}>
+        </td>`;
+      }).join("");
+      // 行見出し＝メンバー名。クリックでその行を全員→全項目一括トグル。
+      return `<tr>
+        <th class="sx-mvrh" data-mvrow="${u.id}" title="クリックでこのメンバーを一括">${memberName(u)}</th>
+        ${cells}
+      </tr>`;
+    }).join("");
+    host.innerHTML = `
+      <table class="sx-mvtbl">
+        <thead>
+          <tr><th class="sx-mvcorner" rowspan="2">メンバー</th>${grpHeader}</tr>
+          <tr>${colHeader}</tr>
+        </thead>
+        <tbody>${bodyRows}</tbody>
+      </table>`;
+    host.querySelectorAll("input[data-mvk]").forEach((cb) => { cb.onchange = scheduleSave; });
+    // 列一括（見出しクリック）: 列内の有効チェックボックスを、現状が全ONなら全OFFへ、でなければ全ONへ。
+    host.querySelectorAll("th[data-mvcol]").forEach((th) => {
+      th.onclick = () => {
+        const k = th.dataset.mvcol;
+        const cbs = [...host.querySelectorAll(`input[data-mvk="${cssEsc(k)}"]:not(:disabled)`)];
+        const next = !cbs.every((c) => c.checked);
+        cbs.forEach((c) => { c.checked = next; });
+        scheduleSave();
+      };
+    });
+    // 行一括（メンバー名クリック）。
+    host.querySelectorAll("th[data-mvrow]").forEach((th) => {
+      th.onclick = () => {
+        const uid = th.dataset.mvrow;
+        const cbs = [...host.querySelectorAll(`input[data-mv-uid="${cssEsc(uid)}"]:not(:disabled)`)];
+        const next = !cbs.every((c) => c.checked);
+        cbs.forEach((c) => { c.checked = next; });
+        scheduleSave();
+      };
     });
   };
 
-  // 保存の直列化＋デバウンス。
+  // 保存の直列化＋デバウンス（M10 を維持）。
   // ・連打しても最後の状態に収束するよう、保存は 350ms デバウンス。
   // ・前の保存の完了を待ってから次を投げる（_mvSaving チェーン）ことで順序逆転を防ぐ。
-  // ・mv は各トグルで即時更新（applyToMv）するため、デバウンス発火時は常に最新スナップショットを送る。
+  // ・mv は scheduleSave のたびに DOM 全体から再構築（applyToMv）するため、発火時は常に最新スナップショット。
   let _mvSaving = Promise.resolve(); // 進行中の保存（直列化用）
   let _mvTimer = null;               // デバウンスタイマー
   const MV_DEBOUNCE = 350;
 
-  // 現在のチェック状態から、この uid の非表示リスト（OFF のもの・home除く）を mv に反映。
-  const applyToMv = (uid) => {
-    const hidden = [];
-    grid.querySelectorAll("input[data-mvk]").forEach((cb) => {
-      const k = cb.dataset.mvk;
-      if (!cb.checked && !ALWAYS_VISIBLE.has(k)) hidden.push(k);
+  // マトリクスに出ている uid 集合（行＝現在の対象メンバー）。
+  const visibleUids = new Set(list.map((u) => String(u.id)));
+
+  // マトリクス全体の現在のチェック状態から mv（{uid: [hiddenKey,...]}）を作り直す。
+  // ※マトリクスに出ていない uid（過去に設定したが今は対象外の人）の既存設定は壊さず温存する。
+  const applyToMv = () => {
+    for (const k of Object.keys(mv)) if (visibleUids.has(k)) delete mv[k]; // 表示中の行だけ作り直す
+    const perUser = new Map();
+    host.querySelectorAll("input[data-mvk]").forEach((cb) => {
+      const uid = cb.dataset.mvUid, k = cb.dataset.mvk;
+      if (!cb.checked && !ALWAYS_VISIBLE.has(k)) {
+        const arr = perUser.get(uid) || []; arr.push(k); perUser.set(uid, arr);
+      }
     });
-    if (hidden.length) mv[String(uid)] = hidden; else delete mv[String(uid)];
+    for (const [uid, arr] of perUser) if (arr.length) mv[uid] = arr;
   };
 
   // mv の現在値を実際に永続化（直列化チェーンの末尾に積む）。
@@ -491,15 +727,29 @@ function wireMenuVisibility(root, members, me, mvInit) {
     return _mvSaving;
   };
 
-  // トグル時に呼ぶ：mv を即時更新し、保存をデバウンス。
-  const save = (uid) => {
-    applyToMv(uid);
+  // トグル/一括時に呼ぶ：mv を即時更新し、保存をデバウンス。
+  function scheduleSave() {
+    applyToMv();
     if (_mvTimer) clearTimeout(_mvTimer);
     _mvTimer = setTimeout(() => { _mvTimer = null; flushSave(); }, MV_DEBOUNCE);
-  };
+  }
 
-  sel.onchange = () => { if (msg) msg.textContent = ""; renderGrid(+sel.value); };
-  renderGrid(+sel.value);
+  // 全員一括（左上ボタン）: 全行×全列の有効チェックを一括設定。
+  const setAll = (on) => {
+    host.querySelectorAll("input[data-mvk]:not(:disabled)").forEach((cb) => { cb.checked = on; });
+    scheduleSave();
+  };
+  const onBtn = root.querySelector("#mv-all-on");
+  const offBtn = root.querySelector("#mv-all-off");
+  if (onBtn) onBtn.onclick = () => setAll(true);
+  if (offBtn) offBtn.onclick = () => setAll(false);
+
+  buildMatrix();
+}
+
+// CSS セレクタ用の最小エスケープ（ルートキー/uid は英数記号のみだが念のため）。
+function cssEsc(s) {
+  return (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s).replace(/["\\]/g, "\\$&");
 }
 
 function css() {
@@ -610,22 +860,48 @@ function css() {
   .sx-lbrow.res{opacity:.7}
   .sx-lbprot{display:inline-flex;align-items:center;gap:4px;flex:none;font-size:11px;font-weight:700;color:${C.muted};
     background:var(--track);border:1px solid var(--line);padding:4px 10px;border-radius:999px}
+  /* 使用件数バッジ（分類） */
+  .sx-lbcnt{flex:none;font-size:11px;font-weight:700;color:${C.muted};background:var(--track);
+    border:1px solid var(--line);padding:2px 9px;border-radius:999px;white-space:nowrap}
+  .sx-lbcnt.zero{opacity:.7;font-weight:600}
 
-  /* メニュー表示（管理者） */
+  /* 検索・フィルタ行（祝日・分類で共有） */
+  .sx-hfilter{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 0 2px}
+  .sx-hsearch{position:relative;display:inline-flex;align-items:center;flex:1;min-width:160px}
+  .sx-hsearch svg{position:absolute;left:11px;color:${C.muted};pointer-events:none}
+  .sx-hsearch .sx-in{width:100%;padding-left:33px}
+  .sx-hfilter > .sx-in{flex:0 0 auto}
+  .sx-hchk{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:${C.ink};cursor:pointer;white-space:nowrap}
+  .sx-hchk input{width:15px;height:15px;cursor:pointer}
+
+  /* メニュー表示（管理者）: 行=メンバー × 列=メニュー のマトリクス表 */
   .sx-mvhint{font-size:12.5px;color:${C.muted};line-height:1.5;margin-bottom:12px}
-  .sx-mvpick{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
-  .sx-mvpick .sx-rt{flex:none}
-  .sx-mvpick .sx-in{min-width:200px}
-  .sx-mvgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px}
-  .sx-mvgrp{border:1px solid ${C.line};border-radius:10px;padding:10px 12px;background:var(--track)}
-  .sx-mvgt{font-size:11px;font-weight:700;color:${C.muted};margin-bottom:7px;letter-spacing:.02em}
-  .sx-mvitems{display:flex;flex-direction:column;gap:6px}
-  .sx-mvit{display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer}
-  .sx-mvit input{width:15px;height:15px;cursor:pointer;flex:none}
-  .sx-mvit.forced{color:${C.muted};cursor:default}
-  .sx-mvit.forced input{cursor:default}
+  .sx-mvbulk{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+  .sx-mvbtn{font:inherit;font-size:12px;font-weight:700;padding:7px 14px;border-radius:8px;
+    border:1px solid var(--line-strong);background:var(--card);color:${C.ink};cursor:pointer;transition:border-color .12s,color .12s}
+  .sx-mvbtn:hover{border-color:${C.fill};color:${C.fill}}
+  .sx-mvtblwrap{overflow:auto;border:1px solid var(--line);border-radius:10px;max-height:60vh}
+  .sx-mvtbl{border-collapse:separate;border-spacing:0;font-size:12.5px}
+  .sx-mvtbl th,.sx-mvtbl td{border-bottom:1px solid var(--line);border-right:1px solid var(--line)}
+  .sx-mvtbl thead th{position:sticky;top:0;z-index:2;background:var(--track);font-weight:700;color:${C.muted}}
+  .sx-mvgrph{padding:6px 8px;text-align:center;font-size:10.5px;letter-spacing:.02em;border-bottom:1px solid var(--line)}
+  .sx-mvch{padding:7px 6px;text-align:center;vertical-align:bottom;white-space:nowrap;cursor:pointer;user-select:none;min-width:54px}
+  .sx-mvch:hover:not(.forced){color:${C.fill}}
+  .sx-mvch.forced{cursor:default;opacity:.7}
+  .sx-mvchl{display:inline-block;writing-mode:vertical-rl;transform:rotate(180deg);max-height:96px;font-size:11px}
+  .sx-mvcorner{position:sticky;left:0;top:0;z-index:4;background:var(--track);padding:6px 12px;text-align:left;
+    font-size:11px;font-weight:700;color:${C.muted}}
+  .sx-mvrh{position:sticky;left:0;z-index:1;background:var(--card);padding:7px 12px;text-align:left;
+    font-size:12.5px;font-weight:700;color:${C.ink};white-space:nowrap;cursor:pointer;max-width:160px;overflow:hidden;text-overflow:ellipsis}
+  .sx-mvrh:hover{color:${C.fill}}
+  .sx-mvtd{padding:0;text-align:center}
+  .sx-mvtd input{width:16px;height:16px;cursor:pointer;margin:7px auto;display:block}
+  .sx-mvtd input:disabled{cursor:default;opacity:.4}
+  .sx-mvtbl tbody tr:hover td,.sx-mvtbl tbody tr:hover .sx-mvrh{background:var(--track)}
 
   /* ダークモード: ハードコードした淡色面/tintを反転（ライト値は不変） */
   html[data-theme="dark"] .sx-chd{background:var(--track)}
-  html[data-theme="dark"] .sx-mvgrp{background:var(--card);border-color:var(--line)}`;
+  html[data-theme="dark"] .sx-mvtbl thead th,
+  html[data-theme="dark"] .sx-mvcorner{background:var(--card)}
+  html[data-theme="dark"] .sx-mvrh{background:var(--card)}`;
 }
