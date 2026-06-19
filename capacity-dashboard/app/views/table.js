@@ -292,7 +292,7 @@ export async function render(root) {
     ${isOutline
       ? `<div class="card ol-card">${olBody || `<div class="ol-empty">${filtersActive ? "条件に一致するタスクがありません。" : "タスクがありません。"}</div>`}</div>`
       : `<div class="card tb-wrap"><table class="tb">
-      <thead><tr><th class="tb-selcol">${selAllHeadHtml(rows)}</th>${cols().map((c) => th(c, manual)).join("")}</tr></thead>
+      <thead><tr><th scope="col" class="tb-selcol">${selAllHeadHtml(rows)}</th>${cols().map((c) => th(c, manual)).join("")}</tr></thead>
       <tbody>${rows.length ? rows.map((r, i) => rowHtml(r, members, i, manual)).join("") : emptyRow(filtersActive)}</tbody>
     </table></div>`}
     ${isOutline ? "" : bulkBarHtml(rows)}`;
@@ -1760,14 +1760,15 @@ function restoreSearchFocus(root, pos) {
   try { const p = Math.min(pos ?? el.value.length, el.value.length); el.setSelectionRange(p, p); } catch { /* noop */ }
 }
 // ヘッダに何番目のソート軸かを小さく表示（組み合わせの見える化）
+// aria-sort: 現在のソート軸に連動（昇順=ascending / 降順=descending / それ以外=none）＝スクリーンリーダーで並び状態が伝わる。
 const th = (c, manual) => {
-  if (!c.k) return `<th>${c.label}</th>`;
-  let badge = "";
+  if (!c.k) return `<th scope="col">${c.label}</th>`;
+  let badge = "", ariaSort = "none";
   if (!manual) {
     const i = V.sorts.findIndex((s) => s.key === c.k);
-    if (i >= 0) badge = ` <span class="tb-thord">${i + 1}${V.sorts[i].dir > 0 ? "↑" : "↓"}</span>`;
+    if (i >= 0) { badge = ` <span class="tb-thord">${i + 1}${V.sorts[i].dir > 0 ? "↑" : "↓"}</span>`; ariaSort = V.sorts[i].dir > 0 ? "ascending" : "descending"; }
   }
-  return `<th data-k="${c.k}" class="sortable">${c.label}${badge}</th>`;
+  return `<th scope="col" data-k="${c.k}" class="sortable" aria-sort="${ariaSort}">${c.label}${badge}</th>`;
 };
 
 // ヘッダの全選択チェック（現在の絞り込み結果＝表示中の全行が選択済みかで状態を出し分け）

@@ -65,8 +65,9 @@ export async function render(root) {
   // B14: 人別×日の容量（週末/祝日/休暇=0）。休暇/祝日/週末はセルを薄塗り＋容量0表示。
   const capFor = (m, d) => capacityOn(m, d, { holidays: holidaysSet, unavailabilityByMember, capH });
 
-  const head = `<th style="text-align:left">メンバー</th>` +
-    days.map((d, i) => `<th style="${d === today ? "color:" + C.fill : ""}">${DOW[i]}<div style="font-size:10px;color:${C.muted}">${d.slice(5)}</div></th>`).join("") + `<th>週計(予定)</th>`;
+  // 表ヘッダに scope="col"（行頭のメンバー名セルは tbody 側で <th scope="row"> ではないが、列見出しの所属を明示）。
+  const head = `<th scope="col" style="text-align:left">メンバー</th>` +
+    days.map((d, i) => `<th scope="col" style="${d === today ? "color:" + C.fill : ""}">${DOW[i]}<div style="font-size:10px;color:${C.muted}">${d.slice(5)}</div></th>`).join("") + `<th scope="col">週計(予定)</th>`;
   const body = members.length ? members.map(m => {
     let wk = 0;
     const cells = days.map(d => {

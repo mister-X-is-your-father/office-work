@@ -4,7 +4,7 @@
 // 習慣WSのタスクは store.load が通常タスクから除外（負荷・空き・一覧に混ざらない）。
 import { load, invalidate } from "../lib/store.js";
 import { createProject, createTaskInProject, addAssignee, getTimes, logTime, deleteTime, deleteTask, updateTask } from "../lib/api.js";
-import { habitStreak, lastDays, HABIT_WS } from "../lib/habits.js";
+import { habitStreak, lastDays, HABIT_WS, parseGoal, goalLabel, setGoalMeta, weekProgress } from "../lib/habits.js";
 import { dateOnly } from "../lib/capacity.js";
 import { DOW_JA } from "../lib/form.js";
 import { C, esc, todayISO } from "../lib/ui.js";
@@ -120,7 +120,57 @@ export async function render(root) {
       db.disabled = true;
       try { await deleteTask(+db.dataset.del); invalidate(); await load(); render(root); } catch { db.disabled = false; }
     };
+
+    // C11: 目標頻度の設定（毎日/平日/週N/なし）。description のメタ記法に保存し行をローカル差し替え。
+    bindGoal(rowEl);
   };
+
+  // C11: 目標ボタン＋ポップオーバーのイベント。description に [目標:…] を書き込む。
+  function bindGoal(rowEl) {
+    const gb = rowEl.querySelector("[data-goal]");
+    const pop = rowEl.querySelector("[data-goal-pop]");
+    if (!gb || !pop) return;
+    const close = () => { pop.hidden = true; gb.setAttribute("aria-expanded", "false"); };
+    gb.onclick = (ev) => {
+      ev.stopPropagation();
+      const open = pop.hidden;
+      // 他の開いているポップを閉じる
+      root.querySelectorAll(".hb-goal-pop").forEach((p) => { if (p !== pop) p.hidden = true; });
+      root.querySelectorAll(".hb-goal-btn").forEach((b) => { if (b !== gb) b.setAttribute("aria-expanded", "false"); });
+      pop.hidden = !open;
+      gb.setAttribute("aria-expanded", String(open));
+    };
+    pop.querySelectorAll("[data-goal-opt]").forEach((opt) => {
+      opt.onclick = async (ev) => {
+        ev.stopPropagation();
+        const h = hist.find((x) => x.t.id === +gb.dataset.goal);
+        if (!h) return;
+        const choice = GOAL_CHOICES.find((c) => c.key === opt.dataset.goalOpt);
+        if (!choice) return;
+        const goal = ("goal" in choice) ? choice.goal
+          : (choice.key === "daily" ? { type: "daily" }
+            : choice.key === "weekdays" ? { type: "weekdays" } : null);
+        close();
+        pop.querySelectorAll("[data-goal-opt]").forEach((o) => o.classList.add("hb-busy"));
+        try {
+          const nextDesc = setGoalMeta(h.t.description, goal);
+          await updateTask(h.t.id, { description: nextDesc });
+          // ローカル反映（store / hist 双方・次 render まで整合）
+          h.t.description = nextDesc;
+          const ref = (habitTasks || []).find((x) => x.id === h.t.id);
+          if (ref) ref.description = nextDesc;
+          // 行を作り直して差し替え（今週N/M・目標バッジを更新）
+          const fresh = document.createRange().createContextualFragment(rowHtml(h.t, h.dates, h.total, today)).firstElementChild;
+          rowEl.replaceWith(fresh);
+          bindRow(fresh);
+          invalidate();
+        } catch (e) {
+          pop.querySelectorAll("[data-goal-opt]").forEach((o) => o.classList.remove("hb-busy"));
+          showErr("目標の保存に失敗しました: " + (e && e.message ? e.message : e));
+        }
+      };
+    });
+  }
 
   // B48: インライン編集の本体。元タイトルを保持し、保存成功で履歴(Undo/Redo)へ積む。
   function startInlineEdit(rowEl, nameEl) {
@@ -195,6 +245,14 @@ export async function render(root) {
 
   root.querySelectorAll(".hb-row").forEach(bindRow);
 
+  // C11: 外側クリック / Esc で目標ポップを閉じる（行差し替えで重複しないよう毎 render 付け替え）
+  const closeGoalPops = () => {
+    root.querySelectorAll(".hb-goal-pop").forEach((p) => { p.hidden = true; });
+    root.querySelectorAll(".hb-goal-btn").forEach((b) => b.setAttribute("aria-expanded", "false"));
+  };
+  root.onclick = (ev) => { if (!ev.target.closest(".hb-goal-wrap")) closeGoalPops(); };
+  root.onkeydown = (ev) => { if (ev.key === "Escape") closeGoalPops(); };
+
   // B47: 月間ヒートマップを開閉（各行の「📈」で展開・閉じる）
   root.querySelectorAll("[data-heat]").forEach((btn) => {
     btn.onclick = () => {
@@ -231,9 +289,10 @@ function nameHtml(id, title) {
 function rowHtml(t, dates, total, today) {
   const streak = habitStreak(dates, today);
   const week = lastDays(dates, today, 7);
+  const goal = parseGoal(t.description);
   return `<div class="hb-row">
     <div class="hb-name">${nameHtml(t.id, t.title)}
-      <span class="hb-meta">${streak ? `${icon("flame", { size: 14 })} ${streak}日連続` : "—"} ・ 計${total}回</span>
+      <span class="hb-meta">${streak ? `${icon("flame", { size: 14 })} ${streak}日連続` : "—"} ・ 計${total}回${goalMetaHtml(dates, today, goal)}</span>
       <div class="hb-heat" hidden>${heatmapHtml(dates, today)}</div>
     </div>
     <div class="hb-week">
@@ -248,8 +307,46 @@ function rowHtml(t, dates, total, today) {
         </div>`;
       }).join("")}
     </div>
+    <div class="hb-goal-wrap">
+      <button class="hb-goal-btn${goal ? " set" : ""}" data-goal="${t.id}" title="目標頻度を設定" aria-haspopup="true" aria-expanded="false" aria-label="目標頻度を設定">${icon("flag", { size: 15 })}</button>
+      ${goalPopHtml(t.id, goal)}
+    </div>
     <button class="hb-heat-btn" data-heat="${t.id}" title="月間ヒートマップを表示" aria-expanded="false" aria-label="月間ヒートマップを表示">${icon("trendingUp", { size: 15 })}</button>
     <button class="hb-x" data-del="${t.id}" title="習慣を削除">×</button>
+  </div>`;
+}
+
+// C11: 「今週 N/M」（目標がある時だけ。達成で緑表示）。
+function goalMetaHtml(dates, today, goal) {
+  if (!goal) return "";
+  const p = weekProgress(dates, today, goal);
+  if (!p) return "";
+  return ` ・ <span class="hb-goal-prog${p.met ? " met" : ""}" title="目標: ${esc(goalLabel(goal))}">今週 ${p.done}/${p.target}${p.met ? " " + icon("check", { size: 12 }) : ""}</span>`;
+}
+
+// C11: 目標設定の簡易ポップオーバー（毎日 / 平日 / 週N / なし）。
+const GOAL_CHOICES = [
+  { key: "daily", label: "毎日" },
+  { key: "weekdays", label: "平日のみ" },
+  { key: "w2", label: "週2回", goal: { type: "week_n", n: 2 } },
+  { key: "w3", label: "週3回", goal: { type: "week_n", n: 3 } },
+  { key: "w5", label: "週5回", goal: { type: "week_n", n: 5 } },
+  { key: "none", label: "目標なし", goal: null },
+];
+function goalKey(goal) {
+  if (!goal) return "none";
+  if (goal.type === "daily") return "daily";
+  if (goal.type === "weekdays") return "weekdays";
+  if (goal.type === "week_n") return "w" + goal.n;
+  return "none";
+}
+function goalPopHtml(id, goal) {
+  const cur = goalKey(goal);
+  return `<div class="hb-goal-pop" data-goal-pop="${id}" hidden role="menu" aria-label="目標頻度">
+    <div class="hb-goal-pop-h">目標頻度</div>
+    ${GOAL_CHOICES.map((c) =>
+      `<button class="hb-goal-opt${c.key === cur ? " on" : ""}" data-goal-opt="${c.key}" role="menuitemradio" aria-checked="${c.key === cur}">${esc(c.label)}</button>`,
+    ).join("")}
   </div>`;
 }
 
@@ -300,6 +397,9 @@ function css() {
   .hb-name-edit{font:inherit;font-size:14px;font-weight:600;width:min(100%,360px);box-sizing:border-box;padding:3px 7px;border:1px solid ${C.fill};border-radius:7px;background:#fff;color:inherit}
   .hb-name-edit:focus{outline:none;box-shadow:0 0 0 3px rgba(58,134,255,.12)}
   .hb-meta{display:block;font-size:11.5px;color:${C.muted};font-weight:500;margin-top:2px}
+  /* C11: 今週 N/M（目標プログレス。達成で緑） */
+  .hb-goal-prog{display:inline-flex;align-items:center;gap:2px;font-weight:700;color:${C.fill}}
+  .hb-goal-prog.met{color:#2fa66b}
   .hb-week{display:flex;gap:7px}
   .hb-day{display:flex;flex-direction:column;align-items:center;gap:3px}
   .hb-dw{font-size:9.5px;color:${C.muted}}
@@ -308,6 +408,20 @@ function css() {
   .hb-c.today{border:1.5px solid ${C.fill};background:#fff;color:${C.fill};cursor:pointer;font-weight:700}
   .hb-c.today:hover{background:#eef4ff}
   .hb-c.today.on{background:#2fa66b;border-color:#2fa66b;color:#fff}
+  /* C11: 目標頻度ボタン＋ポップオーバー */
+  .hb-goal-wrap{position:relative;display:inline-flex}
+  .hb-goal-btn{border:0;background:transparent;color:${C.muted};cursor:pointer;opacity:.5;padding:4px;border-radius:6px;display:inline-flex;transition:opacity .12s,background .12s,color .12s}
+  .hb-row:hover .hb-goal-btn{opacity:1}
+  .hb-goal-btn:hover{background:rgba(58,134,255,.1);color:${C.fill}}
+  .hb-goal-btn.set{opacity:1;color:${C.fill}}
+  .hb-goal-btn[aria-expanded="true"]{opacity:1;color:${C.fill};background:rgba(58,134,255,.12)}
+  .hb-goal-btn:focus-visible{opacity:1}
+  .hb-goal-pop{position:absolute;top:calc(100% + 6px);right:0;z-index:30;min-width:128px;background:#fff;border:1px solid ${C.line};border-radius:10px;box-shadow:0 8px 24px rgba(20,30,50,.16);padding:5px}
+  .hb-goal-pop-h{font-size:10.5px;color:${C.muted};font-weight:700;padding:4px 8px 5px}
+  .hb-goal-opt{display:block;width:100%;text-align:left;border:0;background:transparent;font:inherit;font-size:12.5px;color:inherit;padding:7px 9px;border-radius:7px;cursor:pointer}
+  .hb-goal-opt:hover{background:rgba(58,134,255,.1)}
+  .hb-goal-opt.on{background:rgba(58,134,255,.14);color:${C.fill};font-weight:700}
+  .hb-goal-opt.hb-busy{opacity:.5;pointer-events:none}
   .hb-heat-btn{border:0;background:transparent;color:${C.muted};cursor:pointer;opacity:.5;padding:4px;border-radius:6px;display:inline-flex;transition:opacity .12s,background .12s}
   .hb-row:hover .hb-heat-btn{opacity:1}
   .hb-heat-btn:hover{background:rgba(58,134,255,.1);color:${C.fill}}
@@ -336,5 +450,8 @@ function css() {
   html[data-theme="dark"] .hb-name-text:hover{background:rgba(58,134,255,.16)}
   html[data-theme="dark"] .hb-name-edit{background:var(--card);color:var(--ink)}
   html[data-theme="dark"] .hb-sum-bar{background:var(--track)}
-  html[data-theme="dark"] .hb-hm-cell{background:var(--track)}`;
+  html[data-theme="dark"] .hb-hm-cell{background:var(--track)}
+  html[data-theme="dark"] .hb-goal-pop{background:var(--card);border-color:var(--line);box-shadow:0 8px 24px rgba(0,0,0,.45)}
+  html[data-theme="dark"] .hb-goal-btn:hover{background:rgba(58,134,255,.16)}
+  html[data-theme="dark"] .hb-goal-opt:hover{background:rgba(58,134,255,.16)}`;
 }

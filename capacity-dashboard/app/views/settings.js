@@ -326,6 +326,7 @@ function holidaySection(holidays) {
           <button class="sx-hadd" id="hol-save">追加</button>
         </div>
         <div class="sx-herr" id="hol-err"></div>
+        ${holidayBulkHtml()}
         <div class="sx-hfilter">
           <div class="sx-hsearch">${icon("search", { size: 14 })}<input id="hol-q" class="sx-in" placeholder="名称で検索" autocomplete="off"></div>
           <select id="hol-year" class="sx-in">${yearOpts}</select>
@@ -334,6 +335,32 @@ function holidaySection(holidays) {
         <div class="sx-hlist" id="hol-list"></div>
       </div>
     </section>`;
+}
+
+// C13: 祝日の一括登録（折りたたみ）。期間（開始〜終了）の各日を直列で createHoliday。
+// 「毎年」チェックで今年から数年分（BULK_YEARS）に同じ月日を展開して登録する。
+// 既存の単発追加フォーム/検索/CRUD には触れず、自己完結のパネルとして増設する。
+const BULK_YEARS = 3; // 「毎年」展開する年数（今年から）。
+function holidayBulkHtml() {
+  return `
+    <details class="sx-hbulk" id="hol-bulk">
+      <summary class="sx-hbsum">期間でまとめて登録</summary>
+      <div class="sx-hbbody">
+        <div class="sx-hbhint">開始〜終了の各日を登録します（既にある日付はスキップ）。連休・閉所期間の一括登録に。</div>
+        <div class="sx-hbrow">
+          <input id="holb-from" class="sx-in sx-hdate" inputmode="numeric" autocomplete="off" placeholder="開始（例: 1228）">
+          <span class="sx-dash">〜</span>
+          <input id="holb-to" class="sx-in sx-hdate" inputmode="numeric" autocomplete="off" placeholder="終了（例: 0103）">
+        </div>
+        <div class="sx-hbrow">
+          <input id="holb-name" class="sx-in sx-hname" placeholder="名称（例: 年末年始休業）">
+          <label class="sx-hchk"><input type="checkbox" id="holb-yearly"><span>毎年（今年から${BULK_YEARS}年分）</span></label>
+          <button class="sx-hadd" id="holb-run">一括登録</button>
+        </div>
+        <div class="sx-herr" id="holb-err"></div>
+        <div class="sx-hbprog" id="holb-prog" hidden></div>
+      </div>
+    </details>`;
 }
 
 function wireHolidays(root, holidays, holidaysByDate) {
@@ -354,6 +381,8 @@ function wireHolidays(root, holidays, holidaysByDate) {
     try { await createHoliday({ date: iso + "T00:00:00Z", name }); reload(); }
     catch (e) { btn.disabled = false; err.textContent = "× " + e.message; }
   };
+
+  wireHolidayBulk(root, sorted, holidaysByDate, reload);
 
   // 検索・年フィルタ・「過去を隠す」: クライアント側で絞り込み、リストを描き直す（CRUDは壊さない）。
   const listEl = root.querySelector("#hol-list");
@@ -400,6 +429,111 @@ function wireHolidays(root, holidays, holidaysByDate) {
   yearEl.onchange = renderList;
   hidePastEl.onchange = renderList;
   renderList();
+}
+
+// C13: 期間（開始〜終了）の各日を直列 createHoliday。「毎年」で今年から BULK_YEARS 年分に展開。
+//   - 開始から終了まで1日ずつ enumerate（UTCで日付計算＝DST影響なし）。
+//   - 既存日付（holidaysByDate / 同バッチ内で登録済み）はスキップして二重登録を防ぐ。
+//   - 連打防止: 実行中は run ボタンを無効化。進捗（n/total）とエラー件数を逐次表示。
+//   - 完了後は reload()（invalidate→再描画）でリストへ反映。途中失敗は集計して通知し、成功分はそのまま残す。
+function wireHolidayBulk(root, existing, holidaysByDate, reload) {
+  const runBtn = root.querySelector("#holb-run");
+  if (!runBtn) return;
+  const fromEl = root.querySelector("#holb-from");
+  const toEl = root.querySelector("#holb-to");
+  const nameEl = root.querySelector("#holb-name");
+  const yearlyEl = root.querySelector("#holb-yearly");
+  const err = root.querySelector("#holb-err");
+  const prog = root.querySelector("#holb-prog");
+
+  // 範囲入力にもカレンダーピッカー＋blur整形（単発入力と同じ作法）。
+  attachDatePicker(fromEl, { holidaysByDate });
+  attachDatePicker(toEl, { holidaysByDate });
+  fromEl.onblur = () => { const iso = parseSmartDate(fromEl.value); if (iso) fromEl.value = fmtDisplayDow(iso); };
+  toEl.onblur = () => { const iso = parseSmartDate(toEl.value); if (iso) toEl.value = fmtDisplayDow(iso); };
+
+  // ISO日付(YYYY-MM-DD)を1日進める（UTC基準）。
+  const nextDay = (iso) => {
+    const d = new Date(iso + "T00:00:00Z");
+    d.setUTCDate(d.getUTCDate() + 1);
+    return d.toISOString().slice(0, 10);
+  };
+  // 開始(月日)〜終了(月日)を年 y に当てはめて日付配列を作る（終了 < 開始なら翌年へまたぐ）。
+  const datesForYear = (fromISO, toISO, y) => {
+    const mmddFrom = fromISO.slice(5), mmddTo = toISO.slice(5);
+    const start = `${y}-${mmddFrom}`;
+    // 終了の月日が開始より前なら年末年始など年またぎ＝終了を翌年に。
+    const end = (mmddTo < mmddFrom) ? `${y + 1}-${mmddTo}` : `${y}-${mmddTo}`;
+    const out = [];
+    let cur = start;
+    // 暴走防止のため最大2年分(=約740日)で打ち切り。
+    for (let guard = 0; guard < 740 && cur <= end; guard++) { out.push(cur); cur = nextDay(cur); }
+    return out;
+  };
+
+  runBtn.onclick = async () => {
+    err.textContent = "";
+    const fromISO = parseSmartDate(fromEl.value);
+    const toISO = parseSmartDate(toEl.value);
+    const name = (nameEl.value || "").trim();
+    if (!fromISO) { err.textContent = "開始日の形式が不正です（例: 1228 → 12/28）。"; return; }
+    if (!toISO) { err.textContent = "終了日の形式が不正です（例: 0103 → 1/3）。"; return; }
+    if (!name) { err.textContent = "名称を入力してください。"; return; }
+    const yearly = !!yearlyEl.checked;
+
+    // 登録対象の日付集合を構築（重複排除）。毎年なら今年から BULK_YEARS 年分を展開。
+    const set = new Set();
+    if (yearly) {
+      const thisYear = new Date().getFullYear();
+      for (let i = 0; i < BULK_YEARS; i++) {
+        for (const d of datesForYear(fromISO, toISO, thisYear + i)) set.add(d);
+      }
+    } else {
+      // 単発: 入力された年そのまま。終了が開始より前なら翌年へまたぐ扱い。
+      let cur = fromISO;
+      let end = (toISO < fromISO) ? `${+toISO.slice(0, 4) + 1}-${toISO.slice(5)}` : toISO;
+      // 年またぎ防止が効くよう、終了は最低でも開始以上に。
+      if (end < fromISO) end = fromISO;
+      for (let guard = 0; guard < 740 && cur <= end; guard++) { set.add(cur); cur = nextDay(cur); }
+    }
+
+    // 既存日付（store の holidaysByDate）はスキップ。日付昇順で直列登録。
+    const have = holidaysByDate || {};
+    const targets = [...set].sort().filter((iso) => !have[iso]);
+    const skipped = set.size - targets.length;
+
+    if (!targets.length) {
+      prog.hidden = false; prog.className = "sx-hbprog ok";
+      prog.innerHTML = `${icon("check", { size: 13 })} 追加対象がありません（${set.size}日はすべて登録済み）`;
+      return;
+    }
+
+    // 連打防止＋進捗表示。
+    runBtn.disabled = true; fromEl.disabled = toEl.disabled = nameEl.disabled = yearlyEl.disabled = true;
+    prog.hidden = false; prog.className = "sx-hbprog";
+    let done = 0; const errors = [];
+    const total = targets.length;
+    const showProg = () => { prog.textContent = `登録中… ${done}/${total}${errors.length ? `（失敗 ${errors.length}）` : ""}`; };
+    showProg();
+    for (const iso of targets) {
+      try { await createHoliday({ date: iso + "T00:00:00Z", name }); }
+      catch (e) { errors.push(`${iso}: ${e && e.message ? e.message : e}`); }
+      done++; showProg();
+    }
+
+    const ok = done - errors.length;
+    if (errors.length) {
+      prog.className = "sx-hbprog err";
+      prog.textContent = `${ok}件登録${skipped ? `・${skipped}件スキップ` : ""}・${errors.length}件失敗（${errors.slice(0, 2).join(" / ")}${errors.length > 2 ? " …" : ""}）`;
+      // 一部成功している可能性があるのでリストへ反映。入力は再操作できるよう戻す。
+      runBtn.disabled = false; fromEl.disabled = toEl.disabled = nameEl.disabled = yearlyEl.disabled = false;
+      if (ok > 0) reload();
+      return;
+    }
+    prog.className = "sx-hbprog ok";
+    prog.innerHTML = `${icon("check", { size: 13 })} ${ok}件登録しました${skipped ? `（${skipped}件は登録済みでスキップ）` : ""}`;
+    reload();
+  };
 }
 
 // 分類（ラベル）マスタ: ユーザー定義の分類ラベルを管理する自己完結セクション。
@@ -829,6 +963,21 @@ function css() {
     background:${C.fill};color:#fff;cursor:pointer;white-space:nowrap;transition:filter .15s,transform .06s}
   .sx-hadd:hover{filter:brightness(1.06)}.sx-hadd:active{transform:translateY(1px)}.sx-hadd:disabled{opacity:.55;cursor:default}
   .sx-herr{font-size:12px;font-weight:600;color:${C.over};min-height:14px;margin:6px 0 0}
+
+  /* C13: 期間一括登録（折りたたみ）。単発フォームの下に控えめに置く */
+  .sx-hbulk{margin:10px 0 0;border:1px solid var(--line);border-radius:10px;background:var(--track);overflow:hidden}
+  .sx-hbsum{font-size:12.5px;font-weight:700;color:${C.ink};padding:10px 14px;cursor:pointer;list-style:none;user-select:none}
+  .sx-hbsum::-webkit-details-marker{display:none}
+  .sx-hbsum::before{content:"＋";display:inline-block;margin-right:8px;color:${C.muted};font-weight:700}
+  .sx-hbulk[open] .sx-hbsum::before{content:"－"}
+  .sx-hbsum:hover{color:${C.fill}}
+  .sx-hbbody{padding:2px 14px 14px;border-top:1px solid var(--line);background:var(--card)}
+  .sx-hbhint{font-size:11.5px;color:${C.muted};line-height:1.55;padding:12px 0 0}
+  .sx-hbrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:10px 0 0}
+  .sx-hbprog{font-size:12px;font-weight:700;color:${C.muted};margin:8px 0 0;min-height:14px;display:flex;align-items:center;gap:5px}
+  .sx-hbprog.ok{color:${C.free}}
+  .sx-hbprog.err{color:${C.over}}
+
   .sx-hlist{display:flex;flex-direction:column;gap:2px;margin:6px 0 14px}
   .sx-hempty{font-size:12.5px;color:${C.muted};padding:10px 2px}
   .sx-hrow{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 2px;border-top:1px solid var(--line)}

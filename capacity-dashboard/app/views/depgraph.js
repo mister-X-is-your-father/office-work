@@ -106,16 +106,56 @@ export async function render(root) {
       <select id="dg-who" class="dg-sel">${memberOpts}</select>
       <select id="dg-proj" class="dg-sel">${projOpts}</select>
       ${(FILTER.who || FILTER.proj) ? `<button id="dg-clear" class="dg-clear" type="button">絞り込み解除</button>` : ""}
+      <div class="dg-zoom" role="group" aria-label="ズーム">
+        <button id="dg-zout" class="dg-zbtn" type="button" title="縮小" aria-label="縮小">−</button>
+        <span id="dg-zlvl" class="dg-zlvl" aria-live="polite">100%</span>
+        <button id="dg-zin" class="dg-zbtn" type="button" title="拡大" aria-label="拡大">＋</button>
+        <button id="dg-zfit" class="dg-zfit" type="button" title="全体フィット">フィット</button>
+      </div>
     </div>
-    <div class="card dg-card"><div class="dg-scroll"><div class="dg-canvas" style="width:${W}px;height:${H}px">
+    <div class="card dg-card"><div class="dg-scroll"><div class="dg-stage" style="width:${W}px;height:${H}px"><div class="dg-canvas" style="width:${W}px;height:${H}px">
       <svg class="dg-edges" width="${W}" height="${H}"><defs>
         <marker id="dg-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#c4ccd6"/></marker>
         <marker id="dg-arrow-c" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="${C.over}"/></marker>
       </defs>${paths}</svg>
       ${nodes}
-    </div></div></div>`;
+    </div></div></div></div>`;
 
   const canvas = root.querySelector(".dg-canvas");
+  const stage = root.querySelector(".dg-stage");
+  const scroll = root.querySelector(".dg-scroll");
+
+  // C14: ズーム/全体フィット。canvas に transform:scale を当て、外側 .dg-stage の
+  // 実寸を scale 後サイズに合わせてスクロールバーを正しく出す（transform はレイアウトを
+  // 動かさないため stage の幅高でスクロール領域を表現する）。群A/B の挙動はそのまま。
+  const Z_MIN = 0.3, Z_MAX = 2, Z_STEP = 0.15, Z_KEY = "dg.zoom";
+  let zoom = (() => {
+    const v = parseFloat((() => { try { return localStorage.getItem(Z_KEY) || ""; } catch { return ""; } })());
+    return Number.isFinite(v) && v > 0 ? Math.min(Z_MAX, Math.max(Z_MIN, v)) : 1;
+  })();
+  const zLvl = root.querySelector("#dg-zlvl");
+  const applyZoom = (persist = true) => {
+    canvas.style.transformOrigin = "top left";
+    canvas.style.transform = `scale(${zoom})`;
+    stage.style.width = `${W * zoom}px`;
+    stage.style.height = `${H * zoom}px`;
+    if (zLvl) zLvl.textContent = `${Math.round(zoom * 100)}%`;
+    if (persist) { try { localStorage.setItem(Z_KEY, String(zoom)); } catch {} }
+  };
+  const setZoom = (z) => { zoom = Math.min(Z_MAX, Math.max(Z_MIN, Math.round(z * 100) / 100)); applyZoom(); };
+  // 全体フィット: スクロール表示領域に内容全体が収まる scale を算出（上限 1＝拡大しすぎない）。
+  const fitZoom = () => {
+    const cs = getComputedStyle(scroll);
+    const availW = scroll.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    const availH = scroll.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+    if (availW <= 0 || availH <= 0) return;
+    const z = Math.min(availW / W, availH / H, 1);
+    setZoom(z);
+  };
+  applyZoom(false);
+  root.querySelector("#dg-zin").onclick = () => setZoom(zoom + Z_STEP);
+  root.querySelector("#dg-zout").onclick = () => setZoom(zoom - Z_STEP);
+  root.querySelector("#dg-zfit").onclick = fitZoom;
 
   // B38: filter 適用（強調＝match、集合外を dim）。再描画せず class トグルで反映。
   const matchOf = (id) => {
@@ -252,9 +292,17 @@ function css() {
   .dg-sel{font-size:12px;border:1px solid ${C.line};border-radius:8px;padding:5px 8px;background:#fff;color:${C.ink};cursor:pointer}
   .dg-clear{font-size:12px;border:1px solid ${C.line};border-radius:8px;padding:5px 10px;background:#fff;color:${C.muted};cursor:pointer}
   .dg-clear:hover{background:#f6f7f9}
+  /* C14 ズームツールバー */
+  .dg-zoom{display:inline-flex;align-items:center;gap:4px;margin-left:auto;border:1px solid ${C.line};border-radius:9px;padding:2px 4px;background:#fff}
+  .dg-zbtn{font-size:14px;line-height:1;width:24px;height:24px;display:grid;place-items:center;border:0;border-radius:6px;background:transparent;color:${C.ink};cursor:pointer}
+  .dg-zbtn:hover{background:#f0f1f4}
+  .dg-zlvl{font-size:11.5px;min-width:38px;text-align:center;color:${C.muted};font-variant-numeric:tabular-nums;user-select:none}
+  .dg-zfit{font-size:11.5px;border:0;border-left:1px solid ${C.line};border-radius:0;margin-left:2px;padding:0 8px;height:24px;background:transparent;color:${C.ink};cursor:pointer}
+  .dg-zfit:hover{background:#f0f1f4}
   .dg-card{padding:0}
   .dg-scroll{overflow:auto;padding:14px}
-  .dg-canvas{position:relative}
+  .dg-stage{position:relative}
+  .dg-canvas{position:relative;transform-origin:top left}
   .dg-edges{position:absolute;inset:0;pointer-events:none}
   .dg-edge{transition:opacity .12s}
   .dg-node{position:absolute;background:#fff;border:1px solid ${C.line};border-radius:11px;padding:9px 11px;box-shadow:0 1px 3px rgba(20,30,50,.08);display:flex;flex-direction:column;justify-content:space-between;z-index:1;cursor:pointer;transition:opacity .12s,box-shadow .12s}

@@ -82,6 +82,13 @@ function shell() {
           <span class="who" id="who"></span>
           <button id="refresh">↻ 再読込</button>
           <button id="logout">ログアウト</button>
+          <div class="tb-of" id="tb-of">
+            <button class="tb-of-btn" id="tb-of-btn" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="その他のメニュー" title="その他">⋮</button>
+            <div class="tb-of-menu" id="tb-of-menu" role="menu" hidden>
+              <button class="tb-of-item" id="tb-of-refresh" type="button" role="menuitem">↻ 再読込</button>
+              <button class="tb-of-item" id="tb-of-logout" type="button" role="menuitem">ログアウト</button>
+            </div>
+          </div>
           <div id="ts-live" aria-live="polite" class="sr-only"></div>
           <div id="ts-live-alert" aria-live="assertive" role="alert" class="sr-only"></div>
         </div>
@@ -147,6 +154,20 @@ function shell() {
     openTaskForm({ onSaved: route });
   };
   document.getElementById("logout").onclick = () => { vik.clearToken(); showLogin(); };
+  // モバイル(≤560px)の⋮オーバーフローメニュー: 再読込/ログアウトを集約。
+  // 実処理は既存の #refresh / #logout に委譲（重複配線を避け、挙動を完全一致させる）。
+  // #refresh/#logout は DOM に残し CSS で視覚的に隠すだけ（topbar 各部品が #refresh を anchor にしているため）。
+  const _ofBtn = document.getElementById("tb-of-btn"), _ofMenu = document.getElementById("tb-of-menu");
+  if (_ofBtn && _ofMenu) {
+    const closeOf = () => { _ofMenu.hidden = true; _ofBtn.setAttribute("aria-expanded", "false"); };
+    const openOf = () => { _ofMenu.hidden = false; _ofBtn.setAttribute("aria-expanded", "true"); };
+    _ofBtn.onclick = (e) => { e.stopPropagation(); _ofMenu.hidden ? openOf() : closeOf(); };
+    document.getElementById("tb-of-refresh").onclick = () => { closeOf(); document.getElementById("refresh").click(); };
+    document.getElementById("tb-of-logout").onclick = () => { closeOf(); document.getElementById("logout").click(); };
+    // メニュー外クリック / Esc で閉じる。
+    document.addEventListener("click", (e) => { if (!_ofMenu.hidden && !e.target.closest("#tb-of")) closeOf(); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !_ofMenu.hidden) { closeOf(); _ofBtn.focus(); } });
+  }
   vik.whoami().then(u => { document.getElementById("who").textContent = u ? (u.name || u.username) : ""; }).catch(() => {});
   // クイック追加バー（1行自然言語 → 即タスク化。既定の投入先=インボックスWS）
   import("./views/quickadd.js").then(({ mountQuickAdd }) => {

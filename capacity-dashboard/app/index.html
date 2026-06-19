@@ -196,6 +196,48 @@
   .theme-tg{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;margin-top:14px;padding:8px 11px;
     border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--muted);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;transition:background .12s,border-color .12s,color .12s}
   .theme-tg:hover{background:var(--track);color:var(--ink);border-color:var(--line-strong)}
+  /* ===== トップバー ⋮ オーバーフローメニュー（モバイルで再読込/ログアウトを集約） ===== */
+  /* デスクトップでは ⋮ 自体を隠し、従来どおり個別ボタンを並べる。 */
+  .tb-of{position:relative;display:none}
+  .tb-of-btn{border:1px solid var(--line);background:var(--card);border-radius:8px;
+    width:34px;height:32px;padding:0;font:inherit;font-size:18px;line-height:1;color:var(--ink);
+    cursor:pointer;flex:none;display:inline-flex;align-items:center;justify-content:center}
+  .tb-of-btn:hover{background:var(--track)}
+  .tb-of-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:20;min-width:160px;
+    background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);
+    padding:5px;display:flex;flex-direction:column;gap:2px}
+  .tb-of-menu[hidden]{display:none}
+  .tb-of-item{display:flex;align-items:center;gap:8px;width:100%;text-align:left;
+    border:0;background:none;border-radius:7px;padding:9px 11px;font:inherit;font-size:13.5px;
+    color:var(--ink);cursor:pointer}
+  .tb-of-item:hover{background:var(--track)}
+  /* ===== C16: 狭幅トップバーの整理（≤560px） ===== */
+  @media (max-width:560px){
+    /* 溢れ防止: 折り返し許可＋左右の余白を詰める。 */
+    .topbar{flex-wrap:wrap;padding:8px 12px;gap:6px}
+    /* ユーザー名は省略（領域を圧迫しない・読み上げには残る）。 */
+    .topbar .who{display:none}
+    /* 個別の「再読込」「ログアウト」は ⋮ メニューに集約＝視覚的に隠す（DOM/配線は維持）。 */
+    .topbar #refresh,.topbar #logout{display:none}
+    /* ⋮ を表示。 */
+    .tb-of{display:inline-block}
+  }
+  /* ===== C17: タップターゲット / hover 代替（タッチ端末の底上げ） ===== */
+  /* coarse ポインタ（指）では主要な操作要素の最小タップ領域を 44px 確保。 */
+  @media (pointer:coarse){
+    .topbar button,.tb-of-btn,.tb-of-item,.sb-toggle,.sb-collapse,
+    .nav a,.addbtn,.theme-tg,.ui-empty-act,.ui-retry,.skip-link,.login button{
+      min-height:44px}
+    /* アイコンのみの正方ボタンは横幅も確保。 */
+    .sb-toggle,.sb-collapse,.tb-of-btn{min-width:44px}
+    /* チップ等の小要素もタップしやすいよう縦パディングを底上げ。 */
+    .legend,.kpi{min-height:auto}
+  }
+  /* hover が無い端末（タッチ主体）では、hover で初めて出る操作を常時可視にする底上げ。
+     各画面ローカルの hover 依存 UI（行hoverで出る×やアクション等）の代表を globally に露出。 */
+  @media (hover:none){
+    [class*="hover-only"],[data-hover-only]{opacity:1!important;visibility:visible!important;pointer-events:auto!important}
+  }
 </style>
 <script>try{var _t=localStorage.getItem("ts.theme");if(_t==="dark")document.documentElement.setAttribute("data-theme","dark");}catch(e){}</script>
 </head>

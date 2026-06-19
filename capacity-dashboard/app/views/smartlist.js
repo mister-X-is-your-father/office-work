@@ -3,10 +3,10 @@
 // 左の縦レールは廃止（アプリ共通ナビと差別化、本文フル幅）。各タブ=icon＋ラベル＋件数バッジ、クリックでビュー切替。
 // 保存はローカル（localStorage・スキーマ変更なし）。完了/フラグは updateTask（#9 非破壊）。
 import { load, invalidate, isAiUser } from "../lib/store.js";
-import { updateTask } from "../lib/api.js";
+import { updateTask, deleteTask, getTask, addAssignee, removeAssignee, addTaskLabel, removeTaskLabel, setTaskWaiting } from "../lib/api.js";
 import { taskMatches, next7End, EMPTY_FILTER, BUILTIN_VIEWS } from "../lib/smartlist.js";
 import { shiftISO } from "../lib/capacity.js";
-import { PRIO, categoryLabels, categoryColor } from "../lib/kinds.js";
+import { PRIO, categoryLabels, categoryColor, REVIEW_LABEL, WAITING_LABEL } from "../lib/kinds.js";
 import { openTaskForm } from "./taskform.js";
 import { C, esc, fmtH, member_color, todayISO, emptyState } from "../lib/ui.js";
 import { push as histPush, initHistoryHotkeys } from "../lib/history.js";
@@ -25,6 +25,8 @@ const SORTS = [["due", "期限順"], ["prio", "重要度順"], ["title", "名前
 
 let state = null; // { sel, filter, sort }
 let searchTimer = null; // 検索入力デバウンス用タイマ
+let selectedIds = new Set(); // C9: 複数選択（一括操作用）。Shift範囲は anchorId 起点。
+let anchorId = null;         // Shift 範囲選択の起点
 const loadLists = (uid) => { try { return JSON.parse(localStorage.getItem(LISTS_KEY(uid)) || "[]"); } catch { return []; } };
 const saveLists = (uid, v) => { try { localStorage.setItem(LISTS_KEY(uid), JSON.stringify(v)); } catch {} };
 
@@ -60,6 +62,8 @@ export async function render(root) {
   const matched = (tasks || []).filter((t) => taskMatches(t, state.filter, ctx) && (!catTitle || categoryLabels(t).some((l) => l.title === catTitle)));
   const sorted = sortTasks(matched, state.sort, today);
   const sumH = sorted.reduce((s, t) => s + (t.time_estimate || 0), 0) / 3600; // ビュー内の見積り合計
+  // 表示外になった選択を捨てる（フィルタ/ビュー切替で見えなくなった id は選択解除）。
+  { const vis = new Set(sorted.map((t) => t.id)); selectedIds.forEach((id) => { if (!vis.has(id)) selectedIds.delete(id); }); if (anchorId != null && !vis.has(anchorId)) anchorId = null; }
 
   // タブ件数（組み込み）。担当フィルタはビュー横断なので件数にも反映＝タブを開いた時の件数と一致させる。
   const who = state.who || "";
@@ -101,6 +105,7 @@ export async function render(root) {
         </div>
         ${chipsHtml(activeChips(state.filter, state.who, members, me, labels))}
         <div class="sl-list" id="sl-results">${resultsHtml(sorted, projects, today, state.sort, state.sel)}</div>
+        ${bulkBarHtml()}
       </section>
     </div>`;
 
@@ -194,6 +199,27 @@ function tabItem(key, icon, label, count, on, custom) {
   return `<span class="sl-tabwrap" role="presentation">${tab}<button class="sl-tdel" type="button" data-del="${esc(String(key))}" title="このリストを削除" aria-label="${esc(label)} を削除" tabindex="-1">${ICON_X}</button></span>`;
 }
 
+// C9: 一括操作バー（sticky・選択0件なら出さない）。各アクションは wireBulk で配線。
+function bulkBarHtml() {
+  const n = selectedIds.size;
+  if (!n) return "";
+  const btn = (act, label) => `<button class="sl-bk-a${act === "del" ? " danger" : ""}" data-bk="${esc(act)}">${esc(label)}</button>`;
+  return `<div class="sl-bulk" id="sl-bulk" role="region" aria-label="一括操作">
+    <span class="sl-bk-n">${n}件選択中</span>
+    <span class="sl-bk-acts">
+      ${btn("status", "ステータス")}
+      ${btn("flag", "フラグ")}
+      ${btn("due", "期限")}
+      ${btn("who", "担当者")}
+      ${btn("cat", "分類")}
+      ${btn("prio", "重要度")}
+      ${btn("del", "削除")}
+    </span>
+    <span class="sl-bk-busy" id="sl-bk-busy" aria-live="polite"></span>
+    <button class="sl-bk-clr" id="sl-bk-clr">選択解除</button>
+  </div>`;
+}
+
 function rowHtml(t, projects, today) {
   const done = !!t.done;
   const dueRaw = t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(0, 10) : "";
@@ -204,7 +230,9 @@ function rowHtml(t, projects, today) {
   const p = PRIO[t.priority || 0];
   const cat = categoryLabels(t)[0] || null;
   const est = (t.time_estimate || 0) / 3600;
-  return `<div class="sl-row${done ? " is-done" : ""}" data-id="${t.id}">
+  const picked = selectedIds.has(t.id);
+  return `<div class="sl-row${done ? " is-done" : ""}${picked ? " is-sel" : ""}" data-id="${t.id}">
+    <span class="sl-pick${picked ? " on" : ""}" data-pick="${t.id}" role="checkbox" aria-checked="${picked ? "true" : "false"}" tabindex="0" title="選択（Shiftで範囲選択）" aria-label="このタスクを選択">${picked ? icon("check", { size: 12 }) : ""}</span>
     <button class="sl-check${done ? " done" : ""}" data-check="${t.id}" title="${done ? "未完了に戻す" : "完了にする"}">${done ? icon("check", { size: 13 }) : ""}</button>
     <span class="sl-pdot${p ? "" : " none"}" title="重要度: ${esc(p ? p.n : "なし")}" style="${p ? `background:${p.c}` : ""}"></span>
     <span class="sl-rtitle">${esc(t.title)}</span>
@@ -366,6 +394,229 @@ function wire(root, data, uid, lists, ctx) {
   wireClear(root, data, ctx);
   // 有効な絞り込みチップ（個別×・すべて解除）
   wireChips(root, uid);
+  // C9: 複数選択（チェック＋Shift範囲）＋ 一括操作バー
+  wireSelection(root, rerender);
+  wireBulk(root, data, ctx, rerender);
+}
+
+// ── C9: 複数選択（チェックボックス＋Shift範囲）。table.js の wireSelection の作法に倣う。 ──
+// 表示中の行 id を DOM 順で扱い、anchorId 起点に Shift で範囲、単独クリックでトグル。
+function wireSelection(root, rerender) {
+  const idsOf = () => Array.from(root.querySelectorAll(".sl-row[data-id]")).map((r) => +r.dataset.id);
+  const toggle = (id) => { selectedIds.has(id) ? selectedIds.delete(id) : selectedIds.add(id); anchorId = id; };
+  const range = (id) => {
+    const ids = idsOf();
+    const a = ids.indexOf(anchorId), b = ids.indexOf(id);
+    if (a < 0) { selectedIds.add(id); anchorId = id; return; }
+    const [lo, hi] = a < b ? [a, b] : [b, a];
+    for (let i = lo; i <= hi; i++) selectedIds.add(ids[i]);
+  };
+  root.querySelectorAll(".sl-pick[data-pick]").forEach((ck) => {
+    const act = (e) => {
+      e.stopPropagation(); e.preventDefault();
+      const id = +ck.dataset.pick;
+      if (e.shiftKey && anchorId != null) range(id); else toggle(id);
+      rerender();
+    };
+    ck.onclick = act;
+    ck.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") act(e); };
+  });
+}
+
+// ── C9: 一括操作バー（選択タスク全件に適用）。table.js の wireBulk を踏襲。 ──
+// 直列適用＋進捗表示。Undo 可能なものは history.push（status/flag/due/prio/cat/who）。削除は不可逆。
+function wireBulk(root, data, ctx, rerender) {
+  const bar = root.querySelector("#sl-bulk");
+  if (!bar) return;
+  const { tasks, members, labels, me } = data;
+  const today = ctx.today;
+  const busy = root.querySelector("#sl-bk-busy");
+  const taskOf = (id) => (tasks || []).find((t) => t.id === id);
+  const targetIds = () => [...selectedIds];
+  const reload = () => { invalidate(); render(root); };
+
+  // 選択全件に fn を直列適用（失敗は握って続行）→ 完了後リロード。処理中は進捗表示。
+  const runAll = async (label, fn) => {
+    const ids = targetIds(); if (!ids.length) return;
+    let ok = 0, fail = 0;
+    bar.querySelectorAll(".sl-bk-a, .sl-bk-clr").forEach((b) => (b.disabled = true));
+    if (busy) busy.textContent = `${label}中… 0/${ids.length}`;
+    for (const id of ids) {
+      try { await fn(id); ok++; } catch { fail++; }
+      if (busy) busy.textContent = `${label}中… ${ok + fail}/${ids.length}`;
+    }
+    if (fail && busy) busy.textContent = `${fail}件失敗（${ok}件成功）`;
+    reload();
+  };
+
+  // 一括操作を1アクションとして履歴へ（適用前に全件スナップショット→undo で復元、redo は fn 再実行）。
+  const ZERO = "0001-01-01T00:00:00Z";
+  const snapshot = (t) => ({
+    id: t.id, done: !!t.done, percent_done: t.percent_done || 0, started_at: t.started_at || null,
+    priority: t.priority || 0, is_favorite: !!t.is_favorite,
+    due_date: (t.due_date && !t.due_date.startsWith("0001")) ? t.due_date : ZERO,
+    waiting: (t.labels || []).some((l) => (l.title || "") === WAITING_LABEL),
+    assignees: (t.assignees || []).map((a) => a.id), labels: (t.labels || []).map((l) => l.id),
+  });
+  const restoreSnap = async (s) => {
+    let cur = null; try { cur = await getTask(s.id); } catch { cur = taskOf(s.id); }
+    await updateTask(s.id, { done: s.done, percent_done: s.percent_done, started_at: s.started_at, priority: s.priority, due_date: s.due_date, is_favorite: s.is_favorite }).catch(() => {});
+    await setTaskWaiting(cur || { id: s.id, labels: [] }, s.waiting).catch(() => {});
+    const curAs = ((cur && cur.assignees) || []).map((a) => a.id), tAs = new Set(s.assignees);
+    for (const a of curAs) if (!tAs.has(a)) await removeAssignee(s.id, a).catch(() => {});
+    for (const a of s.assignees) if (!curAs.includes(a)) await addAssignee(s.id, a).catch(() => {});
+    const curLb = ((cur && cur.labels) || []).filter((l) => (l.title || "") !== WAITING_LABEL).map((l) => l.id), tLb = new Set(s.labels);
+    for (const l of curLb) if (!tLb.has(l)) await removeTaskLabel(s.id, l).catch(() => {});
+    for (const l of s.labels) if (!curLb.includes(l)) await addTaskLabel(s.id, l).catch(() => {});
+  };
+  const runAllH = async (label, fn) => {
+    const ids = targetIds(); if (!ids.length) return;
+    const snaps = ids.map((id) => taskOf(id)).filter(Boolean).map(snapshot);
+    await runAll(label, fn);
+    histPush({
+      label: `${label}（${ids.length}件）`,
+      undo: async () => { for (const s of snaps) await restoreSnap(s); invalidate(); render(root); },
+      redo: async () => { for (const id of ids) await fn(id).catch(() => {}); invalidate(); render(root); },
+    });
+  };
+
+  const setDue = (id, iso) => updateTask(id, { due_date: iso ? iso + "T00:00:00Z" : ZERO });
+  // 各タスクの現在期限を相対シフト（期限なしは今日起点）。
+  const slide = (days) => runAllH("期限変更", (id) => {
+    const t = taskOf(id);
+    const cur = (t && t.due_date && !t.due_date.startsWith("0001")) ? t.due_date.slice(0, 10) : today;
+    return setDue(id, shiftISO(cur, days));
+  });
+
+  const clr = root.querySelector("#sl-bk-clr");
+  if (clr) clr.onclick = () => { selectedIds.clear(); anchorId = null; rerender(); };
+
+  bar.querySelectorAll(".sl-bk-a").forEach((b) => {
+    b.onclick = () => {
+      const r = b.getBoundingClientRect();
+      switch (b.dataset.bk) {
+        case "del": {
+          const ids = targetIds();
+          if (!confirm(`${ids.length}件のタスクを削除しますか？（元に戻せません）`)) return;
+          selectedIds.clear(); anchorId = null;
+          runAll("削除", (id) => deleteTask(id));
+          break;
+        }
+        case "status":
+          openSlMenu(r.left, r.bottom + 4, [
+            { label: "未着手", on: () => runAllH("ステータス変更", (id) => Promise.all([updateTask(id, { done: false, percent_done: 0, started_at: null }), setTaskWaiting(taskOf(id), false)])) },
+            { label: "進行中", on: () => runAllH("ステータス変更", (id) => { const t = taskOf(id); const keepPct = (t && (t.done || t.percent_done >= 100)) ? 0 : ((t && t.percent_done) || 0); return Promise.all([updateTask(id, { done: false, percent_done: keepPct, started_at: new Date().toISOString() }), setTaskWaiting(t, false)]); }) },
+            { label: "連絡待ち", on: () => runAllH("ステータス変更", (id) => setTaskWaiting(taskOf(id), true)) },
+            { label: "完了", on: () => runAllH("ステータス変更", (id) => Promise.all([updateTask(id, { done: true, percent_done: 100 }), setTaskWaiting(taskOf(id), false)])) },
+          ]);
+          break;
+        case "flag":
+          openSlMenu(r.left, r.bottom + 4, [
+            { label: "フラグを付ける", on: () => runAllH("フラグ変更", (id) => updateTask(id, { is_favorite: true })) },
+            { label: "フラグを外す", danger: true, on: () => runAllH("フラグ変更", (id) => updateTask(id, { is_favorite: false })) },
+          ]);
+          break;
+        case "due":
+          openSlMenu(r.left, r.bottom + 4, [
+            { label: "−1日", on: () => slide(-1) },
+            { label: "+1日", on: () => slide(1) },
+            { label: "+1週間", on: () => slide(7) },
+            { sep: true },
+            { label: "日付指定（全件）", input: "date", value: "", on: (v) => { if (v) runAllH("期限変更", (id) => setDue(id, v)); } },
+            { sep: true },
+            { label: "クリア（期限なし）", danger: true, on: () => runAllH("期限変更", (id) => setDue(id, null)) },
+          ]);
+          break;
+        case "prio":
+          openSlMenu(r.left, r.bottom + 4, [[4, "MUST"], [3, "高"], [2, "中"], [1, "低"], [0, "なし"]].map(([v, label]) => ({
+            label, on: () => runAllH("重要度変更", (id) => updateTask(id, { priority: v })),
+          })));
+          break;
+        case "who": {
+          // 追加（既存担当に足す）／置換（既存を外してその人だけ）／全員外す。AI は対象外。
+          const addOne = (uid) => runAllH("担当変更", (id) => addAssignee(id, uid));
+          const replaceOne = (uid) => runAllH("担当変更", async (id) => {
+            const t = taskOf(id); const cur = ((t && t.assignees) || []).filter((a) => !isAiUser(a)).map((a) => a.id);
+            for (const x of cur) if (x !== uid) await removeAssignee(id, x).catch(() => {});
+            if (!cur.includes(uid)) await addAssignee(id, uid).catch(() => {});
+          });
+          const removeAllAs = () => runAllH("担当変更", async (id) => {
+            const t = taskOf(id); const cur = ((t && t.assignees) || []).filter((a) => !isAiUser(a)).map((a) => a.id);
+            for (const x of cur) await removeAssignee(id, x).catch(() => {});
+          });
+          const ms = (members || []).filter((m) => !isAiUser(m));
+          openSlMenu(r.left, r.bottom + 4, [
+            { header: true, label: "追加（足す）" },
+            ...ms.map((m) => ({ label: m.name || m.username, on: () => addOne(m.id) })),
+            { sep: true },
+            { header: true, label: "置換（この人だけに）" },
+            ...ms.map((m) => ({ label: m.name || m.username, on: () => replaceOne(m.id) })),
+            { sep: true },
+            { label: "全員外す（担当なし）", danger: true, on: removeAllAs },
+          ]);
+          break;
+        }
+        case "cat": {
+          // 分類（ラベル）一括: 追加／削除。レビュー/連絡待ちは予約語なので候補から除外。
+          const cats = (labels || []).filter((l) => (l.title || "") !== REVIEW_LABEL && (l.title || "") !== WAITING_LABEL);
+          const addCat = (lid) => runAllH("分類変更", async (id) => {
+            const t = taskOf(id); const cur = ((t && t.labels) || []).map((l) => l.id);
+            if (!cur.includes(lid)) await addTaskLabel(id, lid);
+          });
+          const removeCat = (lid) => runAllH("分類変更", async (id) => {
+            const t = taskOf(id); const cur = ((t && t.labels) || []).map((l) => l.id);
+            if (cur.includes(lid)) await removeTaskLabel(id, lid);
+          });
+          const items = [{ header: true, label: "追加" }];
+          cats.forEach((l) => items.push({ label: l.title, on: () => addCat(l.id) }));
+          if (cats.length) {
+            items.push({ sep: true }, { header: true, label: "外す" });
+            cats.forEach((l) => items.push({ label: l.title, danger: true, on: () => removeCat(l.id) }));
+          } else { items.push({ header: true, label: "（分類がありません）" }); }
+          openSlMenu(r.left, r.bottom + 4, items);
+          break;
+        }
+      }
+    };
+  });
+}
+
+// ── 軽量ポップアップメニュー（一括バー用）。table.js の openMenu を簡略化（header/sep/danger/date）。 ──
+let _slMenuEl = null, _slMenuCleanup = null;
+function closeSlMenu() {
+  if (_slMenuCleanup) { _slMenuCleanup(); _slMenuCleanup = null; }
+  if (_slMenuEl) { _slMenuEl.remove(); _slMenuEl = null; }
+}
+function openSlMenu(x, y, items) {
+  closeSlMenu();
+  const m = document.createElement("div");
+  m.className = "sl-menu";
+  m.setAttribute("role", "menu");
+  m.innerHTML = items.map((it, i) => {
+    if (it.sep) return `<div class="sl-menu-sep"></div>`;
+    if (it.header) return `<div class="sl-menu-hd">${esc(it.label)}</div>`;
+    if (it.input === "date") return `<label class="sl-menu-inp">${esc(it.label)}<input type="date" data-i="${i}" value="${esc(it.value || "")}"></label>`;
+    return `<button class="sl-menu-it${it.danger ? " danger" : ""}" role="menuitem" data-i="${i}">${esc(it.label)}</button>`;
+  }).join("");
+  m.querySelectorAll(".sl-menu-it").forEach((b) => {
+    b.onclick = () => { const it = items[+b.dataset.i]; closeSlMenu(); it.on && it.on(); };
+  });
+  m.querySelectorAll(".sl-menu-inp input").forEach((inp) => {
+    inp.onclick = (e) => e.stopPropagation();
+    inp.onchange = () => { const it = items[+inp.dataset.i]; closeSlMenu(); it.on && it.on(inp.value); };
+  });
+  document.body.appendChild(m);
+  _slMenuEl = m;
+  const mw = m.offsetWidth, mh = m.offsetHeight;
+  m.style.left = Math.max(6, Math.min(x, window.innerWidth - mw - 8)) + "px";
+  // 下に収まらなければ上向きに開く。
+  const top = (y + mh > window.innerHeight - 8) ? Math.max(6, y - mh - 28) : y;
+  m.style.top = top + "px";
+  const onDown = (ev) => { if (!m.contains(ev.target)) closeSlMenu(); };
+  const onKey = (ev) => { if (ev.key === "Escape") closeSlMenu(); };
+  const onScroll = (ev) => { if (ev && ev.target && ev.target.nodeType === 1 && m.contains(ev.target)) return; closeSlMenu(); };
+  setTimeout(() => { document.addEventListener("pointerdown", onDown, true); document.addEventListener("keydown", onKey); window.addEventListener("scroll", onScroll, true); window.addEventListener("resize", onScroll); }, 0);
+  _slMenuCleanup = () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); window.removeEventListener("scroll", onScroll, true); window.removeEventListener("resize", onScroll); };
 }
 
 // 有効な絞り込み条件チップを配線（B29）。各×で個別解除・「すべて解除」で一括。
@@ -407,7 +658,7 @@ function wireClear(root, data, ctx) {
 function wireRows(root, data, rerender) {
   root.querySelectorAll(".sl-row").forEach((row) => {
     row.onclick = (e) => {
-      if (e.target.closest("[data-check]") || e.target.closest("[data-flag]")) return;
+      if (e.target.closest("[data-check]") || e.target.closest("[data-flag]") || e.target.closest("[data-pick]")) return;
       openTaskForm({ taskId: +row.dataset.id, onSaved: rerender });
     };
   });
@@ -538,10 +789,17 @@ function css() {
   .sl-gh:first-child{padding-top:0}
   .sl-gh.over{color:${C.over}}.sl-gh.today{color:${C.amber}}
   .sl-gn{font-size:10.5px;font-weight:700;background:${C.track};color:${C.muted};border-radius:9px;padding:0 7px}
-  .sl-row{display:flex;align-items:center;gap:11px;background:${C.card};border:1px solid ${C.line};border-radius:11px;padding:11px 14px;cursor:pointer;transition:box-shadow .12s,transform .12s,opacity .25s}
+  .sl-row{display:flex;align-items:center;gap:11px;background:${C.card};border:1px solid ${C.line};border-radius:11px;padding:11px 14px;cursor:pointer;transition:box-shadow .12s,transform .12s,opacity .25s,background .12s,border-color .12s}
   .sl-row:hover{box-shadow:0 2px 10px rgba(20,30,50,.07);border-color:#dbe2ec}
   .sl-row.completing{opacity:0;transform:translateX(8px)}
   .sl-row.is-done .sl-rtitle{text-decoration:line-through;color:${C.muted}}
+  .sl-row.is-sel{background:#eef4ff;border-color:#bcd5ff}
+  /* C9: 選択チェックボックス（ホバーで出現・選択中は常時表示） */
+  .sl-pick{display:inline-grid;place-items:center;width:18px;height:18px;flex:none;border-radius:5px;border:1.5px solid ${C.line};background:#fff;color:#fff;cursor:pointer;line-height:1;opacity:0;transition:opacity .12s,background .12s,border-color .12s}
+  .sl-row:hover .sl-pick,.sl-pick.on,.sl-pick:focus-visible{opacity:1}
+  .sl-pick:hover{border-color:${C.fill};box-shadow:0 0 0 3px rgba(58,134,255,.12)}
+  .sl-pick.on{background:${C.fill};border-color:${C.fill}}
+  .sl-pick:focus-visible{outline:2px solid ${C.fill};outline-offset:1px}
   .sl-check{width:21px;height:21px;border-radius:50%;border:2px solid ${C.line};background:#fff;color:#fff;cursor:pointer;flex:none;font-size:12px;line-height:1;display:grid;place-items:center;padding:0;transition:background .12s,border-color .12s}
   .sl-check:hover{border-color:${C.free}}
   .sl-check.done{background:${C.free};border-color:${C.free}}
@@ -559,6 +817,27 @@ function css() {
   .sl-empty{text-align:center;color:${C.muted};padding:50px 0;font-size:13px}
   .sl-empty-i{font-size:34px;margin-bottom:8px;filter:grayscale(.3) opacity(.6)}
   #sl-clear{border:0;cursor:pointer;font:inherit;font-size:13px;font-weight:600}
+  /* ===== C9: 一括操作バー（sticky・選択時のみ） ===== */
+  .sl-bulk{position:sticky;bottom:14px;z-index:20;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:14px 0 4px;padding:9px 14px;border:1px solid #cfe0ff;border-radius:12px;background:#fff;box-shadow:0 8px 26px rgba(20,30,50,.16)}
+  .sl-bk-n{font-size:12.5px;font-weight:700;color:${C.fill};white-space:nowrap}
+  .sl-bk-acts{display:inline-flex;gap:6px;flex-wrap:wrap}
+  .sl-bk-a{font:inherit;font-size:12.5px;font-weight:600;padding:6px 13px;border:1px solid ${C.line};border-radius:8px;background:#fff;color:${C.ink};cursor:pointer}
+  .sl-bk-a:hover{border-color:${C.fill};color:${C.fill};background:#eef4ff}
+  .sl-bk-a.danger{color:${C.over}}.sl-bk-a.danger:hover{border-color:${C.over};color:${C.over};background:#fdecec}
+  .sl-bk-a:disabled,.sl-bk-clr:disabled{opacity:.5;cursor:default}
+  .sl-bk-busy{font-size:11.5px;color:${C.muted};font-variant-numeric:tabular-nums}
+  .sl-bk-clr{font:inherit;font-size:12px;font-weight:600;margin-left:auto;padding:6px 12px;border:1px solid transparent;border-radius:8px;background:transparent;color:${C.muted};cursor:pointer}
+  .sl-bk-clr:hover{color:${C.ink};background:${C.track}}
+  /* C9: 一括バーのポップアップメニュー */
+  .sl-menu{position:fixed;z-index:60;min-width:170px;max-height:60vh;overflow:auto;background:${C.card};border:1px solid ${C.line};border-radius:10px;box-shadow:0 10px 34px rgba(20,30,50,.2);padding:5px}
+  .sl-menu-it{display:flex;align-items:center;width:100%;font:inherit;font-size:13px;color:${C.ink};border:0;background:transparent;text-align:left;padding:7px 10px;border-radius:7px;cursor:pointer;white-space:nowrap}
+  .sl-menu-it:hover{background:${C.track}}
+  .sl-menu-it.danger{color:${C.over}}
+  .sl-menu-it.danger:hover{background:#fdecec}
+  .sl-menu-hd{font-size:10.5px;font-weight:700;letter-spacing:.04em;color:${C.muted};padding:6px 10px 3px}
+  .sl-menu-sep{height:1px;background:${C.line};margin:5px 4px}
+  .sl-menu-inp{display:flex;flex-direction:column;gap:4px;font-size:11.5px;color:${C.muted};padding:6px 10px}
+  .sl-menu-inp input{font:inherit;font-size:13px;padding:6px 8px;border:1px solid ${C.line};border-radius:7px;background:${C.card};color:${C.ink}}
   @media(max-width:720px){.sl-tabs{flex-wrap:nowrap}}
   /* ===== ダークモード（ハードコード淡色を暗側に上書き。ライト不変） ===== */
   html[data-theme="dark"] .sl-tcnt{background:${C.track}}
@@ -569,5 +848,12 @@ function css() {
   html[data-theme="dark"] .sl-chip{background:rgba(58,134,255,.16);border-color:rgba(58,134,255,.35)}
   html[data-theme="dark"] .sl-chipx:hover{background:rgba(58,134,255,.3)}
   html[data-theme="dark"] .sl-row:hover{box-shadow:0 2px 10px rgba(0,0,0,.4);border-color:${C.lineStrong}}
-  html[data-theme="dark"] .sl-check{background:${C.card}}`;
+  html[data-theme="dark"] .sl-check{background:${C.card}}
+  html[data-theme="dark"] .sl-row.is-sel{background:rgba(58,134,255,.16);border-color:rgba(58,134,255,.4)}
+  html[data-theme="dark"] .sl-pick{background:${C.card}}
+  html[data-theme="dark"] .sl-bulk{background:${C.card};border-color:rgba(58,134,255,.4)}
+  html[data-theme="dark"] .sl-bk-a{background:${C.card}}
+  html[data-theme="dark"] .sl-bk-a:hover{background:rgba(58,134,255,.16)}
+  html[data-theme="dark"] .sl-bk-a.danger:hover{background:rgba(229,72,77,.18)}
+  html[data-theme="dark"] .sl-menu-it.danger:hover{background:rgba(229,72,77,.18)}`;
 }
