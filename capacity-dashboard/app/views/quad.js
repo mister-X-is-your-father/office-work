@@ -5,7 +5,7 @@
 // ドラッグで区画移動=重要度・期限を書き換え（undoトースト付き）。クリックで編集モーダル。
 import { load, invalidate, projectName, isAiUser } from "../lib/store.js";
 import { updateTask } from "../lib/api.js";
-import { C, esc, fmtH, member_color, todayISO, announce } from "../lib/ui.js";
+import { C, esc, fmtH, member_color, todayISO, announce, avatar } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
 import { icon } from "../lib/icons.js";
 
@@ -227,7 +227,7 @@ function cardHtml(t, projects, today) {
     <button class="qd-mvbtn" type="button" aria-label="別の区画へ移動" title="別の区画へ移動"><span aria-hidden="true">⋮</span></button>
     <div class="qd-t">${esc(t.title)}</div>
     <div class="qd-m">
-      ${who ? `<span class="qd-ava" style="background:${member_color(who.id)}" title="${esc(wn)}">${esc(wn[0] || "?")}</span>` : ""}
+      ${who ? avatar(who, { size: 17 }) : ""}
       <span>${esc(projectName(projects, t.project_id))}</span>
       ${due ? `<span class="${late ? "late" : ""}">${due.slice(5).replace("-", "/")}${late ? " 超過" : ""}</span>` : ""}
       ${t.time_estimate ? `<span>${fmtH(t.time_estimate / HOUR)}</span>` : ""}
@@ -238,13 +238,13 @@ function cardHtml(t, projects, today) {
 function css() {
   return `
   .qd-tools{display:flex;align-items:center;gap:14px;margin:0 0 14px;flex-wrap:wrap}
-  .qd-rule{font-size:12px;color:${C.muted};background:#fff;border:1px solid ${C.line};border-radius:9px;padding:7px 12px;margin-left:auto}
+  .qd-rule{font-size:12px;color:${C.muted};background:${C.card};border:1px solid ${C.line};border-radius:9px;padding:7px 12px;margin-left:auto}
   .qd-rule b{color:${C.ink}}
-  .qd-tools select{font:inherit;font-size:12.5px;padding:4px 8px;border:1px solid ${C.line};border-radius:7px;background:#fff}
+  .qd-tools select{font:inherit;font-size:12.5px;padding:4px 8px;border:1px solid ${C.line};border-radius:7px;background:${C.card}}
   .qd-sort{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:${C.muted}}
   .qd-sort svg{flex:none;color:${C.muted}}
   .qd-who{display:flex;flex-wrap:wrap;gap:5px}
-  .qd-who-b{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:12.5px;padding:5px 11px;border:1px solid ${C.line};border-radius:18px;background:#fff;color:${C.muted};cursor:pointer;transition:border-color .12s,background .12s,color .12s}
+  .qd-who-b{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:12.5px;padding:5px 11px;border:1px solid ${C.line};border-radius:18px;background:${C.card};color:${C.muted};cursor:pointer;transition:border-color .12s,background .12s,color .12s}
   .qd-who-b:hover{border-color:#cfd9e6}
   .qd-who-b.on{background:${C.fill};border-color:${C.fill};color:#fff;font-weight:700}
   .qd-who-av{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:50%;color:#fff;font-size:9px;font-weight:700}
@@ -263,7 +263,7 @@ function css() {
   .qd-sub{font-size:11px;color:${C.muted};font-weight:500}
   .qd-list{display:flex;flex-direction:column;gap:7px;position:relative}
   .qd-empty{font-size:12px;color:${C.muted};padding:14px;text-align:center}
-  .qd-card{position:relative;border:1px solid ${C.line};border-radius:10px;padding:8px 11px;background:#fff;cursor:grab}
+  .qd-card{position:relative;border:1px solid ${C.line};border-radius:10px;padding:8px 11px;background:${C.card};cursor:grab}
   .qd-card:hover{border-color:#cfd9e6;box-shadow:0 2px 8px rgba(20,30,50,.06)}
   /* タップ移動ボタン（⋮）。マウス環境では控えめ＝hover/フォーカスで出す。タッチ端末では常時可視。 */
   .qd-mvbtn{position:absolute;top:3px;right:3px;width:24px;height:24px;display:grid;place-items:center;
@@ -273,7 +273,7 @@ function css() {
   .qd-card:hover .qd-mvbtn,.qd-mvbtn:focus-visible{opacity:1}
   /* タッチ端末（hoverできない/粗いポインタ）はDnD不可なので常時表示＝代替操作が見える */
   @media (hover:none),(pointer:coarse){.qd-mvbtn{opacity:.6}.qd-t{padding-right:20px}}
-  .qd-mvmenu{position:fixed;z-index:10000;min-width:210px;background:#fff;border:1px solid ${C.line};border-radius:11px;
+  .qd-mvmenu{position:fixed;z-index:10000;min-width:210px;background:${C.card};border:1px solid ${C.line};border-radius:11px;
     box-shadow:0 12px 34px rgba(20,30,50,.22);padding:5px;display:flex;flex-direction:column}
   .qd-mvmenu-hd{font-size:10px;font-weight:700;letter-spacing:.04em;color:${C.muted};padding:6px 11px 4px}
   .qd-mvmenu-it{display:flex;align-items:center;gap:9px;font:inherit;font-size:13px;text-align:left;border:0;background:transparent;
@@ -285,7 +285,6 @@ function css() {
   .qd-t{font-size:13px;font-weight:600;margin-bottom:3px}
   .qd-m{display:flex;align-items:center;gap:8px;font-size:11px;color:${C.muted}}
   .qd-m .late{color:${C.over};font-weight:700}
-  .qd-ava{display:inline-grid;place-items:center;width:17px;height:17px;border-radius:50%;color:#fff;font-size:9px;font-weight:700}
   .qd-hint{font-size:11px;color:${C.muted};margin-top:10px}
   .qd-undo{position:fixed;left:50%;transform:translateX(-50%);bottom:26px;z-index:55;display:flex;align-items:center;gap:12px;
     background:#1d2430;color:#fff;border-radius:11px;padding:10px 16px;font-size:12.5px;box-shadow:0 10px 30px rgba(10,18,35,.35)}
@@ -297,7 +296,7 @@ function css() {
   html[data-theme="dark"] .qd-rule,
   html[data-theme="dark"] .qd-tools select,
   html[data-theme="dark"] .qd-who-b,
-  html[data-theme="dark"] .qd-card{background:var(--card);color:var(--muted)}
+  html[data-theme="dark"] .qd-card{color:var(--muted)}
   html[data-theme="dark"] .qd-card{color:var(--ink)}
   html[data-theme="dark"] .qd-who-b:hover,
   html[data-theme="dark"] .qd-card:hover{border-color:${C.fill}}
@@ -309,7 +308,7 @@ function css() {
   html[data-theme="dark"] .qd-cell[data-q="q4"]{background:rgba(138,147,160,.12)!important}
   html[data-theme="dark"] .qd-mvbtn{color:var(--muted)}
   html[data-theme="dark"] .qd-mvbtn:hover{background:var(--track);color:var(--ink)}
-  html[data-theme="dark"] .qd-mvmenu{background:var(--card);border-color:var(--line);box-shadow:0 12px 34px rgba(0,0,0,.45)}
+  html[data-theme="dark"] .qd-mvmenu{border-color:var(--line);box-shadow:0 12px 34px rgba(0,0,0,.45)}
   html[data-theme="dark"] .qd-mvmenu-it{color:var(--ink)}
   html[data-theme="dark"] .qd-mvmenu-it:hover{background:var(--track)}
   html[data-theme="dark"] .qd-mvmenu-it.cur{color:var(--muted)}`;

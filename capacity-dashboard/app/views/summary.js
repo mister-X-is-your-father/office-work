@@ -7,7 +7,7 @@ import { openTaskForm } from "./taskform.js";
 import { dailyThroughput, projectTotals, labelTotals, overallStats } from "../lib/summary.js";
 import { estimateVsActual, shiftISO, dateOnly, hasDate } from "../lib/capacity.js";
 import { categoryColor } from "../lib/kinds.js";
-import { C, esc, fmtH, member_color, todayISO } from "../lib/ui.js";
+import { C, esc, fmtH, avatar, todayISO } from "../lib/ui.js";
 
 const DOW = ["日", "月", "火", "水", "木", "金", "土"];
 
@@ -152,14 +152,16 @@ function toolbar(pf, members, me) {
   const meId = me && me.id;
   const meMember = (members || []).find((m) => m.id === meId);
   const others = (members || []).filter((m) => m.id !== meId);
-  const whoBtn = (val, label, color) => {
+  // av: avatar() に渡す member（無ければアバター無し＝全員タブ）。色/イニシャルは共有ヘルパに統一。
+  const whoBtn = (val, label, av) => {
     const on = String(pf.who) === String(val) ? " on" : "";
-    const av = color ? `<i class="sm-who-av" style="background:${color}">${esc(label[0] || "?")}</i>` : "";
-    return `<button class="sm-who-b${on}" data-who="${esc(String(val))}">${av}${esc(label)}</button>`;
+    const avHtml = av ? avatar(av, { size: 16 }) : "";
+    return `<button class="sm-who-b${on}" data-who="${esc(String(val))}">${avHtml}${esc(label)}</button>`;
   };
-  const whoTabs = whoBtn("", "全員", "")
-    + (meMember ? whoBtn(meMember.id, "自分", member_color(meMember.id)) : "")
-    + others.map((m) => whoBtn(m.id, m.name || m.username, member_color(m.id))).join("");
+  const whoTabs = whoBtn("", "全員", null)
+    // 「自分」は表記は固定だが色は本人の member_color、イニシャルは「自」を維持（name=自分）。
+    + (meMember ? whoBtn(meMember.id, "自分", { id: meMember.id, name: "自分" }) : "")
+    + others.map((m) => whoBtn(m.id, m.name || m.username, m)).join("");
 
   const sortOpts = SORTS.map((o) =>
     `<option value="${o.key}"${o.key === pf.sort ? " selected" : ""}>${esc(o.label)}</option>`).join("");
@@ -244,21 +246,20 @@ function css() {
   return `
   .sm-tools{display:flex;align-items:center;gap:12px;margin:0 0 14px;flex-wrap:wrap}
   .sm-spacer{flex:1 1 auto}
-  .sm-seg{display:inline-flex;border:1px solid ${C.line};border-radius:9px;overflow:hidden;background:#fff}
+  .sm-seg{display:inline-flex;border:1px solid ${C.line};border-radius:9px;overflow:hidden;background:${C.card}}
   .sm-seg-b{font:inherit;font-size:12.5px;padding:6px 13px;border:0;border-left:1px solid ${C.line};background:transparent;color:${C.muted};cursor:pointer;transition:background .12s,color .12s}
   .sm-seg-b:first-child{border-left:0}
   .sm-seg-b:hover{background:${C.track}}
   .sm-seg-b.on{background:${C.fill};color:#fff;font-weight:700}
   .sm-who{display:flex;flex-wrap:wrap;gap:5px}
-  .sm-who-b{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:12.5px;padding:5px 11px;border:1px solid ${C.line};border-radius:18px;background:#fff;color:${C.muted};cursor:pointer;transition:border-color .12s,background .12s,color .12s}
+  .sm-who-b{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:12.5px;padding:5px 11px;border:1px solid ${C.line};border-radius:18px;background:${C.card};color:${C.muted};cursor:pointer;transition:border-color .12s,background .12s,color .12s}
   .sm-who-b:hover{border-color:#cfd9e6}
   .sm-who-b.on{background:${C.fill};border-color:${C.fill};color:#fff;font-weight:700}
-  .sm-who-av{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:50%;color:#fff;font-size:9px;font-weight:700}
-  .sm-who-b.on .sm-who-av{box-shadow:0 0 0 1.5px #fff}
+  .sm-who-b.on .ui-ava{box-shadow:0 0 0 1.5px #fff}
   .sm-done-l{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:${C.muted};cursor:pointer}
   .sm-done-l input{cursor:pointer}
   .sm-sort-l{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:${C.muted}}
-  .sm-tools select{font:inherit;font-size:12.5px;padding:5px 8px;border:1px solid ${C.line};border-radius:7px;background:#fff;color:${C.ink}}
+  .sm-tools select{font:inherit;font-size:12.5px;padding:5px 8px;border:1px solid ${C.line};border-radius:7px;background:${C.card};color:${C.ink}}
   .sm-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:14px}
   .sm-kpi{background:${C.card};border:1px solid ${C.line};border-radius:14px;padding:14px 16px}
   a.sm-kpi-link{display:block;text-decoration:none;color:inherit;transition:border-color .12s,box-shadow .12s,transform .12s}
@@ -315,11 +316,8 @@ function css() {
      ここで直す対象＝var()を介さず直書きした淡色のみ。アクセント色(青/緑/amber)は据え置き。 */
   html[data-theme="dark"] .sm-bcol.wknd .sm-bx,
   html[data-theme="dark"] .sm-bcol.wknd .sm-bw{color:var(--line-strong)}
-  /* B70 ツールバー: 直書き白背景だけ card へ補正。アクセント(青).on は据え置き。 */
-  html[data-theme="dark"] .sm-seg,
-  html[data-theme="dark"] .sm-who-b,
-  html[data-theme="dark"] .sm-tools select{background:var(--card);color:var(--muted)}
-  html[data-theme="dark"] .sm-seg-b.on,
-  html[data-theme="dark"] .sm-who-b.on{color:#fff}
+  /* B70 ツールバー: 背景は base で var(--card)=C.card 化済＝両テーマ自動反転（旧ダーク上書き不要）。
+     select の文字色だけ暗側で muted に寄せる現状を維持（ライト=ink / ダーク=muted）。 */
+  html[data-theme="dark"] .sm-tools select{color:var(--muted)}
   html[data-theme="dark"] .sm-who-b:hover{border-color:${C.fill}}`;
 }

@@ -4,7 +4,7 @@
 import { load, invalidate, isAiUser, ensureInbox } from "../lib/store.js";
 import { updateTask, getTask, setTaskWaiting, createTaskInProject, createProject, addRelation, removeRelation } from "../lib/api.js";
 import { PRIO, prioBucket, STATUS, statusOf } from "../lib/kinds.js";
-import { C, fmtH, esc, member_color, todayISO, announce } from "../lib/ui.js";
+import { C, fmtH, esc, todayISO, announce, avatar } from "../lib/ui.js";
 import { shiftISO } from "../lib/capacity.js";
 import { taskMatches, next7End } from "../lib/smartlist.js";
 import { icon } from "../lib/icons.js";
@@ -92,10 +92,11 @@ export async function render(root) {
 
 // ── ツールバー（プリセットタブ＋担当フィルタ＋スイムレーントグル）──
 function toolbarHtml(preset, swim, who, members, me) {
+  // 共有セグメント(.seg/.seg-b)に寄せる。サイズ据え置きの微差は .kb-tabs 側で最小上書き（視覚パリティ維持）。
   const tabs = PRESETS.map((p) =>
-    `<button class="kb-tab${p.key === preset ? " on" : ""}" data-preset="${p.key}">${esc(p.label)}</button>`).join("");
+    `<button class="seg-b kb-tab${p.key === preset ? " on" : ""}" data-preset="${p.key}">${esc(p.label)}</button>`).join("");
   return `<div class="kb-tools">
-    <div class="kb-tabs" role="tablist">${tabs}</div>
+    <div class="seg kb-tabs" role="tablist">${tabs}</div>
     ${whoTabsHtml(who, members, me)}
     <button class="kb-swim${swim ? " on" : ""}" data-swim title="案件（親タスク）ごとに行を分けて進み具合を見る">
       ${icon("folders", { size: 14 })}<span>案件レーン</span>
@@ -108,14 +109,16 @@ function whoTabsHtml(who, members, me) {
   const meId = me && me.id;
   const meMember = (members || []).find((m) => m.id === meId);
   const others = (members || []).filter((m) => m.id !== meId);
-  const btn = (val, label, color) => {
+  // アバターは共有 avatar() に置換（色は従来どおり member id 基準＝colorIndex:m.id。サイズ16px据え置き）。
+  // 表示ラベルは label を別途出す（avatar はイニシャルのみ）。「全員」はアバター無し。
+  const btn = (val, label, member) => {
     const on = String(who) === String(val) ? " on" : "";
-    const av = color ? `<i class="kb-who-av" style="background:${color}">${esc((label[0] || "?"))}</i>` : "";
+    const av = member ? avatar({ ...member, colorIndex: member.id }, { size: 16 }) : "";
     return `<button class="kb-who-b${on}" data-who="${esc(String(val))}">${av}${esc(label)}</button>`;
   };
-  const tabs = btn("", "全員", "")
-    + (meMember ? btn(meMember.id, "自分", member_color(meMember.id)) : "")
-    + others.map((m) => btn(m.id, m.name || m.username, member_color(m.id))).join("");
+  const tabs = btn("", "全員", null)
+    + (meMember ? btn(meMember.id, "自分", meMember) : "")
+    + others.map((m) => btn(m.id, m.name || m.username, m)).join("");
   return `<div class="kb-who" role="group" aria-label="担当フィルタ">${tabs}</div>`;
 }
 
@@ -210,9 +213,8 @@ function cardHtml(t, memberIdx) {
   const pb = prioBucket(t.priority);
   const est = t.time_estimate ? fmtH(t.time_estimate / 3600) : null;
   const who = (t.assignees || []).find((a) => !isAiUser(a)) || null;
-  const ava = who
-    ? `<span class="kb-ava" style="background:${member_color(memberIdx.get(who.id) ?? 0)}" title="${esc(who.name || who.username || "")}">${esc((who.name || who.username || "?")[0])}</span>`
-    : "";
+  // 共有 avatar() に置換（色は従来どおり members 配列内 index 基準＝colorIndex で固定。サイズ18px据え置き）。
+  const ava = who ? avatar({ ...who, colorIndex: memberIdx.get(who.id) ?? 0 }, { size: 18 }) : "";
   const parent = (((t.related_tasks || {}).parenttask) || [])[0] || null;
   const projBadge = parent
     ? `<span class="kb-proj" style="border-color:${projColor(parent.id)};color:${projColor(parent.id)}" title="案件: ${esc(parent.title)}">${esc(parent.title)}</span>`
@@ -674,26 +676,24 @@ function errHtml(e) {
 function css() {
   return `
   .kb-tools{display:flex;gap:12px;margin-bottom:14px;align-items:center;flex-wrap:wrap}
-  .kb-tabs{display:flex;gap:4px;background:#f0f2f5;border:1px solid ${C.line};border-radius:10px;padding:3px}
-  .kb-tab{font:inherit;font-size:12.5px;padding:5px 12px;border:0;background:transparent;color:${C.muted};border-radius:7px;cursor:pointer;font-weight:600}
-  .kb-tab:hover{color:${C.ink}}
-  .kb-tab.on{background:#fff;color:${C.ink};box-shadow:0 1px 2px rgba(20,30,50,.08)}
-  .kb-swim{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:12.5px;font-weight:600;padding:6px 12px;border:1px solid ${C.line};border-radius:9px;background:#fff;color:${C.muted};cursor:pointer}
+  /* プリセットタブ＝共有 .seg/.seg-b。従来のサイズ感（gap4・font12.5・縦5px・line-height従来）だけ最小上書きして視覚パリティ維持。 */
+  .kb-tabs{gap:4px}
+  .kb-tab{font-size:12.5px;padding:5px 12px;border-radius:7px;line-height:normal}
+  .kb-swim{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:12.5px;font-weight:600;padding:6px 12px;border:1px solid ${C.line};border-radius:9px;background:var(--card);color:${C.muted};cursor:pointer}
   .kb-swim:hover{border-color:${C.fill};color:${C.fill}}
   .kb-swim.on{background:${C.fill};border-color:${C.fill};color:#fff}
 
   .kb-who{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
-  .kb-who-b{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:12px;font-weight:600;padding:5px 10px;border:1px solid ${C.line};border-radius:9px;background:#fff;color:${C.muted};cursor:pointer}
+  .kb-who-b{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:12px;font-weight:600;padding:5px 10px;border:1px solid ${C.line};border-radius:9px;background:var(--card);color:${C.muted};cursor:pointer}
   .kb-who-b:hover{border-color:${C.fill};color:${C.fill}}
   .kb-who-b.on{background:${C.fill};border-color:${C.fill};color:#fff}
-  .kb-who-av{width:16px;height:16px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:9px;font-weight:700;flex:none}
 
   .kb-board{display:flex;gap:12px;align-items:flex-start;overflow-x:auto;padding-bottom:10px}
   .kb-col{flex:0 0 270px;background:#f0f2f5;border:1px solid ${C.line};border-radius:12px;padding:10px;display:flex;flex-direction:column}
   .kb-colh{display:flex;align-items:center;gap:7px;margin-bottom:9px;padding:0 2px}
   .kb-colh.warn{color:${C.over}}
   .kb-colt{font-size:13px;font-weight:700}
-  .kb-cnt{font-size:11px;color:${C.muted};background:#fff;border:1px solid ${C.line};border-radius:10px;padding:1px 8px;font-variant-numeric:tabular-nums}
+  .kb-cnt{font-size:11px;color:${C.muted};background:var(--card);border:1px solid ${C.line};border-radius:10px;padding:1px 8px;font-variant-numeric:tabular-nums}
   .kb-sum{font-size:11px;color:${C.muted};font-variant-numeric:tabular-nums}
   .kb-colh.warn .kb-sum{color:${C.over};font-weight:700}
   .kb-wip{margin-left:auto;color:${C.over};display:inline-flex;align-items:center}
@@ -701,11 +701,11 @@ function css() {
   .kb-cards.over{background:#e8f1ff;outline:2px dashed ${C.fill};outline-offset:-2px}
   .kb-add{margin-top:8px}
   .kb-addbtn{width:100%;font:inherit;font-size:12px;color:${C.muted};border:1px dashed ${C.line};border-radius:9px;background:transparent;padding:6px 8px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:5px}
-  .kb-addbtn:hover{border-color:${C.fill};color:${C.fill};background:#fff}
-  .kb-addin{width:100%;font:inherit;font-size:12.5px;padding:7px 10px;border:1px solid ${C.fill};border-radius:9px;background:#fff;box-sizing:border-box}
+  .kb-addbtn:hover{border-color:${C.fill};color:${C.fill};background:var(--card)}
+  .kb-addin{width:100%;font:inherit;font-size:12.5px;padding:7px 10px;border:1px solid ${C.fill};border-radius:9px;background:var(--card);box-sizing:border-box}
   .kb-addin:focus{outline:none}
 
-  .kb-card{position:relative;background:#fff;border:1px solid ${C.line};border-radius:10px;padding:9px 11px;cursor:grab;box-shadow:0 1px 2px rgba(20,30,50,.06);border-left:3px solid transparent}
+  .kb-card{position:relative;background:var(--card);border:1px solid ${C.line};border-radius:10px;padding:9px 11px;cursor:grab;box-shadow:0 1px 2px rgba(20,30,50,.06);border-left:3px solid transparent}
   .kb-card:hover{border-color:${C.fill}}
   .kb-card:focus-visible{outline:2px solid ${C.fill};outline-offset:2px}
   .kb-card.kb-dragging{opacity:.5}
@@ -718,7 +718,7 @@ function css() {
   .kb-ct{font-size:12.5px;font-weight:600;line-height:1.35;display:flex;gap:6px;align-items:baseline;padding-right:20px}
 
   /* ── タッチ用「移動」トリガ（マウス環境では控えめ・hover/focusで可視。タッチでは常時可視）── */
-  .kb-move{position:absolute;top:5px;right:5px;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;padding:0;border:1px solid ${C.line};border-radius:7px;background:#fff;color:${C.muted};cursor:pointer;opacity:0;transition:opacity .12s;z-index:1}
+  .kb-move{position:absolute;top:5px;right:5px;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;padding:0;border:1px solid ${C.line};border-radius:7px;background:var(--card);color:${C.muted};cursor:pointer;opacity:0;transition:opacity .12s;z-index:1}
   .kb-move:hover{color:${C.fill};border-color:${C.fill}}
   .kb-move:focus-visible{outline:2px solid ${C.fill};outline-offset:1px;opacity:1}
   .kb-card:hover .kb-move,.kb-card:focus-within .kb-move{opacity:1}
@@ -726,7 +726,7 @@ function css() {
   @media (hover:none),(pointer:coarse){ .kb-move{opacity:1} }
 
   /* ── 移動先メニュー（tb-ctx 風の軽量ポップ。body 直下に固定配置）── */
-  .kb-mm{position:fixed;z-index:1000;min-width:160px;max-width:240px;background:#fff;border:1px solid ${C.line};border-radius:10px;box-shadow:0 8px 28px rgba(20,30,50,.18);padding:5px;max-height:70vh;overflow:auto}
+  .kb-mm{position:fixed;z-index:1000;min-width:160px;max-width:240px;background:var(--card);border:1px solid ${C.line};border-radius:10px;box-shadow:0 8px 28px rgba(20,30,50,.18);padding:5px;max-height:70vh;overflow:auto}
   .kb-mm-h{font-size:10.5px;font-weight:700;color:${C.muted};padding:6px 8px 3px;letter-spacing:.02em}
   .kb-mm-i{display:flex;align-items:center;gap:6px;width:100%;font:inherit;font-size:12.5px;font-weight:600;color:${C.ink};text-align:left;border:0;background:transparent;border-radius:7px;padding:7px 8px;cursor:pointer}
   .kb-mm-i:hover:not([disabled]){background:#eef2f8;color:${C.fill}}
@@ -739,7 +739,6 @@ function css() {
   .kb-cr{margin-top:6px}
   .kb-proj{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px;font-weight:600;border:1px solid;border-radius:7px;padding:0 6px;vertical-align:middle}
   .kb-cm{display:flex;gap:7px;align-items:center;margin-top:8px;min-height:18px;flex-wrap:wrap}
-  .kb-ava{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:10px;font-weight:700;flex:none}
   .kb-due{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:${C.muted};font-weight:600;font-variant-numeric:tabular-nums;border-radius:7px;padding:0 6px}
   .kb-due.heat-overdue{color:#fff;background:${C.over}}
   .kb-due.heat-today{color:#fff;background:${C.amber}}
@@ -758,31 +757,28 @@ function css() {
   .kb-lanegrid{display:grid;grid-template-columns:190px repeat(4,minmax(210px,1fr));gap:10px;margin-bottom:10px;align-items:start}
   .kb-lanehd{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;color:${C.ink};padding:8px 6px;background:#f0f2f5;border:1px solid ${C.line};border-radius:10px;align-self:stretch}
   .kb-lanet{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .kb-lanecnt{margin-left:auto;font-size:10.5px;color:${C.muted};background:#fff;border:1px solid ${C.line};border-radius:9px;padding:0 7px;flex:none}
+  .kb-lanecnt{margin-left:auto;font-size:10.5px;color:${C.muted};background:var(--card);border:1px solid ${C.line};border-radius:9px;padding:0 7px;flex:none}
   .kb-scell{background:#f6f7f9;border:1px solid ${C.line};border-radius:10px;padding:6px;min-height:44px}
 
   /* ---- ダークモード上書き（淡色のみ反転） ---- */
+  /* var(--card)/var(--line) に寄せた淡色面（.kb-swim/.kb-who-b/.kb-cnt/.kb-addbtn:hover/.kb-addin/
+     .kb-move/.kb-lanecnt 等）は明側で既に変数化済み＝個別のダーク上書き不要になり削除した。 */
+  /* プリセットタブ track/on は共有 .seg が --surface-2/--surface-raised を使うが、従来のダーク色
+     （track=#262c34 / on=#1f242c）を維持するため明示的に上書きして視覚パリティを保つ。 */
   html[data-theme="dark"] .kb-tabs{background:var(--track)}
   html[data-theme="dark"] .kb-tab.on{background:var(--card)}
-  html[data-theme="dark"] .kb-swim{background:var(--card);border-color:var(--line)}
   html[data-theme="dark"] .kb-swim.on{background:${C.fill};border-color:${C.fill};color:#fff}
-  html[data-theme="dark"] .kb-who-b{background:var(--card);border-color:var(--line)}
   html[data-theme="dark"] .kb-who-b:hover{border-color:${C.fill};color:${C.fill}}
   html[data-theme="dark"] .kb-who-b.on{background:${C.fill};border-color:${C.fill};color:#fff}
   html[data-theme="dark"] .kb-col{background:var(--track)}
-  html[data-theme="dark"] .kb-cnt{background:var(--card);border-color:var(--line)}
   html[data-theme="dark"] .kb-cards.over{background:rgba(255,255,255,.06)}
-  html[data-theme="dark"] .kb-addbtn:hover{background:var(--card)}
-  html[data-theme="dark"] .kb-addin{background:var(--card)}
-  html[data-theme="dark"] .kb-card{background:var(--card);border-color:var(--line);box-shadow:0 1px 2px rgba(0,0,0,.35)}
-  html[data-theme="dark"] .kb-move{background:var(--card);border-color:var(--line)}
-  html[data-theme="dark"] .kb-mm{background:var(--card);border-color:var(--line);box-shadow:0 8px 28px rgba(0,0,0,.5)}
+  html[data-theme="dark"] .kb-card{box-shadow:0 1px 2px rgba(0,0,0,.35)}
+  html[data-theme="dark"] .kb-mm{box-shadow:0 8px 28px rgba(0,0,0,.5)}
   html[data-theme="dark"] .kb-mm-i:hover:not([disabled]){background:rgba(255,255,255,.08)}
   html[data-theme="dark"] .kb-card.kb-saving::after{background:rgba(0,0,0,.6)}
   html[data-theme="dark"] .kb-card:hover{border-color:${C.fill}}
   html[data-theme="dark"] .kb-shead{background:var(--track);border-color:var(--line)}
   html[data-theme="dark"] .kb-lanehd{background:var(--track);border-color:var(--line)}
-  html[data-theme="dark"] .kb-lanecnt{background:var(--card);border-color:var(--line)}
   html[data-theme="dark"] .kb-scell{background:var(--track);border-color:var(--line)}
   html[data-theme="dark"] .kb-due.heat-week{color:#1a1400;background:#d8b94a}`;
 }

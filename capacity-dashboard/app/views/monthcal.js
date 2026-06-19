@@ -5,7 +5,7 @@ import { load, invalidate, isAiUser } from "../lib/store.js";
 import { updateTask } from "../lib/api.js";
 import { expandRecurrences } from "../lib/recurrence.js";
 import { monthMatrix, DOW_JA } from "../lib/form.js";
-import { C, esc, member_color, todayISO } from "../lib/ui.js";
+import { C, esc, member_color, todayISO, avatar } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
 import { openTaskForm } from "./taskform.js";
 
@@ -72,14 +72,14 @@ export async function render(root) {
   const meId = me && me.id;
   const meMember = (members || []).find((m) => m.id === meId);
   const others = (members || []).filter((m) => m.id !== meId);
-  const whoBtn = (val, label, color) => {
+  // av=avatar()用member（無ければアバター無し＝「全員」）。「自分」は表記を保つため name を上書きした合成member。
+  const whoBtn = (val, label, av) => {
     const on = String(FILTER.who) === String(val) ? " on" : "";
-    const av = color ? `<i class="mc-who-av" style="background:${color}">${esc(label[0] || "?")}</i>` : "";
-    return `<button class="mc-who-b${on}" data-who="${esc(String(val))}">${av}${esc(label)}</button>`;
+    return `<button class="mc-who-b${on}" data-who="${esc(String(val))}">${av ? avatar(av, { size: 16 }) : ""}${esc(label)}</button>`;
   };
-  const whoTabs = whoBtn("", "全員", "")
-    + (meMember ? whoBtn(meMember.id, "自分", member_color(meMember.id)) : "")
-    + others.map((m) => whoBtn(m.id, m.name || m.username, member_color(m.id))).join("");
+  const whoTabs = whoBtn("", "全員", null)
+    + (meMember ? whoBtn(meMember.id, "自分", { id: meMember.id, name: "自分" }) : "")
+    + others.map((m) => whoBtn(m.id, m.name || m.username, m)).join("");
   const kindBtn = (k, label, on) =>
     `<button class="mc-kind-b${on ? " on" : ""}" data-kind="${k}" aria-pressed="${on}">${label}</button>`;
 
@@ -326,23 +326,22 @@ function css() {
   return `
   .mc-tools{display:flex;align-items:center;gap:10px;margin:0 0 14px}
   .mc-title{font-size:15px;min-width:110px;text-align:center}
-  .mc-nav{font:inherit;font-size:14px;border:1px solid ${C.line};background:#fff;border-radius:8px;padding:5px 13px;cursor:pointer}
+  .mc-nav{font:inherit;font-size:14px;border:1px solid ${C.line};background:${C.card};border-radius:8px;padding:5px 13px;cursor:pointer}
   .mc-nav:hover{background:${C.track}}
   .mc-tdy{font-size:12.5px}
   .mc-kinds{display:flex;gap:6px;margin-left:auto}
-  .mc-kind-b{font:inherit;font-size:12.5px;padding:5px 12px;border:1px solid ${C.line};border-radius:8px;background:#fff;color:${C.muted};cursor:pointer;transition:border-color .12s,background .12s,color .12s}
+  .mc-kind-b{font:inherit;font-size:12.5px;padding:5px 12px;border:1px solid ${C.line};border-radius:8px;background:${C.card};color:${C.muted};cursor:pointer;transition:border-color .12s,background .12s,color .12s}
   .mc-kind-b:hover{border-color:#cfd9e6}
   .mc-kind-b.on{background:${C.fill};border-color:${C.fill};color:#fff;font-weight:700}
   .mc-who{display:flex;flex-wrap:wrap;gap:5px;margin:0 0 14px}
-  .mc-who-b{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:12.5px;padding:5px 11px;border:1px solid ${C.line};border-radius:18px;background:#fff;color:${C.muted};cursor:pointer;transition:border-color .12s,background .12s,color .12s}
+  .mc-who-b{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:12.5px;padding:5px 11px;border:1px solid ${C.line};border-radius:18px;background:${C.card};color:${C.muted};cursor:pointer;transition:border-color .12s,background .12s,color .12s}
   .mc-who-b:hover{border-color:#cfd9e6}
   .mc-who-b.on{background:${C.fill};border-color:${C.fill};color:#fff;font-weight:700}
-  .mc-who-av{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:50%;color:#fff;font-size:9px;font-weight:700}
-  .mc-who-b.on .mc-who-av{box-shadow:0 0 0 1.5px #fff}
+  .mc-who-b.on .ui-ava{box-shadow:0 0 0 1.5px #fff}
   .mc-grid{display:grid;grid-template-columns:repeat(7,1fr);overflow:hidden;padding:0;position:relative}
   .mc-dow{font-size:11px;color:${C.muted};font-weight:700;text-align:center;padding:8px 0;border-bottom:1px solid ${C.line};background:#fafbfc}
   .mc-dow.sat{color:#3a86ff}.mc-dow.sun{color:#e5484d}
-  .mc-day{min-height:96px;border-bottom:1px solid ${C.line};border-right:1px solid ${C.line};padding:5px 6px;background:#fff;cursor:pointer}
+  .mc-day{min-height:96px;border-bottom:1px solid ${C.line};border-right:1px solid ${C.line};padding:5px 6px;background:${C.card};cursor:pointer}
   .mc-day.out{cursor:default}
   .mc-day:nth-child(7n+1){border-left:0}
   .mc-day.out{background:#fafbfd}.mc-day.out .mc-num{color:#c3c9d2}
@@ -371,7 +370,7 @@ function css() {
     .mc-task{padding-top:3px;padding-bottom:3px}
   }
   /* 「日付を変更」小メニュー（tb-ctx 風）。 */
-  .mc-move{position:absolute;z-index:40;width:168px;background:#fff;border:1px solid ${C.line};border-radius:10px;box-shadow:0 8px 28px rgba(20,30,50,.18);padding:6px}
+  .mc-move{position:absolute;z-index:40;width:168px;background:${C.card};border:1px solid ${C.line};border-radius:10px;box-shadow:0 8px 28px rgba(20,30,50,.18);padding:6px}
   .mc-move-hd{font-size:10.5px;color:${C.muted};font-weight:700;padding:2px 6px 4px}
   .mc-move-b{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;font:inherit;font-size:12.5px;text-align:left;padding:6px 8px;border:0;border-radius:6px;background:none;color:${C.ink};cursor:pointer}
   .mc-move-b:hover{background:${C.track}}
@@ -379,11 +378,11 @@ function css() {
   .mc-move-b small{color:${C.muted};font-size:10.5px}
   .mc-move-b.on small{color:${C.fill}}
   .mc-move-date{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11.5px;color:${C.muted};margin-top:4px;padding:4px 8px 2px;border-top:1px solid ${C.line}}
-  .mc-move-date input{font:inherit;font-size:12px;border:1px solid ${C.line};border-radius:6px;padding:3px 5px;background:#fff;color:inherit}
+  .mc-move-date input{font:inherit;font-size:12px;border:1px solid ${C.line};border-radius:6px;padding:3px 5px;background:${C.card};color:inherit}
   .mc-rec{background:#f2eefc;color:#6b4fa0}
   .mc-more{font:inherit;font-size:10px;color:${C.muted};padding:1px 5px;background:none;border:0;border-radius:4px;cursor:pointer;display:block;text-align:left}
   .mc-more:hover{background:${C.track};color:${C.fill}}
-  .mc-pop{position:absolute;z-index:30;width:230px;max-height:300px;overflow:auto;background:#fff;border:1px solid ${C.line};border-radius:10px;box-shadow:0 8px 28px rgba(20,30,50,.18);padding:8px}
+  .mc-pop{position:absolute;z-index:30;width:230px;max-height:300px;overflow:auto;background:${C.card};border:1px solid ${C.line};border-radius:10px;box-shadow:0 8px 28px rgba(20,30,50,.18);padding:8px}
   .mc-pop-hd{display:flex;align-items:center;gap:8px;margin:0 0 6px;padding:0 2px}
   .mc-pop-hd b{font-size:12.5px}
   .mc-pop-hd span{font-size:11px;color:${C.muted}}

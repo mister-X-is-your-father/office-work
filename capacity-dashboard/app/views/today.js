@@ -17,10 +17,11 @@ let MODE_UID = null; // モード保存先のユーザー id
 
 const round1 = (x) => Math.round(x * 100) / 100; // 時間表示=小数2桁（capacity.js と同義）
 
-const segCss = () => `<style>.t-seg{display:inline-flex;background:#fff;border:1px solid ${C.line};border-radius:10px;padding:3px;margin:0 0 16px;box-shadow:0 1px 2px rgba(20,30,50,.04)}
+// モード切替トグル。見た目は従来どおり（on=青塗り/白字＝モードが等価でなく「選択」を強調する既存意匠）。
+// 面の色は --card（light=#fff / dark=#1f242c）に統一し、テーマ別2ルールを1本化（描画は両テーマで従来と同一）。
+const segCss = () => `<style>.t-seg{display:inline-flex;background:var(--card);border:1px solid ${C.line};border-radius:10px;padding:3px;margin:0 0 16px;box-shadow:0 1px 2px rgba(20,30,50,.04)}
     .t-seg button{border:0;background:transparent;color:${C.muted};font:inherit;font-size:13px;font-weight:600;padding:5px 14px;border-radius:8px;cursor:pointer}
-    .t-seg button.on{background:${C.fill};color:#fff}
-    html[data-theme="dark"] .t-seg{background:var(--card)}</style>`;
+    .t-seg button.on{background:${C.fill};color:#fff}</style>`;
 
 const segHtml = (mode) => `<div class="t-seg">
       <button data-m="stacked" class="${mode === "stacked" ? "on" : ""}">積み上げ</button>
@@ -243,7 +244,7 @@ function legendHtml(usedPjs, projects, pjColor, usedKinds = new Set()) {
       ${pj}${occ}
       <span class="item"><span class="rule"></span>容量線 ${CAP}h</span>
       <span class="item"><span class="oversw"></span>容量超過</span>
-      <span class="item"><span class="sw freesw" style="background:#fff;border:1.5px dashed #c4d6c9"></span>空き工数</span>
+      <span class="item"><span class="sw freesw" style="background:var(--card);border:1.5px dashed #c4d6c9"></span>空き工数</span>
     </div>`;
 }
 

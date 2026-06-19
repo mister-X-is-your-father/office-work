@@ -8,7 +8,7 @@ import { taskMatches, next7End, EMPTY_FILTER, BUILTIN_VIEWS } from "../lib/smart
 import { shiftISO } from "../lib/capacity.js";
 import { PRIO, categoryLabels, categoryColor, REVIEW_LABEL, WAITING_LABEL } from "../lib/kinds.js";
 import { openTaskForm } from "./taskform.js";
-import { C, esc, fmtH, member_color, todayISO, emptyState } from "../lib/ui.js";
+import { C, esc, fmtH, todayISO, emptyState } from "../lib/ui.js";
 import { push as histPush, initHistoryHotkeys } from "../lib/history.js";
 import { icon } from "../lib/icons.js";
 

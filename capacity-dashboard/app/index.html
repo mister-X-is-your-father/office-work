@@ -19,6 +19,10 @@
     --fill:#3a86ff;--over:#e5484d;--free:#2fa66b;--full:#8a93a0;
     --shadow:0 1px 2px rgba(20,30,50,.05),0 6px 18px rgba(20,30,50,.07);
     --font:"Hiragino Kaku Gothic ProN",-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;
+    /* 意味的サーフェス変数（各viewのダーク上書きで頻出する淡色面を集約。--card/--track/--line を補完） */
+    --surface-2:#f0f2f5;      /* やや沈んだ面（セグメントtrack/淡い区画背景） */
+    --surface-raised:#ffffff; /* 浮いた面（メニュー/ポップ/onボタン面=cardと同等の明面） */
+    --chip-bg:#eef1f5;        /* チップ/タグの淡色面（既定はtrack相当） */
     /* Lucide settings（ナビ「設定」のギア用マスク。fill黒=mask不透明部、色は背景の currentColor で着く）。 */
     --ic-settings:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>')}
   *{box-sizing:border-box}
@@ -175,6 +179,8 @@
     --bg:#161a21; --card:#1f242c; --ink:#e7eaef; --muted:#9aa3af;
     --line:#2c333d; --line-strong:#3b434f; --track:#262c34;
     --shadow:0 1px 2px rgba(0,0,0,.45),0 8px 22px rgba(0,0,0,.5);
+    /* 意味的サーフェス変数のダーク値（沈んだ面=bgより少し明るく、浮いた面=cardより明るく） */
+    --surface-2:#1b2027; --surface-raised:#272d36; --chip-bg:#262c34;
   }
   /* シェルのハードコード淡色を暗側に上書き */
   html[data-theme="dark"] .nav a.active{background:rgba(58,134,255,.22)}
@@ -238,6 +244,29 @@
   @media (hover:none){
     [class*="hover-only"],[data-hover-only]{opacity:1!important;visibility:visible!important;pointer-events:auto!important}
   }
+  /* ===== 共有ビルディングブロック（additive・Phase2で各viewのタブ/トグル/ボタンを統一） ===== */
+  /* セグメントコントロール: kanban/today/table/smartlist/quad のタブ・トグル群を1つの見た目に揃える */
+  .seg{display:inline-flex;align-items:center;gap:2px;padding:3px;border:1px solid var(--line);
+    border-radius:10px;background:var(--surface-2)}
+  .seg-b{display:inline-flex;align-items:center;justify-content:center;gap:6px;
+    border:0;background:none;color:var(--muted);border-radius:7px;padding:6px 12px;
+    font:inherit;font-size:13px;font-weight:600;line-height:1;cursor:pointer;white-space:nowrap;
+    transition:background .12s,color .12s}
+  .seg-b:hover{color:var(--ink)}
+  .seg-b.on{background:var(--surface-raised);color:var(--ink);
+    box-shadow:0 1px 2px rgba(20,30,50,.10)}
+  html[data-theme="dark"] .seg-b.on{box-shadow:0 1px 2px rgba(0,0,0,.4)}
+  /* ボタン: 散在する白ボタン/塗りボタンの基準形（focus-visible は既定の輪郭を継承） */
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;
+    border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;
+    padding:8px 14px;font:inherit;font-size:13px;font-weight:600;line-height:1;cursor:pointer;
+    transition:background .12s,border-color .12s,filter .12s}
+  .btn:hover{background:var(--track);border-color:var(--line-strong)}
+  .btn-primary{background:var(--fill);border-color:var(--fill);color:#fff}
+  .btn-primary:hover{background:var(--fill);border-color:var(--fill);filter:brightness(1.08)}
+  .btn-ghost{background:transparent;border-color:var(--line);color:var(--ink)}
+  .btn-ghost:hover{background:var(--track);border-color:var(--line-strong)}
+  .btn-sm{padding:5px 10px;font-size:12px;border-radius:7px}
 </style>
 <script>try{var _t=localStorage.getItem("ts.theme");if(_t==="dark")document.documentElement.setAttribute("data-theme","dark");}catch(e){}</script>
 </head>
