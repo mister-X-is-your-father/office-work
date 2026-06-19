@@ -428,6 +428,7 @@ export async function render(root) {
     b.onclick = (e) => { e.stopPropagation(); openStatusMenu(b, +b.dataset.st, tasks, root); };
   });
   // 一覧から直接編集（担当/分類/重要度/期限/見積）。各セルはボタン＝行クリック(編集)とは分離。
+  root.querySelectorAll(".tb-projbtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openProjectMenu(b, +b.dataset.proj, tasks, root); }; });
   root.querySelectorAll(".tb-asbtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openAssigneeMenu(b, +b.dataset.as, tasks, members, root); }; });
   root.querySelectorAll(".tb-catbtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openCategoryMenu(b, +b.dataset.cat, tasks, labels, root); }; });
   root.querySelectorAll(".tb-priobtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openPrioMenu(b, +b.dataset.prio, tasks, root); }; });
@@ -809,15 +810,57 @@ function openCategoryMenu(chipEl, id, tasks, labels, root) {
   openMenu(r.left, r.bottom + 4, build(), { keepOpen: true, rebuild: build, onClose: () => { if (dirty) { recordLabels(); invalidate(); render(root); } } });
 }
 
+// あるタスク（rootId）自身＋その全子孫の id 集合を返す（循環防止に親候補から除外する用）。
+function descendantIds(tasks, rootId) {
+  const childrenOf = new Map();
+  for (const x of tasks) {
+    const p = (((x.related_tasks || {}).parenttask) || [])[0];
+    if (p) { (childrenOf.get(p.id) || childrenOf.set(p.id, []).get(p.id)).push(x.id); }
+  }
+  const out = new Set([rootId]); const stack = [rootId];
+  while (stack.length) {
+    const c = stack.pop();
+    for (const k of (childrenOf.get(c) || [])) if (!out.has(k)) { out.add(k); stack.push(k); }
+  }
+  return out;
+}
+
+// プロジェクト（親タスク）のワンクリック変更。候補＝既存の親タスク（自分自身と子孫は循環防止で除外）。
+function openProjectMenu(chipEl, id, tasks, root) {
+  closeRowMenu();
+  const t = (tasks || []).find((x) => x.id === id); if (!t) return;
+  const cur = (((t.related_tasks || {}).parenttask) || [])[0];
+  const curId = cur ? cur.id : null;
+  const excluded = descendantIds(tasks, id); // 自分＋子孫（親に選べない）
+  // 候補＝親として使われているタスク（distinct）。除外集合のものは弾く。
+  const cand = new Map();
+  for (const x of tasks || []) {
+    const p = (((x.related_tasks || {}).parenttask) || [])[0];
+    if (p && !excluded.has(p.id)) cand.set(p.id, p.title || "");
+  }
+  const apply = (newId) => {
+    gActive = { id, col: "proj" };
+    gridApply("プロジェクト変更", [{ id, col: "proj", before: curId || "", after: newId || "" }]);
+  };
+  const items = [...cand.entries()]
+    .sort((a, b) => (a[1] || "").localeCompare(b[1] || "", "ja"))
+    .map(([pid, title]) => ({ label: title || "(無題)", check: curId === pid, on: () => apply(pid) }));
+  items.push({ sep: true });
+  items.push({ label: "親タスクを新規/他から選ぶ…", on: () => openTaskForm({ taskId: id, onSaved: () => render(root) }) });
+  if (curId) items.push({ label: "プロジェクトから外す", danger: true, on: () => apply(null) });
+  const rc = chipEl.getBoundingClientRect();
+  openMenu(rc.left, rc.bottom + 4, items);
+}
+
 // ══ Excel風グリッド編集 ══════════════════════════════════════════════
 // 表モードのタスク一覧を、キーボードでセル移動しながら高速編集する層。
 // - 矢印=移動 / Shift+矢印=矩形選択 / Enter=確定して下 / Tab=右 / F2・直接入力=編集 / Esc=取消
 // - テキスト系(タイトル/見積/期限)はセル内インライン入力、列挙(担当/分類/重要度/ステータス)は既存ポップアップ
 // - Ctrl+C/V=セル値コピペ（列の型ごとにテキスト解釈）/ Ctrl+D=選択範囲を上のセルで下方向フィル
 // - 適用は rawSet（履歴なし）＋バッチで history に1エントリ＝コピペ/フィルも1回のUndoで戻る
-const GCOLS = ["title", "who", "cat", "prio", "due", "est", "state"]; // ナビ対象＝編集可能列（描画順）
+const GCOLS = ["proj", "title", "who", "cat", "prio", "due", "est", "state"]; // ナビ対象＝編集可能列（描画順）
 const GTEXT = new Set(["title", "due", "est"]); // セル内インライン入力する列（他は列挙ポップアップ）
-const GLABEL = { title: "タスク名変更", who: "担当変更", cat: "分類変更", prio: "重要度変更", due: "期限変更", est: "見積変更", state: "ステータス変更" };
+const GLABEL = { proj: "プロジェクト変更", title: "タスク名変更", who: "担当変更", cat: "分類変更", prio: "重要度変更", due: "期限変更", est: "見積変更", state: "ステータス変更" };
 const PRIO_NAME = { 0: "なし", 1: "低", 2: "中", 3: "高", 4: "MUST" };
 const PRIO_NUM = { "なし": 0, "低": 1, "中": 2, "高": 3, "must": 4, "MUST": 4 };
 const STATE_LABEL2KEY = { "未着手": "todo", "進行中": "doing", "連絡待ち": "waiting", "完了": "done" };
@@ -837,6 +880,7 @@ function gCellEl(root, id, col) { return root.querySelector(`tr[data-id="${id}"]
 
 // セルの論理値（before/after・rawSet で使う型）
 function gReadVal(col, t) {
+  if (col === "proj") return (((t.related_tasks || {}).parenttask) || [])[0]?.id || "";
   if (col === "title") return t.title || "";
   if (col === "who") return nonAiAssignees(t).map((a) => a.id).sort((a, b) => a - b);
   if (col === "cat") return userCats(t).map((l) => l.id).sort((a, b) => a - b);
@@ -848,6 +892,7 @@ function gReadVal(col, t) {
 }
 // セルの表示テキスト（コピー時のシリアライズ）
 function gValToText(col, t) {
+  if (col === "proj") { const p = (((t.related_tasks || {}).parenttask) || [])[0]; return p ? (p.title || "") : ""; }
   if (col === "title") return t.title || "";
   if (col === "who") return nonAiAssignees(t).map((a) => a.name || a.username).join(", ");
   if (col === "cat") return userCats(t).map((l) => l.title).join(", ");
@@ -860,6 +905,12 @@ function gValToText(col, t) {
 // テキスト → 論理値（ペースト時の型別解釈）。無効は null（=そのセルはスキップ）。
 function gParseText(col, text) {
   const s = (text == null ? "" : String(text)).trim();
+  if (col === "proj") {
+    if (!s) return "";
+    const key = s.toLowerCase();
+    const hit = (gCtx.tasks || []).find((x) => (x.title || "").trim().toLowerCase() === key);
+    return hit ? hit.id : null;
+  }
   if (col === "title") return s ? s : null;
   if (col === "due") { if (!s) return ""; const iso = parseSmartDate(s); return iso || null; }
   if (col === "est") { if (!s) return 0; const hf = parseFloat(s.replace(/[hH時間\s]/g, "")); return isFinite(hf) && hf >= 0 ? Math.round(hf * 3600) : null; }
@@ -883,6 +934,15 @@ function gEqual(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
 
 // 論理値をサーバへ適用（履歴は積まない）。set系(担当/分類)は現状から収束、state は正準フィールドへ。
 async function gRawSet(col, id, value) {
+  if (col === "proj") {
+    // 値=親タスクID（""=親なし）。現在の親をライブに読み、現状→目標へ差分適用（undo/redo 両方向に効く）。
+    const t = findGTask(id) || {};
+    const cur = (((t.related_tasks || {}).parenttask) || [])[0];
+    const curId = cur ? cur.id : null;
+    if (curId && curId !== value) await removeRelation(curId, "subtask", id).catch(() => {});
+    if (value && value !== curId) await addRelation(+value, id, "subtask").catch(() => {});
+    return;
+  }
   if (col === "title") return updateTask(id, { title: value });
   if (col === "prio") return updateTask(id, { priority: value });
   if (col === "due") return updateTask(id, { due_date: value ? value + "T00:00:00Z" : ZERO_DUE });
@@ -1544,7 +1604,7 @@ function rowHtml(r, members, i, manual) {
   const sel = selectedIds.has(id);
   return `<tr data-id="${id}" class="${manual ? "tb-draggable" : ""}${sel ? " tb-sel" : ""}">
     <td class="tb-selcol"><span class="tb-rowck${sel ? " on" : ""}" data-ck="${id}" role="checkbox" aria-checked="${sel}" title="選択">${sel ? icon("check", { size: 12 }) : ""}</span></td>
-    <td class="tb-proj" title="${r.parent ? esc(r.parent.title) : ""}">${r.parent ? esc(r.parent.title) : "—"}</td>
+    <td class="tb-proj tb-gc" data-col="proj"><button class="tb-cell tb-projbtn" data-proj="${id}" title="クリックでプロジェクト（親タスク）を変更">${r.parent ? esc(r.parent.title) : "—"}<span class="tb-cell-car">▾</span></button></td>
     <td class="tb-title tb-gc" data-col="title">${esc(r.title)}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">${icon("flag", { size: 12 })}</span>` : ""}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">${icon("play", { size: 11 })}</button>` : ""}</td>
     <td class="tb-gc" data-col="who">${whoBtn}</td>
     <td>${kind}</td>
