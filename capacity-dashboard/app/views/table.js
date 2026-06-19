@@ -739,19 +739,21 @@ function openEstMenu(chipEl, id, tasks, root) {
 // 多対多リレーション（担当/分類）の集合編集を1アクションとして履歴へ積む。
 // before/after は ID 配列。undo/redo は「現状(API)から見て足りない/余分な分」を add/remove する。
 // 単純な集合適用なので途中状態が違っても収束する。getCur は当該タスクの現在ID配列を返す関数。
+// 集合の収束適用: getCur()（現状=API側）から target へ、足りない分を add / 余分を remove。
+// 途中状態が違っても収束する（pushSetEdit の undo/redo・メニュー onClose の差分適用で共用）。
+async function applySetConverge(target, getCur, addFn, removeFn) {
+  const ts = new Set(target);
+  const cur = getCur();
+  for (const x of cur) if (!ts.has(x)) await removeFn(x).catch(() => {});
+  for (const x of target) if (!cur.includes(x)) await addFn(x).catch(() => {});
+}
 function pushSetEdit(label, before, after, getCur, addFn, removeFn) {
-  const bs = new Set(before), as = new Set(after);
+  const as = new Set(after);
   if (before.length === after.length && before.every((x) => as.has(x))) return; // 変化なし
-  const applySet = async (target) => {
-    const ts = new Set(target);
-    const cur = getCur();
-    for (const x of cur) if (!ts.has(x)) await removeFn(x).catch(() => {});
-    for (const x of target) if (!cur.includes(x)) await addFn(x).catch(() => {});
-  };
   history.push({
     label,
-    undo: async () => { await applySet(before); historyRerender(); },
-    redo: async () => { await applySet(after); historyRerender(); },
+    undo: async () => { await applySetConverge(before, getCur, addFn, removeFn); historyRerender(); },
+    redo: async () => { await applySetConverge(after, getCur, addFn, removeFn); historyRerender(); },
   });
 }
 
@@ -763,7 +765,11 @@ function openAssigneeMenu(chipEl, id, tasks, members, root) {
   let dirty = false;
   const before = t.assignees.map((a) => a.id); // 開いた時点の担当ID（履歴の before）
   const curAssignees = () => { const tt = (tasks || []).find((x) => x.id === id); return (tt && tt.assignees ? tt.assignees : t.assignees).map((a) => a.id); };
-  const recordAssignees = () => pushSetEdit("担当変更", before, t.assignees.map((a) => a.id), curAssignees, (uid) => addAssignee(id, uid), (uid) => removeAssignee(id, uid));
+  const addFn = (uid) => addAssignee(id, uid), removeFn = (uid) => removeAssignee(id, uid);
+  const recordAssignees = () => pushSetEdit("担当変更", before, t.assignees.map((a) => a.id), curAssignees, addFn, removeFn);
+  // 「適用するまで保存しない」: トグルはローカルの t.assignees を更新するだけ。
+  // 閉じた時に onClose で before→最終集合の差分を1回だけ API へ収束適用＋履歴1アクション（順序逆転を防ぐ）。
+  const commit = async () => { await applySetConverge(t.assignees.map((a) => a.id), () => before, addFn, removeFn); recordAssignees(); invalidate(); render(root); };
   const build = () => {
     const items = (members || []).map((m) => ({
       label: m.name || m.username,
@@ -771,15 +777,15 @@ function openAssigneeMenu(chipEl, id, tasks, members, root) {
       toggle: true,
       on: () => {
         dirty = true;
-        if (t.assignees.some((a) => a.id === m.id)) { t.assignees = t.assignees.filter((a) => a.id !== m.id); removeAssignee(id, m.id).catch(() => {}); }
-        else { t.assignees = [...t.assignees, { id: m.id, username: m.username, name: m.name }]; addAssignee(id, m.id).catch(() => {}); }
+        if (t.assignees.some((a) => a.id === m.id)) { t.assignees = t.assignees.filter((a) => a.id !== m.id); }
+        else { t.assignees = [...t.assignees, { id: m.id, username: m.username, name: m.name }]; }
       },
     }));
-    if (t.assignees.length) items.push({ sep: true }, { label: "担当なし（全員外す）", danger: true, on: () => { const cur = [...t.assignees]; t.assignees = []; cur.forEach((a) => removeAssignee(id, a.id).catch(() => {})); recordAssignees(); invalidate(); render(root); } });
+    if (t.assignees.length) items.push({ sep: true }, { label: "担当なし（全員外す）", danger: true, on: () => { dirty = true; t.assignees = []; commit(); } });
     return items;
   };
   const r = chipEl.getBoundingClientRect();
-  openMenu(r.left, r.bottom + 4, build(), { keepOpen: true, rebuild: build, onClose: () => { if (dirty) { recordAssignees(); invalidate(); render(root); } } });
+  openMenu(r.left, r.bottom + 4, build(), { keepOpen: true, rebuild: build, onClose: () => { if (dirty) commit(); } });
 }
 
 // 分類（ラベル）のワンクリック変更（複数トグル＋新規作成）。レビューは予約語なので除外。
@@ -790,7 +796,11 @@ function openCategoryMenu(chipEl, id, tasks, labels, root) {
   let dirty = false;
   const before = t.labels.map((x) => x.id); // 開いた時点の分類ラベルID（履歴の before）
   const curLabels = () => { const tt = (tasks || []).find((x) => x.id === id); return (tt && tt.labels ? tt.labels : t.labels).map((x) => x.id); };
-  const recordLabels = () => pushSetEdit("分類変更", before, t.labels.map((x) => x.id), curLabels, (lid) => addTaskLabel(id, lid), (lid) => removeTaskLabel(id, lid));
+  const addFn = (lid) => addTaskLabel(id, lid), removeFn = (lid) => removeTaskLabel(id, lid);
+  const recordLabels = () => pushSetEdit("分類変更", before, t.labels.map((x) => x.id), curLabels, addFn, removeFn);
+  // 「適用するまで保存しない」: トグルはローカルの t.labels を更新するだけ。
+  // 閉じた時に onClose で before→最終集合の差分を1回だけ API へ収束適用＋履歴1アクション（順序逆転を防ぐ）。
+  const commit = async () => { await applySetConverge(t.labels.map((x) => x.id), () => before, addFn, removeFn); recordLabels(); invalidate(); render(root); };
   const cats = (labels || []).filter((l) => l.title !== REVIEW_LABEL && l.title !== WAITING_LABEL);
   const build = () => {
     const items = cats.map((l) => ({
@@ -799,15 +809,16 @@ function openCategoryMenu(chipEl, id, tasks, labels, root) {
       toggle: true,
       on: () => {
         dirty = true;
-        if (t.labels.some((x) => x.id === l.id)) { t.labels = t.labels.filter((x) => x.id !== l.id); removeTaskLabel(id, l.id).catch(() => {}); }
-        else { t.labels = [...t.labels, l]; addTaskLabel(id, l.id).catch(() => {}); }
+        if (t.labels.some((x) => x.id === l.id)) { t.labels = t.labels.filter((x) => x.id !== l.id); }
+        else { t.labels = [...t.labels, l]; }
       },
     }));
-    items.push({ sep: true }, { label: "＋ 新しい分類…", on: async () => { const name = (prompt("新しい分類名") || "").trim(); if (!name) return; try { const lab = await createLabel(name); await addTaskLabel(id, lab.id); t.labels = [...t.labels, lab]; recordLabels(); } catch (e) { /* noop */ } invalidate(); render(root); } });
+    // 新規ラベル作成だけは即時 createLabel（マスタ生成）。付与はローカル＋onClose差分に合わせる。
+    items.push({ sep: true }, { label: "＋ 新しい分類…", on: async () => { const name = (prompt("新しい分類名") || "").trim(); if (!name) return; try { const lab = await createLabel(name); t.labels = [...t.labels, lab]; dirty = true; } catch (e) { /* noop */ } invalidate(); render(root); } });
     return items;
   };
   const r = chipEl.getBoundingClientRect();
-  openMenu(r.left, r.bottom + 4, build(), { keepOpen: true, rebuild: build, onClose: () => { if (dirty) { recordLabels(); invalidate(); render(root); } } });
+  openMenu(r.left, r.bottom + 4, build(), { keepOpen: true, rebuild: build, onClose: () => { if (dirty) commit(); } });
 }
 
 // あるタスク（rootId）自身＋その全子孫の id 集合を返す（循環防止に親候補から除外する用）。
@@ -871,6 +882,7 @@ let gEditing = false; // インライン編集中か（グリッドのキー操�
 let gClip = null;     // 内部クリップボード {cols:[colKey], rows:[[text,...],...]}
 let gKeyWired = false;
 let gCtx = null;      // {root, tasks, members, labels, today}
+let _gridBusy = false; // gridApply の並行ガード（連続発火時に await が重ならないよう直列化）
 
 function findGTask(id) { return (gCtx && gCtx.tasks || []).find((x) => x.id === id) || null; }
 function nonAiAssignees(t) { return (t.assignees || []).filter((a) => !isAiUser(a)); }
@@ -974,15 +986,22 @@ async function gRawSet(col, id, value) {
 }
 // 複数セル編集をまとめて適用＋履歴1エントリ。edits=[{id,col,before,after}]。適用後に再描画。
 async function gridApply(label, edits) {
-  const real = edits.filter((e) => !gEqual(e.before, e.after));
-  if (!real.length) { historyRerender(); return; }
-  for (const e of real) await gRawSet(e.col, e.id, e.after);
-  history.push({
-    label: real.length > 1 ? `${label}（${real.length}件）` : label,
-    undo: async () => { for (const e of real) await gRawSet(e.col, e.id, e.before); historyRerender(); },
-    redo: async () => { for (const e of real) await gRawSet(e.col, e.id, e.after); historyRerender(); },
-  });
-  historyRerender();
+  // 並行ガード: paste/fill/単一編集すべてこの経路。連続発火時に await が重なって順序逆転しないよう直列化。
+  if (_gridBusy) return;
+  _gridBusy = true;
+  try {
+    const real = edits.filter((e) => !gEqual(e.before, e.after));
+    if (!real.length) { historyRerender(); return; }
+    for (const e of real) await gRawSet(e.col, e.id, e.after);
+    history.push({
+      label: real.length > 1 ? `${label}（${real.length}件）` : label,
+      undo: async () => { for (const e of real) await gRawSet(e.col, e.id, e.before); historyRerender(); },
+      redo: async () => { for (const e of real) await gRawSet(e.col, e.id, e.after); historyRerender(); },
+    });
+    historyRerender();
+  } finally {
+    _gridBusy = false;
+  }
 }
 
 // アクティブ/選択ハイライトの再適用（再描画ごと）。アクティブIDが消えていたら解除。
