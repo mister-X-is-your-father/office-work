@@ -11,7 +11,14 @@ import { openTaskForm } from "./taskform.js";
 
 let VIEW = null; // {y, m}（表示中の月・セッション内で保持）
 const WHO_KEY = "ts.monthcal.who"; // 担当者フィルタ選択を個人保存（再読込でも維持）
-let FILTER = { who: (() => { try { return localStorage.getItem(WHO_KEY) || ""; } catch { return ""; } })() };
+const TASK_KEY = "ts.monthcal.showTask"; // 種別トグル: タスクを表示するか（既定: 表示）
+const REC_KEY = "ts.monthcal.showRec"; // 種別トグル: 会議/定例を表示するか（既定: 表示）
+const lsFlag = (k) => { try { return localStorage.getItem(k) !== "0"; } catch { return true; } }; // 既定 true（"0" のときだけ false）
+let FILTER = {
+  who: (() => { try { return localStorage.getItem(WHO_KEY) || ""; } catch { return ""; } })(),
+  task: lsFlag(TASK_KEY),
+  rec: lsFlag(REC_KEY),
+};
 
 const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(0, 10) : "");
 const hhmm = (min) => `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")}`;
@@ -24,7 +31,7 @@ const taskChip = (it, { drag } = {}) =>
 
 export async function render(root) {
   closePopover(root); // 再描画前に開いていたポップオーバーと document リスナを掃除
-  const { tasks, members, recurrences, holidaysByDate } = await load();
+  const { tasks, members, recurrences, holidaysByDate, me } = await load();
   const today = todayISO();
   if (!VIEW) VIEW = { y: +today.slice(0, 4), m: +today.slice(5, 7) };
   const weeks = monthMatrix(VIEW.y, VIEW.m);
@@ -33,7 +40,7 @@ export async function render(root) {
   // 日付 → 項目。タスク=期限ベース（完了は薄く）・会議/定例=展開結果（時刻つき）
   const byDay = new Map();
   const add = (iso, item) => { (byDay.get(iso) || byDay.set(iso, []).get(iso)).push(item); };
-  for (const { recurrence: rec, dateISO, assignees, override } of expandRecurrences(recurrences || [], firstISO, lastISO)) {
+  if (FILTER.rec) for (const { recurrence: rec, dateISO, assignees, override } of expandRecurrences(recurrences || [], firstISO, lastISO)) {
     const ids = assignees || rec.assignee_ids || [];
     if (FILTER.who && ids.length && !ids.includes(+FILTER.who)) continue;
     const d = new Date(rec.dtstart);
@@ -41,7 +48,7 @@ export async function render(root) {
     const min = override && override.start_minute != null ? override.start_minute : baseMin;
     add(dateISO, { kind: "rec", title: rec.title || "会議", min: min || null, sort: min || 0 });
   }
-  for (const t of tasks || []) {
+  if (FILTER.task) for (const t of tasks || []) {
     const due = dueISO(t);
     if (!due || due < firstISO || due > lastISO) continue;
     if (FILTER.who && !(t.assignees || []).some((a) => String(a.id) === FILTER.who)) continue;
@@ -51,19 +58,32 @@ export async function render(root) {
   }
   for (const list of byDay.values()) list.sort((a, b) => a.sort - b.sort);
 
-  const whoOpts = `<option value="">全員</option>` + (members || []).map((m) =>
-    `<option value="${m.id}"${String(m.id) === FILTER.who ? " selected" : ""}>${esc(m.name || m.username)}</option>`).join("");
+  // 担当者切替=ワンタップのボタンタブ（全員 / 自分 / 各メンバー）。選択は localStorage 永続（quad.js と同作法）。
+  const meId = me && me.id;
+  const meMember = (members || []).find((m) => m.id === meId);
+  const others = (members || []).filter((m) => m.id !== meId);
+  const whoBtn = (val, label, color) => {
+    const on = String(FILTER.who) === String(val) ? " on" : "";
+    const av = color ? `<i class="mc-who-av" style="background:${color}">${esc(label[0] || "?")}</i>` : "";
+    return `<button class="mc-who-b${on}" data-who="${esc(String(val))}">${av}${esc(label)}</button>`;
+  };
+  const whoTabs = whoBtn("", "全員", "")
+    + (meMember ? whoBtn(meMember.id, "自分", member_color(meMember.id)) : "")
+    + others.map((m) => whoBtn(m.id, m.name || m.username, member_color(m.id))).join("");
+  const kindBtn = (k, label, on) =>
+    `<button class="mc-kind-b${on ? " on" : ""}" data-kind="${k}" aria-pressed="${on}">${label}</button>`;
 
   root.innerHTML = `
     <style>${css()}</style>
-    <h1 class="vtitle">月カレンダー <small>期限タスク＋会議/定例 ・ チップをドラッグで期限移動</small></h1>
+    <h1 class="vtitle">月カレンダー <small>期限タスク＋会議/定例 ・ チップをドラッグで期限移動 ・ 空きをクリックで新規</small></h1>
     <div class="mc-tools">
       <button id="mc-prev" class="mc-nav">‹</button>
       <b class="mc-title">${VIEW.y}年${VIEW.m}月</b>
       <button id="mc-next" class="mc-nav">›</button>
       <button id="mc-today" class="mc-nav mc-tdy">今日</button>
-      <select id="mc-who">${whoOpts}</select>
+      <div class="mc-kinds" id="mc-kinds">${kindBtn("task", "タスク", FILTER.task)}${kindBtn("rec", "会議", FILTER.rec)}</div>
     </div>
+    <div class="mc-who" id="mc-who">${whoTabs}</div>
     <div class="card mc-grid">
       ${DOW_JA.map((n, i) => `<div class="mc-dow ${i === 0 ? "sun" : i === 6 ? "sat" : ""}">${n}</div>`).join("")}
       ${weeks.flat().map((c) => dayHtml(c, byDay.get(c.iso) || [], today, holidaysByDate)).join("")}
@@ -72,7 +92,17 @@ export async function render(root) {
   root.querySelector("#mc-prev").onclick = () => { VIEW.m--; if (VIEW.m < 1) { VIEW.m = 12; VIEW.y--; } render(root); };
   root.querySelector("#mc-next").onclick = () => { VIEW.m++; if (VIEW.m > 12) { VIEW.m = 1; VIEW.y++; } render(root); };
   root.querySelector("#mc-today").onclick = () => { VIEW = null; render(root); };
-  root.querySelector("#mc-who").onchange = (e) => { FILTER.who = e.target.value; try { localStorage.setItem(WHO_KEY, FILTER.who); } catch {} render(root); };
+  root.querySelectorAll("#mc-who [data-who]").forEach((b) => {
+    b.onclick = () => { FILTER.who = b.dataset.who; try { localStorage.setItem(WHO_KEY, FILTER.who); } catch {} render(root); };
+  });
+  root.querySelectorAll("#mc-kinds [data-kind]").forEach((b) => {
+    b.onclick = () => {
+      const k = b.dataset.kind;
+      FILTER[k] = !FILTER[k];
+      try { localStorage.setItem(k === "task" ? TASK_KEY : REC_KEY, FILTER[k] ? "1" : "0"); } catch {}
+      render(root);
+    };
+  });
 
   root.querySelectorAll(".mc-task").forEach((el) => {
     el.onclick = () => openTaskForm({ taskId: +el.dataset.id, onSaved: async () => { invalidate(); await load(); render(root); } });
@@ -91,6 +121,12 @@ export async function render(root) {
   });
 
   root.querySelectorAll(".mc-day").forEach((cell) => {
+    // 空き領域クリックで新規作成（B12 軽量版・プリフィルは将来）。チップ/他N件/祝日ラベル等の上は除外。
+    cell.onclick = (ev) => {
+      if (root.querySelector(".mc-pop")) return; // ポップオーバー表示中はその外側クリックの後始末に専念
+      if (ev.target.closest(".mc-task,.mc-rec,.mc-more,.mc-hol")) return; // 既存項目・操作の上は新規作成しない
+      openTaskForm({ onSaved: async () => { invalidate(); await load(); render(root); } });
+    };
     cell.ondragover = (ev) => { ev.preventDefault(); cell.classList.add("over"); };
     cell.ondragleave = () => cell.classList.remove("over");
     cell.ondrop = async (ev) => {
@@ -189,11 +225,21 @@ function css() {
   .mc-nav{font:inherit;font-size:14px;border:1px solid ${C.line};background:#fff;border-radius:8px;padding:5px 13px;cursor:pointer}
   .mc-nav:hover{background:${C.track}}
   .mc-tdy{font-size:12.5px}
-  .mc-tools select{font:inherit;font-size:13px;padding:6px 10px;border:1px solid ${C.line};border-radius:8px;background:#fff;margin-left:auto}
+  .mc-kinds{display:flex;gap:6px;margin-left:auto}
+  .mc-kind-b{font:inherit;font-size:12.5px;padding:5px 12px;border:1px solid ${C.line};border-radius:8px;background:#fff;color:${C.muted};cursor:pointer;transition:border-color .12s,background .12s,color .12s}
+  .mc-kind-b:hover{border-color:#cfd9e6}
+  .mc-kind-b.on{background:${C.fill};border-color:${C.fill};color:#fff;font-weight:700}
+  .mc-who{display:flex;flex-wrap:wrap;gap:5px;margin:0 0 14px}
+  .mc-who-b{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:12.5px;padding:5px 11px;border:1px solid ${C.line};border-radius:18px;background:#fff;color:${C.muted};cursor:pointer;transition:border-color .12s,background .12s,color .12s}
+  .mc-who-b:hover{border-color:#cfd9e6}
+  .mc-who-b.on{background:${C.fill};border-color:${C.fill};color:#fff;font-weight:700}
+  .mc-who-av{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:50%;color:#fff;font-size:9px;font-weight:700}
+  .mc-who-b.on .mc-who-av{box-shadow:0 0 0 1.5px #fff}
   .mc-grid{display:grid;grid-template-columns:repeat(7,1fr);overflow:hidden;padding:0;position:relative}
   .mc-dow{font-size:11px;color:${C.muted};font-weight:700;text-align:center;padding:8px 0;border-bottom:1px solid ${C.line};background:#fafbfc}
   .mc-dow.sat{color:#3a86ff}.mc-dow.sun{color:#e5484d}
-  .mc-day{min-height:96px;border-bottom:1px solid ${C.line};border-right:1px solid ${C.line};padding:5px 6px;background:#fff}
+  .mc-day{min-height:96px;border-bottom:1px solid ${C.line};border-right:1px solid ${C.line};padding:5px 6px;background:#fff;cursor:pointer}
+  .mc-day.out{cursor:default}
   .mc-day:nth-child(7n+1){border-left:0}
   .mc-day.out{background:#fafbfd}.mc-day.out .mc-num{color:#c3c9d2}
   .mc-day.today{background:#f3f8ff;box-shadow:inset 0 0 0 1.5px ${C.fill}}
@@ -224,7 +270,12 @@ function css() {
   .mc-pop-empty{font-size:11px;color:${C.muted};padding:4px 2px}
   /* ===== ダーク: ハードコード淡色を構造色へ（ライトは非変更） ===== */
   html[data-theme="dark"] .mc-nav{background:var(--card);color:var(--ink)}
-  html[data-theme="dark"] .mc-tools select{background:var(--card);color:var(--ink)}
+  html[data-theme="dark"] .mc-kind-b,
+  html[data-theme="dark"] .mc-who-b{background:var(--card);color:var(--muted)}
+  html[data-theme="dark"] .mc-kind-b:hover,
+  html[data-theme="dark"] .mc-who-b:hover{border-color:${C.fill}}
+  html[data-theme="dark"] .mc-kind-b.on,
+  html[data-theme="dark"] .mc-who-b.on{background:${C.fill};border-color:${C.fill};color:#fff}
   html[data-theme="dark"] .mc-dow{background:var(--track)}
   html[data-theme="dark"] .mc-day{background:var(--card)}
   html[data-theme="dark"] .mc-day.out{background:var(--track)}

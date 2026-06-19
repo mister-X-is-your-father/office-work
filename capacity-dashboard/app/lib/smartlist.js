@@ -3,7 +3,8 @@
 import { shiftISO, dateOnly, hasDate, hasStarted } from "./capacity.js";
 
 // フィルタの既定（空＝条件なし）
-export const EMPTY_FILTER = { text: "", due: "", prio: "", ws: 0, status: "undone", flag: false, unsorted: false };
+// assignee: "" = 指定なし（すべて） / "none" = 担当者なし / "<id>" = その人間担当（AI=fable は対象外）
+export const EMPTY_FILTER = { text: "", due: "", prio: "", ws: 0, status: "undone", flag: false, unsorted: false, assignee: "" };
 
 // AI（fable）担当の判定。lib/store.js の isAiUser と同義だが、循環 import を避けるため
 // ここに最小実装をインライン（AI_USERNAMES=["fable"] と同一基準。増えたら両方更新）。
@@ -66,6 +67,12 @@ export function taskMatches(t, f, ctx) {
 
   if (f.ws && t.project_id !== f.ws) return false;
   if (f.flag && !t.is_favorite) return false;
+
+  // 担当フィルタ: "none"=人間担当が1人もいない（AI=fable のみ/担当無しを含む） / "<id>"=その人が担当に含まれる
+  if (f.assignee) {
+    if (f.assignee === "none") { if (hasHumanAssignee(t)) return false; }
+    else if (!(t.assignees || []).some((a) => String(a.id) === String(f.assignee))) return false;
+  }
 
   // 未整理（unsorted）= まだ段取りされてない＝「人間担当あり かつ 期限あり」を除外（担当なし or 期限なしのみ通す）。
   if (f.unsorted && hasHumanAssignee(t) && due) return false;

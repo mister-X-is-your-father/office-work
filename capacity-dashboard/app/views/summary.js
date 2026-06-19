@@ -1,42 +1,105 @@
 // 概要ダッシュボード（TickTick の「概要/統計」をブラッシュアップ＋§9 のPJ別配分/負荷ヒストリー）。
 // store のタスクだけで集計（N+1なし）。完了の推移・PJ別配分・分類別・見積りvs実績。
+// B70: 期間切替(14/30/90日・既定14)＋並べ替え(見積vs実績)＋フィルタ(担当/完了含む)。選択は localStorage 永続。
+//      集計は期間に追従＝期間内(対象=作成 or 完了が過去N日以内)のタスクだけで再計算する。
 import { load, invalidate, projectName } from "../lib/store.js";
 import { openTaskForm } from "./taskform.js";
 import { dailyThroughput, projectTotals, labelTotals, overallStats } from "../lib/summary.js";
-import { estimateVsActual } from "../lib/capacity.js";
+import { estimateVsActual, shiftISO, dateOnly, hasDate } from "../lib/capacity.js";
 import { categoryColor } from "../lib/kinds.js";
-import { C, esc, fmtH, todayISO } from "../lib/ui.js";
+import { C, esc, fmtH, member_color, todayISO } from "../lib/ui.js";
 
 const DOW = ["日", "月", "火", "水", "木", "金", "土"];
 
+const PERIODS = [14, 30, 90];
+const SORTS = [
+  { key: "diffAbs", label: "ズレ大きい順" },
+  { key: "diffOver", label: "超過大きい順" },
+  { key: "diffUnder", label: "短縮大きい順" },
+  { key: "actH", label: "実績多い順" },
+];
+const LS = {
+  period: "ts.summary.period",
+  sort: "ts.summary.sort",
+  who: "ts.summary.who",
+  done: "ts.summary.includeDone",
+};
+const lsGet = (k, def) => { try { const v = localStorage.getItem(k); return v == null ? def : v; } catch { return def; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, String(v)); } catch {} };
+
+function readPrefs() {
+  const period = (() => { const n = +lsGet(LS.period, 14); return PERIODS.includes(n) ? n : 14; })();
+  const sort = (() => { const s = lsGet(LS.sort, "diffAbs"); return SORTS.some((o) => o.key === s) ? s : "diffAbs"; })();
+  return {
+    period,
+    sort,
+    who: lsGet(LS.who, ""), // ""=全員 / それ以外=メンバーid文字列
+    includeDone: lsGet(LS.done, "1") !== "0", // 既定=完了も含む（現状の集計と一致）
+  };
+}
+
+// 期間内判定: 作成 or 完了 が過去 period 日以内（today を含む末尾 period 日窓）。
+// done_at が無い未完了は created で判定＝この窓に入れば対象。
+function inPeriod(t, today, period) {
+  const start = shiftISO(today, -(period - 1));
+  const cr = hasDate(t.created) ? dateOnly(t.created) : "";
+  if (cr && cr >= start && cr <= today) return true;
+  if (t.done && hasDate(t.done_at)) {
+    const d = dateOnly(t.done_at);
+    if (d >= start && d <= today) return true;
+  }
+  return false;
+}
+
+function applyFilters(tasks, today, pf) {
+  return (tasks || []).filter((t) => {
+    if (!pf.includeDone && t.done) return false;
+    if (pf.who && !(t.assignees || []).some((a) => String(a.id) === String(pf.who))) return false;
+    return inPeriod(t, today, pf.period);
+  });
+}
+
+function sortEva(rows, key) {
+  const arr = rows.slice();
+  if (key === "diffOver") arr.sort((a, b) => (b.actH - b.estH) - (a.actH - a.estH));
+  else if (key === "diffUnder") arr.sort((a, b) => (a.actH - a.estH) - (b.actH - b.estH));
+  else if (key === "actH") arr.sort((a, b) => b.actH - a.actH);
+  else arr.sort((a, b) => Math.abs(b.actH - b.estH) - Math.abs(a.actH - a.estH)); // diffAbs
+  return arr;
+}
+
 export async function render(root) {
-  const { tasks, projects, labels = [] } = await load();
+  const { tasks, projects, members = [], me, labels = [] } = await load();
   const today = todayISO();
-  const s = overallStats(tasks, today);
-  const tp = dailyThroughput(tasks, today, 14);
-  const pjs = projectTotals(tasks)
+  const pf = readPrefs();
+  const scoped = applyFilters(tasks, today, pf);
+
+  const s = overallStats(scoped, today);
+  const tp = dailyThroughput(scoped, today, pf.period);
+  const pjs = projectTotals(scoped)
     .filter((p) => p.estH > 0 || p.spentH > 0 || p.count > 0)
     .sort((a, b) => (b.estH + b.spentH) - (a.estH + a.spentH)).slice(0, 8);
-  const cats = labelTotals(tasks).slice(0, 8);
+  const cats = labelTotals(scoped).slice(0, 8);
   const labelById = new Map((labels || []).map((l) => [l.title, l]));
-  const eva = estimateVsActual(tasks).rows
-    .filter((r) => r.actH > 0).sort((a, b) => Math.abs(b.actH - b.estH) - Math.abs(a.actH - a.estH)).slice(0, 6);
+  const eva = sortEva(estimateVsActual(scoped).rows.filter((r) => r.actH > 0), pf.sort).slice(0, 6);
 
   const accPct = s.accuracy == null ? "—" : Math.round(s.accuracy * 100) + "%";
   const accCls = s.accuracy == null ? "" : (s.accuracy > 1.1 ? "over" : s.accuracy < 0.9 ? "under" : "ok");
+  const sortLabel = (SORTS.find((o) => o.key === pf.sort) || SORTS[0]).label;
 
   root.innerHTML = `
     <style>${css()}</style>
-    <h1 class="vtitle">概要 <small>${today} 時点</small></h1>
+    <h1 class="vtitle">概要 <small>${today} 時点 ・ 過去${pf.period}日</small></h1>
+    ${toolbar(pf, members, me)}
     <div class="sm-kpis">
-      ${kpi("今週の完了", `${s.doneThisWeek}`, `件 ・ 累計 ${s.done}`, "free", "#/status")}
+      ${kpi("完了（期間内）", `${s.done}`, `件 ・ 今週 ${s.doneThisWeek}`, "free", "#/status")}
       ${kpi("実績 / 見積り", `${fmtH(s.spentH)}`, `/ ${fmtH(s.estH)}`, "", "#/estactual")}
       ${kpi("見積り精度", accPct, "実績÷見積り", accCls, "#/estactual")}
       ${kpi("未完了", `${s.open}`, `件 ・ 期限切れ ${s.overdue}`, s.overdue ? "over" : "", "#/triage")}
     </div>
 
     <div class="card sm-card">
-      <div class="sm-h">完了の推移 <span class="sm-sub">過去14日 ・ <i class="lg add"></i>追加 <i class="lg done"></i>完了</span></div>
+      <div class="sm-h">完了の推移 <span class="sm-sub">過去${pf.period}日 ・ <i class="lg add"></i>追加 <i class="lg done"></i>完了</span></div>
       ${throughputChart(tp)}
     </div>
 
@@ -52,9 +115,21 @@ export async function render(root) {
     </div>
 
     <div class="card sm-card">
-      <div class="sm-h">見積り vs 実績 <span class="sm-sub">ズレの大きい順 ・ 実績のあるタスク</span></div>
+      <div class="sm-h">見積り vs 実績 <span class="sm-sub">${esc(sortLabel)} ・ 実績のあるタスク</span></div>
       ${eva.length ? evaRows(eva) : empty()}
     </div>`;
+
+  // ── ツールバー操作（いずれも localStorage 永続→再描画。集計が追従する） ──
+  root.querySelectorAll("#sm-period [data-period]").forEach((b) => {
+    b.onclick = () => { lsSet(LS.period, b.dataset.period); render(root); };
+  });
+  root.querySelectorAll("#sm-who [data-who]").forEach((b) => {
+    b.onclick = () => { lsSet(LS.who, b.dataset.who); render(root); };
+  });
+  const sortSel = root.querySelector("#sm-sort");
+  if (sortSel) sortSel.onchange = (e) => { lsSet(LS.sort, e.target.value); render(root); };
+  const doneChk = root.querySelector("#sm-done");
+  if (doneChk) doneChk.onchange = (e) => { lsSet(LS.done, e.target.checked ? "1" : "0"); render(root); };
 
   const openRow = (el) => {
     const id = +el.dataset.id;
@@ -67,6 +142,36 @@ export async function render(root) {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openRow(el); }
     });
   });
+}
+
+// 期間/担当/並べ替え/完了含む のツールバー（quad.js whoTabs の作法を踏襲）。
+function toolbar(pf, members, me) {
+  const periodBtns = PERIODS.map((n) =>
+    `<button class="sm-seg-b${n === pf.period ? " on" : ""}" data-period="${n}">${n}日</button>`).join("");
+
+  const meId = me && me.id;
+  const meMember = (members || []).find((m) => m.id === meId);
+  const others = (members || []).filter((m) => m.id !== meId);
+  const whoBtn = (val, label, color) => {
+    const on = String(pf.who) === String(val) ? " on" : "";
+    const av = color ? `<i class="sm-who-av" style="background:${color}">${esc(label[0] || "?")}</i>` : "";
+    return `<button class="sm-who-b${on}" data-who="${esc(String(val))}">${av}${esc(label)}</button>`;
+  };
+  const whoTabs = whoBtn("", "全員", "")
+    + (meMember ? whoBtn(meMember.id, "自分", member_color(meMember.id)) : "")
+    + others.map((m) => whoBtn(m.id, m.name || m.username, member_color(m.id))).join("");
+
+  const sortOpts = SORTS.map((o) =>
+    `<option value="${o.key}"${o.key === pf.sort ? " selected" : ""}>${esc(o.label)}</option>`).join("");
+
+  return `
+    <div class="sm-tools">
+      <div class="sm-seg" id="sm-period" role="group" aria-label="集計期間">${periodBtns}</div>
+      <div class="sm-who" id="sm-who">${whoTabs}</div>
+      <span class="sm-spacer"></span>
+      <label class="sm-done-l"><input type="checkbox" id="sm-done"${pf.includeDone ? " checked" : ""}>完了を含む</label>
+      <label class="sm-sort-l">並べ替え <select id="sm-sort">${sortOpts}</select></label>
+    </div>`;
 }
 
 function kpi(label, big, sub, cls, href) {
@@ -137,6 +242,23 @@ const empty = () => `<div class="sm-empty">データがありません。</div>`
 
 function css() {
   return `
+  .sm-tools{display:flex;align-items:center;gap:12px;margin:0 0 14px;flex-wrap:wrap}
+  .sm-spacer{flex:1 1 auto}
+  .sm-seg{display:inline-flex;border:1px solid ${C.line};border-radius:9px;overflow:hidden;background:#fff}
+  .sm-seg-b{font:inherit;font-size:12.5px;padding:6px 13px;border:0;border-left:1px solid ${C.line};background:transparent;color:${C.muted};cursor:pointer;transition:background .12s,color .12s}
+  .sm-seg-b:first-child{border-left:0}
+  .sm-seg-b:hover{background:${C.track}}
+  .sm-seg-b.on{background:${C.fill};color:#fff;font-weight:700}
+  .sm-who{display:flex;flex-wrap:wrap;gap:5px}
+  .sm-who-b{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:12.5px;padding:5px 11px;border:1px solid ${C.line};border-radius:18px;background:#fff;color:${C.muted};cursor:pointer;transition:border-color .12s,background .12s,color .12s}
+  .sm-who-b:hover{border-color:#cfd9e6}
+  .sm-who-b.on{background:${C.fill};border-color:${C.fill};color:#fff;font-weight:700}
+  .sm-who-av{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:50%;color:#fff;font-size:9px;font-weight:700}
+  .sm-who-b.on .sm-who-av{box-shadow:0 0 0 1.5px #fff}
+  .sm-done-l{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:${C.muted};cursor:pointer}
+  .sm-done-l input{cursor:pointer}
+  .sm-sort-l{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:${C.muted}}
+  .sm-tools select{font:inherit;font-size:12.5px;padding:5px 8px;border:1px solid ${C.line};border-radius:7px;background:#fff;color:${C.ink}}
   .sm-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:14px}
   .sm-kpi{background:${C.card};border:1px solid ${C.line};border-radius:14px;padding:14px 16px}
   a.sm-kpi-link{display:block;text-decoration:none;color:inherit;transition:border-color .12s,box-shadow .12s,transform .12s}
@@ -192,5 +314,12 @@ function css() {
      カード/罫線/track/ink/muted は C.* 経由で var() 参照済＝自動反転するので再指定不要。
      ここで直す対象＝var()を介さず直書きした淡色のみ。アクセント色(青/緑/amber)は据え置き。 */
   html[data-theme="dark"] .sm-bcol.wknd .sm-bx,
-  html[data-theme="dark"] .sm-bcol.wknd .sm-bw{color:var(--line-strong)}`;
+  html[data-theme="dark"] .sm-bcol.wknd .sm-bw{color:var(--line-strong)}
+  /* B70 ツールバー: 直書き白背景だけ card へ補正。アクセント(青).on は据え置き。 */
+  html[data-theme="dark"] .sm-seg,
+  html[data-theme="dark"] .sm-who-b,
+  html[data-theme="dark"] .sm-tools select{background:var(--card);color:var(--muted)}
+  html[data-theme="dark"] .sm-seg-b.on,
+  html[data-theme="dark"] .sm-who-b.on{color:#fff}
+  html[data-theme="dark"] .sm-who-b:hover{border-color:${C.fill}}`;
 }

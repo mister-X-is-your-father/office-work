@@ -1,7 +1,7 @@
 // 今日の稼働予定。円時計(clock.js)／積み上げ(mock54) を切替表示。
 import { load } from "../lib/store.js";
-import { loadByMember } from "../lib/capacity.js";
-import { capacityOn } from "../lib/recurrence.js";
+import { todayItemsByMember } from "../lib/today_items.js";
+import { KINDS } from "../lib/kinds.js";
 import { projectName } from "../lib/store.js";
 import { C, fmtH, esc, todayISO, member_color } from "../lib/ui.js";
 import { renderClock } from "./clock.js";
@@ -14,6 +14,8 @@ const DEFAULT_MODE = "stacked"; // 'clock' | 'stacked'
 const modeKey = (uid) => `ts.today.mode.${uid ?? "anon"}`;
 let MODE = null;     // 未確定=null。初回 render で localStorage から確定
 let MODE_UID = null; // モード保存先のユーザー id
+
+const round1 = (x) => Math.round(x * 100) / 100; // 時間表示=小数2桁（capacity.js と同義）
 
 const segCss = () => `<style>.t-seg{display:inline-flex;background:#fff;border:1px solid ${C.line};border-radius:10px;padding:3px;margin:0 0 16px;box-shadow:0 1px 2px rgba(20,30,50,.04)}
     .t-seg button{border:0;background:transparent;color:${C.muted};font:inherit;font-size:13px;font-weight:600;padding:5px 14px;border-radius:8px;cursor:pointer}
@@ -90,8 +92,12 @@ export async function renderInto(container, opts = {}) {
   draw();
 }
 
+// 会議/定例（taskId 無し＝プロジェクト色を持たない occurrence）の積み木色。
+// kind ごとに固定色＝凡例と一致。模様（斜線/ドット）は円時計側のみで、積み上げはベタ色で区別する。
+const KINDCOL = { meeting: "#7c8597", recurring: "#9aa3b2" };
+
 function renderStacked(body, data, day, opts = {}) {
-  const { tasks, members, projects, plansByTask, holidaysSet, unavailabilityByMember } = data;
+  const { tasks, members, projects } = data;
   const taskById = new Map((tasks || []).map((t) => [t.id, t]));
   const pjIdx = new Map();
   const pjColor = (pid) => {
@@ -103,14 +109,33 @@ function renderStacked(body, data, day, opts = {}) {
   // rows は freeH 降順ソートされるため行 index は不安定。id→配列位置の固定マップを使う。
   const memberIdx = new Map((members || []).map((m, i) => [m.id, i]));
   const memberColor = (mid) => member_color(memberIdx.get(mid) ?? 0);
-  // 営業日割り（holidays）＋人別容量（週末/祝日/休暇=0）で今日KPIを正確に（§土日祝ギャップ）
-  const capacityFor = (m, d) => capacityOn(m, d, { holidays: holidaysSet, unavailabilityByMember, capH: CAP });
-  const rows = loadByMember(tasks, members, day, CAP, plansByTask, { holidays: holidaysSet, capacityFor }).sort((a, b) => b.freeH - a.freeH);
+  // 【単一データ源】円時計と同じ todayItemsByMember を使う（タスク見積/予定＋会議/定例 occurrence を統合、
+  // 人別容量＝週末/祝日/休暇=0 も内包）。これでモード間（積み上げ⇔円時計）と KPI の数値が必ず一致する。
+  // items: [{taskId?, title, h, kind, prio, flags}]、usedH/freeH/overH/capH/status はメンバー集計済み。
+  const stateMap = todayItemsByMember(data, day, CAP);
+  const rows = members
+    .map((m) => stateMap.get(m.id))
+    .filter(Boolean)
+    .map((s) => ({
+      id: s.member.id,
+      name: s.member.name || s.member.username,
+      capH: s.capH,
+      assignedH: s.usedH,
+      freeH: s.freeH,
+      overH: s.overH,
+      status: s.status,
+      tasks: s.items, // 会議/定例 occurrence もここに含まれる（kind で色分け）
+    }))
+    .sort((a, b) => b.freeH - a.freeH);
+  // チーム集計は円時計 KPI(kpiStrip)と「同じ算式」で出す＝モードを切り替えても数値が一致する。
+  //   稼働率 = Σmin(使用, CAP) / Σ容量（超過者が率を 100% 超に押し上げない・分母は人別容量＝週末/祝日0）
+  //   超過   = Σ各人 overH（ある人の余りが別人の超過を相殺しない＝per-member 合算）
+  //   空き   = Σ各人 freeH（同上）
   const totCap = rows.reduce((s, r) => s + r.capH, 0);
-  const totAsg = rows.reduce((s, r) => s + r.assignedH, 0);
-  const free = Math.max(0, totCap - totAsg);
-  const over = Math.max(0, totAsg - totCap);
-  const rate = totCap > 0 ? Math.round((totAsg / totCap) * 100) : 0;
+  const free = round1(rows.reduce((s, r) => s + r.freeH, 0));
+  const over = round1(rows.reduce((s, r) => s + r.overH, 0));
+  const usedCapped = rows.reduce((s, r) => s + Math.min(r.assignedH, CAP), 0); // 円時計 usedAll と同式（global CAP 頭打ち）
+  const rate = totCap > 0 ? Math.round((usedCapped / totCap) * 100) : 0;
   const maxTotal = rows.reduce((m, r) => Math.max(m, r.assignedH), 0);
   const yMax = Math.max(11, Math.ceil(maxTotal) + 1);
   // 全画面=固定 400px（従来どおり・非回帰）。fluid(ホーム埋め込み)=固定px箱をやめ、
@@ -121,22 +146,28 @@ function renderStacked(body, data, day, opts = {}) {
   const CHART_H = fluid ? Math.round(Math.max(260, Math.min(400, vw * 0.32))) : 400;
   const FOOT_H = 54, PLOT_H = CHART_H - FOOT_H;
   const pxPerH = PLOT_H / yMax;
+  // 会議/定例 occurrence が今日どれか1人にでも載っているか（凡例の出し分け用）。
+  const usedKinds = new Set();
+  for (const r of rows) for (const t of r.tasks) if (t.kind === "meeting" || t.kind === "recurring") usedKinds.add(t.kind);
+  // 先に chart を生成して pjIdx を埋める（colHtml 内の pjColor 呼び出しで使用プロジェクトが確定）→
+  // その後で usedPjs スナップショットを取り、凡例に正しく反映させる。
+  const chart = rows.length ? chartHtml(rows, { yMax, PLOT_H, FOOT_H, pxPerH, taskById, pjColor, memberColor }) : empty();
   const usedPjs = [...pjIdx.keys()];
 
   body.innerHTML = `
     <style>${css()}</style>
-    <div class="t54-sub">メンバー別の予定工数と空き（容量 ${CAP}h/人・予定があれば予定、無ければ見積りの期間日割り）</div>
+    <div class="t54-sub">メンバー別の予定工数と空き（容量 ${CAP}h/人・タスク見積/予定＋会議・定例）</div>
     <div class="kpis">
-      <div class="kpi"><div class="l">チーム稼働</div><div class="v">${fmtH(totAsg)}<small>/${fmtH(totCap)}</small></div></div>
+      <div class="kpi"><div class="l">チーム稼働</div><div class="v">${fmtH(round1(usedCapped))}<small>/${fmtH(totCap)}</small></div></div>
       <div class="kpi"><div class="l">稼働率</div><div class="v">${rate}<small>%</small></div></div>
       <div class="kpi free"><div class="l">空き工数</div><div class="v">${fmtH(free)}</div></div>
       <div class="kpi over"><div class="l">超過</div><div class="v">${over > 0 ? "+" + fmtH(over) : "0h"}</div></div>
     </div>
     <div class="t54-card">
-      ${rows.length ? chartHtml(rows, { yMax, PLOT_H, FOOT_H, pxPerH, taskById, pjColor, memberColor }) : empty()}
-      ${rows.length ? legendHtml(usedPjs, projects, pjColor) : ""}
+      ${chart}
+      ${rows.length ? legendHtml(usedPjs, projects, pjColor, usedKinds) : ""}
     </div>
-    ${rows.length ? `<div class="t54-hint">タイル＝今日のタスク（高さ＝工数）。容量線(${CAP}h)を超えた分が赤、線の下の点線が空き工数。</div>` : ""}`;
+    ${rows.length ? `<div class="t54-hint">タイル＝今日のタスク・会議・定例（高さ＝工数）。容量線(${CAP}h)を超えた分が赤、線の下の点線が空き工数。</div>` : ""}`;
 }
 
 function chartHtml(rows, g) {
@@ -168,14 +199,15 @@ function colHtml(r, i, g) {
   if (free > 0) {
     inner += `<div class="t54-freezone" style="bottom:${FOOT_H + total * pxPerH}px;height:${free * pxPerH}px"><span>空き ${fmtH(free)}</span></div>`;
   }
-  // タスク積み木
+  // タスク積み木。会議/定例(occurrence)は taskId を持たない＝kind 固定色、それ以外はプロジェクト色。
   let segs = "";
   for (const t of r.tasks) {
     const hpx = t.h * pxPerH;
-    const pid = taskById.get(t.id)?.project_id;
-    const col = pjColor(pid);
+    const isOcc = t.kind === "meeting" || t.kind === "recurring";
+    const col = isOcc ? (KINDCOL[t.kind] || C.full) : pjColor(taskById.get(t.taskId)?.project_id);
     const small = hpx < 40 ? " small" : "";
-    segs += `<div class="t54-seg${small}" style="height:${hpx}px;background:${col}" title="${esc(t.title)} ・ ${fmtH(t.h)}">
+    const kindLabel = isOcc ? `${KINDS[t.kind].label}・` : "";
+    segs += `<div class="t54-seg${small}" style="height:${hpx}px;background:${col}" title="${kindLabel}${esc(t.title)} ・ ${fmtH(t.h)}">
         <div class="t54-tname">${esc(t.title)}</div><div class="t54-thrs"><b>${fmtH(t.h)}</b></div></div>`;
   }
   if (!r.tasks.length) {
@@ -201,11 +233,14 @@ function colHtml(r, i, g) {
   return `<div class="t54-col"><div class="t54-area">${inner}</div></div>`;
 }
 
-function legendHtml(usedPjs, projects, pjColor) {
+function legendHtml(usedPjs, projects, pjColor, usedKinds = new Set()) {
   const pj = usedPjs.map((pid) =>
     `<span class="item"><span class="sw" style="background:${pjColor(pid)}"></span>${esc(projectName(projects, pid))}</span>`).join("");
+  // 会議/定例 occurrence は taskId を持たずプロジェクト色に乗らないので、kind 固定色で別途凡例を出す。
+  const occ = ["meeting", "recurring"].filter((k) => usedKinds.has(k)).map((k) =>
+    `<span class="item"><span class="sw" style="background:${KINDCOL[k]}"></span>${esc(KINDS[k].label)}</span>`).join("");
   return `<div class="t54-legend">
-      ${pj}
+      ${pj}${occ}
       <span class="item"><span class="rule"></span>容量線 ${CAP}h</span>
       <span class="item"><span class="oversw"></span>容量超過</span>
       <span class="item"><span class="sw freesw" style="background:#fff;border:1.5px dashed #c4d6c9"></span>空き工数</span>

@@ -69,6 +69,24 @@ test("unsorted（未整理）: 担当なし or 期限なし のみ通す", () =>
   assert.equal(taskMatches(T({ done: true }), { unsorted: true, status: "undone" }, ctx), false);
 });
 
+test("assignee: 自分(id) / 担当なし / 各人（AI=fable は人間担当に数えない）", () => {
+  const alice = [{ id: 1, username: "alice" }];
+  const bob = [{ id: 2, username: "bob" }];
+  const ai = [{ id: 9, username: "fable" }];
+  // 指定 id がタスクの担当に含まれる
+  assert.equal(taskMatches(T({ assignees: alice }), { assignee: "1" }, ctx), true);
+  assert.equal(taskMatches(T({ assignees: bob }), { assignee: "1" }, ctx), false);
+  // 数値 id でも一致（String 比較）
+  assert.equal(taskMatches(T({ assignees: alice }), { assignee: 1 }, ctx), true);
+  // "none"=人間担当が1人もいない（担当無し / AI のみ は通す、人間ありは除外）
+  assert.equal(taskMatches(T({}), { assignee: "none" }, ctx), true);
+  assert.equal(taskMatches(T({ assignees: ai }), { assignee: "none" }, ctx), true);
+  assert.equal(taskMatches(T({ assignees: alice }), { assignee: "none" }, ctx), false);
+  // 空文字＝指定なし＝素通し（既存挙動不変）
+  assert.equal(taskMatches(T({ assignees: alice }), { assignee: "" }, ctx), true);
+  assert.equal(taskMatches(T({}), {}, ctx), true);
+});
+
 test("BUILTIN_VIEWS と EMPTY_FILTER の健全性", () => {
   assert.ok(BUILTIN_VIEWS.length >= 6);
   assert.ok(BUILTIN_VIEWS.every((v) => v.key && v.label && v.filter && v.desc));

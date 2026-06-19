@@ -4,7 +4,7 @@
 import { load, invalidate, isAiUser, ensureInbox } from "../lib/store.js";
 import { getTasks, updateTask, getTask, setTaskWaiting, createTaskInProject, createProject, addRelation, removeRelation } from "../lib/api.js";
 import { PRIO, prioBucket, STATUS, statusOf } from "../lib/kinds.js";
-import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
+import { C, fmtH, esc, member_color, todayISO, announce } from "../lib/ui.js";
 import { shiftISO } from "../lib/capacity.js";
 import { taskMatches, next7End } from "../lib/smartlist.js";
 import { icon } from "../lib/icons.js";
@@ -16,6 +16,7 @@ history.initHistoryHotkeys(); // Ctrl/Cmd+Z=取消・Ctrl+Y/Ctrl+Shift+Z=やり�
 // ── ローカル設定（本人ごと・スキーマ変更なし）──
 const SWIM_KEY = "ts.kanban.swim";     // 案件スイムレーン ON/OFF（2軸グリッド）
 const PRESET_KEY = "ts.kanban.preset"; // 絞り込みプリセット（既定=今週）
+const WHO_KEY = "ts.kanban.who";       // 担当フィルタ（""=全員 / メンバーid。既定=全員）
 const STATUS_ORDER = ["todo", "doing", "waiting", "done"];
 
 // 絞り込みプリセット（期限重視）。filter は smartlist.taskMatches に渡す形に正確に合わせる。
@@ -43,18 +44,22 @@ let _moving = false;
 export async function render(root) {
   _root = root;
   _today = todayISO();
-  const { members } = await load();
+  const { members, me } = await load();
   let tasks = [];
   try { tasks = (await getTasks()) || []; } catch (e) { tasks = []; root.innerHTML = errHtml(e); return; }
 
   const memberIdx = new Map((members || []).map((m, i) => [m.id, i]));
   const preset = loadPreset();
   const swim = loadSwim();
+  const who = loadWho(); // ""=全員 / メンバーid文字列
 
   // 絞り込み（完了は status を触らず別制御）。preset.filter を taskMatches へ。
   const ctx = { today: _today, next7: next7End(_today) };
   const presetDef = PRESETS.find((p) => p.key === preset) || PRESETS[0];
-  const filtered = (tasks || []).filter((t) => taskMatches(t, presetDef.filter, ctx));
+  let filtered = (tasks || []).filter((t) => taskMatches(t, presetDef.filter, ctx));
+
+  // B4: 担当フィルタ（自分/全員/各人）。選択した担当者がアサインされたタスクのみ。
+  if (who) filtered = filtered.filter((t) => (t.assignees || []).some((a) => String(a.id) === who));
 
   // 完了列の絞り: 既定（すべて/今日/今週/未整理）では「今日完了 or 直近7日で更新」のみ。
   // 「期限切れ」プリセットは完了を出さない（status:undone で既に除外済み）。多すぎる完了で画面が埋まらないように。
@@ -70,31 +75,51 @@ export async function render(root) {
 
   root.innerHTML = `
     <style>${css()}</style>
-    <h1 class="vtitle">かんばん <small>状況が一目でわかる ・ ドラッグで列移動 ・ クリックで編集</small></h1>
-    ${toolbarHtml(preset, swim)}
+    <h1 class="vtitle">かんばん <small>状況が一目でわかる ・ ドラッグ／Ctrl+左右で列移動 ・ クリックで編集</small></h1>
+    ${toolbarHtml(preset, swim, who, members, me)}
     <div class="kb-wrap">${swim ? swimHtml(visible, memberIdx) : boardHtml(visible, memberIdx)}</div>`;
 
   wireToolbar(root);
-  wireCards(root, tasks);
+  wireCards(root, tasks, memberIdx);
   wireColumns(root, tasks);
   wireAdd(root);
 }
 
-// ── ツールバー（プリセットタブ＋スイムレーントグル）──
-function toolbarHtml(preset, swim) {
+// ── ツールバー（プリセットタブ＋担当フィルタ＋スイムレーントグル）──
+function toolbarHtml(preset, swim, who, members, me) {
   const tabs = PRESETS.map((p) =>
     `<button class="kb-tab${p.key === preset ? " on" : ""}" data-preset="${p.key}">${esc(p.label)}</button>`).join("");
   return `<div class="kb-tools">
     <div class="kb-tabs" role="tablist">${tabs}</div>
+    ${whoTabsHtml(who, members, me)}
     <button class="kb-swim${swim ? " on" : ""}" data-swim title="案件（親タスク）ごとに行を分けて進み具合を見る">
       ${icon("folders", { size: 14 })}<span>案件レーン</span>
     </button>
   </div>`;
 }
 
+// 担当フィルタ（全員 / 自分 / 各メンバー）。quad.js の whoTabs と同じ作法。選択は localStorage 永続。
+function whoTabsHtml(who, members, me) {
+  const meId = me && me.id;
+  const meMember = (members || []).find((m) => m.id === meId);
+  const others = (members || []).filter((m) => m.id !== meId);
+  const btn = (val, label, color) => {
+    const on = String(who) === String(val) ? " on" : "";
+    const av = color ? `<i class="kb-who-av" style="background:${color}">${esc((label[0] || "?"))}</i>` : "";
+    return `<button class="kb-who-b${on}" data-who="${esc(String(val))}">${av}${esc(label)}</button>`;
+  };
+  const tabs = btn("", "全員", "")
+    + (meMember ? btn(meMember.id, "自分", member_color(meMember.id)) : "")
+    + others.map((m) => btn(m.id, m.name || m.username, member_color(m.id))).join("");
+  return `<div class="kb-who" role="group" aria-label="担当フィルタ">${tabs}</div>`;
+}
+
 function wireToolbar(root) {
   root.querySelectorAll("[data-preset]").forEach((b) => {
     b.onclick = () => { savePreset(b.dataset.preset); render(_root); };
+  });
+  root.querySelectorAll("[data-who]").forEach((b) => {
+    b.onclick = () => { saveWho(b.dataset.who); render(_root); };
   });
   const sw = root.querySelector("[data-swim]");
   if (sw) sw.onclick = () => { saveSwim(!loadSwim()); render(_root); };
@@ -205,7 +230,7 @@ function cardHtml(t, memberIdx) {
     }
   }
 
-  return `<div class="kb-card${t.done ? " done" : ""}${heat ? " h-" + heat : ""}" draggable="true" data-id="${t.id}" tabindex="0" role="button" aria-label="${esc(t.title)} を編集">
+  return `<div class="kb-card${t.done ? " done" : ""}${heat ? " h-" + heat : ""}" draggable="true" data-id="${t.id}" tabindex="0" role="button" aria-label="${esc(t.title)} を編集（Enterで編集 / Ctrl+左右で列移動）">
     <div class="kb-ct"><i class="kb-prio" style="background:${pb ? PRIO[pb].c : "#c6cdd6"}"></i>${esc(t.title)}</div>
     ${projBadge ? `<div class="kb-cr">${projBadge}</div>` : ""}
     <div class="kb-cm">
@@ -218,25 +243,51 @@ function cardHtml(t, memberIdx) {
   </div>`;
 }
 
-// ── カードの操作（クリックで編集・ドラッグ開始）──
-function wireCards(root, tasks) {
+// ── カードの操作（クリックで編集・ドラッグ開始・キーボード移動）──
+// tasks/memberIdx を各カードに紐付け、楽観移動後に差し替えるカードも wireOneCard で同じ配線にする。
+function wireCards(root, tasks, memberIdx) {
   root.querySelectorAll(".kb-card").forEach((card) => {
-    const edit = () => openTaskForm({ taskId: +card.dataset.id, onSaved: () => { invalidate(); render(_root); } });
-    card.onclick = edit;
-    card.addEventListener("keydown", (e) => {
-      if (e.target !== card) return;
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); edit(); }
-    });
-    card.addEventListener("dragstart", (e) => {
-      e.dataTransfer.effectAllowed = "move";
-      try { e.dataTransfer.setData("text/plain", card.dataset.id); } catch { /* noop */ }
-      card.classList.add("kb-dragging");
-    });
-    card.addEventListener("dragend", () => card.classList.remove("kb-dragging"));
+    card._tasks = tasks;
+    wireOneCard(card, memberIdx);
   });
 }
 
+// 1枚のカードへ全配線（render 時と、楽観移動後の差し替えカードの両方で使う）。
+function wireOneCard(card, memberIdx) {
+  card._memberIdx = memberIdx;
+  // 差し替え時は元カードの _tasks を引き継ぐ（差し替え呼び出し側で設定済みでなければ既存参照を保持）。
+  const tasks = card._tasks || (card._tasks = []);
+  const taskOf = () => (tasks || []).find((x) => x.id === +card.dataset.id);
+  const edit = () => openTaskForm({ taskId: +card.dataset.id, onSaved: () => { invalidate(); render(_root); } });
+  card.onclick = edit;
+  card.addEventListener("keydown", (e) => {
+    if (e.target !== card) return;
+    // B67: Ctrl+←/→ で前/次ステータスへ移動（フォーカス中カード）。クリック編集(Enter/Space)とは競合させない。
+    if ((e.ctrlKey || e.metaKey) && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
+      e.preventDefault();
+      if (_moving) return;
+      const t = taskOf();
+      if (!t) return;
+      const idx = STATUS_ORDER.indexOf(statusOf(t));
+      if (idx < 0) return;
+      const next = idx + (e.key === "ArrowRight" ? 1 : -1);
+      if (next < 0 || next >= STATUS_ORDER.length) return; // 端では何もしない
+      moveStatus(card, t, STATUS_ORDER[next]);
+      return;
+    }
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); edit(); }
+  });
+  card.addEventListener("dragstart", (e) => {
+    e.dataTransfer.effectAllowed = "move";
+    try { e.dataTransfer.setData("text/plain", card.dataset.id); } catch { /* noop */ }
+    card.classList.add("kb-dragging");
+  });
+  card.addEventListener("dragend", () => card.classList.remove("kb-dragging"));
+}
+
 // ── 列（ドロップ先）: drop でステータス更新＋Undo/Redo（table.js の applyState と同じ副作用セット）──
+// B19: ステータスのみの変更は楽観更新（drop直後に即移動＋「保存中」薄表示→成功で該当カードだけ反映／失敗で元へ戻す）。
+// レーン跨ぎ（案件付け替え）は行グルーピングが変わるため従来どおり全再描画。
 function wireColumns(root, tasks) {
   root.querySelectorAll(".kb-cards").forEach((col) => {
     col.addEventListener("dragover", (e) => { e.preventDefault(); col.classList.add("over"); });
@@ -255,30 +306,90 @@ function wireColumns(root, tasks) {
       const needLane = newParentId != null && cur !== newParentId;
       const needStatus = statusOf(t) !== target;
       if (!needLane && !needStatus) return;
-      _moving = true;
-      try {
-        if (needLane) await moveLane(t, newParentId);
-        if (needStatus) await applyStatusChange(t, target);
-      } finally {
-        _moving = false;
+
+      // レーン跨ぎを伴う場合は従来の全再描画パス（楽観更新は使わない）。
+      if (needLane) {
+        _moving = true;
+        try {
+          await moveLane(t, newParentId);
+          if (needStatus) await applyStatusChange(t, target);
+        } finally { _moving = false; }
+        rerender();
+        return;
       }
-      rerender();
+
+      // ステータスのみ: 楽観更新。
+      const card = root.querySelector(`.kb-card[data-id="${taskId}"]`);
+      if (!card) { _moving = true; try { await applyStatusChange(t, target); } finally { _moving = false; } rerender(); return; }
+      await optimisticStatusMove(card, col, t, target);
     });
   });
 }
 
-// ステータス変更の単一経路（table.js:611-642 と同じ副作用セット）。before/after を history へ積む。
-// before/after = { done, percent_done, started_at, waiting }。applyState で適用（updateTask + setTaskWaiting）。
-async function moveStatus(t, key) {
+// 楽観的ステータス移動の共通経路（drop / キーボード 両方から使う）。
+// card を target 列へ即移動＋「保存中」薄表示→ applyStatusChange 成功なら該当カードだけ再描画、
+// 失敗なら元の位置へ戻し announce。既存の _moving ガード／history.push（applyStatusChange 内）は維持。
+async function optimisticStatusMove(card, targetCol, t, target) {
   if (_moving) return;
   _moving = true;
-  try { await applyStatusChange(t, key); }
-  finally { _moving = false; }
+  // 戻し用に元の位置を記録（同一親内の DOM 位置）。
+  const origParent = card.parentNode;
+  const origNext = card.nextSibling;
+  const memberIdx = card._memberIdx;
+  // 楽観移動＋保存中表示。
+  targetCol.appendChild(card);
+  card.classList.add("kb-saving");
+  card.setAttribute("aria-busy", "true");
+  try {
+    const res = await applyStatusChange(t, target);
+    if (res.ok) {
+      // 該当タスクのみ反映: 最新タスクでカードを差し替え（全再取得しない）。
+      if (res.fresh && memberIdx) {
+        Object.assign(t, res.fresh); // ローカルの tasks 配列の参照も更新（次の操作の整合のため）
+        const tmp = document.createElement("div");
+        tmp.innerHTML = cardHtml(res.fresh, memberIdx);
+        const fresh = tmp.firstElementChild;
+        fresh._tasks = card._tasks; // tasks 参照を引き継ぐ（差し替え後もキーボード移動が効くように）
+        card.replaceWith(fresh);
+        wireOneCard(fresh, memberIdx);
+        try { fresh.focus(); } catch { /* noop */ }
+      } else {
+        card.classList.remove("kb-saving");
+        card.removeAttribute("aria-busy");
+      }
+      announce(`「${t.title}」を「${(STATUS[target] || {}).label || target}」へ移動しました`);
+    } else {
+      // 失敗: 元の位置へ戻す。
+      if (origNext) origParent.insertBefore(card, origNext); else origParent.appendChild(card);
+      card.classList.remove("kb-saving");
+      card.removeAttribute("aria-busy");
+      announce(`移動に失敗しました: ${res.err && res.err.message ? res.err.message : ""}`, { assertive: true });
+    }
+  } finally {
+    _moving = false;
+  }
+}
+
+// キーボードからのステータス移動（B67）: 前/次ステータスへ。フォーカス中カードに対して。
+async function moveStatus(card, t, key) {
+  if (_moving) return;
+  // スイムレーン時は同じレーン行内の対象セルへ（親は変えない＝同 data-lane）。通常ボードは唯一の列。
+  const curCol = card.closest(".kb-cards");
+  const lane = curCol && curCol.dataset ? curCol.dataset.lane : null;
+  let col = null;
+  if (lane != null) col = _root && _root.querySelector(`.kb-cards[data-status="${key}"][data-lane="${lane}"]`);
+  if (!col) col = _root && _root.querySelector(`.kb-cards[data-status="${key}"]`);
+  if (col) { await optimisticStatusMove(card, col, t, key); return; }
+  // 列DOMが見つからない（万一）の保険: 従来パス。
+  _moving = true;
+  try { await applyStatusChange(t, key); } finally { _moving = false; }
   rerender();
 }
 
-// ステータス変更の本体（_moving ガードと rerender は呼び出し側で管理）。
+// ステータス変更の本体（_moving ガードは呼び出し側で管理）。
 // まず最新タスクを取得（fresh-before スナップショット）してから before/after を組み立てる。
+// 戻り値: { ok, fresh } — ok=API成功可否、fresh=適用後の最新タスク（楽観UIの再描画に使う）。
+// rerender は呼ばない（呼び出し側が楽観UIで反映 or rerender する）。alert もしない（失敗は ok=false で返す）。
 async function applyStatusChange(t, key) {
   let fresh = t;
   try { fresh = await getTask(t.id); } catch { /* keep t */ }
@@ -299,8 +410,10 @@ async function applyStatusChange(t, key) {
       undo: async () => { await applyState(t.id, before); rerender(); },
       redo: async () => { await applyState(t.id, after); rerender(); },
     });
+    let updated = null; try { updated = await getTask(t.id); } catch { updated = null; }
+    return { ok: true, fresh: updated };
   } catch (e) {
-    alert("ステータス変更に失敗しました: " + (e && e.message ? e.message : ""));
+    return { ok: false, err: e };
   }
 }
 
@@ -419,6 +532,8 @@ function loadPreset() { try { const v = localStorage.getItem(PRESET_KEY); return
 function savePreset(v) { try { localStorage.setItem(PRESET_KEY, v); } catch { /* noop */ } }
 function loadSwim() { try { return localStorage.getItem(SWIM_KEY) === "1"; } catch { return false; } }
 function saveSwim(on) { try { localStorage.setItem(SWIM_KEY, on ? "1" : "0"); } catch { /* noop */ } }
+function loadWho() { try { return localStorage.getItem(WHO_KEY) || ""; } catch { return ""; } }
+function saveWho(v) { try { localStorage.setItem(WHO_KEY, v || ""); } catch { /* noop */ } }
 
 function errHtml(e) {
   return `<h1 class="vtitle">かんばん</h1><div class="card"><div class="loading">タスクの取得に失敗しました：${esc(e && e.message ? e.message : "")}</div></div>`;
@@ -434,6 +549,12 @@ function css() {
   .kb-swim{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:12.5px;font-weight:600;padding:6px 12px;border:1px solid ${C.line};border-radius:9px;background:#fff;color:${C.muted};cursor:pointer}
   .kb-swim:hover{border-color:${C.fill};color:${C.fill}}
   .kb-swim.on{background:${C.fill};border-color:${C.fill};color:#fff}
+
+  .kb-who{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+  .kb-who-b{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:12px;font-weight:600;padding:5px 10px;border:1px solid ${C.line};border-radius:9px;background:#fff;color:${C.muted};cursor:pointer}
+  .kb-who-b:hover{border-color:${C.fill};color:${C.fill}}
+  .kb-who-b.on{background:${C.fill};border-color:${C.fill};color:#fff}
+  .kb-who-av{width:16px;height:16px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:9px;font-weight:700;flex:none}
 
   .kb-board{display:flex;gap:12px;align-items:flex-start;overflow-x:auto;padding-bottom:10px}
   .kb-col{flex:0 0 270px;background:#f0f2f5;border:1px solid ${C.line};border-radius:12px;padding:10px;display:flex;flex-direction:column}
@@ -456,6 +577,8 @@ function css() {
   .kb-card:hover{border-color:${C.fill}}
   .kb-card:focus-visible{outline:2px solid ${C.fill};outline-offset:2px}
   .kb-card.kb-dragging{opacity:.5}
+  .kb-card.kb-saving{opacity:.55;position:relative;pointer-events:none}
+  .kb-card.kb-saving::after{content:"保存中…";position:absolute;top:6px;right:8px;font-size:9.5px;font-weight:700;color:${C.muted};background:rgba(255,255,255,.85);border-radius:6px;padding:0 5px}
   .kb-card.done{opacity:.6}
   .kb-card.h-overdue{border-left-color:${C.over}}
   .kb-card.h-today{border-left-color:${C.amber}}
@@ -492,12 +615,16 @@ function css() {
   html[data-theme="dark"] .kb-tab.on{background:var(--card)}
   html[data-theme="dark"] .kb-swim{background:var(--card);border-color:var(--line)}
   html[data-theme="dark"] .kb-swim.on{background:${C.fill};border-color:${C.fill};color:#fff}
+  html[data-theme="dark"] .kb-who-b{background:var(--card);border-color:var(--line)}
+  html[data-theme="dark"] .kb-who-b:hover{border-color:${C.fill};color:${C.fill}}
+  html[data-theme="dark"] .kb-who-b.on{background:${C.fill};border-color:${C.fill};color:#fff}
   html[data-theme="dark"] .kb-col{background:var(--track)}
   html[data-theme="dark"] .kb-cnt{background:var(--card);border-color:var(--line)}
   html[data-theme="dark"] .kb-cards.over{background:rgba(255,255,255,.06)}
   html[data-theme="dark"] .kb-addbtn:hover{background:var(--card)}
   html[data-theme="dark"] .kb-addin{background:var(--card)}
   html[data-theme="dark"] .kb-card{background:var(--card);border-color:var(--line);box-shadow:0 1px 2px rgba(0,0,0,.35)}
+  html[data-theme="dark"] .kb-card.kb-saving::after{background:rgba(0,0,0,.6)}
   html[data-theme="dark"] .kb-card:hover{border-color:${C.fill}}
   html[data-theme="dark"] .kb-shead{background:var(--track);border-color:var(--line)}
   html[data-theme="dark"] .kb-lanehd{background:var(--track);border-color:var(--line)}

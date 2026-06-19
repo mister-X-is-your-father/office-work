@@ -12,8 +12,21 @@ import { icon } from "../lib/icons.js";
 const HOUR = 3600;
 const DAYS_KEY = "ts.quad.urgentDays";
 const WHO_KEY = "ts.quad.who"; // 担当者フィルタ選択を個人保存（再読込でも維持）
+const SORT_KEY = "ts.quad.sort"; // 各象限内のソート切替を個人保存（再読込でも維持）
 let FILTER = { who: (() => { try { return localStorage.getItem(WHO_KEY) || ""; } catch { return ""; } })() };
 const urgentDays = () => Math.max(1, +(localStorage.getItem(DAYS_KEY) || 3));
+// 各象限内のソート: due=期限が近い順 / priority=重要度が高い順 / estimate=見積が大きい順
+const SORTS = {
+  due: { label: "期限が近い順" },
+  priority: { label: "重要度が高い順" },
+  estimate: { label: "見積が大きい順" },
+};
+const sortMode = () => { try { const v = localStorage.getItem(SORT_KEY); return SORTS[v] ? v : "due"; } catch { return "due"; } };
+function cmpInQuad(mode) {
+  if (mode === "priority") return (a, b) => (b.priority || 0) - (a.priority || 0) || (dueISO(a) || "9999").localeCompare(dueISO(b) || "9999");
+  if (mode === "estimate") return (a, b) => (b.time_estimate || 0) - (a.time_estimate || 0) || (dueISO(a) || "9999").localeCompare(dueISO(b) || "9999");
+  return (a, b) => (dueISO(a) || "9999").localeCompare(dueISO(b) || "9999"); // due（既定）
+}
 
 const addDays = (iso, n) => {
   const d = new Date(iso + "T00:00:00Z");
@@ -43,9 +56,11 @@ export async function render(root) {
   const days = urgentDays();
   let rows = (tasks || []).filter((t) => !t.done);
   if (FILTER.who) rows = rows.filter((t) => (t.assignees || []).some((a) => String(a.id) === FILTER.who));
+  const sort = sortMode();
+  const cmp = cmpInQuad(sort);
   const byQuad = { q1: [], q2: [], q3: [], q4: [] };
   for (const t of rows) byQuad[quadOf(t, today, days)].push(t);
-  for (const k of Object.keys(byQuad)) byQuad[k].sort((a, b) => (dueISO(a) || "9999").localeCompare(dueISO(b) || "9999"));
+  for (const k of Object.keys(byQuad)) byQuad[k].sort(cmp);
 
   // 担当者切替=ワンタップのボタンタブ（全員 / 自分 / 各メンバー）。選択は localStorage 永続。
   const meId = me && me.id;
@@ -61,12 +76,16 @@ export async function render(root) {
     + others.map((m) => whoBtn(m.id, m.name || m.username, member_color(m.id))).join("");
   const dayOpts = [1, 2, 3, 5, 7].map((n) =>
     `<option value="${n}"${n === days ? " selected" : ""}>${n}日</option>`).join("");
+  const sortOpts = Object.entries(SORTS).map(([v, s]) =>
+    `<option value="${v}"${v === sort ? " selected" : ""}>${esc(s.label)}</option>`).join("");
 
   root.innerHTML = `
     <style>${css()}</style>
     <h1 class="vtitle">優先度マトリクス <small>アイゼンハワー・マトリクス ・ ドラッグで再分類</small></h1>
     <div class="qd-tools">
       <div class="qd-who" id="qd-who">${whoTabs}</div>
+      <label class="qd-sort">${icon("list", { size: 13 })} 並び替え
+        <select id="qd-sort">${sortOpts}</select></label>
       <span class="qd-rule">${icon("ruler", { size: 14 })} <b>重要</b> = 重要度が「高」以上 ／ <b>緊急</b> = 期限が
         <select id="qd-days">${dayOpts}</select>
         以内 または超過（期限なし＝緊急でない）</span>
@@ -90,6 +109,7 @@ export async function render(root) {
     b.onclick = () => { FILTER.who = b.dataset.who; try { localStorage.setItem(WHO_KEY, FILTER.who); } catch {} render(root); };
   });
   root.querySelector("#qd-days").onchange = (e) => { localStorage.setItem(DAYS_KEY, e.target.value); render(root); };
+  root.querySelector("#qd-sort").onchange = (e) => { try { localStorage.setItem(SORT_KEY, e.target.value); } catch {} render(root); };
   root.querySelectorAll(".qd-card").forEach((el) => {
     el.onclick = () => openTaskForm({ taskId: +el.dataset.id, onSaved: async () => { invalidate(); await load(); render(root); } });
     el.ondragstart = (ev) => { ev.dataTransfer.setData("text/plain", el.dataset.id); ev.dataTransfer.effectAllowed = "move"; };
@@ -159,6 +179,8 @@ function css() {
   .qd-rule{font-size:12px;color:${C.muted};background:#fff;border:1px solid ${C.line};border-radius:9px;padding:7px 12px;margin-left:auto}
   .qd-rule b{color:${C.ink}}
   .qd-tools select{font:inherit;font-size:12.5px;padding:4px 8px;border:1px solid ${C.line};border-radius:7px;background:#fff}
+  .qd-sort{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:${C.muted}}
+  .qd-sort svg{flex:none;color:${C.muted}}
   .qd-who{display:flex;flex-wrap:wrap;gap:5px}
   .qd-who-b{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:12.5px;padding:5px 11px;border:1px solid ${C.line};border-radius:18px;background:#fff;color:${C.muted};cursor:pointer;transition:border-color .12s,background .12s,color .12s}
   .qd-who-b:hover{border-color:#cfd9e6}
@@ -192,6 +214,7 @@ function css() {
   .qd-undo button{font:inherit;font-size:12px;font-weight:700;border:1px solid #5b6470;background:transparent;color:#9cc3ff;border-radius:7px;padding:4px 12px;cursor:pointer}
 
   /* ダークモード: 面=card / 区画罫線=line / 文字=ink。四象限tintは同系の暗いtintへ。アクセント/PRIO色は維持 */
+  html[data-theme="dark"] .qd-sort{color:var(--muted)}
   html[data-theme="dark"] .qd-rule,
   html[data-theme="dark"] .qd-tools select,
   html[data-theme="dark"] .qd-who-b,
