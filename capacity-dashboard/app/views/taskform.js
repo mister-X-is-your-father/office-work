@@ -3,7 +3,7 @@
 // 作成=createTaskInProject / 更新=updateTask(#9 非破壊) / 担当=add|removeAssignee /
 // プロジェクト(UI呼称)=親タスク。related_tasks.subtask（親に subtask 関連を張る・名前入力で親を新規作成も可）。
 // 階層: ワークスペース(=API project) ＞ プロジェクト(=親タスク) ＞ タスク。
-import { load, invalidate, TEMPLATE_WS } from "../lib/store.js";
+import { load, invalidate, TEMPLATE_WS, ensureInbox } from "../lib/store.js";
 import { getTask, createTaskInProject, createProject, updateTask, addAssignee, removeAssignee, addRelation, removeRelation, createLabel, addTaskLabel, removeTaskLabel, getAttachments, uploadAttachments, deleteAttachment, fetchAttachmentBlob } from "../lib/api.js";
 import { categoryLabels, REVIEW_LABEL, WAITING_LABEL } from "../lib/kinds.js";
 import { C, esc, fmtH } from "../lib/ui.js";
@@ -15,16 +15,7 @@ import { renderRecurrencePanel, ensureRecurrenceStyle } from "./recurrenceform.j
 export { parseSmartDate, fmtDisplay, splitMeta, joinMeta };
 
 const ZERO_DATE = "0001-01-01T00:00:00Z"; // Vikunja の「未設定」センチネル
-const INBOX_WS = "インボックス"; // 新規タスクの既定投入先WS（UIからは排除・project_id は裏で保持）
-
-// インボックスWSの取得（無ければ作成）。WSはUIに出さず、新規タスクは常にここへ投入。
-async function ensureInbox(projects) {
-  const found = (projects || []).find((p) => p.title === INBOX_WS);
-  if (found) return found;
-  const created = await createProject(INBOX_WS);
-  invalidate();
-  return created;
-}
+// インボックスWS取得は lib/store.js の ensureInbox（プロミスメモ化＝重複作成防止）に集約。
 // Vikunja priority(0–5)。0=なし。4=MUST までを提示。
 const PRIO_OPTS = [[0, "なし"], [1, "低"], [2, "中"], [3, "高"], [4, "MUST"]];
 
@@ -511,7 +502,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
       const dt = (iso) => iso + "T00:00:00Z";
       // 投入先WS(project_id): 新規=Inbox（無ければ作成）、編集=既存 project_id を維持。
       // 親タスクの新規作成も同じWSへ。UIには出さず黙って解決する。
-      const pid = isEdit ? task.project_id : (await ensureInbox(projects)).id;
+      const pid = isEdit ? task.project_id : (await ensureInbox()).id;
       let childId;
       if (!isEdit) {
         const body = { title, description: desc, priority: prio, time_estimate: estSec };

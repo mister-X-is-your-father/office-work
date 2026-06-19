@@ -1,7 +1,7 @@
 // かんばん（再設計）。「仕事の状況が一目でわかる道具」＝(1)期限がヤバいタスク (2)案件ごとの進み具合 を即答する。
 // 旧式（Vikunja bucket 依存・単一WS固定）をやめ、全タスクをフロントで「ステータス軸」にグルーピングして描画する。
 // データは壊さない＝bucket 系 API（getViewTasks/createBucket/moveTaskToBucket 等）はもう呼ばない（呼ばないだけ）。
-import { load, invalidate, isAiUser } from "../lib/store.js";
+import { load, invalidate, isAiUser, ensureInbox } from "../lib/store.js";
 import { getTasks, updateTask, getTask, setTaskWaiting, createTaskInProject, createProject, addRelation, removeRelation } from "../lib/api.js";
 import { PRIO, prioBucket, STATUS, statusOf } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
@@ -12,8 +12,6 @@ import { openTaskForm } from "./taskform.js";
 import * as history from "../lib/history.js";
 
 history.initHistoryHotkeys(); // Ctrl/Cmd+Z=取消・Ctrl+Y/Ctrl+Shift+Z=やり直し
-
-const INBOX_WS = "インボックス"; // 列内＋追加の投入先（quickadd.js / taskform.js と同名）
 
 // ── ローカル設定（本人ごと・スキーマ変更なし）──
 const SWIM_KEY = "ts.kanban.swim";     // 案件スイムレーン ON/OFF（2軸グリッド）
@@ -373,18 +371,6 @@ function makeAddBtn(key) {
   b.className = "kb-addbtn"; b.dataset.addbtn = key; b.title = "この列にタスクを追加";
   b.innerHTML = `${icon("inbox", { size: 13 })} 追加`;
   return b;
-}
-
-// インボックスWS（無ければ作成）。quickadd.js / taskform.js の ensureInbox と同じ。
-let _inbox = null;
-async function ensureInbox() {
-  if (_inbox) return _inbox;
-  const { projects } = await load();
-  const found = (projects || []).find((p) => p.title === INBOX_WS);
-  if (found) { _inbox = found; return found; }
-  _inbox = await createProject(INBOX_WS);
-  invalidate();
-  return _inbox;
 }
 
 // ── 純ヘルパ ──

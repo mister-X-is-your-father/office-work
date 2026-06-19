@@ -11,6 +11,25 @@ const SETTINGS_DEFAULT = { capH: 8, calStart: 8, calEnd: 20, excludedWs: [] };
 // タスク雛形を保存する専用ワークスペース名（taskform のテンプレート機能が使用）
 export const TEMPLATE_WS = "テンプレート";
 
+// 新規タスクの既定投入先WS名（UIからは排除・project_id は裏で保持）。taskform/quickadd/kanban で共有。
+export const INBOX_WS = "インボックス";
+// インボックスWS取得（無ければ作成）。**プロミスをメモ化**して、未作成時に複数経路から
+// 同時に呼ばれても createProject が二重に走らない（=「インボックス」WSの重複作成を防ぐ）。
+let _inboxPromise = null;
+export function ensureInbox() {
+  if (_inboxPromise) return _inboxPromise;
+  _inboxPromise = (async () => {
+    const { projects } = await load();
+    const found = (projects || []).find((p) => p.title === INBOX_WS);
+    if (found) return found;
+    const created = await vik.createProject(INBOX_WS);
+    invalidate();
+    return created;
+  })();
+  _inboxPromise.catch(() => { _inboxPromise = null; }); // 失敗時は次回再試行できるようクリア
+  return _inboxPromise;
+}
+
 // AI 担当アカウント（副担当として選択可）。人間のキャパ計算・メンバー列からは除外する。
 // 実行系: taskstation-fable systemd タイマーが fable 担当タスクを巡回し Claude Code(MAXプラン) で提案コメント。
 export const AI_USERNAMES = new Set(["fable"]);

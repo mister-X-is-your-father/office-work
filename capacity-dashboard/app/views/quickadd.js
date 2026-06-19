@@ -4,14 +4,14 @@
 // ホットキー: 入力欄以外で「/」→ フォーカス。Esc → 解除。
 // ※AI担当(fable)はここでは割当不可（taskform の隠しコマンド経由のみ＝仕様）。@は人間のみ解決。
 import * as vik from "../lib/api.js";
-import { load, invalidate } from "../lib/store.js";
+import { load, invalidate, ensureInbox } from "../lib/store.js";
 import { parseQuickAdd } from "../lib/quickadd.js";
 import { joinMeta } from "../lib/form.js";
 import { esc } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
 
-export const INBOX_WS = "インボックス";
 // 新規タスクは常に Inbox WS へ投入（WSはUIから排除・project_id はデータとして裏で保持）。
+// 投入先WS（INBOX_WS）と取得/作成（ensureInbox）は lib/store.js の共有実装を使う＝重複作成防止のためプロミスをメモ化。
 
 // 解析結果を実データに照合（WS/担当の解決）。store.load はキャッシュ済み前提で軽い。
 function resolveParsed(parsed, { projects, members }) {
@@ -87,18 +87,9 @@ function helpTipHtml() {
     <div class="qa-tip-eg">例: <code>明日15時 MTG準備 #会議 1h</code></div>`;
 }
 
-// インボックスWSの取得（無ければ作成）。作成したら store を無効化して名簿を更新。
-async function ensureInbox(projects) {
-  const found = (projects || []).find((p) => p.title === INBOX_WS);
-  if (found) return found;
-  const created = await vik.createProject(INBOX_WS);
-  invalidate();
-  return created;
-}
-
 // 投入先は常にインボックスWS（無ければ作成）。WSはUIから排除＝新規は既定でInboxへ。
 async function createFromParsed(r, data) {
-  const proj = await ensureInbox(data.projects);
+  const proj = await ensureInbox();
   const body = { title: r.title };
   if (r.dateISO) body.due_date = r.dateISO + "T00:00:00Z";
   if (r.priority) body.priority = r.priority;
