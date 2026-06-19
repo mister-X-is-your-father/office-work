@@ -13,6 +13,7 @@ import { icon } from "../lib/icons.js";
 const KEY = "ts.pomo";            // 実行中状態（下記 st 形）
 const CNT = "ts.pomo.count.";     // 今日の完了集中回数（日付キー）
 const BASE_TITLE = document.title || "TaskStation";
+let _pomoTimer = null;            // 冪等マウント用: 軽量ループのタイマーは常に1本
 
 // st: { taskId, taskTitle, mode: focus|break|countdown|countup, focusMin, breakMin, durMin,
 //       endsAt(focus/break/countdown), startedAt(countup), paused, remainMs, elapsedMs }
@@ -192,6 +193,7 @@ async function record(taskId, taskTitle, seconds) {
 }
 
 export function mountPomodoro(topbar) {
+  if (_pomoTimer) { clearInterval(_pomoTimer); _pomoTimer = null; }
   ensureStyle();
   const btn = document.createElement("button");
   btn.id = "pm-btn";
@@ -525,7 +527,7 @@ export function mountPomodoro(topbar) {
   function closePip() { if (pip) { try { pip.close(); } catch { /* noop */ } pip = null; } }
 
   // タイマー実行中ならウィジェットを閉じていてもタブタイトル/満了処理を回す（軽量・カード無しでも動く）
-  setInterval(() => { if (!card) loop(); }, 1000);
+  _pomoTimer = setInterval(() => { if (!card) loop(); }, 1000);
 }
 
 let _style = false;

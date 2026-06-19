@@ -6,6 +6,7 @@ import { esc, todayISO } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
 
 let overlay = null;
+let _searchKeyHandler = null; // mount のたび増殖しないようモジュールレベルで1つだけ保持
 
 function rowHtml(t, projects, i, sel) {
   const due = t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(5, 10).replace("-", "/") : "";
@@ -78,9 +79,13 @@ export function mountSearch(topbar) {
   const anchor = topbar.querySelector("#refresh");
   anchor ? anchor.before(btn) : topbar.appendChild(btn);
   btn.onclick = openSearch;
-  document.addEventListener("keydown", (ev) => {
+  // shell() 再実行（再ログイン等）で mountSearch が再度呼ばれてもリスナが増殖しないよう、
+  // 既存ハンドラを解除してから1つだけ登録する（常にちょうど1個を担保）。
+  if (_searchKeyHandler) document.removeEventListener("keydown", _searchKeyHandler);
+  _searchKeyHandler = (ev) => {
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "k") { ev.preventDefault(); openSearch(); }
-  });
+  };
+  document.addEventListener("keydown", _searchKeyHandler);
 }
 
 let _style = false;
