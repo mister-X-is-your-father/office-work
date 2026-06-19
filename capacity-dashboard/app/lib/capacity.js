@@ -122,14 +122,24 @@ export function loadByMember(tasks, members, isoDay, capH = 8, plansByTask = nul
 
 // 週（isoDays配列）の人別×日 負荷。plansByTask を渡すと plans 優先。
 // opts.holidays(Set): 見積り営業日割りで祝日を除外。
+// 最適化(C8): 旧実装は members×days×tasks の三重走査で taskPlannedHoursByMemberOn を
+// メンバー数ぶん再計算していた（返るマップは全メンバー分なのに 1メンバーぶんしか使わない）。
+// 「日→メンバー→生h」マップを days×tasks の1走査で構築し、各メンバーは引くだけにする。
+// シグネチャ・戻り値の形・数値結果は不変（純粋な内部最適化）。
 export function weekLoadByMember(tasks, members, isoDays, capH = 8, plansByTask = null, { holidays = null } = {}) {
+  // day -> (memberId -> 生h)。1走査で構築（メンバー数ぶんの再走査を排除）。
+  const loadByDay = new Map(isoDays.map((day) => [day, new Map()]));
+  for (const t of tasks) {
+    const entries = planEntriesFor(plansByTask, t.id);
+    for (const day of isoDays) {
+      const dayMap = loadByDay.get(day);
+      const byMember = taskPlannedHoursByMemberOn(t, day, entries, { holidays });
+      for (const [mid, h] of byMember) dayMap.set(mid, (dayMap.get(mid) || 0) + h);
+    }
+  }
   return members.map((m) => {
     const days = isoDays.map((day) => {
-      let h = 0;
-      for (const t of tasks) {
-        const byMember = taskPlannedHoursByMemberOn(t, day, planEntriesFor(plansByTask, t.id), { holidays });
-        h += byMember.get(m.id) || 0;
-      }
+      const h = loadByDay.get(day).get(m.id) || 0;
       return { day, h: round1(h), over: h > capH + 1e-6 };
     });
     return { id: m.id, name: m.name || m.username, capH, days, weekH: round1(days.reduce((s, d) => s + d.h, 0)) };

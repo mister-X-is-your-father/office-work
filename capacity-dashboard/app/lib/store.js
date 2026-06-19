@@ -139,7 +139,7 @@ async function _loadImpl() {
     (t) => vik.getPlans(t.id).then((p) => [t.id, p || []]).catch(() => [t.id, []])
   );
   cache = {
-    tasks: tasks || [], projects: projects || [], members: [...mmap.values()], aiMembers, me, settings,
+    tasks: tasks || [], rawTasks: tasksAll || [], projects: projects || [], members: [...mmap.values()], aiMembers, me, settings,
     labels: labels || [],
     templates, templateProject,
     habitTasks, habitProject,

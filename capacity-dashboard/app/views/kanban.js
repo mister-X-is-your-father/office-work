@@ -2,7 +2,7 @@
 // 旧式（Vikunja bucket 依存・単一WS固定）をやめ、全タスクをフロントで「ステータス軸」にグルーピングして描画する。
 // データは壊さない＝bucket 系 API（getViewTasks/createBucket/moveTaskToBucket 等）はもう呼ばない（呼ばないだけ）。
 import { load, invalidate, isAiUser, ensureInbox } from "../lib/store.js";
-import { getTasks, updateTask, getTask, setTaskWaiting, createTaskInProject, createProject, addRelation, removeRelation } from "../lib/api.js";
+import { updateTask, getTask, setTaskWaiting, createTaskInProject, createProject, addRelation, removeRelation } from "../lib/api.js";
 import { PRIO, prioBucket, STATUS, statusOf } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color, todayISO, announce } from "../lib/ui.js";
 import { shiftISO } from "../lib/capacity.js";
@@ -45,9 +45,13 @@ export async function render(root) {
   closeMoveMenu(); // 再描画前にタッチ移動メニューを閉じる（body 直下のポップが孤立しないように）
   _root = root;
   _today = todayISO();
-  const { members, me } = await load();
-  let tasks = [];
-  try { tasks = (await getTasks()) || []; } catch (e) { tasks = []; root.innerHTML = errHtml(e); return; }
+  // B20: getTasks() 直叩きをやめ store 共有の rawTasks（除外WS等でフィルタ前の全タスク＝全WS横断）を使う。
+  // invalidate→load で再取得される。getTasks は _loadImpl 内で Promise.all され、失敗時は load() が reject。
+  let members, me, tasks;
+  try {
+    ({ members, me, rawTasks: tasks } = await load());
+    tasks = tasks || [];
+  } catch (e) { tasks = []; root.innerHTML = errHtml(e); return; }
 
   const memberIdx = new Map((members || []).map((m, i) => [m.id, i]));
   const preset = loadPreset();
