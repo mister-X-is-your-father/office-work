@@ -5,7 +5,7 @@
 import { load, invalidate } from "../lib/store.js";
 import { deleteRecurrence } from "../lib/api.js";
 import { openRecurrenceForm, summarizeRecurrence, recurrenceMode } from "./recurrenceform.js";
-import { C, esc } from "../lib/ui.js";
+import { C, esc, todayISO } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
 
 const KIND_ICON = { mtg: icon("calendar"), rmtg: icon("repeat"), rtask: icon("repeat") };
@@ -49,12 +49,18 @@ export async function render(root) {
 }
 
 function renderRecurrences(el, recurrences, memberName, { members, holidaysByDate, reload, view }) {
-  const sorted = [...(recurrences || [])].sort((a, b) => String(a.dtstart).localeCompare(String(b.dtstart)));
+  const today = todayISO();
+  // 終了済み（until が今日より前）は末尾へ。各群内は dtstart 昇順を維持。
+  const sorted = [...(recurrences || [])].sort((a, b) => {
+    const ea = isEnded(a, today) ? 1 : 0, eb = isEnded(b, today) ? 1 : 0;
+    if (ea !== eb) return ea - eb;
+    return String(a.dtstart).localeCompare(String(b.dtstart));
+  });
   el.innerHTML = `
     <div class="rc-h"><span>${esc(view.section)} <span class="rc-cnt">${sorted.length}</span></span>
       <button class="rc-add" id="rec-add">＋ 新規</button></div>
     <div class="rc-hint">定例MTG・定期タスク・単発MTGをRRULEで管理。「持ち回り」は担当が順番に巡回します。</div>
-    <div class="rc-list">${sorted.length ? sorted.map((r) => recRow(r, memberName)).join("") : `<div class="rc-empty">${esc(view.empty)}</div>`}</div>`;
+    <div class="rc-list">${sorted.length ? sorted.map((r) => recRow(r, memberName, today)).join("") : `<div class="rc-empty">${esc(view.empty)}</div>`}</div>`;
 
   el.querySelector("#rec-add").onclick = () =>
     openRecurrenceForm({ members, holidaysByDate, onSaved: reload });
@@ -75,15 +81,24 @@ function renderRecurrences(el, recurrences, memberName, { members, holidaysByDat
   });
 }
 
-function recRow(r, memberName) {
+// 終了済み判定: until（終了日・その日を含む）が今日より前なら終了済み。
+function isEnded(r, today = todayISO()) {
+  const u = summarizeRecurrence(r).untilISO;
+  return !!u && u < today;
+}
+
+function recRow(r, memberName, today = todayISO()) {
   const s = summarizeRecurrence(r);
   const names = (r.assignee_ids || []).map(memberName);
   const who = r.rotation
     ? `持ち回り: ${names.join(" → ") || "—"}`
     : (names.join("・") || "—");
   const meta = [s.rep, s.time, s.durTxt].filter(Boolean).join(" ・ ");
-  const until = s.untilISO ? ` <span class="rc-until">〜${s.untilISO.replace(/-/g, "/")}</span>` : "";
-  return `<div class="rc-row">
+  const ended = !!s.untilISO && s.untilISO < today;
+  const until = s.untilISO
+    ? ` <span class="rc-until${ended ? " rc-until-ended" : ""}">${ended ? "終了 " : "〜"}${s.untilISO.replace(/-/g, "/")}</span>`
+    : "";
+  return `<div class="rc-row${ended ? " rc-ended" : ""}">
     <div class="rc-row-main">
       <div class="rc-row-t">${KIND_ICON[recurrenceMode(r)] || icon("repeat")} ${esc(r.title)}</div>
       <div class="rc-row-sub">${esc(meta)}${until} ・ ${esc(who)}</div>
@@ -114,6 +129,10 @@ function ensureStyle() {
   .rc-row-t{font-size:13px;font-weight:600;color:${C.ink}}
   .rc-row-sub{font-size:11.5px;color:${C.muted};margin-top:2px}
   .rc-until{color:${C.amber};font-weight:600}
+  /* 終了済み（until が過去）: ミュート表示。操作ボタンは押せるように維持 */
+  .rc-row.rc-ended .rc-row-main{opacity:.5}
+  .rc-row.rc-ended .rc-row-t{text-decoration:line-through;text-decoration-thickness:1px}
+  .rc-until-ended{color:${C.muted}!important;font-weight:600}
   .rc-row-acts{display:flex;gap:5px;flex-shrink:0}
   .rc-btn{font:inherit;font-size:11.5px;padding:4px 10px;border-radius:7px;border:1px solid ${C.line};background:#fff;color:${C.muted};cursor:pointer}
   .rc-btn:hover{border-color:${C.fill};color:${C.fill}}

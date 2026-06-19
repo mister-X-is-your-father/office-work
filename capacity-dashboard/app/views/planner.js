@@ -68,12 +68,14 @@ export async function render(root) {
   root.innerHTML = `
     <h1 class="vtitle">週プランナー <small>${days[0].slice(5)}〜${days[4].slice(5)} ・ 予定×実績</small></h1>
     <div class="card" style="padding:6px 12px 12px;margin-bottom:14px">
-      <table class="ptable"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
+      <div class="ptable-scroll" style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+        <table class="ptable"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
+      </div>
     </div>
     <div class="card" style="padding:14px 16px">
       <div style="font-weight:700;font-size:13px;margin-bottom:10px">予定を追加（何日に何を何時間）</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <select id="pl-task" style="flex:1;min-width:200px;padding:7px 9px;border:1px solid ${C.line};border-radius:8px">${taskOpts}</select>
+        <select id="pl-task" style="flex:1 1 200px;min-width:160px;padding:7px 9px;border:1px solid ${C.line};border-radius:8px">${taskOpts}</select>
         <select id="pl-mem" title="この予定を誰の容量に乗せるか" style="padding:7px 9px;border:1px solid ${C.line};border-radius:8px">${assigned[0] ? memOptsFor(assigned[0]) : ""}</select>
         <select id="pl-day" style="padding:7px 9px;border:1px solid ${C.line};border-radius:8px">${dayOpts}</select>
         <input id="pl-h" type="number" min="0.5" step="0.5" value="2" style="width:72px;padding:7px 9px;border:1px solid ${C.line};border-radius:8px"> h
@@ -82,7 +84,7 @@ export async function render(root) {
       </div>
     </div>
     <div style="font-size:11.5px;color:${C.muted};margin-top:10px">「予」=予定（task_time_plans）／「実」=実績（task_time_entries）。予定が容量8hを超える日は赤。</div>
-    <style>.ptable{width:100%;border-collapse:collapse;font-size:13px}.ptable th{font-size:11px;color:${C.muted};font-weight:600;padding:8px 6px;border-bottom:1px solid ${C.line}}.ptable td{padding:8px 6px;border-bottom:1px solid ${C.line};font-variant-numeric:tabular-nums}</style>`;
+    <style>.ptable-scroll{margin:0 -6px}.ptable{width:100%;min-width:560px;border-collapse:collapse;font-size:13px}.ptable th{font-size:11px;color:${C.muted};font-weight:600;padding:8px 6px;border-bottom:1px solid ${C.line};white-space:nowrap}.ptable td{padding:8px 6px;border-bottom:1px solid ${C.line};font-variant-numeric:tabular-nums}</style>`;
 
   // タスクを変えたら対象者セレクタをそのタスクの担当者に追従
   const taskSel = root.querySelector("#pl-task");

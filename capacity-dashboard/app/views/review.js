@@ -1,8 +1,8 @@
 // レビュー ／ 承認キュー（mock 66 相当・実データ）。レビューラベル付き未完了タスクを「あなた宛/その他」で一覧。
 import { load, projectName, invalidate } from "../lib/store.js";
-import { whoami, updateTask, createComment, getComments } from "../lib/api.js";
+import { updateTask, createComment, getComments } from "../lib/api.js";
 import { isReviewTask } from "../lib/kinds.js";
-import { C, esc, member_color } from "../lib/ui.js";
+import { C, esc, member_color, avatar } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
 import { icon } from "../lib/icons.js";
 
@@ -17,8 +17,8 @@ function waitLabel(ms) {
 
 export async function render(root) {
   const data = await load();
-  let me = null;
-  try { me = await whoami(); } catch { /* 未取得でも表示はする */ }
+  // 自分判定は load() が取得済みの me を使う（この画面で whoami() を別途叩かない）。
+  const me = data.me || null;
   const meId = me && me.id;
   const meName = me ? (me.name || me.username) : "あなた";
   const now = Date.now();
@@ -28,11 +28,14 @@ export async function render(root) {
     .map((t) => {
       const created = Date.parse(t.created) || now;
       const rel = t.related_tasks && (t.related_tasks.related || [])[0];
+      const cb = t.created_by || null;
       return {
         id: t.id, title: t.title, proj: projectName(data.projects, t.project_id),
         srcId: rel && rel.id, srcTitle: rel && rel.title,
         reviewer: (t.assignees || [])[0],
         mine: (t.assignees || []).some((a) => a.id === meId),
+        createdBy: cb,
+        mineRequest: !!(cb && cb.id === meId),
         wait: Math.max(0, now - created),
       };
     })
@@ -41,22 +44,44 @@ export async function render(root) {
   const mine = rows.filter((r) => r.mine);
   const others = rows.filter((r) => !r.mine);
   const maxWait = rows.reduce((m, r) => Math.max(m, r.wait), 0);
-  const warnN = rows.filter((r) => r.wait >= WARN_MS).length;
+  const warnRows = rows.filter((r) => r.wait >= WARN_MS);
+  const warnN = warnRows.length;
+  // KPI「最長待ち」「要注意」からスクロールするためのアンカー（rows は wait 降順）
+  const anchors = {};
+  if (rows.length) anchors[rows[0].id] = "rq-longest";
+  if (warnRows.length) anchors[warnRows[0].id] = "rq-firstwarn";
 
   root.innerHTML = `
     <style>${css()}</style>
     <h1 class="vtitle">レビュー ／ 承認キュー <small>${esc(meName)} 宛を上に・待ち時間順</small></h1>
     <div class="rq-stats">
-      <div class="rq-kpi you"><div class="l">${esc(meName)}宛・対応待ち</div><div class="v">${mine.length}<small>件</small></div></div>
-      <div class="rq-kpi"><div class="l">キュー全体</div><div class="v">${rows.length}<small>件</small></div></div>
-      <div class="rq-kpi"><div class="l">最長待ち</div><div class="v">${rows.length ? waitLabel(maxWait) : "—"}</div></div>
-      <div class="rq-kpi ${warnN ? "warn" : ""}"><div class="l">要注意（4h以上）</div><div class="v">${warnN}<small>件</small></div></div>
+      ${kpi(`${esc(meName)}宛・対応待ち`, `${mine.length}<small>件</small>`, "you", mine.length ? "sec-mine" : "")}
+      ${kpi("キュー全体", `${rows.length}<small>件</small>`, "", rows.length ? (mine.length ? "sec-mine" : "sec-others") : "")}
+      ${kpi("最長待ち", rows.length ? waitLabel(maxWait) : "—", "", rows.length ? "rq-longest" : "")}
+      ${kpi("要注意（4h以上）", `${warnN}<small>件</small>`, warnN ? "warn" : "", warnN ? "rq-firstwarn" : "")}
     </div>
     ${rows.length ? "" : `<div class="rq-empty">レビュー待ちはありません。円時計の⋯「レビュー依頼」から作成できます。</div>`}
-    ${mine.length ? section(`${esc(meName)} 宛のレビュー待ち`, mine, true) : ""}
-    ${others.length ? section("その他のレビュー／承認待ち", others, false) : ""}`;
+    ${mine.length ? section(`${esc(meName)} 宛のレビュー待ち`, mine, true, "sec-mine", anchors) : ""}
+    ${others.length ? section("その他のレビュー／承認待ち", others, false, "sec-others", anchors) : ""}`;
 
   const onSaved = async () => { invalidate(); render(root); };
+
+  // KPI/サマリ → 該当セクション／行へスムーズスクロール（クリック・Enter/Space）。
+  // data-jump にスクロール先要素の id を持たせ、無ければ何もしない。
+  const jumpTo = (targetId) => {
+    if (!targetId) return;
+    const el = root.querySelector(`#${targetId}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    el.classList.add("rq-flash");
+    setTimeout(() => el.classList.remove("rq-flash"), 1000);
+  };
+  root.querySelectorAll(".rq-kpi[data-jump]").forEach((k) => {
+    k.onclick = () => jumpTo(k.dataset.jump);
+    k.onkeydown = (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); jumpTo(k.dataset.jump); }
+    };
+  });
 
   // 元タスクを SPA モーダルで開く（外部ページへ飛ばない）
   root.querySelectorAll(".rq-open").forEach((b) => {
@@ -213,22 +238,38 @@ function toastCss() {
   html[data-theme="dark"] .rq-toast{box-shadow:0 8px 24px rgba(0,0,0,.5)}`;
 }
 
-function section(title, rows, you) {
-  const head = `<div class="rq-sechdr"><h2>${title}</h2>${you ? `<span class="rq-pill">MUST</span>` : ""}<span class="rq-cnt">${rows.length} 件</span></div>`;
-  return `<div class="rq-section">${head}<div class="rq-queue">${rows.map(rowHtml).join("")}</div></div>`;
+// クリック可能な KPI カード（jumpId があればスクロール用 data-jump とキーボード操作可に）。
+function kpi(label, valueHtml, cls, jumpId) {
+  const clickable = jumpId ? ` rq-jump" data-jump="${jumpId}" role="button" tabindex="0` : "";
+  return `<div class="rq-kpi ${cls}${clickable}"><div class="l">${label}</div><div class="v">${valueHtml}</div></div>`;
 }
 
-function rowHtml(r) {
+function section(title, rows, you, id, anchors = {}) {
+  const head = `<div class="rq-sechdr"><h2>${title}</h2>${you ? `<span class="rq-pill">MUST</span>` : ""}<span class="rq-cnt">${rows.length} 件</span></div>`;
+  return `<div class="rq-section"${id ? ` id="${id}"` : ""}>${head}<div class="rq-queue">${rows.map((r) => rowHtml(r, anchors)).join("")}</div></div>`;
+}
+
+// 依頼者（created_by）表示。自分依頼はバッジ、他者は avatar()「依頼:◯◯」。created_by 無しは省略。
+function requesterHtml(r) {
+  if (r.mineRequest) return `<span class="rq-req mine">自分依頼</span>`;
+  if (!r.createdBy) return "";
+  const nm = r.createdBy.name || r.createdBy.username || "不明";
+  return `<span class="rq-req">${avatar(r.createdBy, { size: 16 })}依頼:${esc(nm)}</span>`;
+}
+
+function rowHtml(r, anchors = {}) {
   const rn = r.reviewer ? (r.reviewer.name || r.reviewer.username) : "未割当";
   const warn = r.wait >= WARN_MS;
   const open = r.srcId ? `<button class="rq-btn rq-open" data-src="${r.srcId}" title="元タスクを開く">↗</button>` : "";
-  return `<div class="rq-row ${r.mine ? "you" : ""}">
+  const anchorId = anchors[r.id] ? ` id="${anchors[r.id]}"` : "";
+  return `<div class="rq-row ${r.mine ? "you" : ""}"${anchorId}>
     <span class="rq-kind">レビュー</span>
     <div class="rq-titlecell" data-id="${r.id}" title="このレビュータスクを編集">
       <div class="t">${esc(r.title)}</div>
       <div class="meta">
         ${r.srcTitle ? `<span class="src">元: ${esc(r.srcTitle)}</span>` : ""}<span class="proj">${esc(r.proj)}</span>
         <span class="rq-who"><span class="ava" style="background:${r.reviewer ? member_color(r.reviewer.id) : C.full}">${esc(rn[0] || "?")}</span>${esc(rn)}${r.mine ? "（あなた）" : ""}</span>
+        ${requesterHtml(r)}
         <span class="rq-wait ${warn ? "warn" : "ok"}"><span class="wdot"></span>${waitLabel(r.wait)}${warn ? " 要対応" : ""}</span>
       </div>
     </div>
@@ -247,6 +288,12 @@ function css() {
   .rq-kpi .v small{font-size:13px;color:${C.muted};font-weight:600;margin-left:2px}
   .rq-kpi.you{border-color:#cfe0ff;background:#f5f9ff}
   .rq-kpi.warn .v{color:${C.over}}
+  .rq-kpi.rq-jump{cursor:pointer;transition:box-shadow .12s,transform .12s}
+  .rq-kpi.rq-jump:hover{box-shadow:0 4px 12px rgba(20,30,50,.1);transform:translateY(-1px)}
+  .rq-kpi.rq-jump:focus-visible{outline:2px solid ${C.fill};outline-offset:2px}
+  /* スクロール先のフラッシュハイライト */
+  .rq-flash{animation:rq-flash 1s ease-out}
+  @keyframes rq-flash{0%{box-shadow:0 0 0 3px rgba(58,134,255,.45)}100%{box-shadow:0 0 0 3px rgba(58,134,255,0)}}
   .rq-section{margin-bottom:22px}
   .rq-sechdr{display:flex;align-items:center;gap:10px;margin:0 0 9px}
   .rq-sechdr h2{font-size:14.5px;margin:0;font-weight:700}
@@ -265,6 +312,9 @@ function css() {
   .rq-titlecell .src{color:${C.ink}}
   .rq-who{display:inline-flex;align-items:center;gap:5px}
   .rq-who .ava{width:18px;height:18px;border-radius:50%;flex:none;display:grid;place-items:center;color:#fff;font-size:10px;font-weight:700}
+  .rq-req{display:inline-flex;align-items:center;gap:4px;color:${C.muted}}
+  .rq-req.mine{font-weight:700;color:${C.fill};background:#eaf2ff;border:1px solid #d5e6ff;border-radius:6px;padding:1px 7px}
+  html[data-theme="dark"] .rq-req.mine{background:rgba(58,134,255,.16);border-color:rgba(58,134,255,.35)}
   .rq-wait{display:inline-flex;align-items:center;gap:5px;font-variant-numeric:tabular-nums;font-weight:600}
   .rq-wait .wdot{width:7px;height:7px;border-radius:50%;background:${C.free}}
   .rq-wait.warn{color:${C.over}}.rq-wait.warn .wdot{background:${C.over}}

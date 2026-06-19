@@ -179,6 +179,7 @@ async function mount(root, opts) {
   // タスク1行ぶんのバー領域HTML（予定バー＋実績バー）。taskId を data 属性に載せてドラッグで参照。
   function barsHTML(r, taskId) {
     const cells = scale.axis.map((a) => `<div class="cell${a.weekend ? " weekend" : ""}${a.dow === weekStart ? " wk" : ""}"></div>`).join("");
+    const tName = (byIdAll.get(taskId) || {}).title || "";
     let bars = "";
     if (r.planned.source) {
       const pg = scale.range(r.planned.start, r.planned.end);
@@ -187,14 +188,18 @@ async function mount(root, opts) {
       // dates のみ端リサイズ可。plans/dates/due はすべて移動＋クリックで編集（draggable）。
       const resizable = r.planned.source === "dates";
       const handles = resizable ? `<span class="bar-h l"></span><span class="bar-h r"></span>` : "";
-      bars += `<div class="bar plan draggable${clip}" data-task="${taskId}" data-src="${r.planned.source}" style="left:${left}px;width:${w}px" title="予定 ${fmtH(r.planned.h)}（${srcLabel(r.planned.source)}）・ドラッグで移動${resizable ? "／端で伸縮" : ""}・クリックで編集">${handles}</div>`;
+      // スクリーンリーダー向け: タスク名＋予定（時間・由来）。視覚的 title はホバー用に従来どおり保持。
+      const planAria = `${tName ? tName + " " : ""}予定 ${fmtH(r.planned.h)}（${srcLabel(r.planned.source)}）`;
+      bars += `<div class="bar plan draggable${clip}" role="img" aria-label="${esc(planAria)}" data-task="${taskId}" data-src="${r.planned.source}" style="left:${left}px;width:${w}px" title="予定 ${fmtH(r.planned.h)}（${srcLabel(r.planned.source)}）・ドラッグで移動${resizable ? "／端で伸縮" : ""}・クリックで編集">${handles}</div>`;
     }
     if (r.actual.start) {
       const ag = scale.range(r.actual.start, r.actual.end);
       const left = ag.fromIdx * COL_W + 2, w = ag.span * COL_W - 4;
       const pct = Math.min(100, r.percent);
       const fill = r.over ? C.over : (r.percent >= 100 ? C.free : C.fill);
-      bars += `<div class="bar act${r.over ? " over" : ""}" style="left:${left}px;width:${w}px" title="実績 ${fmtH(r.actual.h)} / 見積 ${fmtH(r.estH)}">
+      // スクリーンリーダー向け: タスク名＋実績/見積＋進捗%＋超過フラグ。
+      const actAria = `${tName ? tName + " " : ""}実績 ${fmtH(r.actual.h)} / 見積 ${fmtH(r.estH)}・進捗 ${r.percent}%${r.over ? "・超過" : ""}`;
+      bars += `<div class="bar act${r.over ? " over" : ""}" role="img" aria-label="${esc(actAria)}" style="left:${left}px;width:${w}px" title="実績 ${fmtH(r.actual.h)} / 見積 ${fmtH(r.estH)}">
         <div class="fill" style="width:${pct}%;background:${fill}"></div>
         <div class="blabel">${r.percent}%</div></div>`;
     }
@@ -569,6 +574,18 @@ async function mount(root, opts) {
     else paintProjectMode();   // project（"task"廃止＝既定はプロジェクト別）
   }
 
+  // 今日列がチャート領域の中央付近に来るよう横スクロール。窓外（過去/未来に今日が無い）なら何もしない。
+  // ラベル列(固定)はスクロール対象外なので、可視チャート幅 = clientWidth - LABEL_W_P で中央寄せを計算。
+  function scrollToToday(smooth) {
+    const ti = scale.indexOf(today);
+    if (ti < 0 || ti >= WINDOW_DAYS) return;        // 今日が表示窓の外（過去/未来）なら据え置き
+    const todayCenter = LABEL_W_P + ti * COL_W + COL_W / 2;   // チャート内での今日列の中心x(px)
+    const chartW = scrollEl.clientWidth - LABEL_W_P;          // ラベル列を除いた可視チャート幅
+    const target = Math.max(0, todayCenter - LABEL_W_P - chartW / 2);
+    try { scrollEl.scrollTo({ left: target, behavior: smooth ? "smooth" : "auto" }); }
+    catch { scrollEl.scrollLeft = target; }         // scrollTo 非対応フォールバック
+  }
+
   // closeDayPop は編集系（日別予定ポップアップ）が editable のとき本体を差し込む。
   // 非 editable（埋め込み閲覧）では no-op のまま＝onResize から安全に呼べる。
   let closeDayPop = () => {};
@@ -627,6 +644,9 @@ async function mount(root, opts) {
   if (expandAllBtn) expandAllBtn.onclick = () => { state.collapsed.clear(); paint(); };
   const collapseAllBtn = root.querySelector("#gv-collapse-all");
   if (collapseAllBtn) collapseAllBtn.onclick = () => { for (const k of collapsibleKeys) state.collapsed.add(k); paint(); };
+  // 「今日へ」: 今日列が見える位置へスムーススクロール。窓外なら scrollToToday 内で何もしない。
+  const todayBtn = root.querySelector("#gv-today");
+  if (todayBtn) todayBtn.onclick = () => scrollToToday(true);
   } // end if(!embedded) — toolbar wiring
   // 人別ヘッダの折り畳みは再描画後に張り直すのでイベント委譲（埋め込みでも有効）
   rowsEl.addEventListener("click", (e) => {
@@ -796,6 +816,9 @@ async function mount(root, opts) {
   } // end if(editable) — 編集系ハンドラ
 
   paint();
+  // 初期描画後、今日線が見える位置へ自動スクロール（中央寄せ）。埋め込みは「今日の少し手前」起点で
+  // 既に今日が見えるので対象外＝全画面のみ。レイアウト確定後に実行するため rAF で1フレーム待つ。
+  if (!embedded) requestAnimationFrame(() => scrollToToday(false));
   // 埋め込みは cleanup 関数を返す（呼び出し側が破棄時に呼ぶ／呼ばなくても MutationObserver が自動解除）。
   return teardown;
 }
@@ -841,6 +864,9 @@ function shell(members, memberIdx, mode, embedded = false, maxHeight) {
         <button id="gv-expand-all" title="すべて展開">${icon("chevronDown", { size: 14 })}全展開</button>
         <button id="gv-collapse-all" title="すべて折りたたみ">${icon("chevronRight", { size: 14 })}全折りたたみ</button>
       </div>
+      <div class="seg">
+        <button id="gv-today" title="今日が見える位置へスクロール">${icon("calendarDays", { size: 14 })}今日へ</button>
+      </div>
       <div class="tbg"><span class="tbl">表示</span>
         <div class="seg">${["day", "week"].map((u) => `<button data-unit="${u}"${gview.unit === u ? ' class="on"' : ""}>${u === "day" ? "日" : "週"}</button>`).join("")}</div>
         <div class="seg">${SPANS[gview.unit].map((p) => { const cur = gview.unit === "day" ? gview.spanDay : gview.spanWeek; return `<button data-span="${p.key}"${p.key === cur ? ' class="on"' : ""}>${p.label}</button>`; }).join("")}</div>
@@ -859,7 +885,6 @@ function shell(members, memberIdx, mode, embedded = false, maxHeight) {
       <span class="li"><span class="sw" style="background:${C.free}"></span>完了</span>
       <span class="li"><span class="sw" style="background:${C.over}"></span>見積超過</span>
       <span class="li"><span style="border-left:2px dashed ${C.over};height:13px;display:inline-block"></span> 今日</span>
-      <span class="li"><span style="display:inline-block;width:14px;border-top:1.4px dashed ${C.capline}"></span> 依存</span>
     </div>
   </div>
   </div>
@@ -877,8 +902,10 @@ function ganttStyles() {
   /* ガントを画面高にフィット＝行だけ内側スクロール。タイトル/ツールバー/日付軸/凡例は常時表示。
      高さ控除 = topbar(54) + content 余白上(24)。content 下 padding(60) は負 margin で食い込み、
      行エリアをビューポート下端ぎりぎりまで使う（共有 content の padding は触らない）。
-     実効高 = 100vh - 78(=54+24) - 12(下の余白) = 100vh - 90px。 */
-  .gv-view{display:flex;flex-direction:column;height:calc(100vh - 90px);margin-bottom:-48px}
+     実効高 = 100dvh - 78(=54+24) - 12(下の余白) = 100dvh - 90px。
+     iOS Safari 等のアドレスバー出没で 100vh が過大になる問題を避けるため dvh を使う。
+     dvh 非対応ブラウザ向けに 100vh を先に置きフォールバックする。 */
+  .gv-view{display:flex;flex-direction:column;height:calc(100vh - 90px);height:calc(100dvh - 90px);margin-bottom:-48px}
   .gv-view .vtitle{flex:none;margin:0 0 10px}
   .gv{padding:0;flex:1;min-height:0;display:flex;flex-direction:column}
   .gv-toolbar{flex:none}

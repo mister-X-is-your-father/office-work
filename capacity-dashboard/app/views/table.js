@@ -72,6 +72,8 @@ let lastRoot = null, docDeselectWired = false; // 余白クリック解除（doc
 let historyUnsub = null; // Undo/Redo ボタンの活性同期（subscribe 解除関数。再描画ごとに張り替える）
 
 const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(0, 10) : "");
+// 本文(description)の HTML タグを除去してプレーンテキスト化（検索対象用）。空/未設定は ""。
+const descText = (html) => (html ? String(html).replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").trim() : "");
 
 // 軸の定義: ラベル＋比較関数（行 r を受ける）＋セレクトで選んだ時の既定の向き。
 const AXES = {
@@ -144,6 +146,7 @@ export async function render(root) {
         r.title,
         r.parent && r.parent.title,
         r.cat && r.cat.title,
+        descText(r.t.description),   // 本文（HTMLタグを除去したテキスト）も検索対象＝smartlist と一致
         ...(r.t.assignees || []).map((a) => a.name || a.username),
       ];
       return parts.some((s) => s && String(s).toLowerCase().includes(q));
@@ -211,10 +214,16 @@ export async function render(root) {
   const subtitle = isOutline
     ? "階層表示（プロジェクト＞タスク）・チェックで完了、＋でサブタスク追加"
     : (manual ? "・ 行をどこでもドラッグして自分用に並べ替え" : `・ ソート条件を重ねて並べ替え（列ヘッダ: クリック=第1条件 / Shift+クリック=条件を追加・最大${MAX_SORTS}）`);
+  // vtitle の件数内訳サマリ（表示中の集合に対して）: 件数・期限切れ（未完了で期限が今日より前）・見積合計h。
+  const overdueN = rows.filter((r) => !r.done && r.due && r.due < today).length;
+  const estTotal = rows.reduce((s, r) => s + (r.est || 0), 0);
+  const summary = `${rows.length}件`
+    + (overdueN ? `・期限切れ${overdueN}` : "")
+    + (estTotal ? `・見積${fmtH(estTotal)}` : "");
   root.innerHTML = `
     <style>${css()}</style>
     <div class="tb-head">
-      <h1 class="vtitle">タスク一覧 <small>${rows.length}件 ${subtitle}</small></h1>
+      <h1 class="vtitle">タスク一覧 <small>${summary} ${subtitle}</small></h1>
       <span class="tb-search">${icon("search", { size: 15, cls: "tb-search-ic" })}<input id="tb-q" class="tb-search-in" type="text" placeholder="タスクを検索（名前・PJ・分類・担当）" value="${esc(V.q || "")}">${V.q ? `<button id="tb-q-clr" class="tb-search-x" type="button" title="検索をクリア">×</button>` : ""}</span>
     </div>
     <div class="tb-ptabs" role="tablist" aria-label="プリセット">

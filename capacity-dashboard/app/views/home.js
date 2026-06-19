@@ -3,7 +3,6 @@
 import { load, isAiUser } from "../lib/store.js";
 import { loadByMember, estimateVsActual, triage } from "../lib/capacity.js";
 import { capacityOn } from "../lib/recurrence.js";
-import { whoami } from "../lib/api.js";
 import { statusOf } from "../lib/kinds.js";
 import { C, esc, fmtH, todayISO, member_color } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
@@ -26,15 +25,18 @@ const humanAssignees = (t) => (t.assignees || []).filter((a) => !isAiUser(a));
 // 未完了 = done でない（statusOf が "done" 以外）。連絡待ち/進行中は含む。
 const isOpen = (t) => statusOf(t) !== "done";
 
-// 「やること」3バケットを tasks から算出。重複を避けるため 1W は「明日〜7日」。
+// 「やること」4バケットを tasks から算出。重複を避けるため 1W は「明日〜7日」。
+// 先頭=期限超過（due<today の未完了）。今日期限/1W は超過を含まない（===day / >=明日）ので重複なし。
 function todoBuckets(tasks, day) {
   const open = (tasks || []).filter(isOpen);
   const tomorrow = shiftISO(day, 1), in7 = shiftISO(day, 7);
+  const overdue = open.filter((t) => { const d = dueISO(t); return d && d < day; });
   const unassigned = open.filter((t) => humanAssignees(t).length === 0);
   const dueToday = open.filter((t) => dueISO(t) === day);
   const within1w = open.filter((t) => { const d = dueISO(t); return d && d >= tomorrow && d <= in7; });
   const byDue = (a, b) => (dueISO(a) || "9999").localeCompare(dueISO(b) || "9999") || a.id - b.id;
   return [
+    { id: "overdue",    title: "期限超過",   ic: "alarm",        link: "#/list", danger: true, items: overdue.sort(byDue) },
     { id: "unassigned", title: "未アサイン", ic: "user",         link: "#/list", items: unassigned.sort(byDue) },
     { id: "today",      title: "今日期限",   ic: "alarm",        link: "#/list", items: dueToday.sort(byDue) },
     { id: "next7",      title: "1週間以内（明日〜7日）", ic: "calendarDays", link: "#/list", items: within1w.sort(byDue) },
@@ -59,15 +61,17 @@ function todoRow(t, projects, day) {
 }
 
 // 1バケット（見出し「未アサイン (N)」＋行リスト＋他N件リンク）。0件は薄く「なし」。
+// danger=true（期限超過）は赤系の枠/見出し/件数バッジで強調。
 function bucketHtml(b, projects, day) {
   const n = b.items.length;
+  const cls = `td-bk${b.danger ? " td-bk-danger" : ""}`;
   const head = `<div class="td-bk-h">${icon(b.ic, { size: 14 }) || ""}<span>${esc(b.title)}</span><span class="td-bk-n">${n}</span></div>`;
-  if (n === 0) return `<div class="td-bk"><div>${head}</div><div class="td-empty">なし</div></div>`;
+  if (n === 0) return `<div class="${cls}"><div>${head}</div><div class="td-empty">なし</div></div>`;
   const shown = b.items.slice(0, MAX_ROWS);
   const rest = n - shown.length;
   const more = rest > 0
     ? `<a class="td-more" href="${b.link}">他${rest}件 → タスク一覧 ${icon("chevronRight", { size: 12 }) || "›"}</a>` : "";
-  return `<div class="td-bk">${head}
+  return `<div class="${cls}">${head}
     <div class="td-rows">${shown.map((t) => todoRow(t, projects, day)).join("")}</div>${more}</div>`;
 }
 
@@ -82,7 +86,7 @@ function writeFold(uid, fold) {
 }
 
 export async function render(root) {
-  const { tasks, projects, members, plansByTask, holidaysSet, unavailabilityByMember, settings } = await load();
+  const { tasks, projects, members, plansByTask, holidaysSet, unavailabilityByMember, settings, me } = await load();
   const day = todayISO();
   // 営業日割り＋人別容量（週末/祝日/休暇=0）で今日KPIを正確に（§土日祝ギャップ）
   const capacityFor = (m, d) => capacityOn(m, d, { holidays: holidaysSet, unavailabilityByMember, capH: settings.capH });
@@ -93,10 +97,12 @@ export async function render(root) {
   const totCap = rows.reduce((s, r) => s + r.capH, 0), totAsg = rows.reduce((s, r) => s + r.assignedH, 0);
   const over = rows.filter(r => r.status === "over");
   const must = tri.filter(t => t.cls === "must");
+  // 過負荷者の名前（KPI過負荷カードの title=ツールチップ用）。0名なら空。
+  const overNames = over.map(r => r.name).filter(Boolean).join("、");
+  const overTitle = over.length ? `過負荷: ${esc(overNames)}（→ 今日の稼働予定）` : "今日の稼働予定へ";
 
-  // 折りたたみ状態（本人ごと localStorage）。uid 取得失敗時は anon キーへ。
-  let uid = null;
-  try { uid = (await whoami())?.id ?? null; } catch { uid = null; }
+  // 折りたたみ状態（本人ごと localStorage）。uid は load() の me から（往復削減）。未取得時は anon キーへ。
+  const uid = me?.id ?? null;
   const fold = readFold(uid);
 
   // 折りたたみ可能なセクション。id は fold 状態のキー、loader は中身を描く非同期関数。
@@ -115,10 +121,10 @@ export async function render(root) {
   root.innerHTML = `
     <h1 class="vtitle">ホーム <small>${day}</small></h1>
     <div class="kpis">
-      <div class="kpi"><div class="l">チーム稼働</div><div class="v">${fmtH(totAsg)}<small>/${fmtH(totCap)}</small></div></div>
-      <div class="kpi free"><div class="l">空き工数</div><div class="v">${fmtH(Math.max(0, totCap - totAsg))}</div></div>
-      <div class="kpi ${over.length ? "over" : ""}"><div class="l">過負荷</div><div class="v">${over.length}<small>名</small></div></div>
-      <div class="kpi"><div class="l">今日必須</div><div class="v">${must.length}<small>件</small></div></div>
+      <a class="kpi" href="#/today" title="今日の稼働予定へ"><div class="l">チーム稼働</div><div class="v">${fmtH(totAsg)}<small>/${fmtH(totCap)}</small></div></a>
+      <a class="kpi free" href="#/workplan" title="稼働プランへ"><div class="l">空き工数</div><div class="v">${fmtH(Math.max(0, totCap - totAsg))}</div></a>
+      <a class="kpi ${over.length ? "over" : ""}" href="#/today" title="${overTitle}"><div class="l">過負荷</div><div class="v">${over.length}<small>名</small></div></a>
+      <a class="kpi" href="#/triage" title="トリアージへ"><div class="l">今日必須</div><div class="v">${must.length}<small>件</small></div></a>
     </div>
     <div class="home-stack">
       ${section("todo", "やること")}
@@ -127,6 +133,10 @@ export async function render(root) {
       ${section("gantt", "月間ガント（人別レーン）")}
     </div>
     <style>
+      /* KPIカードをリンク化: anchor 既定（色/下線）を打ち消し、見た目は div 時代と同一＋hover で押せると分かる。 */
+      a.kpi{color:inherit;text-decoration:none;display:block;cursor:pointer;transition:box-shadow .12s,border-color .12s,transform .12s}
+      a.kpi:hover{border-color:${C.fill};box-shadow:0 2px 8px rgba(20,30,50,.12);transform:translateY(-1px)}
+      a.kpi:focus-visible{outline:2px solid ${C.fill};outline-offset:2px}
       .home-stack{display:flex;flex-direction:column;gap:16px}
       .home-sec{padding:0;overflow:hidden}
       .home-sec-head{display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;
@@ -138,13 +148,19 @@ export async function render(root) {
       .home-sec-title{flex:1;min-width:0}
       .home-sec-body{padding:12px 16px}
       .home-sec-body[hidden]{display:none}
-      /* やること: 3バケットを横並び（狭幅で縦積み）。可変高・トークン配色でテーマ追従。 */
-      .td-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
-      @media(max-width:720px){.td-grid{grid-template-columns:1fr}}
+      /* やること: 4バケットを横並び（中幅2列・狭幅で縦積み）。可変高・トークン配色でテーマ追従。 */
+      .td-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+      @media(max-width:980px){.td-grid{grid-template-columns:repeat(2,1fr)}}
+      @media(max-width:560px){.td-grid{grid-template-columns:1fr}}
       .td-bk{border:1px solid ${C.line};border-radius:10px;padding:10px 12px;background:${C.bg};display:flex;flex-direction:column;min-width:0}
       .td-bk-h{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;color:${C.ink};margin-bottom:8px}
       .td-bk-h .ic{color:${C.muted}}
       .td-bk-n{margin-left:auto;font-size:11px;font-weight:700;color:${C.muted};background:${C.track};border-radius:999px;padding:1px 8px}
+      /* 期限超過バケット: 赤系で強調（枠/見出し/件数バッジ）。0件時は薄い「なし」のまま。 */
+      .td-bk-danger{border-color:${C.over}}
+      .td-bk-danger .td-bk-h{color:${C.over}}
+      .td-bk-danger .td-bk-h .ic{color:${C.over}}
+      .td-bk-danger .td-bk-n{color:#fff;background:${C.over}}
       .td-empty{font-size:12px;color:${C.muted};padding:6px 2px}
       .td-rows{display:flex;flex-direction:column;gap:4px}
       .td-row{display:flex;flex-direction:column;gap:3px;width:100%;box-sizing:border-box;text-align:left;

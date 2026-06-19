@@ -30,45 +30,80 @@ export async function render(root) {
     <h1 class="vtitle">習慣 <small>毎日の積み重ね ・ 今日の○をクリックでチェック</small></h1>
     <div class="hb-add card">
       <input id="hb-in" class="hb-input" autocomplete="off" placeholder="新しい習慣（例: 朝のレビュー15分）を入力して Enter">
+      <div id="hb-err" class="hb-err" role="alert" hidden></div>
     </div>
     ${hist.length ? `<div class="card hb-list">
       ${hist.map(({ t, dates, total }) => rowHtml(t, dates, total, today)).join("")}
     </div>` : `<div class="card"><div class="loading">習慣はまだありません。上の欄から追加（自分だけに見える「${esc(HABIT_WS)}」ワークスペースに保存・チーム集計には含まれません）。</div></div>`}`;
 
   const input = root.querySelector("#hb-in");
+  const errEl = root.querySelector("#hb-err");
+  const showErr = (msg) => { if (!errEl) return; errEl.textContent = msg; errEl.hidden = false; };
+  const clearErr = () => { if (errEl) { errEl.hidden = true; errEl.textContent = ""; } };
+  input.oninput = clearErr;
   input.onkeydown = async (ev) => {
     if (ev.key !== "Enter") return;
     const name = input.value.trim();
     if (!name || !me) return;
     input.disabled = true;
+    clearErr();
     try {
       const ws = habitProject || await createProject(HABIT_WS);
       const t = await createTaskInProject(ws.id, { title: name });
       await addAssignee(t.id, me.id);
       invalidate(); await load(); render(root);
-    } catch (e) { input.disabled = false; input.value = "× " + e.message; }
+    } catch (e) {
+      // 入力テキストは破壊しない（value 保持・エラーは別要素 role=alert に出す）
+      input.disabled = false;
+      input.focus();
+      showErr("追加に失敗しました: " + (e && e.message ? e.message : e));
+    }
   };
 
-  // 今日のチェックをトグル
-  root.querySelectorAll("[data-check]").forEach((b) => {
-    b.onclick = async () => {
-      const { t, todayEntry } = hist.find((h) => h.t.id === +b.dataset.check);
-      b.disabled = true;
+  // 各行にイベントをバインド（行単位ローカル更新のため再利用可能なヘルパに）
+  const bindRow = (rowEl) => {
+    // 今日のチェックをトグル（フル再描画/再fetchはせず、該当行だけローカル更新して差し替える）
+    const cb = rowEl.querySelector("[data-check]");
+    if (cb) cb.onclick = async () => {
+      const h = hist.find((x) => x.t.id === +cb.dataset.check);
+      if (!h) return;
+      cb.disabled = true;
       try {
-        if (todayEntry) await deleteTime(t.id, todayEntry.id);
-        else await logTime(t.id, 60, "習慣チェック", today + "T00:00:00Z"); // logged_on はRFC3339必須
-        render(root);
-      } catch { b.disabled = false; }
+        if (h.todayEntry) {
+          // 取り消し
+          await deleteTime(h.t.id, h.todayEntry.id);
+          h.dates.delete(today);
+          h.todayEntry = null;
+        } else {
+          // チェック（logged_on はRFC3339必須）
+          let entry = await logTime(h.t.id, 60, "習慣チェック", today + "T00:00:00Z");
+          // 取り消しに使う id を確保。返値に id が無ければ、その習慣のみ再fetch（フル再描画は避ける）
+          if (!entry || entry.id == null) {
+            try {
+              const own = ((await getTimes(h.t.id)) || []).filter((e) => e.user_id === (me && me.id));
+              entry = own.find((e) => dateOnly(e.logged_on || e.created) === today) || entry;
+            } catch { /* noop */ }
+          }
+          h.dates.add(today);
+          h.todayEntry = entry || null;
+        }
+        h.total = h.dates.size;
+        invalidate(); // ストア再fetchは次回 render まで遅延（即時の見た目は行差し替えで反映）
+        // 該当行だけ作り直して差し替え
+        const fresh = document.createRange().createContextualFragment(rowHtml(h.t, h.dates, h.total, today)).firstElementChild;
+        rowEl.replaceWith(fresh);
+        bindRow(fresh);
+      } catch { cb.disabled = false; }
     };
-  });
-  // 習慣の削除（履歴ごと見えなくなる・soft delete）
-  root.querySelectorAll("[data-del]").forEach((b) => {
-    b.onclick = async () => {
+    // 習慣の削除（履歴ごと見えなくなる・soft delete）
+    const db = rowEl.querySelector("[data-del]");
+    if (db) db.onclick = async () => {
       if (!confirm("この習慣を削除しますか？（チェック履歴も見えなくなります）")) return;
-      b.disabled = true;
-      try { await deleteTask(+b.dataset.del); invalidate(); await load(); render(root); } catch { b.disabled = false; }
+      db.disabled = true;
+      try { await deleteTask(+db.dataset.del); invalidate(); await load(); render(root); } catch { db.disabled = false; }
     };
-  });
+  };
+  root.querySelectorAll(".hb-row").forEach(bindRow);
 }
 
 function rowHtml(t, dates, total, today) {
@@ -99,6 +134,7 @@ function css() {
   .hb-add{padding:12px 14px;margin-bottom:14px}
   .hb-input{width:100%;box-sizing:border-box;font:inherit;font-size:13.5px;padding:9px 13px;border:1px solid ${C.line};border-radius:9px;background:#fff}
   .hb-input:focus{outline:none;border-color:${C.fill};box-shadow:0 0 0 3px rgba(58,134,255,.12)}
+  .hb-err{margin-top:8px;font-size:12.5px;color:#c0392b;font-weight:600}
   .hb-list{padding:6px 18px}
   .hb-row{display:flex;align-items:center;gap:16px;padding:13px 0;border-bottom:1px solid ${C.line}}
   .hb-row:last-child{border-bottom:0}
@@ -118,6 +154,7 @@ function css() {
 
   /* ダークモード: 入力面=card / 未チェックの○=track / 今日ボタン面=card。済(.on)の緑は維持 */
   html[data-theme="dark"] .hb-input{background:var(--card);color:var(--ink)}
+  html[data-theme="dark"] .hb-err{color:#ff8a80}
   html[data-theme="dark"] .hb-c{background:var(--track);color:var(--muted)}
   html[data-theme="dark"] .hb-c.today{background:var(--card);color:${C.fill}}
   html[data-theme="dark"] .hb-c.today:hover{background:rgba(58,134,255,.16)}`;

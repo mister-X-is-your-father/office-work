@@ -3,7 +3,7 @@
 // 未読バッジ＋ドロップダウンで通知する。項目クリックで元タスク（or レビュータスク）を編集モーダルで開く。
 // 既読は { [taskId]: { done, cCount } } のスナップショットで管理。done が新たに true / コメント数増 を未読とする。
 import { load } from "../lib/store.js";
-import { whoami, getComments } from "../lib/api.js";
+import { getComments } from "../lib/api.js";
 import { isReviewTask } from "../lib/kinds.js";
 import { esc } from "../lib/ui.js";
 
@@ -33,9 +33,9 @@ const fmtTime = (iso) => { const d = iso ? new Date(iso) : null; return d && !is
 // 自分が依頼したレビュー群から通知リストと未読件数を計算する。
 // 戻り値: { items:[{taskId, openId, kind, title, what, when, unread}], unread:number, snapshot:{[id]:{done,cCount}} }
 async function computeNotifications() {
-  const me = await whoami();
-  if (!me || me.id == null) return { items: [], unread: 0, snapshot: null, uid: null };
   const data = await load();
+  const me = data.me; // load() が whoami をまとめて取得済み（重複 whoami 呼び出しを避ける）
+  if (!me || me.id == null) return { items: [], unread: 0, snapshot: null, uid: null };
   const mine = (data.tasks || []).filter((t) => isReviewTask(t) && t.created_by && t.created_by.id === me.id);
   const seen = readSeen(me.id);
   const snapshot = {};
@@ -89,6 +89,8 @@ export async function mountReviewBell(topbar, opts = {}) {
   btn.className = "nb-btn";
   btn.title = "レビュー通知";
   btn.setAttribute("aria-label", "レビュー通知");
+  btn.setAttribute("aria-haspopup", "true");
+  btn.setAttribute("aria-expanded", "false");
   btn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:block;pointer-events:none"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span class="nb-badge" hidden>0</span>`;
   // 🔍検索・↻再読込の近く（refresh の前）に置く＝既存ウィジェットと並ぶ
   const anchor = topbar.querySelector("#refresh");
@@ -105,6 +107,8 @@ export async function mountReviewBell(topbar, opts = {}) {
   const setBadge = (n) => {
     if (n > 0) { badge.textContent = n > 99 ? "99+" : String(n); badge.hidden = false; }
     else badge.hidden = true;
+    // 未読件数を読み上げに反映（例「レビュー通知 3件」）。0件は件数を付けない。
+    btn.setAttribute("aria-label", n > 0 ? `レビュー通知 ${n}件` : "レビュー通知");
   };
 
   // パネルを開いている間に現れた通知を既読化（スナップショット保存＝バッジクリア）。
@@ -158,10 +162,11 @@ export async function mountReviewBell(topbar, opts = {}) {
   const openPanel = () => {
     renderPanel();
     panel.hidden = false;
+    btn.setAttribute("aria-expanded", "true");
     positionPanel();
     markSeen(); // 開いた時点で表示中の通知を既読化
   };
-  const closePanel = () => { panel.hidden = true; };
+  const closePanel = () => { panel.hidden = true; btn.setAttribute("aria-expanded", "false"); };
   const toggle = () => { panel.hidden ? openPanel() : closePanel(); };
 
   btn.onclick = (e) => { e.stopPropagation(); toggle(); };

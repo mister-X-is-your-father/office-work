@@ -1,6 +1,7 @@
 // 概要ダッシュボード（TickTick の「概要/統計」をブラッシュアップ＋§9 のPJ別配分/負荷ヒストリー）。
 // store のタスクだけで集計（N+1なし）。完了の推移・PJ別配分・分類別・見積りvs実績。
-import { load, projectName } from "../lib/store.js";
+import { load, invalidate, projectName } from "../lib/store.js";
+import { openTaskForm } from "./taskform.js";
 import { dailyThroughput, projectTotals, labelTotals, overallStats } from "../lib/summary.js";
 import { estimateVsActual } from "../lib/capacity.js";
 import { categoryColor } from "../lib/kinds.js";
@@ -28,10 +29,10 @@ export async function render(root) {
     <style>${css()}</style>
     <h1 class="vtitle">概要 <small>${today} 時点</small></h1>
     <div class="sm-kpis">
-      ${kpi("今週の完了", `${s.doneThisWeek}`, `件 ・ 累計 ${s.done}`, "free")}
-      ${kpi("実績 / 見積り", `${fmtH(s.spentH)}`, `/ ${fmtH(s.estH)}`, "")}
-      ${kpi("見積り精度", accPct, "実績÷見積り", accCls)}
-      ${kpi("未完了", `${s.open}`, `件 ・ 期限切れ ${s.overdue}`, s.overdue ? "over" : "")}
+      ${kpi("今週の完了", `${s.doneThisWeek}`, `件 ・ 累計 ${s.done}`, "free", "#/status")}
+      ${kpi("実績 / 見積り", `${fmtH(s.spentH)}`, `/ ${fmtH(s.estH)}`, "", "#/estactual")}
+      ${kpi("見積り精度", accPct, "実績÷見積り", accCls, "#/estactual")}
+      ${kpi("未完了", `${s.open}`, `件 ・ 期限切れ ${s.overdue}`, s.overdue ? "over" : "", "#/triage")}
     </div>
 
     <div class="card sm-card">
@@ -54,13 +55,26 @@ export async function render(root) {
       <div class="sm-h">見積り vs 実績 <span class="sm-sub">ズレの大きい順 ・ 実績のあるタスク</span></div>
       ${eva.length ? evaRows(eva) : empty()}
     </div>`;
+
+  const openRow = (el) => {
+    const id = +el.dataset.id;
+    if (!id) return;
+    openTaskForm({ taskId: id, onSaved: async () => { invalidate(); await render(root); } });
+  };
+  root.querySelectorAll(".sm-erow[data-id]").forEach((el) => {
+    el.addEventListener("click", () => openRow(el));
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openRow(el); }
+    });
+  });
 }
 
-function kpi(label, big, sub, cls) {
-  return `<div class="sm-kpi ${cls}">
-    <div class="sm-kl">${label}</div>
-    <div class="sm-kv">${big}<small>${sub}</small></div>
-  </div>`;
+function kpi(label, big, sub, cls, href) {
+  const inner = `<div class="sm-kl">${label}</div>
+    <div class="sm-kv">${big}<small>${sub}</small></div>`;
+  return href
+    ? `<a class="sm-kpi sm-kpi-link ${cls}" href="${href}">${inner}</a>`
+    : `<div class="sm-kpi ${cls}">${inner}</div>`;
 }
 
 function throughputChart(tp) {
@@ -70,11 +84,10 @@ function throughputChart(tp) {
     const dt = new Date(d.day + "T00:00:00Z");
     const wd = dt.getUTCDay();
     const ha = Math.round((d.added / max) * H), hd = Math.round((d.done / max) * H);
+    const addBar = d.added > 0 ? `<div class="sm-bar add" style="height:${ha}px" title="追加 ${d.added}"></div>` : "";
+    const doneBar = d.done > 0 ? `<div class="sm-bar done" style="height:${hd}px" title="完了 ${d.done}"></div>` : "";
     return `<div class="sm-bcol${wd === 0 || wd === 6 ? " wknd" : ""}">
-      <div class="sm-bwrap" style="height:${H}px">
-        <div class="sm-bar add" style="height:${ha}px" title="追加 ${d.added}"></div>
-        <div class="sm-bar done" style="height:${hd}px" title="完了 ${d.done}"></div>
-      </div>
+      <div class="sm-bwrap" style="height:${H}px">${addBar}${doneBar}</div>
       <div class="sm-bx">${+d.day.slice(8)}</div>
       <div class="sm-bw">${DOW[wd]}</div>
     </div>`;
@@ -113,7 +126,7 @@ function evaRows(eva) {
     const diff = r.actH - r.estH;
     const cls = diff > 0.05 ? "over" : diff < -0.05 ? "under" : "ok";
     const sign = diff > 0 ? "+" : "";
-    return `<div class="sm-erow">
+    return `<div class="sm-erow" data-id="${r.id}" role="button" tabindex="0" title="クリックで編集">
       <div class="sm-etitle" title="${esc(r.title)}">${esc(r.title)}</div>
       <div class="sm-ev">見 ${fmtH(r.estH)} → 実 ${fmtH(r.actH)} <span class="sm-ediff ${cls}">${sign}${fmtH(diff)}</span></div>
     </div>`;
@@ -126,6 +139,9 @@ function css() {
   return `
   .sm-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:14px}
   .sm-kpi{background:${C.card};border:1px solid ${C.line};border-radius:14px;padding:14px 16px}
+  a.sm-kpi-link{display:block;text-decoration:none;color:inherit;transition:border-color .12s,box-shadow .12s,transform .12s}
+  a.sm-kpi-link:hover{border-color:${C.fill};box-shadow:0 2px 10px rgba(0,0,0,.06);transform:translateY(-1px)}
+  a.sm-kpi-link:focus-visible{outline:2px solid ${C.fill};outline-offset:2px}
   .sm-kl{font-size:11.5px;color:${C.muted};font-weight:600;margin-bottom:6px}
   .sm-kv{font-size:26px;font-weight:800;letter-spacing:-.01em;line-height:1}
   .sm-kv small{font-size:12px;font-weight:600;color:${C.muted};margin-left:6px}
@@ -162,8 +178,10 @@ function css() {
   .sm-cbar{height:13px;background:${C.track};border-radius:5px;overflow:hidden}
   .sm-cbar i{display:block;height:100%;border-radius:5px}
   .sm-cn{font-size:12px;font-weight:700;text-align:right;font-variant-numeric:tabular-nums;color:${C.muted}}
-  .sm-erow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 0;border-top:1px solid ${C.track}}
+  .sm-erow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 8px;margin:0 -8px;border-top:1px solid ${C.track};border-radius:8px;cursor:pointer;transition:background .12s}
   .sm-erow:first-child{border-top:0}
+  .sm-erow:hover{background:${C.track}}
+  .sm-erow:focus-visible{outline:2px solid ${C.fill};outline-offset:-2px}
   .sm-etitle{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
   .sm-ev{font-size:12px;color:${C.muted};white-space:nowrap;flex:none}
   .sm-ediff{font-weight:700;margin-left:4px}

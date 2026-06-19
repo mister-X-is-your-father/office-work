@@ -16,6 +16,12 @@ let FILTER = { who: (() => { try { return localStorage.getItem(WHO_KEY) || ""; }
 const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(0, 10) : "");
 const hhmm = (min) => `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")}`;
 
+// タスクチップ（日セル＝drag可 / ポップオーバー＝clickのみ で共用）。
+// 期限超過は赤左ボーダー(.overdue)、重要度(priority>=1)は先頭に赤ドット(.mc-prio)を出す。
+const taskChip = (it, { drag } = {}) =>
+  `<div class="mc-task${it.done ? " done" : ""}${it.overdue ? " overdue" : ""}"${drag ? ` draggable="true"` : ""} data-id="${it.t.id}" title="${esc(it.title)}">
+     ${it.prio >= 1 ? `<span class="mc-prio" aria-label="重要"></span>` : ""}${it.who ? `<i style="background:${member_color(it.who.id)}"></i>` : ""}${esc(it.title)}</div>`;
+
 export async function render(root) {
   closePopover(root); // 再描画前に開いていたポップオーバーと document リスナを掃除
   const { tasks, members, recurrences, holidaysByDate } = await load();
@@ -40,7 +46,8 @@ export async function render(root) {
     if (!due || due < firstISO || due > lastISO) continue;
     if (FILTER.who && !(t.assignees || []).some((a) => String(a.id) === FILTER.who)) continue;
     const who = (t.assignees || []).find((a) => !isAiUser(a)) || null;
-    add(due, { kind: "task", t, title: t.title, who, done: !!t.done, sort: 10000 + (t.priority ? -t.priority : 0) });
+    const overdue = !t.done && due < today; // 未完了かつ期限切れ
+    add(due, { kind: "task", t, title: t.title, who, done: !!t.done, prio: +t.priority || 0, overdue, sort: 10000 + (t.priority ? -t.priority : 0) });
   }
   for (const list of byDay.values()) list.sort((a, b) => a.sort - b.sort);
 
@@ -112,8 +119,7 @@ function openPopover(root, anchor, iso, items) {
     <div class="mc-pop-list">
       ${items.length ? items.map((it) => it.kind === "rec"
         ? `<div class="mc-rec" title="${esc(it.title)}">${icon("repeat", { size: 12 })}${it.min != null ? ` ${hhmm(it.min)}` : ""} ${esc(it.title)}</div>`
-        : `<div class="mc-task${it.done ? " done" : ""}" data-id="${it.t.id}" title="${esc(it.title)}">
-             ${it.who ? `<i style="background:${member_color(it.who.id)}"></i>` : ""}${esc(it.title)}</div>`).join("")
+        : taskChip(it, { drag: false })).join("")
         : `<div class="mc-pop-empty">項目なし</div>`}
     </div>`;
 
@@ -171,8 +177,7 @@ function dayHtml(c, items, today, holidaysByDate) {
     <div class="mc-num">${+c.iso.slice(8, 10)}${hol ? `<span class="mc-hol" title="${esc(hol)}">${esc(hol)}</span>` : ""}</div>
     ${shown.map((it) => it.kind === "rec"
       ? `<div class="mc-rec" title="${esc(it.title)}">${icon("repeat", { size: 12 })}${it.min != null ? ` ${hhmm(it.min)}` : ""} ${esc(it.title)}</div>`
-      : `<div class="mc-task${it.done ? " done" : ""}" draggable="true" data-id="${it.t.id}" title="${esc(it.title)}">
-           ${it.who ? `<i style="background:${member_color(it.who.id)}"></i>` : ""}${esc(it.title)}</div>`).join("")}
+      : taskChip(it, { drag: true })).join("")}
     ${items.length > MAX ? `<button type="button" class="mc-more" data-iso="${c.iso}">他${items.length - MAX}件</button>` : ""}
   </div>`;
 }
@@ -200,7 +205,11 @@ function css() {
   .mc-task{background:#eaf2ff;color:#1d2430;cursor:grab;display:flex;align-items:center;gap:4px}
   .mc-task:hover{background:#dcebff}
   .mc-task.done{opacity:.45;text-decoration:line-through}
+  .mc-task.overdue{background:#fdecec;color:#9a2b2e;border-left:3px solid #e5484d;padding-left:4px}
+  .mc-task.overdue:hover{background:#fbdede}
+  .mc-task.overdue.done{border-left-color:#c3c9d2}
   .mc-task i{flex:none;width:7px;height:7px;border-radius:50%;display:inline-block}
+  .mc-prio{flex:none;width:5px;height:5px;border-radius:50%;background:#e5484d;display:inline-block}
   .mc-rec{background:#f2eefc;color:#6b4fa0}
   .mc-more{font:inherit;font-size:10px;color:${C.muted};padding:1px 5px;background:none;border:0;border-radius:4px;cursor:pointer;display:block;text-align:left}
   .mc-more:hover{background:${C.track};color:${C.fill}}
@@ -223,6 +232,8 @@ function css() {
   html[data-theme="dark"] .mc-day.today{background:rgba(58,134,255,.13)}
   html[data-theme="dark"] .mc-task{background:rgba(58,134,255,.18);color:var(--ink)}
   html[data-theme="dark"] .mc-task:hover{background:rgba(58,134,255,.28)}
+  html[data-theme="dark"] .mc-task.overdue{background:rgba(229,72,77,.20);color:#ffb3b5;border-left-color:#e5484d}
+  html[data-theme="dark"] .mc-task.overdue:hover{background:rgba(229,72,77,.30)}
   html[data-theme="dark"] .mc-rec{background:rgba(124,77,200,.22);color:#c4a9f0}
   html[data-theme="dark"] .mc-pop{background:var(--card)}`;
 }

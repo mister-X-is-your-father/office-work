@@ -11,7 +11,7 @@ const fmtDate = (iso) => fmtDisplayDow(iso);
 
 export async function render(root) {
   ensureStyle();
-  const { members, holidaysByDate } = await load();
+  const { members, holidaysByDate, holidaysSet, me } = await load();
   const memberName = (id) => { const m = (members || []).find((x) => x.id === id); return m ? (m.name || m.username) : `user${id}`; };
 
   // 管理対象は id 付きの生データが要る（削除のため）。store のキャッシュとは別に直接取得。
@@ -25,14 +25,35 @@ export async function render(root) {
 
   const reload = () => { invalidate(); render(root); };
 
-  renderUnavailability(root.querySelector("#mg-una"), unavailability, memberName, { members, holidaysByDate, reload });
+  renderUnavailability(root.querySelector("#mg-una"), unavailability, memberName, { members, holidaysByDate, holidaysSet, me, reload });
 }
 
+// 期間（両端含む）の営業日数 = 土日・祝日を除いた平日数。
+function businessDays(start, end, holidaysSet) {
+  if (!start || !end || end < start) return 0;
+  const hol = holidaysSet || new Set();
+  let n = 0;
+  const d = new Date(start + "T00:00:00Z");
+  const last = new Date(end + "T00:00:00Z");
+  while (d <= last) {
+    const dow = d.getUTCDay();          // 0=日, 6=土
+    const iso = d.toISOString().slice(0, 10);
+    if (dow !== 0 && dow !== 6 && !hol.has(iso)) n++;
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  return n;
+}
+
+// 理由クイック入力チップの候補。
+const REASON_CHIPS = ["有給", "午前休", "午後休", "夏季", "年末年始"];
+
 // ===== 個人休暇 =====
-function renderUnavailability(el, unavailability, memberName, { members, holidaysByDate, reload }) {
+function renderUnavailability(el, unavailability, memberName, { members, holidaysByDate, holidaysSet, me, reload }) {
   const sorted = [...(unavailability || [])].sort((a, b) => String(a.start_date).localeCompare(String(b.start_date)));
   const todayISO = new Date().toISOString().slice(0, 10);
-  const memOpts = (members || []).map((m) => `<option value="${m.id}">${esc(m.name || m.username)}</option>`).join("");
+  const meId = me && me.id;
+  const memOpts = (members || []).map((m) => `<option value="${m.id}"${m.id === meId ? " selected" : ""}>${esc(m.name || m.username)}</option>`).join("");
+  const chips = REASON_CHIPS.map((r) => `<button type="button" class="una-chip" data-chip="${esc(r)}">${esc(r)}</button>`).join("");
   el.innerHTML = `
     <div class="mg-h"><span>個人休暇 <span class="mg-cnt">${sorted.length}</span></span></div>
     <div class="mg-hint">休暇期間（両端含む）はその人の容量が0になり、空き・負荷計算に反映されます。</div>
@@ -41,13 +62,15 @@ function renderUnavailability(el, unavailability, memberName, { members, holiday
       <input id="una-s" class="mg-in mg-in-date" inputmode="numeric" autocomplete="off" placeholder="開始（例: 629）">
       <input id="una-e" class="mg-in mg-in-date" inputmode="numeric" autocomplete="off" placeholder="終了（例: 701）">
       <input id="una-r" class="mg-in" placeholder="理由（例: 有給）">
+      <div class="una-chips">${chips}</div>
       <button class="mg-add" id="una-save">追加</button>
     </div>
     <div class="mg-err" id="una-err"></div>
     <div class="mg-list">${sorted.length ? sorted.map((u) => {
       const s = String(u.start_date).slice(0, 10), e2 = String(u.end_date).slice(0, 10);
       const past = e2 < todayISO;
-      const range = s === e2 ? fmtDate(s) : `${fmtDate(s)} 〜 ${fmtDate(e2)}`;
+      const bd = businessDays(s, e2, holidaysSet);
+      const range = (s === e2 ? fmtDate(s) : `${fmtDate(s)} 〜 ${fmtDate(e2)}`) + (bd ? ` <span class="una-bd">(営業${bd}日)</span>` : "");
       return `<div class="mg-row${past ? " mg-past" : ""}">
         <div class="mg-row-main"><div class="mg-row-t">${esc(memberName(u.user_id))}</div>
           <div class="mg-row-sub">${range}${u.reason ? " ・ " + esc(u.reason) : ""}</div></div>
@@ -61,11 +84,17 @@ function renderUnavailability(el, unavailability, memberName, { members, holiday
     d.onblur = () => { const iso = parseSmartDate(d.value); if (iso) d.value = fmtDisplayDow(iso); };
   });
 
+  // 理由クイック入力チップ → 入力欄に反映してフォーカス。
+  const rEl = el.querySelector("#una-r");
+  el.querySelectorAll("[data-chip]").forEach((b) => {
+    b.onclick = () => { rEl.value = b.dataset.chip; rEl.focus(); };
+  });
+
   el.querySelector("#una-save").onclick = async () => {
     const err = el.querySelector("#una-err"); err.textContent = "";
     const uid = +el.querySelector("#una-mem").value;
     const s = parseSmartDate(sEl.value), e2 = parseSmartDate(eEl.value);
-    const reason = el.querySelector("#una-r").value.trim();
+    const reason = rEl.value.trim();
     if (!uid) { err.textContent = "メンバーを選んでください。"; return; }
     if (!s) { err.textContent = "開始日の形式が不正です（例: 629 → 6/29）。"; return; }
     if (!e2) { err.textContent = "終了日の形式が不正です（例: 701 → 7/1）。"; return; }
@@ -103,6 +132,10 @@ function ensureStyle() {
   .mg-form-una .mg-in{flex:none;width:100%}
   .mg-add{font:inherit;font-size:12.5px;font-weight:700;padding:7px 14px;border-radius:8px;border:1px solid ${C.fill};background:${C.fill};color:#fff;cursor:pointer;white-space:nowrap}
   .mg-add:hover{filter:brightness(1.05)}.mg-add:disabled{opacity:.6}
+  .una-chips{display:flex;flex-wrap:wrap;gap:5px}
+  .una-chip{font:inherit;font-size:11.5px;padding:3px 10px;border-radius:14px;border:1px solid ${C.line};background:${C.track};color:${C.muted};cursor:pointer;white-space:nowrap}
+  .una-chip:hover{border-color:${C.fill};color:${C.fill};background:#fff}
+  .una-bd{color:${C.muted};font-size:11px}
   .mg-err{font-size:12px;font-weight:600;color:${C.over};min-height:14px;margin:2px 0 6px}
   .mg-list{display:flex;flex-direction:column;gap:2px;margin-top:6px}
   .mg-empty{font-size:12.5px;color:${C.muted};padding:10px 2px}
@@ -118,6 +151,7 @@ function ensureStyle() {
 
   /* ダークモード: 白背景の入力・ボタンを面色に（ライト値は不変） */
   html[data-theme="dark"] .mg-in{background:var(--card);color:var(--ink)}
-  html[data-theme="dark"] .mg-btn{background:var(--card)}`;
+  html[data-theme="dark"] .mg-btn{background:var(--card)}
+  html[data-theme="dark"] .una-chip:hover{background:var(--card)}`;
   document.head.appendChild(s);
 }

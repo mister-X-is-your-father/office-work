@@ -108,7 +108,7 @@ export async function render(root) {
       const imp = dst === "q1" || dst === "q2";
       const urg = dst === "q1" || dst === "q3";
       const prev = { priority: t.priority || 0, due_date: t.due_date || null };
-      const patch = { priority: imp ? Math.max(3, prev.priority) : Math.min(2, prev.priority || 2) };
+      const patch = { priority: imp ? Math.max(3, prev.priority || 0) : Math.min(prev.priority || 0, 2) };
       const due = dueISO(t);
       if (urg) patch.due_date = (due && due <= addDays(today, days)) ? t.due_date : today + "T00:00:00Z";
       else if (due && due <= addDays(today, days)) patch.due_date = addDays(today, 7) + "T00:00:00Z";

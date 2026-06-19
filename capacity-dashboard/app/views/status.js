@@ -2,13 +2,18 @@
 // URL を渡せば誰でもチームの現況を把握できる、中立的な状況サマリー。
 // 状況把握に効く順で 1 枚に集約: KPI / 遅延 / 今日のメンバー状況 / 今週の締切 / 直近の完了。
 // データは load() の共有キャッシュから算出（追加 fetch なし）。ロジックは home/report/capacity から再利用。
-import { load, isAiUser } from "../lib/store.js";
+import { load, invalidate, isAiUser } from "../lib/store.js";
 import { loadByMember, triage } from "../lib/capacity.js";
 import { capacityOn } from "../lib/recurrence.js";
 import { statusOf } from "../lib/kinds.js";
-import { C, esc, fmtH, todayISO, member_color } from "../lib/ui.js";
+import { C, esc, fmtH, todayISO, member_color, announce } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
 import { openTaskForm } from "./taskform.js";
+
+// 最終更新時刻（render ごとに更新）。「時点」表示に併記する。
+const fmtClock = (d) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+// このビューが画面に出ている間だけ有効な visibilitychange ハンドラの参照（多重登録防止用）。
+let _visHandler = null;
 
 // today から n 日後の YYYY-MM-DD（home/report と同じ式）。
 const shiftISO = (iso, n) => { const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
@@ -141,18 +146,27 @@ export async function render(root) {
   const head = (ic, title, n, accent) =>
     `<div class="st-h${accent ? " " + accent : ""}">${icon(ic, { size: 16 }) || ""}<span>${esc(title)}</span>${n != null ? `<span class="st-hn">${n}</span>` : ""}</div>`;
 
+  const updatedAt = fmtClock(new Date());
+
   root.innerHTML = `
     <style>${css()}</style>
-    <h1 class="vtitle">ステータス <small>${day} 時点</small></h1>
+    <div class="st-top">
+      <h1 class="vtitle">ステータス <small>${day} 時点 ・ 最終更新 ${updatedAt}</small></h1>
+      <div class="st-actions">
+        <button type="button" class="st-act" id="st-refresh" title="最新の状態に更新">${icon("repeat", { size: 15 }) || ""}<span>更新</span></button>
+        <button type="button" class="st-act" id="st-copy" title="このページのリンクをコピー">${icon("link", { size: 15 }) || ""}<span>リンクをコピー</span></button>
+        <button type="button" class="st-act" id="st-print" title="印刷 / PDF 保存">${icon("file", { size: 15 }) || ""}<span>印刷</span></button>
+      </div>
+    </div>
     <div class="st-kpis">
-      <div class="st-kpi"><div class="l">チーム稼働</div><div class="v">${fmtH(totAsg)}<small>/${fmtH(totCap)}</small></div></div>
-      <div class="st-kpi free"><div class="l">空き工数</div><div class="v">${fmtH(Math.max(0, totCap - totAsg))}</div></div>
-      <div class="st-kpi ${over.length ? "over" : ""}"><div class="l">過負荷</div><div class="v">${over.length}<small>名</small></div></div>
-      <div class="st-kpi"><div class="l">今日必須</div><div class="v">${must.length}<small>件</small></div></div>
-      <div class="st-kpi ${late.length ? "over" : ""}"><div class="l">遅延</div><div class="v">${late.length}<small>件</small></div></div>
+      <button type="button" class="st-kpi" data-drill="capacity" title="負荷計画を見る"><div class="l">チーム稼働</div><div class="v">${fmtH(totAsg)}<small>/${fmtH(totCap)}</small></div></button>
+      <button type="button" class="st-kpi free" data-drill="capacity" title="負荷計画を見る"><div class="l">空き工数</div><div class="v">${fmtH(Math.max(0, totCap - totAsg))}</div></button>
+      <button type="button" class="st-kpi ${over.length ? "over" : ""}" data-drill="over" title="過負荷のメンバーを負荷計画で見る"><div class="l">過負荷</div><div class="v">${over.length}<small>名</small></div></button>
+      <button type="button" class="st-kpi" data-drill="must" title="今日必須のタスクを見る"><div class="l">今日必須</div><div class="v">${must.length}<small>件</small></div></button>
+      <button type="button" class="st-kpi ${late.length ? "over" : ""}" data-drill="late" title="遅延セクションへ移動"><div class="l">遅延</div><div class="v">${late.length}<small>件</small></div></button>
     </div>
 
-    <div class="card st-card st-late-card">
+    <div class="card st-card st-late-card" id="st-sec-late">
       ${head("alertTriangle", "遅延（期限超過）", late.length, "danger")}
       ${lateSection}
     </div>
@@ -177,12 +191,95 @@ export async function render(root) {
   root.querySelectorAll(".st-row[data-id]").forEach((el) => {
     el.onclick = () => openTaskForm({ taskId: +el.dataset.id, onSaved: () => render(root) });
   });
+
+  // KPI カードのドリルダウン: 過負荷→負荷計画 / 今日必須→トリアージ / 遅延→セクションへスクロール。
+  root.querySelectorAll(".st-kpi[data-drill]").forEach((el) => {
+    el.onclick = () => {
+      const d = el.dataset.drill;
+      if (d === "late") {
+        const sec = root.querySelector("#st-sec-late");
+        if (sec) { sec.scrollIntoView({ behavior: "smooth", block: "start" }); announce("遅延セクションへ移動しました"); }
+      } else if (d === "must") {
+        location.hash = "#/triage";
+      } else {
+        // capacity / over とも負荷計画へ（過負荷の確認は負荷計画が最適）。
+        location.hash = "#/workplan";
+      }
+    };
+  });
+
+  // 更新ボタン: キャッシュ破棄→再描画（API から取り直し）。
+  const refreshBtn = root.querySelector("#st-refresh");
+  if (refreshBtn) refreshBtn.onclick = async () => {
+    refreshBtn.disabled = true;
+    invalidate();
+    try { await render(root); announce("ステータスを更新しました"); }
+    catch { refreshBtn.disabled = false; }
+  };
+
+  // リンクをコピー: clipboard API→失敗時 textarea フォールバック。いずれも announce で結果を読み上げ。
+  const copyBtn = root.querySelector("#st-copy");
+  if (copyBtn) copyBtn.onclick = async () => {
+    const url = location.href;
+    try {
+      await navigator.clipboard.writeText(url);
+      announce("リンクをコピーしました", { assertive: true });
+    } catch {
+      const ok = copyViaTextarea(url);
+      announce(ok ? "リンクをコピーしました" : "コピーに失敗しました。URL を手動で選択してください", { assertive: true });
+    }
+  };
+
+  // 印刷: ブラウザの印刷ダイアログ（@media print で体裁を最小整形）。
+  const printBtn = root.querySelector("#st-print");
+  if (printBtn) printBtn.onclick = () => window.print();
+
+  // 復帰時の自動更新: タブが再び見えたら最新データで再描画（多重登録は外してから付け直す）。
+  if (_visHandler) document.removeEventListener("visibilitychange", _visHandler);
+  _visHandler = async () => {
+    if (document.visibilityState !== "visible") return;
+    // 既にこのビューが DOM から外れていたら何もしない（別画面に遷移済み）。
+    if (!root.isConnected) { document.removeEventListener("visibilitychange", _visHandler); _visHandler = null; return; }
+    await load(true);
+    if (root.isConnected) await render(root);
+  };
+  document.addEventListener("visibilitychange", _visHandler);
+}
+
+// clipboard API が使えない環境向けの textarea フォールバック。成否を boolean で返す。
+function copyViaTextarea(text) {
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "-1000px";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
 }
 
 function css() {
   return `
-  .st-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:14px}
-  .st-kpi{background:${C.card};border:1px solid ${C.line};border-radius:14px;padding:14px 16px}
+  .st-top{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .st-top .vtitle{margin:0}
+  .st-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:2px}
+  .st-act{display:inline-flex;align-items:center;gap:6px;font:inherit;font-size:12.5px;font-weight:600;color:${C.ink};
+    background:${C.card};border:1px solid ${C.line};border-radius:9px;padding:6px 11px;cursor:pointer;line-height:1}
+  .st-act:hover{background:${C.track}}
+  .st-act:disabled{opacity:.55;cursor:default}
+  .st-act .ic{color:${C.muted}}
+
+  .st-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:14px 0}
+  .st-kpi{background:${C.card};border:1px solid ${C.line};border-radius:14px;padding:14px 16px;text-align:left;font:inherit;color:${C.ink};cursor:pointer;display:block;width:100%;box-sizing:border-box;transition:border-color .12s,box-shadow .12s}
+  .st-kpi:hover{border-color:${C.muted};box-shadow:0 1px 6px rgba(0,0,0,.05)}
   .st-kpi .l{font-size:11.5px;color:${C.muted};font-weight:600;margin-bottom:6px}
   .st-kpi .v{font-size:26px;font-weight:800;letter-spacing:-.01em;line-height:1}
   .st-kpi .v small{font-size:12px;font-weight:600;color:${C.muted};margin-left:5px}
@@ -230,5 +327,14 @@ function css() {
   .st-mmeta small{font-size:11px;font-weight:600;color:${C.muted}}
 
   .st-grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-  @media(max-width:820px){.st-grid2{grid-template-columns:1fr}}`;
+  @media(max-width:820px){.st-grid2{grid-template-columns:1fr}}
+
+  /* 印刷: 操作ボタンを隠し、影/枠を抑えて 1 枚に収める。 */
+  @media print{
+    .st-actions{display:none}
+    .st-kpi{cursor:default;box-shadow:none;border:1px solid #ccc}
+    .st-card{box-shadow:none;border:1px solid #ccc;break-inside:avoid;page-break-inside:avoid}
+    .st-grid2{gap:10px}
+    .st-row:hover{background:transparent}
+  }`;
 }

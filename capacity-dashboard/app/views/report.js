@@ -10,7 +10,6 @@
 //
 // UI のアイコンは icon()（絵文字非使用）。コピペテキスト内の ✅⚠ 等は「データ」なので許可。
 import { load, isAiUser } from "../lib/store.js";
-import { whoami } from "../lib/api.js";
 import { statusOf } from "../lib/kinds.js";
 import { C, esc, fmtH, todayISO } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
@@ -190,10 +189,8 @@ function buildReport(buckets, hr, day) {
 }
 
 export async function render(root) {
-  const { tasks, members, settings } = await load();
+  const { tasks, members, settings, me } = await load();
   const day = todayISO();
-  let me = null;
-  try { me = await whoami(); } catch { me = null; }
   const uid = me?.id ?? null;
 
   // 対象セレクタ: 自分 / 各メンバー / 全員。localStorage 保持。
@@ -222,11 +219,12 @@ export async function render(root) {
     : tasks.filter((t) => humanAssignees(t).some((a) => a.id === targetId));
 
   let buckets = bucketize(scoped, day, weekEnd, doneRange);
-  let comment = "";
 
   // 報告文ヒアリング回答（本人ごと・当日キー）を復元。壊れた JSON は無視。
-  let hearing = { feel: "", doneNote: "", nextNote: "", lateNote: "", shareNote: "" };
+  // comment（素データ用の見通し/コメント）も hearing に載せ、当日中は永続化する。
+  let hearing = { feel: "", doneNote: "", nextNote: "", lateNote: "", shareNote: "", comment: "" };
   try { const raw = localStorage.getItem(hearingKey(uid, day)); if (raw) hearing = { ...hearing, ...JSON.parse(raw) }; } catch { /* noop */ }
+  let comment = hearing.comment || "";
 
   // 表示モード: report（報告文・既定）/ raw（素データ）。
   let mode = "report";
@@ -234,6 +232,16 @@ export async function render(root) {
   if (!["report", "raw"].includes(mode)) mode = "report";
 
   const hasLate = buckets.late.length > 0;
+
+  // サマリチップ（バケット集計後）: 完了 / 遅延 / 今日中(計Xh)。遅延0は緑・1+は赤で注意喚起。
+  const todayHours = buckets.today.reduce((s, t) => s + (t.time_estimate || 0) / 3600, 0);
+  const lateN = buckets.late.length;
+  const summaryChips = `
+    <div class="rp-sum">
+      <span class="rp-chip"><b>${buckets.done.length}</b> 完了</span>
+      <span class="rp-chip ${lateN > 0 ? "bad" : "ok"}"><b>${lateN}</b> 遅延</span>
+      <span class="rp-chip"><b>${buckets.today.length}</b> 今日中<small>計${fmtH(todayHours)}</small></span>
+    </div>`;
 
   const targetOpts = [
     `<option value="self"${target === "self" ? " selected" : ""}>自分${me ? `（${esc(me.name || me.username)}）` : ""}</option>`,
@@ -258,6 +266,7 @@ export async function render(root) {
       </label>
       <span class="rp-weekend">今週末まで: ${mdOf(weekEnd)}</span>
     </div>
+    ${summaryChips}
     <div class="rp-grid">
       <div class="rp-buckets" id="rp-buckets"></div>
       <div class="rp-copy card">
@@ -288,7 +297,7 @@ export async function render(root) {
         </div>
         <textarea id="rp-text" class="rp-text" readonly></textarea>
         <label class="rp-comment-l${mode === "raw" ? "" : " rp-hide"}" id="rp-comment-l">見通し / コメント（素データの末尾に「→」で付きます）</label>
-        <textarea id="rp-comment" class="rp-comment${mode === "raw" ? "" : " rp-hide"}" placeholder="例: 遅延分は◯日までに完了予定"></textarea>
+        <textarea id="rp-comment" class="rp-comment${mode === "raw" ? "" : " rp-hide"}" placeholder="例: 遅延分は◯日までに完了予定">${esc(comment)}</textarea>
       </div>
     </div>
     <style>
@@ -297,6 +306,15 @@ export async function render(root) {
       .rp-fld .ic{color:${C.muted}}
       .rp-fld select{font:inherit;font-size:12.5px;padding:5px 8px;border:1px solid ${C.line};border-radius:7px;background:${C.bg};color:${C.ink}}
       .rp-weekend{margin-left:auto;font-size:12px;color:${C.muted}}
+      .rp-sum{display:flex;flex-wrap:wrap;gap:8px;margin:-6px 0 16px}
+      .rp-chip{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:${C.ink};
+        background:${C.card};border:1px solid ${C.line};border-radius:999px;padding:4px 12px}
+      .rp-chip b{font-size:13.5px;font-weight:800}
+      .rp-chip small{font-size:11px;font-weight:600;color:${C.muted}}
+      .rp-chip.ok{background:rgba(47,166,107,.12);border-color:rgba(47,166,107,.4);color:${C.free}}
+      .rp-chip.ok b{color:${C.free}}
+      .rp-chip.bad{background:rgba(229,72,77,.12);border-color:rgba(229,72,77,.4);color:${C.over}}
+      .rp-chip.bad b{color:${C.over}}
       .rp-grid{display:grid;grid-template-columns:1.3fr 1fr;gap:16px;align-items:start}
       @media(max-width:900px){.rp-grid{grid-template-columns:1fr}}
       .rp-buckets{display:flex;flex-direction:column;gap:12px}
@@ -424,8 +442,8 @@ export async function render(root) {
     render(root);
   };
 
-  // コメント入力 → コピーテキスト末尾に反映（再集計不要なのでその場更新）。
-  root.querySelector("#rp-comment").oninput = (e) => { comment = e.target.value; paintText(); };
+  // コメント入力 → コピーテキスト末尾に反映＋hearing に載せて当日永続化（再集計不要なのでその場更新）。
+  root.querySelector("#rp-comment").oninput = (e) => { comment = e.target.value; hearing.comment = comment; saveHearing(); paintText(); };
 
   // コピー: clipboard API → 失敗時は textarea を select() してフォールバック。
   const copyBtn = root.querySelector("#rp-copybtn");

@@ -8,7 +8,7 @@ import { taskMatches, next7End, EMPTY_FILTER, BUILTIN_VIEWS } from "../lib/smart
 import { shiftISO } from "../lib/capacity.js";
 import { PRIO, categoryLabels, categoryColor } from "../lib/kinds.js";
 import { openTaskForm } from "./taskform.js";
-import { C, esc, fmtH, member_color, todayISO } from "../lib/ui.js";
+import { C, esc, fmtH, member_color, todayISO, emptyState } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
 
 const DOW_JA = ["日", "月", "火", "水", "木", "金", "土"];
@@ -19,6 +19,7 @@ const LISTS_KEY = (uid) => `ts.smartlists.${uid ?? "anon"}`;
 const SORTS = [["due", "期限順"], ["prio", "重要度順"], ["title", "名前順"], ["created", "追加順"]];
 
 let state = null; // { sel, filter, sort }
+let searchTimer = null; // 検索入力デバウンス用タイマ
 const loadLists = (uid) => { try { return JSON.parse(localStorage.getItem(LISTS_KEY(uid)) || "[]"); } catch { return []; } };
 const saveLists = (uid, v) => { try { localStorage.setItem(LISTS_KEY(uid), JSON.stringify(v)); } catch {} };
 
@@ -49,6 +50,7 @@ export async function render(root) {
   const catTitle = state.filter._cat || "";
   const matched = (tasks || []).filter((t) => taskMatches(t, state.filter, ctx) && (!catTitle || categoryLabels(t).some((l) => l.title === catTitle)));
   const sorted = sortTasks(matched, state.sort, today);
+  const sumH = sorted.reduce((s, t) => s + (t.time_estimate || 0), 0) / 3600; // ビュー内の見積り合計
 
   // タブ件数（組み込み）。保存リストもタブに件数を出す（カスタム filter で算出）。
   const countOf = (v) => (tasks || []).filter((t) => taskMatches(t, presetOf(v), ctx)).length;
@@ -70,23 +72,23 @@ export async function render(root) {
           <button id="sl-savetab" class="sl-tabsave" title="現在の条件をスマートリストとして保存">${icon("save", { size: 14 })}<span class="sl-tlbl">保存</span></button>
         </div>
         <div class="sl-head">
-          <div class="sl-title">${curName.icon ? icon(curName.icon, { size: 20, cls: "sl-titic" }) + " " : ""}${esc(curName.label)} <span class="sl-count" id="sl-count">${sorted.length}</span></div>
+          <div class="sl-title">${curName.icon ? icon(curName.icon, { size: 20, cls: "sl-titic" }) + " " : ""}${esc(curName.label)} <span class="sl-count" id="sl-count">${sorted.length}</span><span class="sl-sum" id="sl-sum" title="このビュー内の見積り合計"${sumH ? "" : ' hidden'}>Σ ${fmtH(sumH)}</span></div>
           <div class="sl-sort">並べ替え
             <select id="sl-sort">${SORTS.map(([k, n]) => `<option value="${k}"${state.sort === k ? " selected" : ""}>${n}</option>`).join("")}</select>
           </div>
         </div>
         ${curName.desc ? `<div class="sl-desc">${esc(curName.desc)}</div>` : ""}
         <div class="sl-bar">
-          <span class="sl-textwrap">${icon("search", { size: 14, cls: "sl-searchic" })}<input id="sl-text" class="sl-in sl-text" placeholder="このビュー内を検索" value="${esc(state.filter.text || "")}"></span>
+          <span class="sl-textwrap">${icon("search", { size: 14, cls: "sl-searchic" })}<input id="sl-text" class="sl-in sl-text" type="search" aria-label="このビュー内を検索" placeholder="このビュー内を検索" value="${esc(state.filter.text || "")}"></span>
           ${sel("sl-due", state.filter.due, [["", "期限：すべて"], ["today", "今日"], ["next7", "次の7日間"], ["overdue", "期限切れ"], ["hasdue", "期限あり"], ["none", "期限なし"]])}
           ${sel("sl-prio", state.filter.prio, [["", "重要度：すべて"], ["top", "MUST"], ["high", "高+"], ["mid", "中+"], ["none", "なし"]])}
           ${sel("sl-cat", catTitle, [["", "分類：すべて"], ...catChoices(labels)])}
           ${sel("sl-status", state.filter.status, [["undone", "未完了"], ["todo", "未着手"], ["doing", "進行中"], ["waiting", "連絡待ち"], ["done", "完了"], ["", "すべて"]])}
-          <button id="sl-flag" class="sl-flagbtn${state.filter.flag ? " on" : ""}" title="フラグ付きのみ">${icon("flag", { size: 15 })}</button>
+          <button id="sl-flag" class="sl-flagbtn${state.filter.flag ? " on" : ""}" aria-pressed="${state.filter.flag ? "true" : "false"}" aria-label="フラグ付きのみ表示" title="フラグ付きのみ">${icon("flag", { size: 15 })}</button>
           ${state.sel === "adhoc" ? `<button id="sl-save" class="sl-save">${icon("save", { size: 14 })} 保存</button>` : ""}
           ${typeof state.sel === "number" ? `<button id="sl-del" class="sl-del">このリストを削除</button>` : ""}
         </div>
-        <div class="sl-list" id="sl-results">${resultsHtml(sorted, projects, today, state.sort)}</div>
+        <div class="sl-list" id="sl-results">${resultsHtml(sorted, projects, today, state.sort, state.sel)}</div>
       </section>
     </div>`;
 
@@ -148,15 +150,36 @@ function rowHtml(t, projects, today) {
       ${est ? `<span class="sl-est">${fmtH(est)}</span>` : ""}
     </span>
     ${dueTxt ? `<span class="sl-due ${dueCls}">${dueTxt}</span>` : `<span class="sl-due none"></span>`}
-    <button class="sl-flagrow${t.is_favorite ? " on" : ""}" data-flag="${t.id}" title="フラグ">${icon("flag", { size: 15 })}</button>
+    <button class="sl-flagrow${t.is_favorite ? " on" : ""}" data-flag="${t.id}" aria-pressed="${t.is_favorite ? "true" : "false"}" aria-label="フラグ" title="フラグ">${icon("flag", { size: 15 })}</button>
   </div>`;
 }
 
-const emptyHtml = () => `<div class="sl-empty"><div class="sl-empty-i">${icon("folders", { size: 34 })}</div>このビューに該当するタスクはありません。</div>`;
+// バーで絞り込みが効いているか（＝空が「条件起因」か「本当に0件」かの判定）。
+// バー操作は必ず state.sel="adhoc" 化する（組み込み/保存ビューの定義由来の due/prio 等を
+// 条件起因と誤判定しないよう、選択状態で判定する）。
+function hasActiveFilter(sel) {
+  return sel === "adhoc";
+}
+
+// 空状態を出し分け。条件起因ならクリア導線、本当に0件なら案内のみ。
+function emptyHtml(filtered) {
+  if (filtered) {
+    return emptyState({
+      icon: "search",
+      title: "条件に一致するタスクがありません",
+      desc: "絞り込み条件を緩めるか、クリアして再表示できます。",
+    }).replace("</div>", `<button id="sl-clear" class="ui-empty-act" type="button">フィルタをクリア</button></div>`);
+  }
+  return emptyState({
+    icon: "folders",
+    title: "このビューにタスクはありません",
+    desc: "新しいタスクを追加すると、ここに表示されます。",
+  });
+}
 
 // 期限ソート時はアジェンダ風に日別グルーピング（期限切れ/今日/明日/日付/期限なし）。
-function resultsHtml(sorted, projects, today, sort) {
-  if (!sorted.length) return emptyHtml();
+function resultsHtml(sorted, projects, today, sort, sel) {
+  if (!sorted.length) return emptyHtml(hasActiveFilter(sel));
   if (sort !== "due") return sorted.map((t) => rowHtml(t, projects, today)).join("");
   const groups = groupByDue(sorted, today);
   return groups.map((g) => `<div class="sl-gh ${g.cls}">${esc(g.header)} <span class="sl-gn">${g.tasks.length}</span></div>
@@ -192,12 +215,16 @@ function wire(root, data, uid, lists, ctx) {
   const rerender = () => render(root);
   const persistSel = () => { try { localStorage.setItem(SEL_KEY(uid), String(state.sel)); } catch {} };
 
-  // 上部タブ選択
+  // 上部タブ選択（保存リストは保存時の sort も復元）
   root.querySelectorAll(".sl-tab").forEach((b) => {
     b.onclick = (e) => {
       if (e.target.closest("[data-del]")) return; // 削除は別ハンドラ
       const v = b.dataset.view;
       state.sel = b.dataset.custom ? +v : v;
+      if (b.dataset.custom) {
+        const cv = lists.find((l) => l.id === +v);
+        if (cv && cv.sort) state.sort = cv.sort; // 保存した並べ替えを復元
+      }
       persistSel(); rerender();
     };
   });
@@ -205,7 +232,9 @@ function wire(root, data, uid, lists, ctx) {
     x.onclick = (e) => {
       e.stopPropagation();
       const id = +x.dataset.del;
-      const next = lists.filter((l) => l.id !== id);
+      const l = lists.find((v) => v.id === id);
+      if (!confirm(`保存リスト「${l ? l.name : ""}」を削除しますか？`)) return; // 誤削除防止
+      const next = lists.filter((v) => v.id !== id);
       saveLists(uid, next);
       if (state.sel === id) state.sel = "inbox";
       rerender();
@@ -215,7 +244,10 @@ function wire(root, data, uid, lists, ctx) {
   // フィルタバー → adhoc 化
   const toAdhoc = (patch) => { state.filter = { ...state.filter, ...patch }; state.sel = "adhoc"; };
   const textEl = root.querySelector("#sl-text");
-  if (textEl) textEl.oninput = () => { toAdhoc({ text: textEl.value }); paintResults(root, data, ctx); updateCount(root, data, ctx); };
+  if (textEl) textEl.oninput = () => { // 150-200ms デバウンス（入力ごとの再フィルタを抑制）
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { toAdhoc({ text: textEl.value }); paintResults(root, data, ctx); updateCount(root, data, ctx); }, 180);
+  };
   const onSel = (id, key, num) => { const el = root.querySelector("#" + id); if (el) el.onchange = () => { const v = num ? (+el.value || 0) : el.value; toAdhoc({ [key]: v }); rerender(); }; };
   onSel("sl-due", "due"); onSel("sl-prio", "prio"); onSel("sl-status", "status");
   const catEl = root.querySelector("#sl-cat");
@@ -231,7 +263,7 @@ function wire(root, data, uid, lists, ctx) {
     if (!name) return;
     const id = Date.now();
     const { _cat, ...f } = state.filter;
-    const next = [...lists, { id, name, filter: { ...f, _cat } }];
+    const next = [...lists, { id, name, sort: state.sort, filter: { ...f, _cat } }]; // 現在の並べ替えも保存
     saveLists(uid, next); state.sel = id; persistSel(); rerender();
   };
   const saveBtn = root.querySelector("#sl-save");
@@ -240,12 +272,26 @@ function wire(root, data, uid, lists, ctx) {
   if (saveTab) saveTab.onclick = doSave;
   const delBtn = root.querySelector("#sl-del");
   if (delBtn) delBtn.onclick = () => {
-    const next = lists.filter((l) => l.id !== state.sel);
+    const l = lists.find((v) => v.id === state.sel);
+    if (!confirm(`保存リスト「${l ? l.name : ""}」を削除しますか？`)) return; // 誤削除防止
+    const next = lists.filter((v) => v.id !== state.sel);
     saveLists(uid, next); state.sel = "inbox"; rerender();
   };
 
   // 結果行: 完了/フラグ/編集
   wireRows(root, data, rerender);
+  // 空状態（条件起因）のフィルタクリア導線
+  wireClear(root, data, ctx);
+}
+
+// 空状態の「フィルタをクリア」ボタンを配線（バーの絞り込みのみリセット、選択ビューは維持）。
+function wireClear(root, data, ctx) {
+  const btn = root.querySelector("#sl-clear");
+  if (!btn) return;
+  btn.onclick = () => {
+    state.filter = { ...state.filter, text: "", due: "", prio: "", _cat: "", flag: false };
+    render(root);
+  };
 }
 
 function wireRows(root, data, rerender) {
@@ -286,13 +332,21 @@ function paintResults(root, data, ctx) {
   const matched = (data.tasks || []).filter((t) => taskMatches(t, state.filter, ctx) && (!catTitle || categoryLabels(t).some((l) => l.title === catTitle)));
   const sorted = sortTasks(matched, state.sort, ctx.today);
   const box = root.querySelector("#sl-results");
-  box.innerHTML = resultsHtml(sorted, data.projects, ctx.today, state.sort);
+  box.innerHTML = resultsHtml(sorted, data.projects, ctx.today, state.sort, state.sel);
   wireRows(root, data, () => render(root));
+  wireClear(root, data, ctx);
+  updateSum(root, sorted);
 }
 function updateCount(root, data, ctx) {
   const catTitle = state.filter._cat || "";
   const n = (data.tasks || []).filter((t) => taskMatches(t, state.filter, ctx) && (!catTitle || categoryLabels(t).some((l) => l.title === catTitle))).length;
   const el = root.querySelector("#sl-count"); if (el) el.textContent = n;
+}
+// ビュー内見積り合計バッジを更新（0 のときは非表示）。
+function updateSum(root, sorted) {
+  const el = root.querySelector("#sl-sum"); if (!el) return;
+  const sumH = sorted.reduce((s, t) => s + (t.time_estimate || 0), 0) / 3600;
+  if (sumH) { el.hidden = false; el.textContent = `Σ ${fmtH(sumH)}`; } else { el.hidden = true; }
 }
 
 function suggestName(f) {
@@ -324,6 +378,8 @@ function css() {
   .sl-head{display:flex;align-items:center;justify-content:space-between;margin:2px 2px 12px}
   .sl-title{font-size:20px;font-weight:800;letter-spacing:-.01em}
   .sl-count{font-size:13px;font-weight:700;color:${C.muted};background:${C.track};border-radius:11px;padding:1px 10px;margin-left:6px;vertical-align:2px}
+  .sl-sum{font-size:12px;font-weight:700;color:${C.muted};margin-left:8px;vertical-align:2px;font-variant-numeric:tabular-nums;letter-spacing:.01em}
+  .sl-sum[hidden]{display:none}
   .sl-desc{font-size:12px;color:${C.muted};margin:-6px 2px 12px;line-height:1.4}
   .sl-sort{font-size:12px;color:${C.muted};display:flex;align-items:center;gap:6px}
   .sl-sort select,.sl-in{font:inherit;font-size:12.5px;padding:7px 9px;border:1px solid ${C.line};border-radius:9px;background:#fff;color:${C.ink}}
@@ -361,6 +417,7 @@ function css() {
   .sl-flagrow.on{color:${C.over}}
   .sl-empty{text-align:center;color:${C.muted};padding:50px 0;font-size:13px}
   .sl-empty-i{font-size:34px;margin-bottom:8px;filter:grayscale(.3) opacity(.6)}
+  #sl-clear{border:0;cursor:pointer;font:inherit;font-size:13px;font-weight:600}
   @media(max-width:720px){.sl-tabs{flex-wrap:nowrap}}
   /* ===== ダークモード（ハードコード淡色を暗側に上書き。ライト不変） ===== */
   html[data-theme="dark"] .sl-tcnt{background:${C.track}}

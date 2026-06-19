@@ -3,8 +3,7 @@ import { load } from "../lib/store.js";
 import { loadByMember } from "../lib/capacity.js";
 import { capacityOn } from "../lib/recurrence.js";
 import { projectName } from "../lib/store.js";
-import { whoami } from "../lib/api.js";
-import { C, fmtH, esc, todayISO } from "../lib/ui.js";
+import { C, fmtH, esc, todayISO, member_color } from "../lib/ui.js";
 import { renderClock } from "./clock.js";
 
 let CAP = 8; // 設定（容量 h/日）で上書き
@@ -38,7 +37,7 @@ export async function render(root) {
   CAP = data.settings.capH;
   const day = todayISO();
   if (MODE === null) {
-    try { MODE_UID = (await whoami())?.id ?? null; } catch { MODE_UID = null; }
+    MODE_UID = data.me?.id ?? null; // load() がキャッシュ済みの whoami 結果（重複 fetch 回避）
     let saved = null;
     try { saved = localStorage.getItem(modeKey(MODE_UID)); } catch {}
     MODE = saved === "clock" || saved === "stacked" ? saved : DEFAULT_MODE;
@@ -100,6 +99,10 @@ function renderStacked(body, data, day, opts = {}) {
     if (!pjIdx.has(pid)) pjIdx.set(pid, pjIdx.size);
     return PJPAL[pjIdx.get(pid) % PJPAL.length];
   };
+  // メンバー色は members の安定 index で member_color に引く（kanban/gantt と同じ規約＝全画面で色一致）。
+  // rows は freeH 降順ソートされるため行 index は不安定。id→配列位置の固定マップを使う。
+  const memberIdx = new Map((members || []).map((m, i) => [m.id, i]));
+  const memberColor = (mid) => member_color(memberIdx.get(mid) ?? 0);
   // 営業日割り（holidays）＋人別容量（週末/祝日/休暇=0）で今日KPIを正確に（§土日祝ギャップ）
   const capacityFor = (m, d) => capacityOn(m, d, { holidays: holidaysSet, unavailabilityByMember, capH: CAP });
   const rows = loadByMember(tasks, members, day, CAP, plansByTask, { holidays: holidaysSet, capacityFor }).sort((a, b) => b.freeH - a.freeH);
@@ -130,14 +133,14 @@ function renderStacked(body, data, day, opts = {}) {
       <div class="kpi over"><div class="l">超過</div><div class="v">${over > 0 ? "+" + fmtH(over) : "0h"}</div></div>
     </div>
     <div class="t54-card">
-      ${rows.length ? chartHtml(rows, { yMax, PLOT_H, FOOT_H, pxPerH, taskById, pjColor }) : empty()}
+      ${rows.length ? chartHtml(rows, { yMax, PLOT_H, FOOT_H, pxPerH, taskById, pjColor, memberColor }) : empty()}
       ${rows.length ? legendHtml(usedPjs, projects, pjColor) : ""}
     </div>
     ${rows.length ? `<div class="t54-hint">タイル＝今日のタスク（高さ＝工数）。容量線(${CAP}h)を超えた分が赤、線の下の点線が空き工数。</div>` : ""}`;
 }
 
 function chartHtml(rows, g) {
-  const { yMax, PLOT_H, FOOT_H, pxPerH, taskById, pjColor } = g;
+  const { yMax, PLOT_H, FOOT_H, pxPerH, taskById, pjColor, memberColor } = g;
   // Y目盛り＋グリッド
   let yaxis = "", grids = "";
   const step = yMax > 14 ? 4 : 2;
@@ -157,7 +160,7 @@ function chartHtml(rows, g) {
 }
 
 function colHtml(r, i, g) {
-  const { PLOT_H, FOOT_H, pxPerH, taskById, pjColor } = g;
+  const { PLOT_H, FOOT_H, pxPerH, taskById, pjColor, memberColor } = g;
   const total = r.assignedH, over = r.overH, free = r.freeH;
   let inner = "";
 
@@ -188,7 +191,7 @@ function colHtml(r, i, g) {
   // フッター
   const cls = r.status === "over" ? "over" : (r.status === "full" ? "full" : (r.status === "off" ? "off" : "free"));
   const txt = r.status === "over" ? "超過 +" + fmtH(over) : (r.status === "full" ? "満稼働" : (r.status === "off" ? "休 (非稼働日)" : "空き " + fmtH(free)));
-  const dot = ["#e5772d", "#3a86ff", "#2fa66b", "#b657d6", "#0ea5e9", "#f5a623"][i % 6];
+  const dot = memberColor(r.id); // members の安定 index 由来（全画面で色一致）。行 index i ではなく member id で引く
   inner += `<div class="t54-foot">
       <div class="t54-nm"><span class="t54-dot" style="background:${dot}"></span>${esc(r.name)}</div>
       <div class="t54-status ${cls}">${txt}</div>
