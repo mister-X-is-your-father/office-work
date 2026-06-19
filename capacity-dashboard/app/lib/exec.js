@@ -35,6 +35,10 @@ export function saveSettings(s) { return req("/settings", { method: "POST", body
 export function savePresets(sortPresets) { return req("/settings", { method: "POST", body: { sort_presets: sortPresets } }); }
 // メニュー表示制御: {"<userId>": ["hiddenRouteKey",...]}（各人の非表示メニュー集合）。書き込みは許可ユーザー（管理者）のみ。
 export function saveMenuVisibility(menuVisibility) { return req("/settings", { method: "POST", body: { menu_visibility: menuVisibility } }); }
+// 着手準備パネル（実行サポート）の per-task データ。読み書きとも全ログインユーザー可（タスク単位の作業データ）。
+// 戻り値は { prep: {...} }（保存時は保存後の本体）。本体は { [methodId]: data, score } の汎用JSON。
+export function getPrep(taskId) { return req(`/prep/${taskId}`); }
+export function savePrep(taskId, prep) { return req(`/prep/${taskId}`, { method: "POST", body: prep }); }
 // 成果物（Fable作業ディレクトリのファイル）
 export function getFiles() { return req("/files"); }
 export function fileUrl(relPath) { return `${EXEC_BASE}/file/${encodeURIComponent(relPath)}?token=${encodeURIComponent(token())}`; }

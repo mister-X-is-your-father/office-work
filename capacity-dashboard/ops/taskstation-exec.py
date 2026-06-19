@@ -51,6 +51,18 @@ def load_settings():
     except (OSError, ValueError):
         return dict(SETTINGS_DEFAULT)
 
+# 着手準備パネル（実行サポート）の per-task ストア。{ "<taskId>": {...プラグインデータ...} }
+# 全ログインユーザーが読み書き可（タスク単位の作業データ）。/notes と同様にタスク単位。
+PREP_PATH = f"{HOME}/.config/taskstation/prep.json"
+def load_prep():
+    try:
+        return json.load(open(PREP_PATH))
+    except (OSError, ValueError):
+        return {}
+def save_prep(d):
+    with open(PREP_PATH, "w") as f:
+        json.dump(d, f, ensure_ascii=False)
+
 # ---- TaskStation API ----
 
 def ts_req(path, token, method="GET", body=None):
@@ -392,6 +404,12 @@ class H(BaseHTTPRequestHandler):
             if not uid and not auth_any(tok):
                 return self._json(401, {"error": "unauthorized"})
             return self._json(200, {"settings": load_settings(), "can_edit": bool(uid)})
+        m_pg = re.match(r"^/prep/(\d+)", self.path)
+        if m_pg:
+            # 着手準備の読み取りは全ログインユーザー可。
+            if not uid and not auth_any(tok):
+                return self._json(401, {"error": "unauthorized"})
+            return self._json(200, {"prep": load_prep().get(m_pg.group(1), {})})
         if not uid:
             return self._json(401, {"error": "unauthorized"})
         if self.path.startswith("/me"):
@@ -481,6 +499,23 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         uid, tok = self._auth()
+        # /prep は全ログインユーザーが書き込み可（タスク単位の作業データ）。ALLOWED ゲートの前に処理。
+        m_pp = re.match(r"^/prep/(\d+)", self.path)
+        if m_pp:
+            if not uid and not auth_any(tok):
+                return self._json(401, {"error": "unauthorized"})
+            try:
+                body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or 0) or b"{}")
+            except ValueError:
+                return self._json(400, {"error": "bad json"})
+            if not isinstance(body, dict):
+                return self._json(400, {"error": "object required"})
+            if len(json.dumps(body, ensure_ascii=False)) > 20000:  # 1タスク分の肥大化防止
+                return self._json(413, {"error": "too large"})
+            prep = load_prep()
+            prep[m_pp.group(1)] = body
+            save_prep(prep)
+            return self._json(200, {"prep": body})
         if not uid:
             return self._json(401, {"error": "unauthorized"})
         if self.path.startswith("/settings"):
