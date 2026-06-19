@@ -9,7 +9,7 @@ import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
 import { shiftISO, buildTaskTree } from "../lib/capacity.js";
 import { openTaskForm, ensureStyle as ensureFormStyle } from "./taskform.js";
 import { summarizeRecurrence, openRecurrenceForm } from "./recurrenceform.js";
-import { hourInputHtml, wireHourInput } from "../lib/form.js";
+import { hourInputHtml, wireHourInput, parseSmartDate } from "../lib/form.js";
 import { taskMatches, next7End, EMPTY_FILTER, BUILTIN_VIEWS } from "../lib/smartlist.js";
 import { icon } from "../lib/icons.js";
 import * as history from "../lib/history.js";
@@ -361,7 +361,20 @@ export async function render(root) {
     };
   });
   root.querySelectorAll("tr[data-id]").forEach((tr) => {
-    tr.onclick = (e) => { if (V.manualMode || e.target.closest(".tb-fable, .tb-rowck")) return; openTaskForm({ taskId: +tr.dataset.id, onSaved: () => render(root) }); };
+    tr.onclick = (e) => {
+      if (V.manualMode || e.target.closest(".tb-fable, .tb-rowck")) return;
+      // 編集セル(.tb-gc)はグリッド編集が受け持つ＝行クリックでフォームを開かない（Excel風: クリックは選択）。
+      // 列挙セルのボタンは stopPropagation 済でここに来ない。タイトル等のテキストセルはここで吸収する。
+      if (e.target.closest(".tb-gc")) { gridSelectFromEl(e.target.closest(".tb-gc"), root); return; }
+      openTaskForm({ taskId: +tr.dataset.id, onSaved: () => render(root) });
+    };
+    // ダブルクリック: 読み取り専用セル/行余白＝フォーム / テキスト系セル＝インライン編集（列挙はクリックでポップアップ済）。
+    tr.ondblclick = (e) => {
+      const gc = e.target.closest(".tb-gc");
+      if (gc) { gridEditFromEl(gc, root); return; }
+      if (e.target.closest(".tb-fable, .tb-rowck")) return;
+      openTaskForm({ taskId: +tr.dataset.id, onSaved: () => render(root) });
+    };
     tr.oncontextmenu = (e) => { e.preventDefault(); openRowMenu(e.clientX, e.clientY, +tr.dataset.id, tasks, root); };
   });
   // 階層: 折りたたみトグル（展開/折りたたみのみ）＋ 行クリックで編集。トグルのたびに永続化。
@@ -422,6 +435,8 @@ export async function render(root) {
   root.querySelectorAll(".tb-estbtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openEstMenu(b, +b.dataset.est, tasks, root); }; });
   // 複数選択（チェックボックス＋全選択＋Shift範囲）＋ 一括操作バー。表モードのみ。
   if (!isOutline) { wireSelection(root, rows, () => render(root)); wireBulk(root, rows, tasks, members, today); }
+  // Excel風グリッド編集（キーボード移動・インライン編集・コピペ・フィルダウン）。表モードのみ。
+  if (!isOutline) wireGrid(root, rows, tasks, members, labels, today);
   root.querySelectorAll(".tb-fable").forEach((b) => {
     b.onclick = async (e) => {
       e.stopPropagation(); b.disabled = true;
@@ -792,6 +807,318 @@ function openCategoryMenu(chipEl, id, tasks, labels, root) {
   };
   const r = chipEl.getBoundingClientRect();
   openMenu(r.left, r.bottom + 4, build(), { keepOpen: true, rebuild: build, onClose: () => { if (dirty) { recordLabels(); invalidate(); render(root); } } });
+}
+
+// ══ Excel風グリッド編集 ══════════════════════════════════════════════
+// 表モードのタスク一覧を、キーボードでセル移動しながら高速編集する層。
+// - 矢印=移動 / Shift+矢印=矩形選択 / Enter=確定して下 / Tab=右 / F2・直接入力=編集 / Esc=取消
+// - テキスト系(タイトル/見積/期限)はセル内インライン入力、列挙(担当/分類/重要度/ステータス)は既存ポップアップ
+// - Ctrl+C/V=セル値コピペ（列の型ごとにテキスト解釈）/ Ctrl+D=選択範囲を上のセルで下方向フィル
+// - 適用は rawSet（履歴なし）＋バッチで history に1エントリ＝コピペ/フィルも1回のUndoで戻る
+const GCOLS = ["title", "who", "cat", "prio", "due", "est", "state"]; // ナビ対象＝編集可能列（描画順）
+const GTEXT = new Set(["title", "due", "est"]); // セル内インライン入力する列（他は列挙ポップアップ）
+const GLABEL = { title: "タスク名変更", who: "担当変更", cat: "分類変更", prio: "重要度変更", due: "期限変更", est: "見積変更", state: "ステータス変更" };
+const PRIO_NAME = { 0: "なし", 1: "低", 2: "中", 3: "高", 4: "MUST" };
+const PRIO_NUM = { "なし": 0, "低": 1, "中": 2, "高": 3, "must": 4, "MUST": 4 };
+const STATE_LABEL2KEY = { "未着手": "todo", "進行中": "doing", "連絡待ち": "waiting", "完了": "done" };
+const ZERO_DUE = "0001-01-01T00:00:00Z";
+let gActive = null;   // {id, col} アクティブセル（タスクID＋列キーで保持＝並べ替えに強い）
+let gAnchor = null;   // {id, col} 矩形選択のアンカー（null時はアクティブ＝単一セル）
+let gEditing = false; // インライン編集中か（グリッドのキー操作を止める）
+let gClip = null;     // 内部クリップボード {cols:[colKey], rows:[[text,...],...]}
+let gKeyWired = false;
+let gCtx = null;      // {root, tasks, members, labels, today}
+
+function findGTask(id) { return (gCtx && gCtx.tasks || []).find((x) => x.id === id) || null; }
+function nonAiAssignees(t) { return (t.assignees || []).filter((a) => !isAiUser(a)); }
+function userCats(t) { return (t.labels || []).filter((l) => (l.title || "") !== REVIEW_LABEL && (l.title || "") !== WAITING_LABEL); }
+function orderedIds(root) { return [...root.querySelectorAll("table tr[data-id]")].map((tr) => +tr.dataset.id); }
+function gCellEl(root, id, col) { return root.querySelector(`tr[data-id="${id}"] td.tb-gc[data-col="${col}"]`); }
+
+// セルの論理値（before/after・rawSet で使う型）
+function gReadVal(col, t) {
+  if (col === "title") return t.title || "";
+  if (col === "who") return nonAiAssignees(t).map((a) => a.id).sort((a, b) => a - b);
+  if (col === "cat") return userCats(t).map((l) => l.id).sort((a, b) => a - b);
+  if (col === "prio") return t.priority || 0;
+  if (col === "due") return dueISO(t);
+  if (col === "est") return t.time_estimate || 0;
+  if (col === "state") return statusOf(t);
+  return null;
+}
+// セルの表示テキスト（コピー時のシリアライズ）
+function gValToText(col, t) {
+  if (col === "title") return t.title || "";
+  if (col === "who") return nonAiAssignees(t).map((a) => a.name || a.username).join(", ");
+  if (col === "cat") return userCats(t).map((l) => l.title).join(", ");
+  if (col === "prio") return PRIO_NAME[Math.min(t.priority || 0, 4)] ?? "なし";
+  if (col === "due") return dueISO(t);
+  if (col === "est") return t.time_estimate ? String(Math.round((t.time_estimate / 3600) * 100) / 100) : "";
+  if (col === "state") return STATUS[statusOf(t)].label;
+  return "";
+}
+// テキスト → 論理値（ペースト時の型別解釈）。無効は null（=そのセルはスキップ）。
+function gParseText(col, text) {
+  const s = (text == null ? "" : String(text)).trim();
+  if (col === "title") return s ? s : null;
+  if (col === "due") { if (!s) return ""; const iso = parseSmartDate(s); return iso || null; }
+  if (col === "est") { if (!s) return 0; const hf = parseFloat(s.replace(/[hH時間\s]/g, "")); return isFinite(hf) && hf >= 0 ? Math.round(hf * 3600) : null; }
+  if (col === "prio") { if (/^[0-4]$/.test(s)) return +s; const v = PRIO_NUM[s] ?? PRIO_NUM[s.toLowerCase()]; return v == null ? null : v; }
+  if (col === "state") { const k = STATE_LABEL2KEY[s] || (["todo", "doing", "waiting", "done"].includes(s) ? s : null); return k; }
+  if (col === "who") {
+    if (!s) return [];
+    const names = s.split(/[,、]/).map((x) => x.trim().toLowerCase()).filter(Boolean);
+    const ids = (gCtx.members || []).filter((m) => names.includes((m.name || "").toLowerCase()) || names.includes((m.username || "").toLowerCase())).map((m) => m.id);
+    return ids.sort((a, b) => a - b);
+  }
+  if (col === "cat") {
+    if (!s) return [];
+    const titles = s.split(/[,、]/).map((x) => x.trim().toLowerCase()).filter(Boolean);
+    const ids = (gCtx.labels || []).filter((l) => (l.title || "") !== REVIEW_LABEL && (l.title || "") !== WAITING_LABEL && titles.includes((l.title || "").toLowerCase())).map((l) => l.id);
+    return ids.sort((a, b) => a - b);
+  }
+  return null;
+}
+function gEqual(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+
+// 論理値をサーバへ適用（履歴は積まない）。set系(担当/分類)は現状から収束、state は正準フィールドへ。
+async function gRawSet(col, id, value) {
+  if (col === "title") return updateTask(id, { title: value });
+  if (col === "prio") return updateTask(id, { priority: value });
+  if (col === "due") return updateTask(id, { due_date: value ? value + "T00:00:00Z" : ZERO_DUE });
+  if (col === "est") return updateTask(id, { time_estimate: value });
+  if (col === "who") {
+    const t = findGTask(id) || { assignees: [] };
+    const cur = nonAiAssignees(t).map((a) => a.id);
+    for (const x of cur) if (!value.includes(x)) await removeAssignee(id, x).catch(() => {});
+    for (const x of value) if (!cur.includes(x)) await addAssignee(id, x).catch(() => {});
+    return;
+  }
+  if (col === "cat") {
+    const t = findGTask(id) || { labels: [] };
+    const cur = userCats(t).map((l) => l.id);
+    for (const x of cur) if (!value.includes(x)) await removeTaskLabel(id, x).catch(() => {});
+    for (const x of value) if (!cur.includes(x)) await addTaskLabel(id, x).catch(() => {});
+    return;
+  }
+  if (col === "state") {
+    const t = findGTask(id) || {};
+    if (value === "waiting") { await updateTask(id, { done: false }); await setTaskWaiting(t, true); return; }
+    const keepPct = (t.done || (t.percent_done || 0) >= 100) ? 0 : (t.percent_done || 0);
+    const patch = value === "done" ? { done: true, percent_done: 100 }
+      : value === "doing" ? { done: false, percent_done: keepPct, started_at: new Date().toISOString() }
+      : { done: false, percent_done: 0, started_at: null };
+    await updateTask(id, patch); await setTaskWaiting(t, false);
+    return;
+  }
+}
+// 複数セル編集をまとめて適用＋履歴1エントリ。edits=[{id,col,before,after}]。適用後に再描画。
+async function gridApply(label, edits) {
+  const real = edits.filter((e) => !gEqual(e.before, e.after));
+  if (!real.length) { historyRerender(); return; }
+  for (const e of real) await gRawSet(e.col, e.id, e.after);
+  history.push({
+    label: real.length > 1 ? `${label}（${real.length}件）` : label,
+    undo: async () => { for (const e of real) await gRawSet(e.col, e.id, e.before); historyRerender(); },
+    redo: async () => { for (const e of real) await gRawSet(e.col, e.id, e.after); historyRerender(); },
+  });
+  historyRerender();
+}
+
+// アクティブ/選択ハイライトの再適用（再描画ごと）。アクティブIDが消えていたら解除。
+function gridHighlight() {
+  const root = gCtx && gCtx.root; if (!root) return;
+  root.querySelectorAll(".tb-gc-active, .tb-gc-insel").forEach((el) => el.classList.remove("tb-gc-active", "tb-gc-insel"));
+  if (!gActive) return;
+  const order = orderedIds(root);
+  if (!order.includes(gActive.id)) { gActive = null; gAnchor = null; return; }
+  const anc = gAnchor || gActive;
+  const r0 = order.indexOf(gActive.id), r1 = order.indexOf(anc.id);
+  const c0 = GCOLS.indexOf(gActive.col), c1 = GCOLS.indexOf(anc.col);
+  if (order.includes(anc.id) && (r0 !== r1 || c0 !== c1)) {
+    for (let r = Math.min(r0, r1); r <= Math.max(r0, r1); r++)
+      for (let c = Math.min(c0, c1); c <= Math.max(c0, c1); c++) {
+        const el = gCellEl(root, order[r], GCOLS[c]); if (el) el.classList.add("tb-gc-insel");
+      }
+  }
+  const act = gCellEl(root, gActive.id, gActive.col);
+  if (act) { act.classList.add("tb-gc-active"); act.scrollIntoView({ block: "nearest", inline: "nearest" }); }
+}
+
+// 移動: dir=up/down/left/right。extend=trueで選択を伸ばす（アンカー保持）。
+function gridMove(dir, extend) {
+  const root = gCtx && gCtx.root; if (!root || !gActive) return;
+  const order = orderedIds(root);
+  let r = order.indexOf(gActive.id), c = GCOLS.indexOf(gActive.col);
+  if (r < 0) return;
+  if (dir === "up") r = Math.max(0, r - 1);
+  else if (dir === "down") r = Math.min(order.length - 1, r + 1);
+  else if (dir === "left") c = Math.max(0, c - 1);
+  else if (dir === "right") c = Math.min(GCOLS.length - 1, c + 1);
+  if (extend) { if (!gAnchor) gAnchor = { ...gActive }; } else { gAnchor = null; }
+  gActive = { id: order[r], col: GCOLS[c] };
+  gridHighlight();
+}
+
+// アクティブセルを編集開始。テキスト系=インライン入力 / 列挙=既存ポップアップ（セル内ボタンをクリック）。
+function gridEditActive(initial) {
+  const root = gCtx && gCtx.root; if (!root || !gActive) return;
+  const cell = gCellEl(root, gActive.id, gActive.col); if (!cell) return;
+  if (GTEXT.has(gActive.col)) { gridInline(cell, gActive.id, gActive.col, initial); return; }
+  const btn = cell.querySelector("button"); if (btn) btn.click(); // 列挙はポップアップ
+}
+
+function gridInline(cell, id, col, initial) {
+  const t = findGTask(id); if (!t) return;
+  gEditing = true;
+  const prev = cell.innerHTML;
+  const cur = gValToText(col, t);
+  const input = document.createElement("input");
+  input.className = "tb-gedit";
+  input.value = initial != null ? initial : cur;
+  if (col === "est") { input.inputMode = "decimal"; input.placeholder = "時間"; }
+  if (col === "due") input.placeholder = "例: 明日 / 6/20";
+  cell.classList.add("tb-gc-editing");
+  cell.replaceChildren(input);
+  input.focus();
+  if (initial == null) input.select();
+  let done = false;
+  const finish = async (commit, move) => {
+    if (done) return; done = true; gEditing = false;
+    const after = commit ? gParseText(col, input.value) : null;
+    const before = gReadVal(col, t);
+    if (move) { const order = orderedIds(gCtx.root); let r = order.indexOf(id), c = GCOLS.indexOf(col);
+      if (move === "down") r = Math.min(order.length - 1, r + 1); else if (move === "right") c = Math.min(GCOLS.length - 1, c + 1); else if (move === "left") c = Math.max(0, c - 1);
+      gAnchor = null; gActive = { id: order[r] ?? id, col: GCOLS[c] }; }
+  if (commit && after !== null && !gEqual(after, before)) { await gridApply(GLABEL[col], [{ id, col, before, after }]); return; } // 再描画＋ハイライト済
+    cell.classList.remove("tb-gc-editing"); cell.innerHTML = prev; gridHighlight();
+  };
+  input.onkeydown = (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); finish(true, "down"); }
+    else if (e.key === "Tab") { e.preventDefault(); finish(true, e.shiftKey ? "left" : "right"); }
+    else if (e.key === "Escape") { e.preventDefault(); finish(false, null); }
+  };
+  input.onblur = () => finish(true, null);
+}
+
+// 矩形選択の範囲（[{id,col}...] の2次元）を返す。
+function gridRange(root) {
+  const order = orderedIds(root);
+  const anc = gAnchor || gActive;
+  const r0 = order.indexOf(gActive.id), r1 = order.indexOf(anc.id);
+  const c0 = GCOLS.indexOf(gActive.col), c1 = GCOLS.indexOf(anc.col);
+  const rows = [];
+  for (let r = Math.min(r0, r1); r <= Math.max(r0, r1); r++) {
+    const cells = [];
+    for (let c = Math.min(c0, c1); c <= Math.max(c0, c1); c++) cells.push({ id: order[r], col: GCOLS[c] });
+    rows.push(cells);
+  }
+  return rows;
+}
+function gridCopy(root) {
+  if (!gActive) return;
+  const range = gridRange(root);
+  gClip = { cols: range[0].map((c) => c.col), rows: range.map((row) => row.map((c) => gValToText(c.col, findGTask(c.id)))) };
+  try { navigator.clipboard && navigator.clipboard.writeText(gClip.rows.map((r) => r.join("\t")).join("\n")); } catch { /* noop */ }
+  flashGrid(root, range);
+}
+async function gridPaste(root) {
+  if (!gActive || !gClip) return;
+  const order = orderedIds(root);
+  const baseR = order.indexOf(gActive.id), baseC = GCOLS.indexOf(gActive.col);
+  // 選択範囲があればその大きさまでタイル、無ければクリップそのままのサイズ。
+  const sel = gridRange(root);
+  const spanR = Math.max(sel.length, gClip.rows.length);
+  const spanC = Math.max(sel[0].length, gClip.cols.length);
+  const edits = [];
+  for (let i = 0; i < spanR; i++) for (let j = 0; j < spanC; j++) {
+    const rr = baseR + i, cc = baseC + j;
+    if (rr >= order.length || cc >= GCOLS.length) continue;
+    const col = GCOLS[cc];
+    const text = gClip.rows[i % gClip.rows.length][j % gClip.cols.length];
+    const after = gParseText(col, text);
+    if (after === null) continue;
+    const t = findGTask(order[rr]); if (!t) continue;
+    edits.push({ id: order[rr], col, before: gReadVal(col, t), after });
+  }
+  await gridApply("貼り付け", edits);
+}
+async function gridFillDown(root) {
+  if (!gActive) return;
+  const range = gridRange(root);
+  if (range.length < 2) return; // 1行だけなら何もしない（範囲を下に広げてから）
+  const edits = [];
+  const top = range[0];
+  for (let ci = 0; ci < top.length; ci++) {
+    const col = top[ci].col;
+    const srcT = findGTask(top[ci].id); if (!srcT) continue;
+    const val = gReadVal(col, srcT);
+    for (let ri = 1; ri < range.length; ri++) {
+      const cell = range[ri][ci]; const t = findGTask(cell.id); if (!t) continue;
+      edits.push({ id: cell.id, col, before: gReadVal(col, t), after: val });
+    }
+  }
+  await gridApply("フィルダウン", edits);
+}
+function flashGrid(root, range) {
+  for (const row of range) for (const c of row) { const el = gCellEl(root, c.id, c.col); if (el) { el.classList.add("tb-gc-flash"); setTimeout(() => el.classList.remove("tb-gc-flash"), 400); } }
+}
+
+// クリック/ダブルクリックから呼ぶ入口（tr ハンドラが使用）。
+function gridSelectFromEl(cell, root) { const tr = cell.closest("tr[data-id]"); if (!tr) return; gAnchor = null; gActive = { id: +tr.dataset.id, col: cell.dataset.col }; gridHighlight(); }
+function gridEditFromEl(cell, root) { gridSelectFromEl(cell, root); gridEditActive(null); }
+
+function wireGrid(root, rows, tasks, members, labels, today) {
+  gCtx = { root, tasks, members, labels, today };
+  // 列挙セルのボタンクリック時もアクティブセルを同期（ポップアップは既存ハンドラが開く）。
+  root.querySelectorAll("td.tb-gc").forEach((cell) => {
+    const btn = cell.querySelector("button");
+    if (btn) btn.addEventListener("mousedown", () => { const tr = cell.closest("tr[data-id]"); if (tr) { gAnchor = null; gActive = { id: +tr.dataset.id, col: cell.dataset.col }; } }, true);
+  });
+  gridHighlight();
+  if (gKeyWired) return;
+  gKeyWired = true;
+  document.addEventListener("keydown", (e) => {
+    if (!location.hash.startsWith("#/list")) return;
+    if (gEditing) return;                          // インライン入力中はそちらが処理
+    if (!gActive) return;                          // セル未選択時はグリッド不作動
+    if (document.querySelector(".tb-ctx")) return; // ポップアップ表示中は触らない
+    const tag = (e.target && e.target.tagName) || "";
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag) || (e.target && e.target.isContentEditable)) return; // 検索欄等の入力中は無視
+    const root = gCtx && gCtx.root; if (!root || !root.isConnected) return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && (e.key === "c" || e.key === "C")) { e.preventDefault(); gridCopy(root); return; }
+    if (mod && (e.key === "v" || e.key === "V")) { e.preventDefault(); gridPaste(root); return; }
+    if (mod && (e.key === "d" || e.key === "D")) { e.preventDefault(); gridFillDown(root); return; }
+    if (mod) return; // Ctrl+Z/Y 等は history のグローバルハンドラに委ねる
+    switch (e.key) {
+      case "ArrowUp": e.preventDefault(); gridMove("up", e.shiftKey); return;
+      case "ArrowDown": e.preventDefault(); gridMove("down", e.shiftKey); return;
+      case "ArrowLeft": e.preventDefault(); gridMove("left", e.shiftKey); return;
+      case "ArrowRight": e.preventDefault(); gridMove("right", e.shiftKey); return;
+      case "Tab": e.preventDefault(); gridMove(e.shiftKey ? "left" : "right", false); return;
+      case "Enter": e.preventDefault(); gridMove(e.shiftKey ? "up" : "down", false); return;
+      case "F2": e.preventDefault(); gridEditActive(null); return;
+      case "Escape": e.preventDefault(); if (gAnchor) { gAnchor = null; gridHighlight(); } else { gActive = null; gridHighlight(); } return;
+      case "Delete": case "Backspace": {
+        // テキスト/見積/期限/担当/分類はクリア（重要度=なし, ステータスは対象外）。
+        e.preventDefault();
+        const t = findGTask(gActive.id); if (!t) return;
+        const col = gActive.col; if (col === "state") return;
+        const empty = col === "who" || col === "cat" ? [] : col === "prio" ? 0 : col === "est" ? 0 : "";
+        gridApply(GLABEL[col], [{ id: gActive.id, col, before: gReadVal(col, t), after: empty }]);
+        return;
+      }
+      default:
+        // 印字可能な1文字＝その文字で編集開始（テキスト列のみ。列挙はポップアップを開く）。
+        if (e.key.length === 1 && !e.altKey) {
+          e.preventDefault();
+          if (GTEXT.has(gActive.col)) gridEditActive(e.key);
+          else gridEditActive(null);
+        }
+    }
+  });
 }
 
 // ── 複数選択（チェックボックス＋全選択＋Shift範囲）。既存 selectedIds/anchorId を活用。 ──
@@ -1218,15 +1545,15 @@ function rowHtml(r, members, i, manual) {
   return `<tr data-id="${id}" class="${manual ? "tb-draggable" : ""}${sel ? " tb-sel" : ""}">
     <td class="tb-selcol"><span class="tb-rowck${sel ? " on" : ""}" data-ck="${id}" role="checkbox" aria-checked="${sel}" title="選択">${sel ? icon("check", { size: 12 }) : ""}</span></td>
     <td class="tb-proj" title="${r.parent ? esc(r.parent.title) : ""}">${r.parent ? esc(r.parent.title) : "—"}</td>
-    <td class="tb-title">${esc(r.title)}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">${icon("flag", { size: 12 })}</span>` : ""}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">${icon("play", { size: 11 })}</button>` : ""}</td>
-    <td>${whoBtn}</td>
+    <td class="tb-title tb-gc" data-col="title">${esc(r.title)}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">${icon("flag", { size: 12 })}</span>` : ""}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">${icon("play", { size: 11 })}</button>` : ""}</td>
+    <td class="tb-gc" data-col="who">${whoBtn}</td>
     <td>${kind}</td>
-    <td>${catBtn}</td>
-    <td>${prioBtn}</td>
-    <td>${dueBtn}</td>
-    <td>${estBtn}</td>
+    <td class="tb-gc" data-col="cat">${catBtn}</td>
+    <td class="tb-gc" data-col="prio">${prioBtn}</td>
+    <td class="tb-gc" data-col="due">${dueBtn}</td>
+    <td class="tb-gc" data-col="est">${estBtn}</td>
     <td><div class="tb-bar"><i style="width:${r.pct}%"></i></div><span class="tb-pct">${r.pct}%</span></td>
-    <td>${st}</td>
+    <td class="tb-gc" data-col="state">${st}</td>
   </tr>`;
 }
 
@@ -1420,6 +1747,14 @@ function css() {
   .tb tbody tr.tb-draggable{cursor:grab;user-select:none;touch-action:pan-y}
   .tb tbody tr.tb-sel td{background:#e6f0ff}
   .tb tbody tr.tb-sel td:first-child{box-shadow:inset 3px 0 0 ${C.fill}}
+  /* Excel風グリッド編集: アクティブセル/矩形選択/インライン入力 */
+  .tb td.tb-gc{position:relative}
+  .tb td.tb-gc-insel{background:rgba(58,134,255,.10)}
+  .tb td.tb-gc-active{box-shadow:inset 0 0 0 2px ${C.fill};border-radius:3px}
+  .tb td.tb-gc-flash{animation:tb-flash-fade .5s ease-out}
+  .tb-gedit{width:100%;box-sizing:border-box;font:inherit;font-size:13px;border:0;outline:2px solid ${C.fill};border-radius:3px;padding:4px 6px;background:#fff;color:${C.ink}}
+  html[data-theme="dark"] .tb td.tb-gc-insel{background:rgba(58,134,255,.18)}
+  html[data-theme="dark"] .tb-gedit{background:var(--card);color:var(--ink)}
   /* 選択チェックボックス列 */
   .tb th.tb-selcol,.tb td.tb-selcol{width:34px;padding-left:14px;padding-right:4px}
   .tb-rowck{display:inline-grid;place-items:center;width:17px;height:17px;border-radius:5px;border:1.5px solid ${C.line};background:#fff;color:#fff;cursor:pointer;font-weight:700;line-height:1}
