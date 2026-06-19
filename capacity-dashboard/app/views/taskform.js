@@ -4,9 +4,9 @@
 // プロジェクト(UI呼称)=親タスク。related_tasks.subtask（親に subtask 関連を張る・名前入力で親を新規作成も可）。
 // 階層: ワークスペース(=API project) ＞ プロジェクト(=親タスク) ＞ タスク。
 import { load, invalidate, TEMPLATE_WS, ensureInbox } from "../lib/store.js";
-import { getTask, createTaskInProject, createProject, updateTask, addAssignee, removeAssignee, addRelation, removeRelation, createLabel, addTaskLabel, removeTaskLabel, getAttachments, uploadAttachments, deleteAttachment, fetchAttachmentBlob } from "../lib/api.js";
-import { categoryLabels, REVIEW_LABEL, WAITING_LABEL } from "../lib/kinds.js";
-import { C, esc, fmtH } from "../lib/ui.js";
+import { getTask, createTaskInProject, createProject, updateTask, addAssignee, removeAssignee, addRelation, removeRelation, createLabel, addTaskLabel, removeTaskLabel, getAttachments, uploadAttachments, deleteAttachment, fetchAttachmentBlob, setTaskWaiting, getComments, createComment } from "../lib/api.js";
+import { categoryLabels, REVIEW_LABEL, WAITING_LABEL, statusOf, STATUS } from "../lib/kinds.js";
+import { C, esc, fmtH, trapFocus } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
 // 共有フォーム部品（スマート日付/[資料][ゴール]規約/時間ステッパー/資料チップ）は lib/form.js に集約
 import { parseSmartDate, fmtDisplay, fmtDisplayDow, splitMeta, joinMeta, hourInputHtml, wireHourInput, docChipsHtml, wireDocChips, checksHtml, wireChecks, attachDatePicker } from "../lib/form.js";
@@ -138,7 +138,14 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
           <label class="tf-l">添付ファイル <span class="tf-hint">（クリックでダウンロード）</span></label>
           <div class="tf-chips tf-atts" id="tf-atts"></div>
           <label class="tf-att-add">＋ ファイルを添付<input type="file" id="tf-att-in" multiple hidden></label>
-          <span class="tf-hint" id="tf-att-msg"></span>` : ""}
+          <span class="tf-hint" id="tf-att-msg"></span>
+          <label class="tf-l">コメント <span class="tf-hint">（履歴・全員が閲覧）</span></label>
+          <div class="tf-ainotes" id="tf-comments"><span class="tf-hint">読み込み中…</span></div>
+          <div class="tf-cmt-add">
+            <textarea id="tf-cmt-in" class="tf-in tf-ta" rows="2" placeholder="コメントを追加（Ctrl/Cmd+Enterで送信）"></textarea>
+            <button type="button" class="tf-cmt-send" id="tf-cmt-send">送信</button>
+          </div>
+          <span class="tf-hint" id="tf-cmt-msg"></span>` : ""}
         </div>
         <div class="tf-side">
           <div class="tf-row">
@@ -183,7 +190,17 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
             <div class="tf-cbx-dd" hidden></div>
           </div>
           <div class="tf-chips" id="tf-dep-chips"></div>
-          ${isEdit ? `<label class="tf-chk"><input id="tf-done" type="checkbox"${task.done ? " checked" : ""}> 完了にする</label>` : ""}
+          ${isEdit ? `
+          <label class="tf-l">ステータス</label>
+          <div class="tf-seg" id="tf-status">
+            ${["todo", "doing", "waiting", "done"].map((k) =>
+              `<button type="button" data-st="${k}"${statusOf(task) === k ? " class=\"on\"" : ""}>${STATUS[k].label}</button>`).join("")}
+          </div>
+          <label class="tf-l">進捗率 <span class="tf-hint" id="tf-pct-cnt"></span></label>
+          <input id="tf-pct" class="tf-range" type="range" min="0" max="100" step="5" value="${task.percent_done || 0}">
+          <div class="tf-pct-quick" id="tf-pct-quick">
+            ${[0, 25, 50, 75, 100].map((v) => `<button type="button" data-pct="${v}">${v}</button>`).join("")}
+          </div>` : ""}
         </div>
         <div class="tf-err" id="tf-err"></div>
       </div>
@@ -199,9 +216,49 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
   _opening = false; // モーダルがDOMに載った＝以後の連打は上の .tf-modal チェックで弾ける
 
   const $ = (id) => wrap.querySelector(id);
+  const card = wrap.querySelector(".tf-card"); // モーダル本体（フォーカストラップ/ドラッグ移動で参照）
+  // B61-B63: ステータス/進捗のフォーム状態（編集時のみ）。table.js openStatusMenu の stateOf と同等の副作用に変換。
+  // stStatus=todo|doing|waiting|done、stPct=0..100、stStartedAt=ISO|null。保存時にupdateTask+setTaskWaitingで反映。
+  let stStatus = isEdit ? statusOf(task) : "todo";
+  let stPct = isEdit ? (task.percent_done || 0) : 0;
+  let stStartedAt = isEdit ? (task.started_at || null) : null;
+  let _initialSnapshot = null; // B65: 全UI配線後にスナップショット確定（それまではdirty判定を無効化）
+  // B66: 開く前にフォーカスがあった要素を記憶（閉じる時に復帰させる）。
+  const prevFocus = document.activeElement;
+  // B66: モーダル内でTabを巡回（フォーカストラップ）。close時に解除関数を呼ぶ。
+  const releaseTrap = trapFocus(card);
+  // B65: 未保存破棄警告。開いた時点のフォーム値スナップショットを取り、変更があれば閉じる前にconfirm。
+  let saving = false; // 保存成功で閉じる時はsnapshot比較をスキップ
+  const formSnapshot = () => JSON.stringify({
+    parent: ($("#tf-parent") || {}).value || "", title: ($("#tf-title") || {}).value || "",
+    desc: ($("#tf-desc") || {}).value || "", goal: ($("#tf-goal") || {}).value || "",
+    asg: ($("#tf-asg") || {}).value || "", prio: ($("#tf-prio") || {}).value || "",
+    cat: ($("#tf-cat") || {}).value || "", asg2: ($("#tf-asg2") || {}).value || "",
+    est: ($("#tf-est") || {}).value || "", start: ($("#tf-start") || {}).value || "",
+    end: ($("#tf-end") || {}).value || "", due: ($("#tf-due") || {}).value || "",
+    docs: docLinks.join("\n"), checks: JSON.stringify(docChecks), preds: [...predSet].sort().join(","),
+    status: stStatus, pct: stPct,
+  });
   // Escで閉じる（候補コンボが開いてる時はそちらが消費＝モーダルは閉じない）。document bubble で受け、閉じる時に解除。
-  const onEsc = (ev) => { if (ev.key === "Escape") { ev.preventDefault(); close(); } };
-  const close = () => { document.removeEventListener("keydown", onEsc); wrap.remove(); };
+  const onEsc = (ev) => {
+    if (ev.key === "Escape") { ev.preventDefault(); close(); return; }
+    // B65: Cmd/Ctrl+Enter で保存実行（種別タブが「タスク」=本フォーム表示中のみ）。
+    if ((ev.metaKey || ev.ctrlKey) && ev.key === "Enter") {
+      const saveBtn = $("#tf-save");
+      if (saveBtn && saveBtn.offsetParent !== null && !saveBtn.disabled) { ev.preventDefault(); saveBtn.click(); }
+    }
+  };
+  const close = () => {
+    // B65: 未保存の変更があれば確認（保存成功時の自動closeはsaving=trueでスキップ）。
+    if (!saving && _initialSnapshot != null && formSnapshot() !== _initialSnapshot) {
+      if (!confirm("保存していない変更があります。破棄して閉じますか？")) return;
+    }
+    document.removeEventListener("keydown", onEsc);
+    releaseTrap();
+    wrap.remove();
+    // B66: 開く前のフォーカス要素へ復帰（DOMに残っていれば）。
+    if (prevFocus && typeof prevFocus.focus === "function" && document.contains(prevFocus)) prevFocus.focus();
+  };
   document.addEventListener("keydown", onEsc);
   // 外側クリックでは閉じない（誤クリックで入力が飛ぶため）。閉じる=×/キャンセル/Escのみ。
   $("#tf-x").onclick = close;
@@ -261,7 +318,6 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
   }
 
   // ヘッダー掴みでモーダルをドラッグ移動（初回ドラッグで fixed 化、画面外に出ない範囲でクランプ）
-  const card = wrap.querySelector(".tf-card");
   wrap.querySelector(".tf-h").onmousedown = (ev) => {
     if (ev.target.closest(".tf-x")) return;
     const r = card.getBoundingClientRect();
@@ -345,6 +401,71 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
       catch (e) { attMsg.textContent = "× " + e.message; }
       ev.target.value = "";
     };
+  }
+
+  // B61/B62/B63: ステータスセグメント＋進捗スライダ＋クイックボタン（編集時のみ）。
+  // 状態(stStatus/stPct/stStartedAt)はJSで保持し、保存時に table.js stateOf と同じ patch へ変換。
+  if (isEdit) {
+    const seg = $("#tf-status"), range = $("#tf-pct"), pctCnt = $("#tf-pct-cnt"), pctQuick = $("#tf-pct-quick");
+    const paintStatus = () => {
+      seg.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.st === stStatus));
+      range.value = String(stPct);
+      pctCnt.textContent = `${stPct}%`;
+      pctQuick.querySelectorAll("button").forEach((b) => b.classList.toggle("on", +b.dataset.pct === stPct));
+    };
+    // ステータス選択 → stPct/stStartedAt を整合（table.js stateOf 準拠）。
+    //   未着手=pct0/started無 / 進行中=startedをnowに(完了or100%だったpctは0へリセット) / 連絡待ち=pct/started維持 / 完了=pct100
+    const setStatus = (key) => {
+      stStatus = key;
+      if (key === "done") { stPct = 100; }
+      else if (key === "todo") { stPct = 0; stStartedAt = null; }
+      else if (key === "doing") { if (stPct >= 100) stPct = 0; if (!stStartedAt) stStartedAt = new Date().toISOString(); }
+      // waiting は pct/started を変えない（連絡待ちは進捗を保ったまま）
+      paintStatus();
+    };
+    seg.querySelectorAll("button").forEach((b) => { b.onclick = () => setStatus(b.dataset.st); });
+    // 進捗率の変更 → done/未着手と連動（100=完了、>0かつ完了/未着手は進行中へ、0は未着手へ）。
+    const setPct = (v) => {
+      stPct = Math.max(0, Math.min(100, v | 0));
+      if (stPct >= 100) { stStatus = "done"; }
+      else if (stPct > 0) { if (stStatus === "done" || stStatus === "todo") stStatus = "doing"; if (stStatus === "doing" && !stStartedAt) stStartedAt = new Date().toISOString(); }
+      else { if (stStatus === "done" || stStatus === "doing") { stStatus = "todo"; stStartedAt = null; } }
+      paintStatus();
+    };
+    range.oninput = () => setPct(+range.value);
+    pctQuick.querySelectorAll("button").forEach((b) => { b.onclick = () => setPct(+b.dataset.pct); });
+    paintStatus();
+  }
+
+  // B64: コメントスレッド（編集時のみ・全員閲覧）。AIノート欄の見た目を流用。送信はcreateComment。
+  if (isEdit) {
+    const cbox = $("#tf-comments"), cin = $("#tf-cmt-in"), csend = $("#tf-cmt-send"), cmsg = $("#tf-cmt-msg");
+    const fmtWhen = (s) => { const d = new Date(s); return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+    const paintComments = (list) => {
+      const arr = Array.isArray(list) ? list : [];
+      cbox.innerHTML = arr.length ? arr.map((c) => {
+        const who = (c.author && (c.author.name || c.author.username)) || "";
+        return `<div class="tf-ainote"><div class="tf-ainote-h">${esc(who)} ・ ${esc(fmtWhen(c.created))}</div><div class="tf-ainote-b">${esc(c.comment || "")}</div></div>`;
+      }).join("") : `<span class="tf-hint">まだコメントはありません</span>`;
+    };
+    getComments(task.id).then(paintComments).catch(() => { cbox.innerHTML = `<span class="tf-hint">コメントを読み込めませんでした</span>`; });
+    const sendComment = async () => {
+      const text = cin.value.trim();
+      if (!text) return;
+      csend.disabled = true; cmsg.textContent = "送信中…";
+      try {
+        await createComment(task.id, text);
+        cin.value = "";
+        cmsg.textContent = "";
+        paintComments(await getComments(task.id));
+      } catch (e) { cmsg.textContent = "× " + (e && e.message ? e.message : "送信に失敗しました"); }
+      csend.disabled = false;
+    };
+    csend.onclick = sendComment;
+    // Ctrl/Cmd+Enter でコメント送信（モーダル全体の保存ショートカットより先に消費）。
+    cin.addEventListener("keydown", (ev) => {
+      if ((ev.metaKey || ev.ctrlKey) && ev.key === "Enter") { ev.preventDefault(); ev.stopPropagation(); sendComment(); }
+    });
   }
 
   const depEl = $("#tf-dep");
@@ -545,15 +666,23 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
         childId = created.id;
         for (const id of wantAsg) await addAssignee(childId, id);
       } else {
+        // B61-B63: ステータス/進捗を table.js stateOf と同等の patch へ変換して updateTask に統合（二重保存を避け1回で反映）。
+        //   完了=done/100、進行中=started_at＋現pct、連絡待ち=done解除＋現pct/started維持、未着手=0/started無。
+        const stPatch = stStatus === "done" ? { done: true, percent_done: 100, started_at: stStartedAt || null }
+          : stStatus === "waiting" ? { done: false, percent_done: stPct, started_at: stStartedAt || null }
+          : stStatus === "doing" ? { done: false, percent_done: stPct, started_at: stStartedAt || new Date().toISOString() }
+          : { done: false, percent_done: 0, started_at: null };
         const patch = {
           title, description: desc, priority: prio,
           due_date: dueISO ? dt(dueISO) : ZERO_DATE,
           start_date: startISO ? dt(startISO) : ZERO_DATE,
           end_date: endISO ? dt(endISO) : ZERO_DATE,
           time_estimate: estSec,
-          done: $("#tf-done").checked,
+          ...stPatch,
         };
         await updateTask(task.id, patch);
+        // B62: 連絡待ちラベルの付け外し（予約ラベル WAITING_LABEL）。waiting選択時のみon、それ以外off。
+        await setTaskWaiting(task, stStatus === "waiting");
         childId = task.id;
         // 担当 diff（主担当＋副担当。副担当はAI=fable も可）。
         // 非作成者にはAI担当が見えていないため、知らずに剥がさないよう保護する。
@@ -596,6 +725,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
       }
 
       invalidate();
+      saving = true; // B65: 保存成功で閉じる＝破棄警告をスキップ
       close();
       onSaved && onSaved();
     } catch (e) {
@@ -603,6 +733,9 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
       err.textContent = "× " + e.message;
     }
   };
+
+  // B65: 全UI配線が完了した状態でスナップショット確定（以後、変更があればclose時にconfirm）。
+  _initialSnapshot = formSnapshot();
 }
 
 // 自前コンボボックス（datalist はブラウザ依存で挙動が独特なため自前描画）。
@@ -675,6 +808,21 @@ export function ensureStyle() {
   .tf-ta{resize:vertical;line-height:1.45}
   .tf-row{display:flex;gap:12px}.tf-col{flex:1;min-width:0}
   .tf-chk{display:flex;align-items:center;gap:7px;font-size:13px;color:${C.ink};margin:14px 0 4px;cursor:pointer}
+  .tf-seg{display:flex;gap:0;border:1px solid ${C.line};border-radius:9px;overflow:hidden}
+  .tf-seg button{flex:1;border:0;border-left:1px solid ${C.line};background:#fff;color:${C.muted};font:inherit;font-size:12px;font-weight:600;padding:7px 4px;cursor:pointer;white-space:nowrap}
+  .tf-seg button:first-child{border-left:0}
+  .tf-seg button:hover{background:#f5f8fc;color:${C.ink}}
+  .tf-seg button.on{background:${C.fill};color:#fff}
+  .tf-range{width:100%;accent-color:${C.fill};margin:6px 0 2px;cursor:pointer}
+  .tf-pct-quick{display:flex;gap:6px}
+  .tf-pct-quick button{flex:1;border:1px solid ${C.line};background:#fff;color:${C.muted};font:inherit;font-size:11.5px;font-weight:600;padding:4px 0;border-radius:7px;cursor:pointer}
+  .tf-pct-quick button:hover{background:#f5f8fc;color:${C.ink}}
+  .tf-pct-quick button.on{background:#eef4ff;color:${C.fill};border-color:${C.fill}}
+  .tf-cmt-add{display:flex;gap:8px;align-items:flex-start;margin-top:7px}
+  .tf-cmt-add .tf-ta{flex:1}
+  .tf-cmt-send{border:1px solid ${C.fill};background:${C.fill};color:#fff;font:inherit;font-size:12.5px;font-weight:600;padding:8px 14px;border-radius:9px;cursor:pointer;white-space:nowrap}
+  .tf-cmt-send:hover{filter:brightness(1.05)}
+  .tf-cmt-send:disabled{opacity:.6;cursor:default}
   .tf-step{position:relative}
   .tf-step .tf-in{padding-right:30px}
   .tf-step-btns{position:absolute;top:1px;right:1px;bottom:1px;width:24px;display:flex;flex-direction:column;border-left:1px solid ${C.line};border-radius:0 8px 8px 0;overflow:hidden}
