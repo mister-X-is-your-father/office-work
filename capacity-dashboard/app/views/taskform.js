@@ -104,7 +104,11 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
         <button type="button" data-tab="mtg">MTG</button>
         <button type="button" data-tab="rmtg">定例MTG</button>
         <button type="button" data-tab="rtask">定期タスク</button>
-      </div>` : ""}
+      </div>` : `
+      <div class="tf-tabs" id="tf-etabs">
+        <button type="button" data-etab="base" class="on">基本</button>
+        <button type="button" data-etab="prep">実行準備</button>
+      </div>`}
       <div class="tf-body">
         <div class="tf-main">
           ${!isEdit ? `
@@ -184,6 +188,7 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
         <div class="tf-err" id="tf-err"></div>
       </div>
       <div class="tf-body tf-alt" id="tf-alt" hidden></div>
+      ${isEdit ? `<div class="tf-body tf-prep" id="tf-prep-pane" hidden></div>` : ""}
       <div class="tf-acts">
         <button class="tf-tpl-save" id="tf-tpl-save" title="タイトル/重要度/見積り/説明を雛形として保存（プロジェクト欄=分類）">テンプレートとして保存</button>
         <button class="tf-cancel" id="tf-cancel">キャンセル</button>
@@ -202,6 +207,33 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
   $("#tf-x").onclick = close;
   $("#tf-cancel").onclick = close;
   $("#tf-title").focus();
+
+  // 編集時タブ: [基本][実行準備]。実行準備は初回表示時に exec-support を遅延マウント（着手準備パネル＋実行可能性メーター）。
+  const etabs = $("#tf-etabs");
+  if (etabs && isEdit) {
+    const paneBase = wrap.querySelector(".tf-body:not(.tf-alt):not(.tf-prep)");
+    const panePrep = $("#tf-prep-pane");
+    let prepMounted = false;
+    etabs.querySelectorAll("button").forEach((b) => {
+      b.onclick = async () => {
+        etabs.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+        const isPrep = b.dataset.etab === "prep";
+        paneBase.hidden = isPrep;
+        panePrep.hidden = !isPrep;
+        if (isPrep && !prepMounted) {
+          prepMounted = true;
+          panePrep.innerHTML = `<div class="loading" style="padding:16px">読み込み中…</div>`;
+          try {
+            const { renderExecSupport, ensureStyle: ensurePrepStyle } = await import("./exec-support.js");
+            ensurePrepStyle();
+            await renderExecSupport(panePrep, { taskId: task.id, task });
+          } catch (e) {
+            panePrep.innerHTML = `<div class="tf-err" style="padding:16px">実行準備の読み込みに失敗しました: ${esc(e && e.message ? e.message : "")}</div>`;
+          }
+        }
+      };
+    });
+  }
 
   // 種別タブ（新規時のみ）: タスク=本フォーム / MTG・定例MTG・定期タスク=recurrenceform のパネル
   const tabs = $("#tf-tabs");
