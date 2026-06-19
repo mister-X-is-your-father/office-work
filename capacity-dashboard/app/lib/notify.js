@@ -83,7 +83,9 @@ function toast(title, body) {
 }
 
 // getData: () => Promise<store.load() 形> を渡す（キャッシュ済み前提・通知のために強制再取得はしない）
+let _notifyTimer = null; // 二重起動防止: 既存タイマーがあれば張り替える（app.js の __tsNotify に加えた多層防御）
 export function startNotifications(getData) {
+  if (_notifyTimer) { clearInterval(_notifyTimer); _notifyTimer = null; }
   const tick = async () => {
     let data;
     try { data = await getData(); } catch { return; }
@@ -110,5 +112,6 @@ export function startNotifications(getData) {
     if (dirty) localStorage.setItem(FIRED_PREFIX + dayISO, JSON.stringify([...fired]));
   };
   tick();
-  return setInterval(tick, 30000);
+  _notifyTimer = setInterval(tick, 30000);
+  return _notifyTimer;
 }

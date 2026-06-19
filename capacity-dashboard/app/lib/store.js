@@ -37,8 +37,14 @@ export const isAiUser = (u) => !!u && AI_USERNAMES.has(u.username);
 
 let cache = null;
 
+let _loadInflight = null; // 飛行中の load() を合流させ、invalidate直後の並行呼び出しで N+1 取得が多重実行されるのを防ぐ
 export async function load(force = false) {
   if (cache && !force) return cache;
+  if (_loadInflight) return _loadInflight;          // 既に取得中なら同じ結果を共有（重複fetchを合流）
+  _loadInflight = _loadImpl();
+  try { return await _loadInflight; } finally { _loadInflight = null; }
+}
+async function _loadImpl() {
   const [tasksAll, projectsRaw, recurrences, holidays, unavailability, me, settingsRaw, labels] = await Promise.all([
     vik.getTasks(), vik.getProjects(),
     vik.getRecurrences().catch(() => []),
