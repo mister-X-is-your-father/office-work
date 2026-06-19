@@ -506,6 +506,23 @@ const PLUGINS = [
 
 const PLUGIN_BY_ID = Object.fromEntries(PLUGINS.map((p) => [p.id, p]));
 
+// ── 診断「何が止めてる?」→手法サジェスト ───────────────────────────
+// 症状ボタン → 効く手法(pluginId) の明示マップ。
+//   PLUGINS の symptoms タグから自動逆引きすると粒度がズレるため、判断軸を明示する。
+//   ここに無い pluginId は使わない／PLUGINS に新 id を足しても壊れない（描画時に存在チェック）。
+const DIAGNOSTICS = [
+  { label: "大きすぎ・曖昧で手がつかない", plugins: ["next_step", "steps"] },
+  { label: "やる気はあるが先延ばし", plugins: ["if_then", "schedule"] },
+  { label: "段取り・予定が立っていない", plugins: ["steps", "schedule"] },
+  { label: "準備不足・イメージが湧かない", plugins: ["prereqs", "dod"] },
+  { label: "失敗・中断が不安", plugins: ["obstacles"] },
+  { label: "ゴールが曖昧", plugins: ["dod"] },
+];
+// 実在する pluginId のみへ正規化（存在しない id は黙って落とす＝堅牢化）。
+const DIAGNOSTIC_ITEMS = DIAGNOSTICS
+  .map((d) => ({ label: d.label, plugins: d.plugins.filter((id) => PLUGIN_BY_ID[id]) }))
+  .filter((d) => d.plugins.length > 0);
+
 // ── 手法 ON/OFF（個人・localStorage） ──────────────────────────────
 const ENABLED_KEY = "ts.execsupport.enabled";
 function loadEnabled() {
@@ -618,6 +635,22 @@ export function ensureStyle() {
   .es-btn:disabled{opacity:.5;cursor:default;filter:none}
   .es-toast{font-size:11.5px;color:var(--free,#2fa66b);font-weight:600}
   .es-down{font-size:11.5px;color:var(--muted);padding:6px 0}
+  .es-dx{border:1px solid var(--line);border-radius:11px;background:var(--track);overflow:hidden}
+  .es-dx-h{display:flex;align-items:center;gap:8px;width:100%;padding:9px 12px;background:transparent;border:0;cursor:pointer;font:inherit;color:var(--ink);text-align:left}
+  .es-dx-h:hover{color:var(--fill)}
+  .es-dx-ic{line-height:0;color:var(--muted);flex:none}
+  .es-dx-h:hover .es-dx-ic{color:var(--fill)}
+  .es-dx-t{font-size:12.5px;font-weight:700}
+  .es-dx-sub{font-size:10.5px;color:var(--muted);font-weight:500}
+  .es-dx-chev{margin-left:auto;line-height:0;color:var(--muted);transition:transform .2s ease}
+  .es-dx.open .es-dx-chev{transform:rotate(180deg)}
+  .es-dx-body{display:none;flex-wrap:wrap;gap:7px;padding:0 12px 11px}
+  .es-dx.open .es-dx-body{display:flex}
+  .es-dx-b{font:inherit;font-size:11.5px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:999px;padding:6px 12px;cursor:pointer;line-height:1.3;text-align:left}
+  .es-dx-b:hover{border-color:#b9d4ff;color:var(--fill)}
+  .es-dx-b:active{transform:translateY(1px)}
+  @keyframes es-flash{0%{box-shadow:0 0 0 0 rgba(58,134,255,.55);border-color:var(--fill)}100%{box-shadow:0 0 0 6px rgba(58,134,255,0);border-color:var(--line)}}
+  .es-card.es-flash{animation:es-flash 1.4s ease-out;border-color:var(--fill)}
   html[data-theme="dark"] .es-add:hover,html[data-theme="dark"] .es-gear:hover{background:var(--card)}`;
   document.head.appendChild(s);
 }
@@ -727,6 +760,25 @@ export async function renderExecSupport(container, { taskId, task = null, onChan
       </section>`;
   }).join("");
 
+  // ── 診断「何が止めてる?」HTML ──
+  // 折りたたみ可能。症状ボタンを押すと該当手法を有効化＋スクロール＋ハイライト。
+  const diagnosticsHtml = () => {
+    if (!DIAGNOSTIC_ITEMS.length) return "";
+    const btns = DIAGNOSTIC_ITEMS.map((d, i) =>
+      `<button type="button" class="es-dx-b" data-dx="${i}">${esc(d.label)}</button>`
+    ).join("");
+    return `
+      <div class="es-dx" id="es-dx">
+        <button type="button" class="es-dx-h" id="es-dx-h" aria-expanded="false" aria-controls="es-dx-body">
+          <span class="es-dx-ic">${icon("lightbulb", { size: 16 })}</span>
+          <span class="es-dx-t">何が止めてる?</span>
+          <span class="es-dx-sub">症状を選ぶと、効く手法に案内します</span>
+          <span class="es-dx-chev">${icon("chevronDown", { size: 15 })}</span>
+        </button>
+        <div class="es-dx-body" id="es-dx-body">${btns}</div>
+      </div>`;
+  };
+
   // ── トグル（手法 ON/OFF）HTML ──
   const togglesHtml = () => PLUGINS.map((p) => {
     const on = enabled.includes(p.id);
@@ -754,6 +806,7 @@ export async function renderExecSupport(container, { taskId, task = null, onChan
         <button type="button" class="es-gear" id="es-gear" aria-label="手法のON/OFF" title="手法のON/OFF">${icon("settings", { size: 16 })}</button>
       </div>
       <div class="es-toggles" id="es-toggles">${togglesHtml()}</div>
+      ${diagnosticsHtml()}
       ${execDown ? `<div class="es-down">${icon("alertTriangle", { size: 13 })} 保存サービスに接続できません。入力はこの画面では反映されますが、保存されない可能性があります。</div>` : ""}
       <div class="es-cards" id="es-cards">${cardsHtml()}</div>
       <div class="es-foot">
@@ -802,6 +855,57 @@ export async function renderExecSupport(container, { taskId, task = null, onChan
       save(); // score 再計算分を保存
     });
   });
+
+  // ── 診断「何が止めてる?」配線 ──
+  // 折りたたみトグル＋症状ボタン（症状→手法を有効化＆スクロール＆ハイライト）。
+  const dxBox = container.querySelector("#es-dx");
+  if (dxBox) {
+    const dxHead = container.querySelector("#es-dx-h");
+    dxHead.addEventListener("click", () => {
+      const open = dxBox.classList.toggle("open");
+      dxHead.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+
+    // pluginId を必要なら有効化（トグルの change を発火＝カード再構築・保存まで一括）。
+    const ensureEnabled = (id) => {
+      if (enabled.includes(id)) return false;
+      const cb = container.querySelector(`[data-tg="${id}"]`);
+      if (cb && !cb.checked) { cb.checked = true; cb.dispatchEvent(new Event("change")); return true; }
+      return false;
+    };
+
+    dxBox.querySelectorAll("[data-dx]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const item = DIAGNOSTIC_ITEMS[+btn.dataset.dx];
+        if (!item) return;
+        // 1) 無効な手法を有効化（複数該当ならすべて）。enabled に残るものだけ対象に。
+        const targets = item.plugins.filter((id) => PLUGIN_BY_ID[id]);
+        let activated = false;
+        for (const id of targets) { if (ensureEnabled(id)) activated = true; }
+
+        // 2) 対応カードへスクロール（先頭）＋ハイライト（全該当）。
+        //    有効化直後は #es-cards が再構築されるので、反映を待ってから DOM を引く。
+        const flash = () => {
+          const cards = targets
+            .map((id) => container.querySelector(`.es-card[data-pid="${id}"]`))
+            .filter(Boolean);
+          if (!cards.length) return;
+          cards[0].scrollIntoView({ block: "center", behavior: "smooth" });
+          for (const c of cards) {
+            c.classList.remove("es-flash");
+            // reflow を挟んで再度アニメ発火（連打でも毎回光るように）。
+            void c.offsetWidth;
+            c.classList.add("es-flash");
+            setTimeout(() => c.classList.remove("es-flash"), 1500);
+          }
+          // 3) 先頭カードの主入力へフォーカス（任意・あれば）。
+          const main = cards[0].querySelector(".es-body input, .es-body textarea");
+          if (main) { try { main.focus({ preventScroll: true }); } catch { main.focus(); } }
+        };
+        if (activated) requestAnimationFrame(flash); else flash();
+      });
+    });
+  }
 
   // ── フッター ──
   const toast = container.querySelector("#es-toast");
