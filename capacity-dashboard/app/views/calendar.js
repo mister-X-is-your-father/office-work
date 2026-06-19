@@ -369,11 +369,17 @@ function openOccurrenceEditor(recId, origISO) {
 
 // リサイズ確定: 同じ時刻・担当のまま所要だけ変更（plans に更新APIが無いため delete→create）
 async function resizePlan(taskId, planId, memberId, startMin, mins) {
-  await deletePlan(taskId, planId);
-  await logPlan(taskId, mins * 60, _day, "", memberId, startMin);
-  invalidate();
-  _data = await load();
-  paint();
+  if (_calBusy) return; // 飛行中の二度目の確定を無視（delete→create の重複防止／place と共用ガード）
+  _calBusy = true;
+  try {
+    await deletePlan(taskId, planId);
+    await logPlan(taskId, mins * 60, _day, "", memberId, startMin);
+    invalidate();
+    _data = await load();
+    paint();
+  } finally {
+    _calBusy = false;
+  }
 }
 
 async function place(drag, toMember, startMin) {

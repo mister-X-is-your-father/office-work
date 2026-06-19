@@ -107,7 +107,13 @@ export async function render(root) {
       + qq.pending.map((j) => row(j, `<button class="fb-x" data-cancel="${j.id}" title="取消">×</button>`)).join("")
       + (qq.history || []).slice(0, 8).map((j) => row(j)).join("")
       || `<div class="fb-empty">キューは空です</div>`;
-    el.querySelectorAll("[data-cancel]").forEach((b) => { b.onclick = async () => { await cancelJob(+b.dataset.cancel); refresh(); }; });
+    el.querySelectorAll("[data-cancel]").forEach((b) => {
+      b.onclick = async () => {
+        b.disabled = true;
+        try { await cancelJob(+b.dataset.cancel); refresh(); }
+        catch { b.disabled = false; }
+      };
+    });
     el.querySelectorAll("[data-watch]").forEach((s) => { s.onclick = () => watch(+s.dataset.watch, s.dataset.title); });
   };
   const watch = (jobId, title) => {
