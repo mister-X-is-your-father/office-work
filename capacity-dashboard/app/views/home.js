@@ -6,6 +6,7 @@ import { capacityOn } from "../lib/recurrence.js";
 import { statusOf } from "../lib/kinds.js";
 import { C, esc, fmtH, todayISO, member_color } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
+import { getPrepScores } from "../lib/exec.js";
 import { icon } from "../lib/icons.js";
 import * as today from "./today.js";
 import * as workplan from "./workplan.js";
@@ -45,24 +46,43 @@ function todoBuckets(tasks, day) {
 
 const MAX_ROWS = 6; // 各バケットで先頭表示する件数。超過分は「他N件」リンク。
 
-// 1タスク行（タイトル＋軽いメタ: 担当アバター/期限/プロジェクト名）。
-function todoRow(t, projects, day) {
+// 着手準備バッジ（実行可能性メーター）。score 有り→「準備 N%」＋達成度で色分け、
+// score 無し/0→「準備する」プロンプト（未準備＝目立たせて着手準備タブへ誘導）。
+// .td-row は <button> なのでネスト不可: <span role="button"> として行クリックと分離する。
+function prepBadge(t, scores, urgent) {
+  const raw = scores ? scores[t.id] : undefined;
+  const has = Number.isFinite(raw) && raw > 0;
+  const n = has ? Math.max(0, Math.min(100, Math.round(raw))) : 0;
+  // 低=注意(over) / 中=進行(amber) / 高=好調(free)。未準備は控えめ→ただし urgent(超過/今日)は注意色で促す。
+  const lvl = !has ? (urgent ? "urgent" : "none") : n < 40 ? "low" : n < 80 ? "mid" : "high";
+  const label = has ? `準備 ${n}%` : "準備する";
+  const title = has ? `着手準備 ${n}% — クリックで準備タブへ` : "未準備 — クリックで着手準備タブへ";
+  return `<span class="td-prep td-prep-${lvl}" role="button" tabindex="0" data-prep="${t.id}" title="${esc(title)}" aria-label="${esc(title)}">
+      ${has ? `<span class="td-prep-bar"><span class="td-prep-fill" style="width:${n}%"></span></span>` : `${icon("alarm", { size: 11 }) || ""}`}
+      <span class="td-prep-t">${esc(label)}</span>
+    </span>`;
+}
+
+// 1タスク行（タイトル＋軽いメタ: 担当アバター/期限/プロジェクト名＋準備メーター）。
+function todoRow(t, projects, day, scores) {
   const who = humanAssignees(t)[0] || null;
   const wn = who ? (who.name || who.username) : "";
   const due = dueISO(t);
   const late = due && due < day;
+  const urgent = !!late || due === day; // 超過/今日期限は未準備を強めに促す
   return `<button type="button" class="td-row" data-id="${t.id}">
     <span class="td-row-t">${esc(t.title)}</span>
     <span class="td-row-m">
       ${who ? `<span class="td-ava" style="background:${member_color(who.id)}" title="${esc(wn)}">${esc((wn[0] || "?").toUpperCase())}</span>` : ""}
       ${due ? `<span class="td-due${late ? " late" : ""}">${due.slice(5).replace("-", "/")}${late ? " 超過" : ""}</span>` : ""}
+      ${prepBadge(t, scores, urgent)}
     </span>
   </button>`;
 }
 
 // 1バケット（見出し「未アサイン (N)」＋行リスト＋他N件リンク）。0件は薄く「なし」。
 // danger=true（期限超過）は赤系の枠/見出し/件数バッジで強調。
-function bucketHtml(b, projects, day) {
+function bucketHtml(b, projects, day, scores) {
   const n = b.items.length;
   const cls = `td-bk${b.danger ? " td-bk-danger" : ""}`;
   const head = `<div class="td-bk-h">${icon(b.ic, { size: 14 }) || ""}<span>${esc(b.title)}</span><span class="td-bk-n">${n}</span></div>`;
@@ -72,7 +92,7 @@ function bucketHtml(b, projects, day) {
   const more = rest > 0
     ? `<a class="td-more" href="${b.link}">他${rest}件 → タスク一覧 ${icon("chevronRight", { size: 12 }) || "›"}</a>` : "";
   return `<div class="${cls}">${head}
-    <div class="td-rows">${shown.map((t) => todoRow(t, projects, day)).join("")}</div>${more}</div>`;
+    <div class="td-rows">${shown.map((t) => todoRow(t, projects, day, scores)).join("")}</div>${more}</div>`;
 }
 
 function readFold(uid) {
@@ -88,6 +108,10 @@ function writeFold(uid, fold) {
 export async function render(root) {
   const { tasks, projects, members, plansByTask, holidaysSet, unavailabilityByMember, settings, me } = await load();
   const day = todayISO();
+  // 着手準備スコア（実行可能性メーター）を一括取得。exec 停止時は空で続行＝ホームは壊さない。
+  // 戻り値 {scores:{ "<taskId>": number }}。未準備タスクは欠落＝0扱い。
+  let prepScores = {};
+  try { prepScores = (await getPrepScores())?.scores || {}; } catch { prepScores = {}; }
   // 営業日割り＋人別容量（週末/祝日/休暇=0）で今日KPIを正確に（§土日祝ギャップ）
   const capacityFor = (m, d) => capacityOn(m, d, { holidays: holidaysSet, unavailabilityByMember, capH: settings.capH });
   const rows = loadByMember(tasks, members, day, settings.capH, plansByTask, { holidays: holidaysSet, capacityFor });
@@ -170,6 +194,27 @@ export async function render(root) {
       .td-row-m{display:flex;align-items:center;gap:7px;font-size:11px;color:${C.muted};min-width:0}
       .td-ava{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:50%;color:#fff;font-size:9px;font-weight:700;flex:none}
       .td-due.late{color:${C.over};font-weight:700}
+      /* 着手準備メーター: 行内の小バッジ。span[role=button] でクリック/Enter/Space 可、行クリックとは別動作。 */
+      .td-prep{display:inline-flex;align-items:center;gap:4px;margin-left:auto;flex:none;cursor:pointer;
+        font-size:10.5px;font-weight:700;line-height:1;border-radius:999px;padding:2px 7px;
+        border:1px solid ${C.line};background:${C.track};color:${C.muted};transition:border-color .12s,background .12s,color .12s}
+      .td-prep:hover{border-color:${C.fill};color:${C.ink}}
+      .td-prep:focus-visible{outline:2px solid ${C.fill};outline-offset:1px}
+      .td-prep .ic{flex:none}
+      .td-prep-t{white-space:nowrap}
+      .td-prep-bar{display:inline-block;width:26px;height:5px;border-radius:999px;background:${C.line};overflow:hidden;flex:none}
+      .td-prep-fill{display:block;height:100%;border-radius:999px}
+      /* 達成度の色分け: 低=注意 / 中=進行 / 高=好調。未準備は控えめ・urgent は注意色で促す。 */
+      .td-prep-low{color:${C.over};border-color:${C.over}}
+      .td-prep-low .td-prep-fill{background:${C.over}}
+      .td-prep-mid{color:${C.amber};border-color:${C.amber}}
+      .td-prep-mid .td-prep-fill{background:${C.amber}}
+      .td-prep-high{color:${C.free};border-color:${C.free}}
+      .td-prep-high .td-prep-fill{background:${C.free}}
+      .td-prep-urgent{color:${C.over};border-color:${C.over};background:transparent}
+      .td-prep-urgent .ic{color:${C.over}}
+      .td-prep-none{color:${C.muted}}
+      .td-prep-none .ic{color:${C.muted}}
       .td-more{display:inline-flex;align-items:center;gap:3px;margin-top:6px;font-size:11.5px;font-weight:600;color:${C.fill};text-decoration:none}
       .td-more:hover{text-decoration:underline}
     </style>`;
@@ -185,10 +230,16 @@ export async function render(root) {
     if (id === "todo") {
       // 「やること」3バケット。データは load() の tasks から算出（追加 fetch なし）。
       const buckets = todoBuckets(tasks, day);
-      body.innerHTML = `<div class="td-grid">${buckets.map((b) => bucketHtml(b, projects, day)).join("")}</div>`;
+      body.innerHTML = `<div class="td-grid">${buckets.map((b) => bucketHtml(b, projects, day, prepScores)).join("")}</div>`;
       // 行クリック=編集モーダル。保存後はホーム全体を再描画（バケット件数を最新化）。
       body.querySelectorAll(".td-row[data-id]").forEach((el) => {
         el.onclick = () => openTaskForm({ taskId: +el.dataset.id, onSaved: () => render(root) });
+      });
+      // 準備バッジ=着手準備タブへ直行（行クリックの編集とは分離）。span[role=button] なので click + keydown を配線。
+      body.querySelectorAll("[data-prep]").forEach((el) => {
+        const go = (e) => { e.stopPropagation(); openTaskForm({ taskId: +el.dataset.prep, tab: "prep", onSaved: () => render(root) }); };
+        el.onclick = go;
+        el.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(e); } };
       });
     } else if (id === "today") {
       // fluid: ホーム埋め込みは固定高(px箱)をやめ可変高に（コンテナ幅に追従）。

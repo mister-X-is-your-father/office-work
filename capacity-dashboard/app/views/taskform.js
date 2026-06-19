@@ -26,7 +26,7 @@ let _mounted = false;
 let _opening = false; // 多重起動ガード: 連打で load()/getTask() の await 中に複数モーダルが積層するのを防ぐ
 
 // taskId 省略=新規 / 指定=編集。保存後 onSaved() を呼ぶ。
-export async function openTaskForm({ taskId = null, onSaved } = {}) {
+export async function openTaskForm({ taskId = null, onSaved, tab = null } = {}) {
   // 既に開いている / 開く処理中なら無視（モーダルは常に1枚）。
   if (_opening || document.querySelector(".tf-modal")) return;
   _opening = true;
@@ -290,6 +290,8 @@ export async function openTaskForm({ taskId = null, onSaved } = {}) {
         }
       };
     });
+    // 外部から tab:"prep" 指定で開かれたら、実行準備タブを自動で開く（ホーム等からの誘導用）。
+    if (tab === "prep") { const pb = etabs.querySelector('button[data-etab="prep"]'); if (pb) pb.click(); }
   }
 
   // 種別タブ（新規時のみ）: タスク=本フォーム / MTG・定例MTG・定期タスク=recurrenceform のパネル
