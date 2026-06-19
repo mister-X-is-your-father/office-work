@@ -42,6 +42,7 @@ let _today = "";
 let _moving = false;
 
 export async function render(root) {
+  closeMoveMenu(); // 再描画前にタッチ移動メニューを閉じる（body 直下のポップが孤立しないように）
   _root = root;
   _today = todayISO();
   const { members, me } = await load();
@@ -231,6 +232,7 @@ function cardHtml(t, memberIdx) {
   }
 
   return `<div class="kb-card${t.done ? " done" : ""}${heat ? " h-" + heat : ""}" draggable="true" data-id="${t.id}" tabindex="0" role="button" aria-label="${esc(t.title)} を編集（Enterで編集 / Ctrl+左右で列移動）">
+    <button type="button" class="kb-move" data-move aria-haspopup="menu" aria-expanded="false" title="移動（タップで移動先を選ぶ）" aria-label="「${esc(t.title)}」を移動">${icon("chevronRight", { size: 14 })}</button>
     <div class="kb-ct"><i class="kb-prio" style="background:${pb ? PRIO[pb].c : "#c6cdd6"}"></i>${esc(t.title)}</div>
     ${projBadge ? `<div class="kb-cr">${projBadge}</div>` : ""}
     <div class="kb-cm">
@@ -260,6 +262,22 @@ function wireOneCard(card, memberIdx) {
   const taskOf = () => (tasks || []).find((x) => x.id === +card.dataset.id);
   const edit = () => openTaskForm({ taskId: +card.dataset.id, onSaved: () => { invalidate(); render(_root); } });
   card.onclick = edit;
+  // タッチ用「移動」: ネイティブHTML5 DnD が効かない端末向けの代替。タップで移動先メニューを開く。
+  // 既存の DnD・クリック編集は温存（このボタンは編集と競合しないよう stopPropagation）。
+  const moveBtn = card.querySelector("[data-move]");
+  if (moveBtn) {
+    moveBtn.draggable = false;
+    moveBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const t = taskOf();
+      if (!t) return;
+      openMoveMenu(moveBtn, card, t, memberIdx);
+    });
+    // mousedown/touchstart も止めてカードの dragstart / click 編集を誘発しない。
+    moveBtn.addEventListener("mousedown", (e) => e.stopPropagation());
+    moveBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
+  }
   card.addEventListener("keydown", (e) => {
     if (e.target !== card) return;
     // B67: Ctrl+←/→ で前/次ステータスへ移動（フォーカス中カード）。クリック編集(Enter/Space)とは競合させない。
@@ -283,6 +301,116 @@ function wireOneCard(card, memberIdx) {
     card.classList.add("kb-dragging");
   });
   card.addEventListener("dragend", () => card.classList.remove("kb-dragging"));
+}
+
+// ── タッチ用「移動先メニュー」（ネイティブDnDが効かない端末の代替。tb-ctx 風の軽量ポップ）──
+// 既存の移動関数をそのまま呼ぶ: ステータス=moveStatus(card,t,key)（楽観更新＋history＋announce）、
+// レーン(案件)=moveLane(t,parentId)（drop と同じ全再描画パス）。同時に1つだけ開く。
+let _menuEl = null;
+let _menuCleanup = null;
+function closeMoveMenu() {
+  if (_menuCleanup) { try { _menuCleanup(); } catch { /* noop */ } _menuCleanup = null; }
+  if (_menuEl) { _menuEl.remove(); _menuEl = null; }
+}
+function openMoveMenu(anchor, card, t, memberIdx) {
+  if (_menuEl) { const same = _menuEl._anchor === anchor; closeMoveMenu(); if (same) return; }
+  const curStatus = statusOf(t);
+  // スイムレーン表示中なら、このカードが属するレーン(=現在の親案件)も把握。
+  const curCol = card.closest(".kb-cards");
+  const inSwim = !!(curCol && curCol.dataset && curCol.dataset.lane != null);
+  const curLane = inSwim ? curCol.dataset.lane : null;
+
+  let rows = "";
+  // ステータス移動（現在の列は disabled＋✓）。
+  rows += `<div class="kb-mm-h">移動先（状況）</div>`;
+  rows += STATUS_ORDER.map((key) => {
+    const on = key === curStatus;
+    return `<button type="button" class="kb-mm-i${on ? " on" : ""}" data-st="${key}"${on ? " disabled" : ""}>
+      <span class="kb-mm-chk">${on ? icon("check", { size: 13 }) : ""}</span>${esc((STATUS[key] || {}).label || key)}
+    </button>`;
+  }).join("");
+
+  // スイムレーン時のみ: 案件（レーン）移動。表示中の全レーンを DOM から収集（現在のレーンは disabled）。
+  const lanes = [];
+  if (inSwim) {
+    _root.querySelectorAll(".kb-lanegrid").forEach((g) => {
+      const cell = g.querySelector(".kb-scell[data-lane]");
+      const hd = g.querySelector(".kb-lanet");
+      if (!cell || !hd) return;
+      const id = cell.dataset.lane;
+      lanes.push({ id, title: hd.textContent || "" });
+    });
+    if (lanes.length) {
+      rows += `<div class="kb-mm-h">移動先（案件）</div>`;
+      rows += lanes.map((ln) => {
+        const on = String(ln.id) === String(curLane);
+        return `<button type="button" class="kb-mm-i${on ? " on" : ""}" data-lane="${esc(ln.id)}"${on ? " disabled" : ""}>
+          <span class="kb-mm-chk">${on ? icon("check", { size: 13 }) : ""}</span>${icon("folder", { size: 12 })}<span class="kb-mm-lt">${esc(ln.title)}</span>
+        </button>`;
+      }).join("");
+    }
+  }
+
+  const menu = document.createElement("div");
+  menu.className = "kb-mm";
+  menu.setAttribute("role", "menu");
+  menu._anchor = anchor;
+  menu.innerHTML = rows;
+  document.body.appendChild(menu);
+  _menuEl = menu;
+  anchor.setAttribute("aria-expanded", "true");
+
+  // 位置決め: アンカー右下基準。画面外にはみ出すなら左/上へ寄せる。
+  const r = anchor.getBoundingClientRect();
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  let left = r.left;
+  let top = r.bottom + 4;
+  if (left + mw > window.innerWidth - 8) left = Math.max(8, window.innerWidth - mw - 8);
+  if (top + mh > window.innerHeight - 8) top = Math.max(8, r.top - mh - 4);
+  menu.style.left = `${Math.max(8, left)}px`;
+  menu.style.top = `${Math.max(8, top)}px`;
+
+  menu.querySelectorAll("[data-st]").forEach((b) => {
+    b.addEventListener("click", async () => {
+      const key = b.dataset.st;
+      closeMoveMenu();
+      if (key && key !== curStatus) await moveStatus(card, t, key);
+    });
+  });
+  menu.querySelectorAll("[data-lane]").forEach((b) => {
+    b.addEventListener("click", async () => {
+      const pid = +b.dataset.lane;
+      closeMoveMenu();
+      if (String(pid) !== String(curLane)) await moveToLane(t, pid);
+    });
+  });
+
+  // 外側クリック / Esc / スクロール / リサイズで閉じる。
+  const onDoc = (e) => { if (_menuEl && !_menuEl.contains(e.target) && e.target !== anchor) closeMoveMenu(); };
+  const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); closeMoveMenu(); try { anchor.focus(); } catch { /* noop */ } } };
+  const onScroll = () => closeMoveMenu();
+  setTimeout(() => document.addEventListener("click", onDoc, true), 0);
+  document.addEventListener("keydown", onKey, true);
+  window.addEventListener("resize", onScroll, true);
+  window.addEventListener("scroll", onScroll, true);
+  _menuCleanup = () => {
+    anchor.setAttribute("aria-expanded", "false");
+    document.removeEventListener("click", onDoc, true);
+    document.removeEventListener("keydown", onKey, true);
+    window.removeEventListener("resize", onScroll, true);
+    window.removeEventListener("scroll", onScroll, true);
+  };
+  // 最初の選択可能項目へフォーカス（キーボード操作の足がかり）。
+  const first = menu.querySelector(".kb-mm-i:not([disabled])");
+  if (first) try { first.focus(); } catch { /* noop */ }
+}
+
+// メニューからの案件（レーン）移動。drop のレーン跨ぎパスと同じ副作用（moveLane→全再描画）。
+async function moveToLane(t, newParentId) {
+  if (_moving) return;
+  _moving = true;
+  try { await moveLane(t, newParentId); } finally { _moving = false; }
+  rerender();
 }
 
 // ── 列（ドロップ先）: drop でステータス更新＋Undo/Redo（table.js の applyState と同じ副作用セット）──
@@ -573,7 +701,7 @@ function css() {
   .kb-addin{width:100%;font:inherit;font-size:12.5px;padding:7px 10px;border:1px solid ${C.fill};border-radius:9px;background:#fff;box-sizing:border-box}
   .kb-addin:focus{outline:none}
 
-  .kb-card{background:#fff;border:1px solid ${C.line};border-radius:10px;padding:9px 11px;cursor:grab;box-shadow:0 1px 2px rgba(20,30,50,.06);border-left:3px solid transparent}
+  .kb-card{position:relative;background:#fff;border:1px solid ${C.line};border-radius:10px;padding:9px 11px;cursor:grab;box-shadow:0 1px 2px rgba(20,30,50,.06);border-left:3px solid transparent}
   .kb-card:hover{border-color:${C.fill}}
   .kb-card:focus-visible{outline:2px solid ${C.fill};outline-offset:2px}
   .kb-card.kb-dragging{opacity:.5}
@@ -583,7 +711,26 @@ function css() {
   .kb-card.h-overdue{border-left-color:${C.over}}
   .kb-card.h-today{border-left-color:${C.amber}}
   .kb-card.h-week{border-left-color:#e8c14a}
-  .kb-ct{font-size:12.5px;font-weight:600;line-height:1.35;display:flex;gap:6px;align-items:baseline}
+  .kb-ct{font-size:12.5px;font-weight:600;line-height:1.35;display:flex;gap:6px;align-items:baseline;padding-right:20px}
+
+  /* ── タッチ用「移動」トリガ（マウス環境では控えめ・hover/focusで可視。タッチでは常時可視）── */
+  .kb-move{position:absolute;top:5px;right:5px;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;padding:0;border:1px solid ${C.line};border-radius:7px;background:#fff;color:${C.muted};cursor:pointer;opacity:0;transition:opacity .12s;z-index:1}
+  .kb-move:hover{color:${C.fill};border-color:${C.fill}}
+  .kb-move:focus-visible{outline:2px solid ${C.fill};outline-offset:1px;opacity:1}
+  .kb-card:hover .kb-move,.kb-card:focus-within .kb-move{opacity:1}
+  /* タッチ端末（hoverできない/粗いポインタ）では常時表示＝操作不能を解消 */
+  @media (hover:none),(pointer:coarse){ .kb-move{opacity:1} }
+
+  /* ── 移動先メニュー（tb-ctx 風の軽量ポップ。body 直下に固定配置）── */
+  .kb-mm{position:fixed;z-index:1000;min-width:160px;max-width:240px;background:#fff;border:1px solid ${C.line};border-radius:10px;box-shadow:0 8px 28px rgba(20,30,50,.18);padding:5px;max-height:70vh;overflow:auto}
+  .kb-mm-h{font-size:10.5px;font-weight:700;color:${C.muted};padding:6px 8px 3px;letter-spacing:.02em}
+  .kb-mm-i{display:flex;align-items:center;gap:6px;width:100%;font:inherit;font-size:12.5px;font-weight:600;color:${C.ink};text-align:left;border:0;background:transparent;border-radius:7px;padding:7px 8px;cursor:pointer}
+  .kb-mm-i:hover:not([disabled]){background:#eef2f8;color:${C.fill}}
+  .kb-mm-i:focus-visible{outline:2px solid ${C.fill};outline-offset:-2px}
+  .kb-mm-i[disabled]{color:${C.muted};cursor:default}
+  .kb-mm-i.on{color:${C.fill}}
+  .kb-mm-chk{width:14px;display:inline-flex;align-items:center;justify-content:center;flex:none;color:${C.fill}}
+  .kb-mm-lt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .kb-prio{width:8px;height:8px;border-radius:50%;flex:none;display:inline-block;transform:translateY(-1px)}
   .kb-cr{margin-top:6px}
   .kb-proj{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px;font-weight:600;border:1px solid;border-radius:7px;padding:0 6px;vertical-align:middle}
@@ -624,6 +771,9 @@ function css() {
   html[data-theme="dark"] .kb-addbtn:hover{background:var(--card)}
   html[data-theme="dark"] .kb-addin{background:var(--card)}
   html[data-theme="dark"] .kb-card{background:var(--card);border-color:var(--line);box-shadow:0 1px 2px rgba(0,0,0,.35)}
+  html[data-theme="dark"] .kb-move{background:var(--card);border-color:var(--line)}
+  html[data-theme="dark"] .kb-mm{background:var(--card);border-color:var(--line);box-shadow:0 8px 28px rgba(0,0,0,.5)}
+  html[data-theme="dark"] .kb-mm-i:hover:not([disabled]){background:rgba(255,255,255,.08)}
   html[data-theme="dark"] .kb-card.kb-saving::after{background:rgba(0,0,0,.6)}
   html[data-theme="dark"] .kb-card:hover{border-color:${C.fill}}
   html[data-theme="dark"] .kb-shead{background:var(--track);border-color:var(--line)}

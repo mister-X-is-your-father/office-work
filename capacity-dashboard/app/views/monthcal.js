@@ -23,14 +23,24 @@ let FILTER = {
 const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(0, 10) : "");
 const hhmm = (min) => `${Math.floor(min / 60)}:${String(min % 60).padStart(2, "0")}`;
 
+// ローカル日付の足し算で ISO(YYYY-MM-DD)を作る（タイムゾーンずれ回避にローカル年月日で組む）。
+const isoFromDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const addDaysISO = (iso, n) => { const d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() + n); return isoFromDate(d); };
+// 今週末(=直近の土曜)。今日が土なら今日、日なら前日土曜は過ぎているので翌週末は使わず「今週の土曜」=今日扱い。
+const thisWeekendISO = (iso) => { const dow = new Date(iso + "T00:00:00").getDay(); return addDaysISO(iso, (6 - dow + 7) % 7); };
+// 来週(=次の月曜)。今日の曜日から次の月曜までの日数。
+const nextWeekISO = (iso) => { const dow = new Date(iso + "T00:00:00").getDay(); return addDaysISO(iso, ((8 - dow) % 7) || 7); };
+
 // タスクチップ（日セル＝drag可 / ポップオーバー＝clickのみ で共用）。
 // 期限超過は赤左ボーダー(.overdue)、重要度(priority>=1)は先頭に赤ドット(.mc-prio)を出す。
+// タッチ端末は HTML5 DnD が効かないため、各チップに「日付を変更」の代替メニューを開く ⋮ ボタンを付ける
+// （マウス環境では hover 時だけ薄く出す＝既存の見た目を邪魔しない。クリックでも動く）。
 const taskChip = (it, { drag } = {}) =>
   `<div class="mc-task${it.done ? " done" : ""}${it.overdue ? " overdue" : ""}"${drag ? ` draggable="true"` : ""} data-id="${it.t.id}" title="${esc(it.title)}">
-     ${it.prio >= 1 ? `<span class="mc-prio" aria-label="重要"></span>` : ""}${it.who ? `<i style="background:${member_color(it.who.id)}"></i>` : ""}${esc(it.title)}</div>`;
+     ${it.prio >= 1 ? `<span class="mc-prio" aria-label="重要"></span>` : ""}${it.who ? `<i style="background:${member_color(it.who.id)}"></i>` : ""}<span class="mc-task-t">${esc(it.title)}</span><button type="button" class="mc-task-move" data-id="${it.t.id}" aria-label="日付を変更" title="日付を変更">⋮</button></div>`;
 
 export async function render(root) {
-  closePopover(root); // 再描画前に開いていたポップオーバーと document リスナを掃除
+  closePopover(root); closeMoveMenu(root); // 再描画前に開いていたポップ/移動メニューと document リスナを掃除
   const { tasks, members, recurrences, holidaysByDate, me } = await load();
   const today = todayISO();
   if (!VIEW) VIEW = { y: +today.slice(0, 4), m: +today.slice(5, 7) };
@@ -116,7 +126,7 @@ export async function render(root) {
       const already = root.querySelector(".mc-pop");
       closePopover(root);
       if (already && already.dataset.iso === iso) return; // 同じ日のトグルは閉じるだけ
-      openPopover(root, btn, iso, byDay.get(iso) || []);
+      openPopover(root, btn, iso, byDay.get(iso) || [], tasks, today);
     };
   });
 
@@ -133,19 +143,99 @@ export async function render(root) {
       ev.preventDefault();
       cell.classList.remove("over");
       const id = +ev.dataTransfer.getData("text/plain");
-      const iso = cell.dataset.iso;
-      const t = (tasks || []).find((x) => x.id === id);
-      if (!t || dueISO(t) === iso) return;
-      try {
-        await updateTask(id, { due_date: iso + "T00:00:00Z" });
-        invalidate(); await load(); render(root);
-      } catch (e) { console.error(e); }
+      await moveTaskDue(root, tasks, id, cell.dataset.iso);
+    };
+  });
+
+  // タッチ代替: 各チップの ⋮ で「日付を変更」メニュー（クイック日付＋日付指定）を開く。
+  // ＝デスクトップの DnD はそのまま、追加のみ。チップ本体の click(=編集) へ伝播させない。
+  root.querySelectorAll(".mc-task-move").forEach((btn) => {
+    btn.onclick = (ev) => {
+      ev.stopPropagation();
+      ev.preventDefault();
+      const id = +btn.dataset.id;
+      openMoveMenu(root, btn, id, tasks, today);
     };
   });
 }
 
+// 期限の移動を一括で行う共通関数（DnD のドロップ・タッチメニューの双方から呼ぶ）。
+// 既存の updateTask(#9 非破壊) → invalidate → load → 再描画 の流れをそのまま再利用する。
+async function moveTaskDue(root, tasks, id, iso) {
+  const t = (tasks || []).find((x) => x.id === id);
+  if (!t || dueISO(t) === iso) return;
+  try {
+    await updateTask(id, { due_date: iso + "T00:00:00Z" });
+    invalidate(); await load(); render(root);
+  } catch (e) { console.error(e); }
+}
+
+// チップの ⋮ から開く「日付を変更」小メニュー。tb-ctx 風の軽量ポップ。
+// クイック日付（今日/明日/今週末/来週）＋日付指定（input[type=date]）。選ぶと moveTaskDue を呼ぶ。
+function openMoveMenu(root, anchor, id, tasks, today) {
+  // 「他N件」ポップ内のチップからも開くため、ポップは閉じない（anchor 消失を防ぐ）。
+  // 同じ機構の移動メニューだけ排他にする（別チップを叩いたら旧メニューを畳む）。
+  const existing = root.querySelector(".mc-move");
+  closeMoveMenu(root);
+  if (existing && +existing.dataset.id === id) return; // 同じチップの再タップで閉じる
+
+  const cur = dueISO((tasks || []).find((x) => x.id === id) || {});
+  const quick = [
+    ["今日", today],
+    ["明日", addDaysISO(today, 1)],
+    ["今週末", thisWeekendISO(today)],
+    ["来週", nextWeekISO(today)],
+  ];
+  const menu = document.createElement("div");
+  menu.className = "mc-move";
+  menu.dataset.id = String(id);
+  menu.innerHTML = `
+    <div class="mc-move-hd">日付を変更</div>
+    ${quick.map(([label, iso]) => {
+      const md = `${+iso.slice(5, 7)}/${+iso.slice(8, 10)}`;
+      const on = iso === cur ? " on" : "";
+      return `<button type="button" class="mc-move-b${on}" data-iso="${iso}"><span>${label}</span><small>${md}</small></button>`;
+    }).join("")}
+    <label class="mc-move-date">日付指定<input type="date" value="${cur || today}"></label>`;
+
+  if (getComputedStyle(root).position === "static") root.style.position = "relative";
+  root.appendChild(menu);
+  // anchor の近くに配置（root 基準の絶対配置。「他N件」ポップと同じ算法）。
+  const rr = root.getBoundingClientRect();
+  const ar = anchor.getBoundingClientRect();
+  const W = menu.offsetWidth || 168;
+  let left = ar.left - rr.left;
+  if (left + W > rr.width) left = Math.max(0, rr.width - W);
+  let top = ar.bottom - rr.top + 2;
+  if (ar.bottom + (menu.offsetHeight || 0) > window.innerHeight) {
+    top = Math.max(0, ar.top - rr.top - (menu.offsetHeight || 0) - 2);
+  }
+  menu.style.left = left + "px";
+  menu.style.top = top + "px";
+
+  menu.querySelectorAll(".mc-move-b").forEach((b) => {
+    b.onclick = async (e) => { e.stopPropagation(); const iso = b.dataset.iso; closeMoveMenu(root); await moveTaskDue(root, tasks, id, iso); };
+  });
+  const dateInput = menu.querySelector(".mc-move-date input");
+  dateInput.onclick = (e) => e.stopPropagation();
+  dateInput.onchange = async (e) => { e.stopPropagation(); const iso = e.target.value; if (!iso) return; closeMoveMenu(root); await moveTaskDue(root, tasks, id, iso); };
+
+  // 外側クリック / Esc で閉じる（次フレーム登録で自身のタップを拾わない＝「他N件」ポップと同作法）。
+  const onDoc = (e) => { if (!menu.contains(e.target) && e.target !== anchor) closeMoveMenu(root); };
+  const onKey = (e) => { if (e.key === "Escape") closeMoveMenu(root); };
+  menu._cleanup = () => { document.removeEventListener("mousedown", onDoc, true); document.removeEventListener("keydown", onKey, true); };
+  setTimeout(() => { document.addEventListener("mousedown", onDoc, true); document.addEventListener("keydown", onKey, true); }, 0);
+}
+
+function closeMoveMenu(root) {
+  const m = root.querySelector(".mc-move");
+  if (!m) return;
+  if (m._cleanup) m._cleanup();
+  m.remove();
+}
+
 // その日の全項目を出すポップオーバー。各タスクは既存と同様 openTaskForm で編集へ。
-function openPopover(root, anchor, iso, items) {
+function openPopover(root, anchor, iso, items, tasks, today) {
   const pop = document.createElement("div");
   pop.className = "mc-pop";
   pop.dataset.iso = iso;
@@ -184,9 +274,23 @@ function openPopover(root, anchor, iso, items) {
       openTaskForm({ taskId: id, onSaved: async () => { invalidate(); await load(); render(root); } });
     };
   });
+  // ポップ内チップの ⋮ も「日付を変更」メニューへ（日セルと同じ代替操作）。
+  pop.querySelectorAll(".mc-task-move").forEach((btn) => {
+    btn.onclick = (ev) => {
+      ev.stopPropagation();
+      ev.preventDefault();
+      openMoveMenu(root, btn, +btn.dataset.id, tasks, today);
+    };
+  });
 
-  // 外側クリック / Esc で閉じる（次フレームで登録して自身のクリックを拾わない）
-  const onDoc = (e) => { if (!pop.contains(e.target) && e.target !== anchor) closePopover(root); };
+  // 外側クリック / Esc で閉じる（次フレームで登録して自身のクリックを拾わない）。
+  // 上に開いた移動メニュー(.mc-move)内のクリックでは閉じない（ポップから移動メニューへ操作が続くため）。
+  const onDoc = (e) => {
+    if (pop.contains(e.target) || e.target === anchor) return;
+    const mv = root.querySelector(".mc-move");
+    if (mv && mv.contains(e.target)) return;
+    closePopover(root);
+  };
   const onKey = (e) => { if (e.key === "Escape") closePopover(root); };
   pop._cleanup = () => { document.removeEventListener("mousedown", onDoc, true); document.removeEventListener("keydown", onKey, true); };
   setTimeout(() => { document.addEventListener("mousedown", onDoc, true); document.addEventListener("keydown", onKey, true); }, 0);
@@ -256,6 +360,26 @@ function css() {
   .mc-task.overdue.done{border-left-color:#c3c9d2}
   .mc-task i{flex:none;width:7px;height:7px;border-radius:50%;display:inline-block}
   .mc-prio{flex:none;width:5px;height:5px;border-radius:50%;background:#e5484d;display:inline-block}
+  .mc-task-t{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* タッチ代替の「日付を変更」ボタン。マウス環境では既存の見た目を邪魔しないよう hover 時だけ薄く出す。 */
+  .mc-task-move{flex:none;margin-left:auto;font:inherit;font-size:12px;line-height:1;color:${C.muted};background:none;border:0;border-radius:4px;padding:0 2px;cursor:pointer;opacity:0;transition:opacity .12s,background .12s}
+  .mc-task:hover .mc-task-move{opacity:.7}
+  .mc-task-move:hover{opacity:1;background:rgba(20,30,50,.10)}
+  /* タッチ端末（hover 不可・粗ポインタ）では常時可視＝指で押せるアフォーダンスを確保。 */
+  @media (hover:none),(pointer:coarse){
+    .mc-task-move{opacity:.85;font-size:14px;padding:0 4px}
+    .mc-task{padding-top:3px;padding-bottom:3px}
+  }
+  /* 「日付を変更」小メニュー（tb-ctx 風）。 */
+  .mc-move{position:absolute;z-index:40;width:168px;background:#fff;border:1px solid ${C.line};border-radius:10px;box-shadow:0 8px 28px rgba(20,30,50,.18);padding:6px}
+  .mc-move-hd{font-size:10.5px;color:${C.muted};font-weight:700;padding:2px 6px 4px}
+  .mc-move-b{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;font:inherit;font-size:12.5px;text-align:left;padding:6px 8px;border:0;border-radius:6px;background:none;color:${C.ink};cursor:pointer}
+  .mc-move-b:hover{background:${C.track}}
+  .mc-move-b.on{color:${C.fill};font-weight:700}
+  .mc-move-b small{color:${C.muted};font-size:10.5px}
+  .mc-move-b.on small{color:${C.fill}}
+  .mc-move-date{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11.5px;color:${C.muted};margin-top:4px;padding:4px 8px 2px;border-top:1px solid ${C.line}}
+  .mc-move-date input{font:inherit;font-size:12px;border:1px solid ${C.line};border-radius:6px;padding:3px 5px;background:#fff;color:inherit}
   .mc-rec{background:#f2eefc;color:#6b4fa0}
   .mc-more{font:inherit;font-size:10px;color:${C.muted};padding:1px 5px;background:none;border:0;border-radius:4px;cursor:pointer;display:block;text-align:left}
   .mc-more:hover{background:${C.track};color:${C.fill}}
@@ -286,5 +410,10 @@ function css() {
   html[data-theme="dark"] .mc-task.overdue{background:rgba(229,72,77,.20);color:#ffb3b5;border-left-color:#e5484d}
   html[data-theme="dark"] .mc-task.overdue:hover{background:rgba(229,72,77,.30)}
   html[data-theme="dark"] .mc-rec{background:rgba(124,77,200,.22);color:#c4a9f0}
-  html[data-theme="dark"] .mc-pop{background:var(--card)}`;
+  html[data-theme="dark"] .mc-pop{background:var(--card)}
+  html[data-theme="dark"] .mc-task-move{color:var(--muted)}
+  html[data-theme="dark"] .mc-task-move:hover{background:rgba(255,255,255,.12)}
+  html[data-theme="dark"] .mc-move{background:var(--card)}
+  html[data-theme="dark"] .mc-move-b:hover{background:var(--track)}
+  html[data-theme="dark"] .mc-move-date input{background:var(--card);color:var(--ink)}`;
 }

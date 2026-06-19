@@ -5,7 +5,7 @@
 // ドラッグで区画移動=重要度・期限を書き換え（undoトースト付き）。クリックで編集モーダル。
 import { load, invalidate, projectName, isAiUser } from "../lib/store.js";
 import { updateTask } from "../lib/api.js";
-import { C, esc, fmtH, member_color, todayISO } from "../lib/ui.js";
+import { C, esc, fmtH, member_color, todayISO, announce } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
 import { icon } from "../lib/icons.js";
 
@@ -49,6 +49,21 @@ const QUADS = {
   q3: { title: "重要でない × 緊急", sub: "減らす・さばく・任せる", color: "#f5872e", tint: "#fdf8f1" },
   q4: { title: "重要でない × 緊急でない", sub: "捨てる・まとめる・合間で", color: "#8a93a0", tint: "#f6f7f9" },
 };
+
+// 区画移動の差分を算出（ドロップ／タップメニュー共通）。重要度0の昇格バグ修正式を維持。
+//   重要=重要度を3以上に / 非重要=2以下に。緊急=期限を今日に / 非緊急=超過期限は＋7日へ。
+// 戻り: { patch, prev } （prevはundo用。変化なしなら null）。
+function moveDiff(t, dst, today, days) {
+  if (!t || quadOf(t, today, days) === dst) return null;
+  const imp = dst === "q1" || dst === "q2";
+  const urg = dst === "q1" || dst === "q3";
+  const prev = { priority: t.priority || 0, due_date: t.due_date || null };
+  const patch = { priority: imp ? Math.max(3, prev.priority || 0) : Math.min(prev.priority || 0, 2) };
+  const due = dueISO(t);
+  if (urg) patch.due_date = (due && due <= addDays(today, days)) ? t.due_date : today + "T00:00:00Z";
+  else if (due && due <= addDays(today, days)) patch.due_date = addDays(today, 7) + "T00:00:00Z";
+  return { patch, prev };
+}
 
 export async function render(root) {
   const { tasks, projects, members, me } = await load();
@@ -110,9 +125,34 @@ export async function render(root) {
   });
   root.querySelector("#qd-days").onchange = (e) => { localStorage.setItem(DAYS_KEY, e.target.value); render(root); };
   root.querySelector("#qd-sort").onchange = (e) => { try { localStorage.setItem(SORT_KEY, e.target.value); } catch {} render(root); };
+  // ドロップ／タップメニュー共通の移動実行。差分算出→更新→再描画→undoトースト＋読み上げ。
+  async function applyMove(id, dst) {
+    const t = rows.find((x) => x.id === id);
+    const diff = moveDiff(t, dst, today, days);
+    if (!diff) return;
+    const { patch, prev } = diff;
+    try {
+      await updateTask(id, patch);
+      invalidate(); await load(); render(root);
+      announce(`「${t.title}」を「${QUADS[dst].title}」へ移動しました`);
+      showUndo(`「${t.title}」を「${QUADS[dst].title}」へ移動しました`, async () => {
+        await updateTask(id, prev.due_date ? prev : { ...prev, due_date: "0001-01-01T00:00:00Z" });
+        invalidate(); await load(); render(root);
+      });
+    } catch (e) {
+      showUndo(`× 移動に失敗: ${e.message}`, null);
+    }
+  }
+
   root.querySelectorAll(".qd-card").forEach((el) => {
-    el.onclick = () => openTaskForm({ taskId: +el.dataset.id, onSaved: async () => { invalidate(); await load(); render(root); } });
+    el.onclick = (ev) => {
+      if (ev.target.closest(".qd-mvbtn")) return; // 移動ボタンはメニューを開く（編集を開かない）
+      openTaskForm({ taskId: +el.dataset.id, onSaved: async () => { invalidate(); await load(); render(root); } });
+    };
     el.ondragstart = (ev) => { ev.dataTransfer.setData("text/plain", el.dataset.id); ev.dataTransfer.effectAllowed = "move"; };
+    // タップ移動代替（タッチ端末＝ネイティブDnD不可の救済。マウス環境でも害なく動く）。
+    const mv = el.querySelector(".qd-mvbtn");
+    if (mv) mv.onclick = (ev) => { ev.stopPropagation(); openMoveMenu(mv, +el.dataset.id); };
   });
   root.querySelectorAll(".qd-cell").forEach((cell) => {
     cell.ondragover = (ev) => { ev.preventDefault(); cell.classList.add("over"); };
@@ -121,29 +161,50 @@ export async function render(root) {
       ev.preventDefault();
       cell.classList.remove("over");
       const id = +ev.dataTransfer.getData("text/plain");
-      const t = rows.find((x) => x.id === id);
-      const dst = cell.dataset.q;
-      if (!t || quadOf(t, today, days) === dst) return;
-      // 区画→属性: 重要=重要度3/2、緊急=期限today/今日+7（期限なし→緊急でないならそのまま無期限）
-      const imp = dst === "q1" || dst === "q2";
-      const urg = dst === "q1" || dst === "q3";
-      const prev = { priority: t.priority || 0, due_date: t.due_date || null };
-      const patch = { priority: imp ? Math.max(3, prev.priority || 0) : Math.min(prev.priority || 0, 2) };
-      const due = dueISO(t);
-      if (urg) patch.due_date = (due && due <= addDays(today, days)) ? t.due_date : today + "T00:00:00Z";
-      else if (due && due <= addDays(today, days)) patch.due_date = addDays(today, 7) + "T00:00:00Z";
-      try {
-        await updateTask(id, patch);
-        invalidate(); await load(); render(root);
-        showUndo(`「${t.title}」を「${QUADS[dst].title}」へ移動しました`, async () => {
-          await updateTask(id, prev.due_date ? prev : { ...prev, due_date: "0001-01-01T00:00:00Z" });
-          invalidate(); await load(); render(root);
-        });
-      } catch (e) {
-        showUndo(`× 移動に失敗: ${e.message}`, null);
-      }
+      await applyMove(id, cell.dataset.q);
     };
   });
+
+  // タップで開く移動先メニュー（4象限。現在の区画は選択不可）。tb-ctx 風の軽量ポップ。
+  function openMoveMenu(anchor, id) {
+    closeMoveMenu();
+    const t = rows.find((x) => x.id === id);
+    if (!t) return;
+    const cur = quadOf(t, today, days);
+    const m = document.createElement("div");
+    m.className = "qd-mvmenu";
+    m.innerHTML = `<div class="qd-mvmenu-hd">移動先を選ぶ</div>`
+      + Object.entries(QUADS).map(([k, q]) =>
+        `<button class="qd-mvmenu-it${k === cur ? " cur" : ""}" data-q="${k}"${k === cur ? " disabled" : ""}>
+          <i class="qd-mvmenu-dot" style="background:${q.color}"></i>
+          <span class="qd-mvmenu-t">${esc(q.title)}${k === cur ? "（現在）" : ""}</span></button>`).join("");
+    document.body.appendChild(m);
+    // 位置: アンカー（移動ボタン）の下に。はみ出すなら画面内へ寄せる。
+    const r = anchor.getBoundingClientRect();
+    const mw = m.offsetWidth, mh = m.offsetHeight;
+    let left = Math.min(r.left, window.innerWidth - mw - 8);
+    let top = r.bottom + 6;
+    if (top + mh > window.innerHeight - 8) top = Math.max(8, r.top - mh - 6);
+    m.style.left = Math.max(8, left) + "px";
+    m.style.top = top + "px";
+    m.querySelectorAll(".qd-mvmenu-it:not(.cur)").forEach((b) => {
+      b.onclick = async () => { const dst = b.dataset.q; closeMoveMenu(); await applyMove(id, dst); };
+    });
+    // 外側クリック／Escで閉じる（次フレームから有効化＝開いた瞬間のクリックで即閉じない）。
+    setTimeout(() => {
+      m._out = (ev) => { if (!m.contains(ev.target)) closeMoveMenu(); };
+      m._key = (ev) => { if (ev.key === "Escape") closeMoveMenu(); };
+      document.addEventListener("pointerdown", m._out, true);
+      document.addEventListener("keydown", m._key, true);
+    }, 0);
+  }
+  function closeMoveMenu() {
+    document.querySelectorAll(".qd-mvmenu").forEach((m) => {
+      if (m._out) document.removeEventListener("pointerdown", m._out, true);
+      if (m._key) document.removeEventListener("keydown", m._key, true);
+      m.remove();
+    });
+  }
 
   function showUndo(text, onUndo) {
     const box = document.getElementById("qd-undo");
@@ -163,6 +224,7 @@ function cardHtml(t, projects, today) {
   const who = (t.assignees || []).find((a) => !isAiUser(a));
   const wn = who ? (who.name || who.username) : "";
   return `<div class="qd-card" draggable="true" data-id="${t.id}">
+    <button class="qd-mvbtn" type="button" aria-label="別の区画へ移動" title="別の区画へ移動"><span aria-hidden="true">⋮</span></button>
     <div class="qd-t">${esc(t.title)}</div>
     <div class="qd-m">
       ${who ? `<span class="qd-ava" style="background:${member_color(who.id)}" title="${esc(wn)}">${esc(wn[0] || "?")}</span>` : ""}
@@ -201,8 +263,25 @@ function css() {
   .qd-sub{font-size:11px;color:${C.muted};font-weight:500}
   .qd-list{display:flex;flex-direction:column;gap:7px;position:relative}
   .qd-empty{font-size:12px;color:${C.muted};padding:14px;text-align:center}
-  .qd-card{border:1px solid ${C.line};border-radius:10px;padding:8px 11px;background:#fff;cursor:grab}
+  .qd-card{position:relative;border:1px solid ${C.line};border-radius:10px;padding:8px 11px;background:#fff;cursor:grab}
   .qd-card:hover{border-color:#cfd9e6;box-shadow:0 2px 8px rgba(20,30,50,.06)}
+  /* タップ移動ボタン（⋮）。マウス環境では控えめ＝hover/フォーカスで出す。タッチ端末では常時可視。 */
+  .qd-mvbtn{position:absolute;top:3px;right:3px;width:24px;height:24px;display:grid;place-items:center;
+    border:0;background:transparent;color:${C.muted};font-size:17px;line-height:1;border-radius:7px;cursor:pointer;
+    opacity:0;transition:opacity .12s,background .12s;-webkit-tap-highlight-color:transparent}
+  .qd-mvbtn:hover{background:${C.track};color:${C.ink}}
+  .qd-card:hover .qd-mvbtn,.qd-mvbtn:focus-visible{opacity:1}
+  /* タッチ端末（hoverできない/粗いポインタ）はDnD不可なので常時表示＝代替操作が見える */
+  @media (hover:none),(pointer:coarse){.qd-mvbtn{opacity:.6}.qd-t{padding-right:20px}}
+  .qd-mvmenu{position:fixed;z-index:10000;min-width:210px;background:#fff;border:1px solid ${C.line};border-radius:11px;
+    box-shadow:0 12px 34px rgba(20,30,50,.22);padding:5px;display:flex;flex-direction:column}
+  .qd-mvmenu-hd{font-size:10px;font-weight:700;letter-spacing:.04em;color:${C.muted};padding:6px 11px 4px}
+  .qd-mvmenu-it{display:flex;align-items:center;gap:9px;font:inherit;font-size:13px;text-align:left;border:0;background:transparent;
+    color:${C.ink};padding:9px 11px;border-radius:7px;cursor:pointer;white-space:nowrap}
+  .qd-mvmenu-it:hover{background:${C.track}}
+  .qd-mvmenu-it.cur{color:${C.muted};cursor:default}
+  .qd-mvmenu-it[disabled]{opacity:.55;cursor:default}
+  .qd-mvmenu-dot{flex:none;width:9px;height:9px;border-radius:50%}
   .qd-t{font-size:13px;font-weight:600;margin-bottom:3px}
   .qd-m{display:flex;align-items:center;gap:8px;font-size:11px;color:${C.muted}}
   .qd-m .late{color:${C.over};font-weight:700}
@@ -227,5 +306,11 @@ function css() {
   html[data-theme="dark"] .qd-cell[data-q="q1"]{background:rgba(229,72,77,.12)!important}
   html[data-theme="dark"] .qd-cell[data-q="q2"]{background:rgba(58,134,255,.12)!important}
   html[data-theme="dark"] .qd-cell[data-q="q3"]{background:rgba(245,135,46,.12)!important}
-  html[data-theme="dark"] .qd-cell[data-q="q4"]{background:rgba(138,147,160,.12)!important}`;
+  html[data-theme="dark"] .qd-cell[data-q="q4"]{background:rgba(138,147,160,.12)!important}
+  html[data-theme="dark"] .qd-mvbtn{color:var(--muted)}
+  html[data-theme="dark"] .qd-mvbtn:hover{background:var(--track);color:var(--ink)}
+  html[data-theme="dark"] .qd-mvmenu{background:var(--card);border-color:var(--line);box-shadow:0 12px 34px rgba(0,0,0,.45)}
+  html[data-theme="dark"] .qd-mvmenu-it{color:var(--ink)}
+  html[data-theme="dark"] .qd-mvmenu-it:hover{background:var(--track)}
+  html[data-theme="dark"] .qd-mvmenu-it.cur{color:var(--muted)}`;
 }

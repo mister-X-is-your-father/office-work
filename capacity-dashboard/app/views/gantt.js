@@ -7,7 +7,7 @@ import { taskRanges, dependencyEdges, depLayers, dayScale, toMemberDayEntries, s
 import { capacityOn } from "../lib/recurrence.js";
 import { fmtDisplayDow } from "../lib/form.js";
 import { openTaskForm } from "./taskform.js";
-import { C, member_color, fmtH, esc, todayISO } from "../lib/ui.js";
+import { C, member_color, fmtH, esc, todayISO, announce } from "../lib/ui.js";
 
 let COL_W = 40, WINDOW_DAYS = 21;   // 表示範囲プリセットで render ごとに上書き
 let COL_W_MIN = 9;                  // プリセット由来の最小列幅（fitColumns で実幅へ伸ばす起点）
@@ -211,9 +211,13 @@ async function mount(root, opts) {
       // dates のみ端リサイズ可。plans/dates/due はすべて移動＋クリックで編集（draggable）。
       const resizable = r.planned.source === "dates";
       const handles = resizable ? `<span class="bar-h l"></span><span class="bar-h r"></span>` : "";
+      // タップ端末向けの「移動」アフォーダンス（プログレッシブ拡張）。HTML5/pointerドラッグが効かない
+      // タッチ環境では (hover:none)/(pointer:coarse) で常時可視。マウス環境ではホバー/フォーカス時のみ
+      // 小さく出す控えめなボタン。クリックで日付シフトの小メニューを開く（既存DnDの日付更新を流用）。
+      const shiftBtn = `<button class="bar-shift" type="button" data-task="${taskId}" aria-label="${esc((tName ? tName + " " : "") + "の日程をずらす")}" title="日程をずらす">⋮</button>`;
       // スクリーンリーダー向け: タスク名＋予定（時間・由来）。視覚的 title はホバー用に従来どおり保持。
       const planAria = `${tName ? tName + " " : ""}予定 ${fmtH(r.planned.h)}（${srcLabel(r.planned.source)}）`;
-      bars += `<div class="bar plan draggable${clip}" role="img" aria-label="${esc(planAria)}" data-task="${taskId}" data-src="${r.planned.source}" style="left:${left}px;width:${w}px" title="予定 ${fmtH(r.planned.h)}（${srcLabel(r.planned.source)}）・ドラッグで移動${resizable ? "／端で伸縮" : ""}・クリックで編集">${handles}</div>`;
+      bars += `<div class="bar plan draggable${clip}" role="img" aria-label="${esc(planAria)}" data-task="${taskId}" data-src="${r.planned.source}" style="left:${left}px;width:${w}px" title="予定 ${fmtH(r.planned.h)}（${srcLabel(r.planned.source)}）・ドラッグで移動${resizable ? "／端で伸縮" : ""}・クリックで編集">${handles}${shiftBtn}</div>`;
     }
     if (r.actual.start) {
       const ag = scale.range(r.actual.start, r.actual.end);
@@ -782,6 +786,7 @@ async function mount(root, opts) {
   const hideLabel = () => { if (dlabel) dlabel.style.display = "none"; };
 
   rowsEl.addEventListener("pointerdown", (e) => {
+    if (e.target.closest(".bar-shift")) return;   // 移動メニュー用ボタンはドラッグ開始しない（タップで開く）
     const bar = e.target.closest(".bar.draggable");
     if (!bar) return;
     const taskId = +bar.dataset.task;
@@ -848,9 +853,100 @@ async function mount(root, opts) {
     }
   }
 
+  // ── タップ端末向け: バーの「⋮」から日程シフトの小メニュー（既存DnDの日付更新を流用） ──
+  // タッチではネイティブ pointer ドラッグが効かず操作不能なので、同じ commitDrag を小メニューから呼ぶ。
+  // デスクトップの DnD は一切変えず、これは「追加」のみ（マウスでもボタンから使えるが控えめ表示）。
+  let shiftMenu = null;
+  const closeShiftMenu = () => {
+    if (shiftMenu) { shiftMenu.remove(); shiftMenu = null; document.removeEventListener("pointerdown", onShiftDocDown, true); document.removeEventListener("keydown", onShiftKey, true); }
+  };
+  function onShiftDocDown(e) { if (shiftMenu && !shiftMenu.contains(e.target)) closeShiftMenu(); }
+  function onShiftKey(e) { if (e.key === "Escape") closeShiftMenu(); }
+
+  // 指定の edge/delta でバー日付を更新（DnD と同一の applyBarDrag→commitDrag を再利用）。
+  async function doShift(taskId, src, edge, dayDelta) {
+    const r = rangeByTask.get(taskId);
+    if (!r || !r.planned.source) return;
+    const base = { start: r.planned.start, end: r.planned.end };
+    const nb = applyBarDrag(base, dayDelta, edge);
+    closeShiftMenu();
+    try {
+      await commitDrag(taskId, src, nb, dayDelta);
+      const t = byIdAll.get(taskId);
+      announce(`${t ? t.title + " " : ""}日程を更新しました（${src === "due" ? fmtDisplayDow(nb.start) : `${fmtDisplayDow(nb.start)} 〜 ${fmtDisplayDow(nb.end)}`}）`);
+    } catch (err) { alert("日程の更新に失敗: " + err.message); }
+    reload();
+  }
+  // 開始日を絶対指定（date input）。dates/plans は期間長を保ったまま、due は締切日そのものを移動。
+  async function doSetStart(taskId, src, newStartISO) {
+    const r = rangeByTask.get(taskId);
+    if (!r || !r.planned.source || !newStartISO) return;
+    const anchor = src === "due" ? r.planned.end : r.planned.start;   // due は単点（start=end）
+    const dayDelta = Math.round((Date.parse(newStartISO + "T00:00:00Z") - Date.parse(anchor + "T00:00:00Z")) / 86400000);
+    if (dayDelta === 0) { closeShiftMenu(); return; }
+    await doShift(taskId, src, "move", dayDelta);
+  }
+
+  function openShiftMenu(btn, taskId) {
+    closeShiftMenu();
+    const r = rangeByTask.get(taskId);
+    if (!r || !r.planned.source) return;
+    const t = byIdAll.get(taskId); if (!t) return;
+    const src = r.planned.source;
+    const resizable = src === "dates";   // 期間のみ開始/終了を個別に動かせる
+    const curStart = src === "due" ? r.planned.end : r.planned.start;
+    const rangeTxt = src === "due" ? `締切 ${fmtDisplayDow(r.planned.end)}` : `${fmtDisplayDow(r.planned.start)} 〜 ${fmtDisplayDow(r.planned.end)}`;
+    // 行: ラベル＋ -1週/-1日/+1日/+1週 の4ボタン。move は全体移動、start/end は端だけ。
+    const shiftRow = (label, edge) => `
+      <div class="sm-row">
+        <span class="sm-rl">${label}</span>
+        <span class="sm-btns">
+          <button class="sm-b" data-edge="${edge}" data-d="-7">−1週</button>
+          <button class="sm-b" data-edge="${edge}" data-d="-1">−1日</button>
+          <button class="sm-b" data-edge="${edge}" data-d="1">+1日</button>
+          <button class="sm-b" data-edge="${edge}" data-d="7">+1週</button>
+        </span>
+      </div>`;
+    shiftMenu = document.createElement("div");
+    shiftMenu.className = "gv-shiftmenu";
+    shiftMenu.setAttribute("role", "menu");
+    shiftMenu.innerHTML = `
+      <div class="sm-h">${esc(t.title)}<small>${rangeTxt}・${srcLabel(src)}</small></div>
+      ${shiftRow(resizable ? "全体を移動" : "移動", "move")}
+      ${resizable ? shiftRow("開始だけ", "start") + shiftRow("終了だけ", "end") : ""}
+      <div class="sm-row sm-date">
+        <span class="sm-rl">${src === "due" ? "締切日" : "開始日"}</span>
+        <input type="date" id="sm-date" value="${curStart}">
+      </div>
+      <div class="sm-foot"><button class="sm-edit" id="sm-edit">詳細編集…</button></div>`;
+    document.body.appendChild(shiftMenu);
+    // ボタン基準で配置（画面端で折り返し）。
+    const br = btn.getBoundingClientRect();
+    const mw = 252;
+    shiftMenu.style.left = Math.max(8, Math.min(br.left, window.innerWidth - mw - 8)) + "px";
+    shiftMenu.style.top = Math.min(br.bottom + 6, window.innerHeight - 220) + "px";
+    shiftMenu.querySelectorAll(".sm-b").forEach((b) => {
+      b.onclick = () => doShift(taskId, src, b.dataset.edge, +b.dataset.d);
+    });
+    const dIn = shiftMenu.querySelector("#sm-date");
+    if (dIn) dIn.onchange = () => doSetStart(taskId, src, dIn.value);
+    shiftMenu.querySelector("#sm-edit").onclick = () => { closeShiftMenu(); openTaskForm({ taskId, onSaved: reload }); };
+    setTimeout(() => { document.addEventListener("pointerdown", onShiftDocDown, true); document.addEventListener("keydown", onShiftKey, true); }, 0);
+    const first = shiftMenu.querySelector(".sm-b");
+    if (first) first.focus();
+  }
+
+  rowsEl.addEventListener("click", (e) => {
+    const btn = e.target.closest(".bar-shift");
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openShiftMenu(btn, +btn.dataset.task);
+  });
   // ── 日別予定の直接入力: タスク行の「日セル」をクリック→その日の実施予定時間を入力 ──
   let dayPop = null;
-  closeDayPop = () => { if (dayPop) { dayPop.remove(); dayPop = null; document.removeEventListener("pointerdown", onDocDown, true); } };
+  // closeDayPop は onResize→paint（DOM再構築）でポップ系を畳む共通フック。シフトメニューも一緒に閉じる。
+  closeDayPop = () => { if (dayPop) { dayPop.remove(); dayPop = null; document.removeEventListener("pointerdown", onDocDown, true); } closeShiftMenu(); };
   function onDocDown(e) { if (dayPop && !dayPop.contains(e.target)) closeDayPop(); }
 
   function openDayPlanPopup(taskId, dayISO, x, y) {
@@ -1085,6 +1181,36 @@ function ganttStyles() {
   .gv .bar.plan.dragging{cursor:grabbing;opacity:.9;z-index:7;box-shadow:inset 0 0 0 1.5px ${C.fill}}
   .gv .bar-h{position:absolute;top:0;bottom:0;width:7px;cursor:ew-resize;z-index:1}
   .gv .bar-h.l{left:0}.gv .bar-h.r{right:0}
+  /* タップ端末向け「⋮」日程シフトボタン（プログレッシブ拡張）。バー右端に小さく重ねる。
+     マウス環境では既定 非表示で、行/バーのホバー or フォーカス時のみ控えめに出す（DnD の邪魔をしない）。
+     タッチ環境（hover:none / pointer:coarse）では常時可視＝唯一の操作手段になる。 */
+  .gv .bar.plan.draggable{position:absolute}
+  .gv .bar-shift{position:absolute;top:50%;right:1px;transform:translateY(-50%);width:15px;height:15px;padding:0;
+    display:none;align-items:center;justify-content:center;border:0;border-radius:4px;cursor:pointer;
+    background:rgba(255,255,255,.92);color:${C.fill};font-size:13px;font-weight:900;line-height:1;
+    box-shadow:0 1px 3px rgba(20,30,50,.28);z-index:3}
+  .gv .bar-shift:hover{background:#fff;color:${C.ink}}
+  .gv .bar-shift:focus-visible{outline:2px solid ${C.fill};outline-offset:1px;display:inline-flex}
+  .gv .row:hover .bar.plan.draggable .bar-shift,
+  .gv .bar.plan.draggable:hover .bar-shift{display:inline-flex}
+  /* タッチ/粗いポインタ環境＝ネイティブDnDが効かないので常時表示（少し大きめでタップしやすく） */
+  @media (hover:none),(pointer:coarse){
+    .gv .bar-shift{display:inline-flex;width:18px;height:18px;font-size:15px;right:0}
+  }
+  /* 日程シフトの小メニュー（⋮ から開く）。tb-ctx 風の軽量ポップ。 */
+  .gv-shiftmenu{position:fixed;z-index:10001;width:252px;background:#fff;border:1px solid ${C.line};border-radius:12px;
+    box-shadow:0 14px 38px rgba(20,30,50,.24);padding:11px 12px;font-size:13px}
+  .gv-shiftmenu .sm-h{font-weight:700;font-size:13px;line-height:1.3;margin-bottom:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .gv-shiftmenu .sm-h small{display:block;font-weight:500;color:${C.muted};font-size:11px;margin-top:2px;white-space:normal}
+  .gv-shiftmenu .sm-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .gv-shiftmenu .sm-rl{flex:none;width:64px;font-size:11px;color:${C.muted};font-weight:600}
+  .gv-shiftmenu .sm-btns{display:flex;gap:4px;flex:1}
+  .gv-shiftmenu .sm-b{flex:1;font:inherit;font-size:11.5px;font-weight:700;padding:6px 0;border:1px solid ${C.line};border-radius:7px;background:#fff;color:${C.ink};cursor:pointer}
+  .gv-shiftmenu .sm-b:hover{background:${C.track};border-color:#d7dde6}
+  .gv-shiftmenu .sm-date input{flex:1;font:inherit;font-size:12.5px;padding:5px 7px;border:1px solid ${C.line};border-radius:7px}
+  .gv-shiftmenu .sm-foot{margin-top:2px;border-top:1px solid ${C.line};padding-top:8px}
+  .gv-shiftmenu .sm-edit{width:100%;font:inherit;font-size:12px;font-weight:700;padding:7px 0;border:1px solid ${C.line};border-radius:8px;background:#fff;color:${C.fill};cursor:pointer}
+  .gv-shiftmenu .sm-edit:hover{background:${C.track}}
   /* 集約バー（人別: 親プロジェクト見出しの子まとめ帯）。読み取り専用＝点線枠で個別バーと区別 */
   .gv .bar.plan.agg{top:18px;height:9px;background:rgba(58,134,255,.10);box-shadow:inset 0 0 0 1px rgba(58,134,255,.30);border-radius:5px}
   .gv .bar.plan.agg::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(90deg,rgba(58,134,255,.16) 0 6px,transparent 6px 10px)}

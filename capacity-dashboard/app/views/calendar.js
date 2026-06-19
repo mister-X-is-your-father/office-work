@@ -8,7 +8,7 @@ import { expandRecurrences } from "../lib/recurrence.js";
 import { PRIO, NEUTRAL, KINDS } from "../lib/kinds.js";
 import { dateOnly, shiftISO } from "../lib/capacity.js";
 import { deletePlan, logPlan, updateRecurrence } from "../lib/api.js";
-import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
+import { C, fmtH, esc, member_color, todayISO, announce } from "../lib/ui.js";
 import { splitMeta } from "../lib/form.js"; // note の "[資料] URL" 行を抽出
 import { icon } from "../lib/icons.js";
 
@@ -148,7 +148,8 @@ function paint() {
 
   const trayHtml = tray.length
     ? tray.map((it) => `<div class="cal-chip" draggable="true" data-task="${it.taskId}" data-member="${it.memberId}" data-mins="${it.mins}" style="border-left-color:${itemColor(it)}">
-        <span class="cal-chip-t">${esc(it.title)}</span><span class="cal-chip-h">${fmtH(it.mins / 60)}</span></div>`).join("")
+        <span class="cal-chip-t">${esc(it.title)}</span><span class="cal-chip-h">${fmtH(it.mins / 60)}</span>
+        <button class="cal-tap" title="配置（タップ操作）" aria-label="この場所に配置">${icon("calendar", { size: 13 })}</button></div>`).join("")
     : `<div class="cal-tray-empty">未配置のタスクはありません</div>`;
 
   // タスク一覧プール: 今日の負荷を持たない未完了タスクも直接ドラッグして配置できる
@@ -162,9 +163,10 @@ function paint() {
     const estMin = Math.round((t.time_estimate || 0) / 60);
     const mins = Math.max(SNAP, Math.min(dayMins, estMin || 60)); // 見積り無し=1h
     const asg = (t.assignees || [])[0];
-    return `<div class="cal-chip cal-pool-chip" draggable="true" data-task="${t.id}" data-mins="${mins}"
+    return `<div class="cal-chip cal-pool-chip" draggable="true" data-task="${t.id}" data-mins="${mins}"${asg ? ` data-asg="${asg.id}"` : ""}
         title="${esc(t.title)}${asg ? `（担当: ${esc(asg.name || asg.username)}）` : ""}">
-      <span class="cal-chip-t">${esc(t.title)}</span><span class="cal-chip-h">${fmtH(mins / 60)}</span></div>`;
+      <span class="cal-chip-t">${esc(t.title)}</span><span class="cal-chip-h">${fmtH(mins / 60)}</span>
+      <button class="cal-tap" title="配置（タップ操作）" aria-label="この場所に配置">${icon("calendar", { size: 13 })}</button></div>`;
   }).join("") : `<div class="cal-tray-empty">配置できる未完了タスクはありません</div>`;
 
   _root.innerHTML = `
@@ -253,6 +255,7 @@ function blockHtml(b) {
   return `<div class="cal-block ${hatch}" draggable="true" data-task="${b.taskId}" data-member="${b.memberId}" data-mins="${b.mins}" data-start="${b.startMin}" data-plan="${b.planId}"
       style="top:${top}px;height:${h}px;${pos}background:${itemColor(b)}">
     <button class="cal-unplace" title="未配置に戻す" aria-label="未配置に戻す">×</button>
+    <button class="cal-tap cal-tap-blk" title="移動・変更（タップ操作）" aria-label="移動・変更">${icon("pencil", { size: 12 })}</button>
     <div class="cal-bt">${esc(b.title)}</div><div class="cal-bh">${timeLabel}</div>
     <div class="cal-rs" draggable="false" title="ドラッグで所要時間を変更"></div>
   </div>`;
@@ -329,6 +332,30 @@ function wireDnD() {
     el.addEventListener("click", (e) => {
       if (e.target.closest("a")) return;
       openOccurrenceEditor(+el.dataset.rec, el.dataset.orig);
+    });
+  });
+  // ── タップ操作の代替（タッチ端末でネイティブDnDが使えない救済・追加のみ／DnDは不変） ──
+  // 未配置チップ/プールチップの ⊞ ボタン → タップで「担当（プールのみ）→時刻」を選んで place()。
+  _root.querySelectorAll(".cal-chip .cal-tap").forEach((btn) => {
+    // DnD と干渉しないよう mousedown は止める（チップは draggable）
+    btn.addEventListener("mousedown", (e) => e.stopPropagation());
+    btn.addEventListener("dragstart", (e) => { e.preventDefault(); e.stopPropagation(); });
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation(); e.preventDefault();
+      const chip = btn.closest(".cal-chip");
+      if (!chip) return;
+      openPlaceMenu(btn, chip);
+    });
+  });
+  // 配置済みブロックの ✎ ボタン → タップで「時刻変更／担当変更／未配置に戻す」。
+  _root.querySelectorAll(".cal-block:not(.cal-fixed) .cal-tap-blk").forEach((btn) => {
+    btn.addEventListener("mousedown", (e) => e.stopPropagation());
+    btn.addEventListener("dragstart", (e) => { e.preventDefault(); e.stopPropagation(); });
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation(); e.preventDefault();
+      const blk = btn.closest(".cal-block");
+      if (!blk) return;
+      openBlockMenu(btn, blk);
     });
   });
   _root.querySelectorAll(".cal-colbody").forEach((col) => {
@@ -449,6 +476,123 @@ function openOccurrenceEditor(recId, origISO) {
     if (durSec !== rec.duration_seconds) newOv.duration_seconds = durSec;
     await saveOverrides(Object.keys(newOv).length ? newOv : null);
   };
+}
+
+// ── タップ操作の代替（ネイティブDnD不可なタッチ端末の救済） ─────────────
+// 軽量ポップメニュー: anchor 近傍に出す。items=[{label, sub?, danger?, onClick}] or 区切り {sep:true}。
+// 画面端でクリップしないよう簡易に左右/上下反転。背景タップで閉じる。
+function popMenu(anchor, title, items) {
+  document.querySelectorAll(".cal-pop").forEach((p) => p.remove()); // 既存を閉じる（積層防止）
+  const bg = document.createElement("div");
+  bg.className = "cal-pop-bg";
+  const pop = document.createElement("div");
+  pop.className = "cal-pop";
+  pop.innerHTML =
+    (title ? `<div class="cal-pop-h">${esc(title)}</div>` : "") +
+    `<div class="cal-pop-list">` +
+    items.map((it, i) => it.sep
+      ? `<div class="cal-pop-sep"></div>`
+      : `<button class="cal-pop-it${it.danger ? " cal-pop-danger" : ""}" data-i="${i}">
+           <span class="cal-pop-lb">${esc(it.label)}</span>${it.sub ? `<span class="cal-pop-sub">${esc(it.sub)}</span>` : ""}
+         </button>`).join("") +
+    `</div>`;
+  const close = () => { pop.remove(); bg.remove(); };
+  bg.addEventListener("click", close);
+  pop.querySelectorAll(".cal-pop-it").forEach((b) => {
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const it = items[+b.dataset.i];
+      close();
+      if (it && it.onClick) it.onClick();
+    });
+  });
+  document.body.appendChild(bg);
+  document.body.appendChild(pop);
+  // 位置決め: アンカーの直下、足りなければ上。右端クリップは左寄せ。
+  const r = anchor.getBoundingClientRect();
+  const pw = pop.offsetWidth, ph = pop.offsetHeight;
+  let left = r.left;
+  if (left + pw > window.innerWidth - 8) left = Math.max(8, window.innerWidth - 8 - pw);
+  let top = r.bottom + 6;
+  if (top + ph > window.innerHeight - 8) top = Math.max(8, r.top - 6 - ph);
+  pop.style.left = left + "px";
+  pop.style.top = top + "px";
+  return close;
+}
+
+// 配置可能な開始時刻の候補（営業時間内・mins ぶん収まる・30分刻み）。
+function timeSlotOptions(mins) {
+  const out = [];
+  for (let m = H0 * 60; m + mins <= H1 * 60; m += 30) {
+    out.push({ startMin: m, label: `${hhmm(m)}`, sub: `〜${hhmm(m + mins)}` });
+  }
+  return out;
+}
+
+// 時刻メニュー→選択で onPick(startMin)。
+function pickTimeMenu(anchor, title, mins, onPick) {
+  const slots = timeSlotOptions(mins);
+  if (!slots.length) { popMenu(anchor, title, [{ label: "配置できる時間枠がありません", sub: "営業時間を確認" }]); return; }
+  popMenu(anchor, title, slots.map((s) => ({ label: s.label, sub: s.sub, onClick: () => onPick(s.startMin) })));
+}
+
+// 担当メニュー→選択で onPick(memberId)。current は先頭に「現在」と注記。
+function pickMemberMenu(anchor, title, currentId, onPick) {
+  const items = (_data.members || []).map((m) => ({
+    label: (m.name || m.username || "?"),
+    sub: m.id === currentId ? "現在" : "",
+    onClick: () => onPick(m.id),
+  }));
+  popMenu(anchor, title, items);
+}
+
+// 未配置チップ/プールチップ → タップで配置。プールで担当未定なら担当→時刻、決まっていれば時刻のみ。
+function openPlaceMenu(anchor, chip) {
+  const taskId = +chip.dataset.task;
+  const mins = +chip.dataset.mins;
+  const trayMember = chip.dataset.member ? +chip.dataset.member : null;     // 未配置トレイ=確定担当
+  const asg = chip.dataset.asg ? +chip.dataset.asg : null;                  // プール=既定担当（任意）
+  const title = (chip.querySelector(".cal-chip-t")?.textContent || "タスク").trim();
+  const doPlace = (memberId) => pickTimeMenu(anchor, `${title} を配置`, mins, async (startMin) => {
+    await place({ taskId, fromMember: memberId, mins, planId: null }, memberId, startMin);
+    announce(`${title} を ${hhmm(startMin)} に配置しました`);
+  });
+  if (trayMember != null) { doPlace(trayMember); return; }                  // 担当確定 → 時刻のみ
+  // プール: 担当を選んでから時刻（既定担当があっても変更できるよう毎回メンバー選択を出す）
+  pickMemberMenu(anchor, `${title} の担当を選ぶ`, asg, (memberId) => doPlace(memberId));
+}
+
+// 配置済みブロック → 時刻変更／担当変更／未配置に戻す。
+function openBlockMenu(anchor, blk) {
+  const taskId = +blk.dataset.task;
+  const planId = +blk.dataset.plan;
+  const memberId = +blk.dataset.member;
+  const mins = +blk.dataset.mins;
+  const startMin = +blk.dataset.start;
+  const title = (blk.querySelector(".cal-bt")?.textContent || "タスク").trim();
+  popMenu(anchor, title, [
+    {
+      label: "時刻を変更", sub: `現在 ${hhmm(startMin)}`,
+      onClick: () => pickTimeMenu(anchor, `${title} の時刻`, mins, async (newStart) => {
+        if (newStart === startMin) return;
+        await place({ taskId, fromMember: memberId, mins, planId }, memberId, newStart);
+        announce(`${title} を ${hhmm(newStart)} に移動しました`);
+      }),
+    },
+    {
+      label: "担当を変更", sub: "別の人へ",
+      onClick: () => pickMemberMenu(anchor, `${title} の担当`, memberId, async (newMember) => {
+        if (newMember === memberId) return;
+        await place({ taskId, fromMember: memberId, mins, planId }, newMember, startMin);
+        announce(`${title} の担当を変更しました`);
+      }),
+    },
+    { sep: true },
+    {
+      label: "未配置に戻す", danger: true,
+      onClick: async () => { await unplace(taskId, planId, memberId, mins); announce(`${title} を未配置に戻しました`); },
+    },
+  ]);
 }
 
 // リサイズ確定: 同じ時刻・担当のまま所要だけ変更（plans に更新APIが無いため delete→create）
@@ -575,11 +719,42 @@ function css() {
   .cal-ovm-ghost:hover{color:${C.ink}}
   .cal-ovm-save{font:inherit;font-size:12.5px;font-weight:700;padding:7px 14px;border-radius:8px;border:1px solid ${C.fill};background:${C.fill};color:#fff;cursor:pointer}
   .cal-ovm-save:hover{filter:brightness(1.05)}
+  /* ===== タップ操作の代替（タッチ端末の救済・DnD は不変／追加のみ） ===== */
+  /* チップ内の「配置」ボタン: マウス環境では hover で控えめに、タッチでは常時可視 */
+  .cal-chip{position:relative}
+  .cal-tap{display:flex;align-items:center;justify-content:center;flex:none;width:22px;height:22px;padding:0;margin-left:2px;border:1px solid ${C.line};border-radius:6px;background:#fff;color:${C.fill};cursor:pointer;opacity:0;transition:opacity .12s}
+  .cal-chip:hover .cal-tap{opacity:.85}
+  .cal-tap:hover{opacity:1;border-color:${C.fill};background:#f3f8ff}
+  /* ブロック内の「移動・変更」ボタン: ×（未配置）の左隣に小さく */
+  .cal-tap-blk{position:absolute;top:2px;right:20px;width:16px;height:16px;border:none;border-radius:4px;background:rgba(0,0,0,.18);color:#fff;opacity:0;z-index:3}
+  .cal-block:hover .cal-tap-blk{opacity:1}
+  .cal-tap-blk:hover{background:rgba(0,0,0,.42)}
+  /* タッチ端末（hover 不可 or 粗いポインタ）では常時可視＝唯一の操作経路 */
+  @media (hover:none),(pointer:coarse){
+    .cal-tap{opacity:.9}
+    .cal-tap-blk{opacity:.9;width:18px;height:18px}
+  }
+  /* ポップメニュー */
+  .cal-pop-bg{position:fixed;inset:0;z-index:80}
+  .cal-pop{position:fixed;z-index:81;min-width:160px;max-width:240px;max-height:60vh;overflow:auto;background:#fff;border:1px solid ${C.line};border-radius:12px;box-shadow:0 14px 40px rgba(20,30,50,.24);padding:6px}
+  .cal-pop-h{font-size:11.5px;font-weight:700;color:${C.muted};padding:6px 8px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cal-pop-list{display:flex;flex-direction:column;gap:1px}
+  .cal-pop-it{display:flex;align-items:baseline;justify-content:space-between;gap:10px;width:100%;font:inherit;font-size:13px;text-align:left;padding:9px 10px;border:none;border-radius:8px;background:none;color:${C.ink};cursor:pointer}
+  .cal-pop-it:hover{background:#f3f8ff}
+  .cal-pop-lb{font-weight:600;font-variant-numeric:tabular-nums}
+  .cal-pop-sub{font-size:11px;color:${C.muted};font-variant-numeric:tabular-nums}
+  .cal-pop-danger .cal-pop-lb{color:${C.over}}
+  .cal-pop-danger:hover{background:rgba(255,77,79,.08)}
+  .cal-pop-sep{height:1px;background:${C.line};margin:4px 2px}
   /* ===== ダーク: ハードコード淡色を構造色へ（ライトは非変更・アクセントは維持） ===== */
   html[data-theme="dark"] .cal-tray-list{background:var(--track)}
   html[data-theme="dark"] .cal-chip{background:var(--card)}
   html[data-theme="dark"] .cal-pool-q{background:var(--card);color:var(--ink)}
   html[data-theme="dark"] .cal-colbody.over{background:rgba(58,134,255,.13)}
   html[data-theme="dark"] .cal-ovm-card{background:var(--card)}
-  html[data-theme="dark"] .cal-ovm-ghost{background:var(--card)}`;
+  html[data-theme="dark"] .cal-ovm-ghost{background:var(--card)}
+  html[data-theme="dark"] .cal-tap{background:var(--card)}
+  html[data-theme="dark"] .cal-tap:hover{background:rgba(58,134,255,.13)}
+  html[data-theme="dark"] .cal-pop{background:var(--card)}
+  html[data-theme="dark"] .cal-pop-it:hover{background:rgba(58,134,255,.13)}`;
 }
