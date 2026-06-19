@@ -39,6 +39,8 @@ export function saveMenuVisibility(menuVisibility) { return req("/settings", { m
 // 戻り値は { prep: {...} }（保存時は保存後の本体）。本体は { [methodId]: data, score } の汎用JSON。
 export function getPrep(taskId) { return req(`/prep/${taskId}`); }
 export function savePrep(taskId, prep) { return req(`/prep/${taskId}`, { method: "POST", body: prep }); }
+// バッチ: 全タスクの着手準備スコア {taskId: score} を一括取得（ホーム/一覧のメーターバッジ用・軽量）。
+export function getPrepScores() { return req("/prep"); }
 // 保護時間帯（トラブル想定枠/バッファ）: [{id,label,days:[0..6],start:"HH:MM",end:"HH:MM",kind:"buffer"|"block"}]。
 // 逆算スケジュールが尊重（重要タスクをここに置かない/バッファ確保）。読み取りは getSettings().settings.protected_windows。書き込みは管理者のみ。
 export function saveProtectedWindows(windows) { return req("/settings", { method: "POST", body: { protected_windows: windows } }); }

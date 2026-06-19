@@ -404,6 +404,19 @@ class H(BaseHTTPRequestHandler):
             if not uid and not auth_any(tok):
                 return self._json(401, {"error": "unauthorized"})
             return self._json(200, {"settings": load_settings(), "can_edit": bool(uid)})
+        if self.path.split("?")[0].rstrip("/") == "/prep":
+            # バッチ: 全タスクの着手準備スコアだけを {taskId: score} で返す（ホーム/一覧のメーター用・軽量）。
+            if not uid and not auth_any(tok):
+                return self._json(401, {"error": "unauthorized"})
+            scores = {}
+            for k, v in (load_prep() or {}).items():
+                try:
+                    s = int((v or {}).get("score", 0))
+                except (TypeError, ValueError):
+                    s = 0
+                if s:
+                    scores[k] = s
+            return self._json(200, {"scores": scores})
         m_pg = re.match(r"^/prep/(\d+)", self.path)
         if m_pg:
             # 着手準備の読み取りは全ログインユーザー可。
