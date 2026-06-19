@@ -12,28 +12,6 @@
           }
         ]
       }
-    ],
-    "SubagentStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 /home/neo/apps/office-work/.claude/hooks/subagent-depth.py inc",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 /home/neo/apps/office-work/.claude/hooks/subagent-depth.py dec",
-            "timeout": 10
-          }
-        ]
-      }
     ]
   }
 }

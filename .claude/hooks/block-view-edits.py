@@ -26,17 +26,12 @@ SHARED_IN_VIEWS = {"taskform.js", "recurrenceform.js"}
 if m.group(1) in SHARED_IN_VIEWS:
     sys.exit(0)  # 共有ファイル＝許可
 
-# サブエージェント稼働中（depth>0）なら委譲先の実装編集とみなして許可。
-# depth は SubagentStart で +1 / SubagentStop で -1（subagent-depth.py）。
-# メインエージェントの直接編集時は depth==0 のはず＝deny される。
-def _depth():
-    try:
-        with open("/tmp/cap-subagent-depth") as f:
-            return int((f.read() or "0").strip() or "0")
-    except Exception:
-        return 0
-if _depth() > 0:
-    sys.exit(0)  # 委譲中＝許可
+# 委譲中だけ views 編集を許可する＝マーカー /tmp/cap-view-edit-allow の有無で判定（唯一の許可経路）。
+# 指示役が Agent 委譲の直前に `touch` し、完了後に `rm` する。決定論的で、指示役が制御する。
+# （旧: SubagentStart/Stop の depth カウンタは発火が不安定で fail-open/closed したため撤去。）
+# マーカー無し＝メインの直接編集とみなして deny。
+if os.path.exists("/tmp/cap-view-edit-allow"):
+    sys.exit(0)  # 委譲ウィンドウ open＝許可
 
 reason = (
     "capacity-dashboard の views/*.js は指示役（メイン）が直接編集しない規約です。"

@@ -33,16 +33,24 @@
 
 ## 委譲の機械的強制（hook ＝ 文書頼みにしない仕組み）
 
-この規約は「読んで守る」だけだと守られなかった（2026-06-19 是正）。そこで**ハーネスが決定論的に実行する hook** で強制している（`.claude/settings.json` ＋ `.claude/hooks/`）:
+この規約は「読んで守る」だけだと守られなかった（2026-06-19 是正）。そこで**ハーネスが決定論的に実行する hook** で強制している（`.claude/settings.json` ＋ `.claude/hooks/block-view-edits.py`）:
 
 - **PreToolUse(Edit/Write/MultiEdit)** → `block-view-edits.py`: 編集先が `capacity-dashboard/app/views/<name>.js` のとき、
-  **サブエージェント稼働中(depth>0)でなければ deny**。＝メインが直接 views を編集しようとすると弾かれる。
+  **マーカー `/tmp/cap-view-edit-allow` が無ければ deny**。＝メインが直接 views を編集しようとすると弾かれる。
   共有の `taskform.js` / `recurrenceform.js` は除外（指示役が直接編集してよい）。lib/ や app.js も対象外。
-- **SubagentStart/SubagentStop** → `subagent-depth.py inc/dec`: 稼働中サブエージェント数を `/tmp/cap-subagent-depth` に記録。
-  ＝ Agent ツールで委譲している間だけ views 編集の窓が開き、終われば自動で閉じる（手動操作不要）。
 
-挙動: 指示役が views を編集 → ブロックされる → スペックを書いて `Agent` に委譲 → 子が編集（窓が開く）→ 戻ると窓が閉じる。
-hook を一時的に外したい/見直したいときは `/hooks` か `.claude/settings.json` を編集。検証ログは git 履歴（commit メッセージ参照）。
+**委譲ウィンドウのマーカー方式（指示役の手順・厳守）:**
+```
+touch /tmp/cap-view-edit-allow      # ← views を編集するサブエージェントを Agent で起動する直前に
+# … Agent で委譲（子が views/*.js を編集）…
+rm -f /tmp/cap-view-edit-allow      # ← サブエージェントが戻ったら必ず閉じる
+```
+- マーカーが無い状態でメインが views を直接編集しようとすると hook が弾く＝**設計どおり委譲を強制**。
+- 開けっ放しは fail-open（メインが views を直接編集できてしまう）になるので、委譲が終わったら必ず `rm`。
+- （旧 `SubagentStart/Stop` の depth カウンタ方式は発火が不安定で fail-open/closed したため 2026-06-20 撤去。マーカー一本＝指示役が決定論的に制御。）
+
+挙動: 指示役が views を編集 → ブロックされる → スペックを書いて `touch` → `Agent` 委譲（子が編集）→ 戻ったら `rm`。
+hook を一時的に外したい/見直したいときは `/hooks` か `.claude/settings.json` を編集。
 
 ## 呼称・前提
 
