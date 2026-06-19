@@ -92,7 +92,7 @@ export async function render(root) {
     memSel.innerHTML = t ? memOptsFor(t) : "";
   };
 
-  root.querySelector("#pl-add").onclick = async () => {
+  const addBtn = root.querySelector("#pl-add"); addBtn.onclick = async () => {
     const tid = +taskSel.value;
     const uid = +memSel.value || null; // #3: 対象者を user_id として帰属
     const day = root.querySelector("#pl-day").value;
@@ -100,10 +100,11 @@ export async function render(root) {
     const msg = root.querySelector("#pl-msg");
     if (!tid || !day || !(h > 0)) { msg.textContent = "入力を確認"; return; }
     msg.textContent = "保存中…";
+    addBtn.disabled = true;
     try {
       await vik.logPlan(tid, Math.round(h * 3600), day, "", uid);
       invalidate();
       await render(root); // 再描画で反映
-    } catch (e) { msg.textContent = "× " + e.message; }
+    } catch (e) { msg.textContent = "× " + e.message; addBtn.disabled = false; }
   };
 }

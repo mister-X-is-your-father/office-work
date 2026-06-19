@@ -143,13 +143,25 @@ export async function render(root) {
   Object.values(optEls).forEach((el) => { el.onchange = saveOpts; });
 
   _root.querySelectorAll("[data-run-task]").forEach((b) => {
-    b.onclick = async () => { saveOpts(); const j = await runAi(+b.dataset.runTask, b.dataset.title); refresh(); watch(j.job.id, j.job.title); };
+    b.onclick = async () => {
+      b.disabled = true;
+      try { saveOpts(); const j = await runAi(+b.dataset.runTask, b.dataset.title); refresh(); watch(j.job.id, j.job.title); }
+      finally { b.disabled = false; }
+    };
   });
   _root.querySelectorAll("[data-plan-task]").forEach((b) => {
-    b.onclick = async () => { saveOpts(); const j = await planAi(+b.dataset.planTask, b.dataset.title); refresh(); watch(j.job.id, j.job.title); };
+    b.onclick = async () => {
+      b.disabled = true;
+      try { saveOpts(); const j = await planAi(+b.dataset.planTask, b.dataset.title); refresh(); watch(j.job.id, j.job.title); }
+      finally { b.disabled = false; }
+    };
   });
   _root.querySelectorAll("[data-run-script]").forEach((b) => {
-    b.onclick = async () => { const j = await runScript(b.dataset.runScript); refresh(); watch(j.job.id, j.job.title); };
+    b.onclick = async () => {
+      b.disabled = true;
+      try { const j = await runScript(b.dataset.runScript); refresh(); watch(j.job.id, j.job.title); }
+      finally { b.disabled = false; }
+    };
   });
 
   await refresh();
