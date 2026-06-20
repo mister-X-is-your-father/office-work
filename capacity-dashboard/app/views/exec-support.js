@@ -265,11 +265,12 @@ const PLUGINS = [
       ensureRowIds(data.items || (data.items = []));
       const n = data.items.length;
       const rows = data.items.map((it, i) => `
-        <div class="es-row" data-id="${it.__id}">
+        <div class="es-row${it.done ? " done" : ""}" data-id="${it.__id}">
           <span class="es-ord">
             <button type="button" class="es-ordb" data-act="up" aria-label="上へ移動"${i === 0 ? " disabled" : ""}>${icon("arrowUp", { size: 13 })}</button>
             <button type="button" class="es-ordb" data-act="down" aria-label="下へ移動"${i === n - 1 ? " disabled" : ""}>${icon("chevronDown", { size: 13 })}</button>
           </span>
+          <input type="checkbox" class="es-step-done" data-k="done"${it.done ? " checked" : ""} aria-label="この手順を完了にする" title="完了にする">
           <input class="es-in es-grow" data-k="title" type="text" placeholder="手順" value="${esc(it.title || "")}">
           <input class="es-in es-w64" data-k="est" type="text" inputmode="decimal" placeholder="見積h" value="${esc(it.est || "")}">
           <input class="es-in es-w120" data-k="due" type="text" placeholder="期日" value="${esc(it.due ? dueLabel(it.due) : "")}">
@@ -294,6 +295,12 @@ const PLUGINS = [
         const it = data.items.find((x) => x.__id === rowEl.dataset.id);
         if (!it) return;
         rowEl.querySelector('[data-k="title"]').addEventListener("input", (e) => { it.title = e.target.value; save(); });
+        const doneEl = rowEl.querySelector('[data-k="done"]');
+        if (doneEl) doneEl.addEventListener("change", () => {
+          it.done = doneEl.checked;
+          rowEl.classList.toggle("done", doneEl.checked); // 取り消し線（再描画せず軽量に）
+          save();
+        });
         rowEl.querySelector('[data-k="est"]').addEventListener("input", (e) => { it.est = e.target.value; save(); });
         const dueEl = rowEl.querySelector('[data-k="due"]');
         dueEl.addEventListener("change", () => {
@@ -767,6 +774,8 @@ export function ensureStyle() {
   .es-w160{width:160px;flex:none}
   .es-rowx{border:0;background:transparent;color:var(--muted);cursor:pointer;padding:3px;border-radius:6px;line-height:0;flex:none}
   .es-rowx:hover{color:var(--over,#e5484d);background:var(--track)}
+  .es-row .es-step-done{flex:none;margin:0;cursor:pointer}
+  .es-row.done [data-k="title"]{text-decoration:line-through;color:var(--muted)}
   .es-check{display:flex;align-items:center;gap:8px}
   .es-check input[type=checkbox]{margin:0;flex:none}
   .es-check.done .es-check-in{text-decoration:line-through;color:var(--muted)}

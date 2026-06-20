@@ -421,8 +421,9 @@ class H(BaseHTTPRequestHandler):
                     scores[k] = s
                 try:
                     items = (((v or {}).get("steps") or {}).get("items")) or []
-                    dated = [{"title": (it.get("title") or ""), "due": it.get("due"), "done": bool(it.get("done"))}
-                             for it in items if isinstance(it, dict) and it.get("due")]
+                    # idx = items 内の元位置（クライアントが done を書き戻すとき対象手順を正確に狙うため）。
+                    dated = [{"idx": i, "title": (it.get("title") or ""), "due": it.get("due"), "done": bool(it.get("done"))}
+                             for i, it in enumerate(items) if isinstance(it, dict) and it.get("due")]
                     if dated:
                         steps_by_task[k] = dated
                 except (TypeError, ValueError, AttributeError):

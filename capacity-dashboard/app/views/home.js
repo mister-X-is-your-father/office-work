@@ -6,7 +6,8 @@ import { capacityOn } from "../lib/recurrence.js";
 import { statusOf } from "../lib/kinds.js";
 import { C, esc, fmtH, todayISO, member_color } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
-import { getPrepScores } from "../lib/exec.js";
+import { getPrepScores, getPrep, savePrep } from "../lib/exec.js";
+import { setTaskStarted } from "../lib/api.js";
 import { icon } from "../lib/icons.js";
 import * as today from "./today.js";
 import * as workplan from "./workplan.js";
@@ -131,7 +132,7 @@ export async function render(root) {
     if (!t || !isOpen(t)) continue;
     for (const s of steps || []) {
       if (s && s.due === day && !s.done && (s.title || "").trim()) {
-        mitItems.push({ taskId: t.id, taskTitle: t.title, stepTitle: s.title });
+        mitItems.push({ taskId: t.id, taskTitle: t.title, stepTitle: s.title, idx: s.idx });
       }
     }
   }
@@ -140,11 +141,14 @@ export async function render(root) {
       <div class="mit-h">${icon("play", { size: 15 }) || "▶"}<span>今日やる1手</span><span class="mit-n">${mitItems.length}</span></div>
       <div class="mit-rows">
         ${mitItems.map((it) => `
-          <button type="button" class="mit-row" data-prep="${it.taskId}">
-            <span class="mit-step">${esc(it.stepTitle)}</span>
-            <span class="mit-task">${esc(it.taskTitle)}</span>
-            <span class="mit-go">${icon("chevronRight", { size: 14 }) || "›"}</span>
-          </button>`).join("")}
+          <div class="mit-row" data-task="${it.taskId}" data-idx="${it.idx}">
+            <input type="checkbox" class="mit-check" aria-label="この手順を完了にする" title="完了にする">
+            <button type="button" class="mit-open" data-prep="${it.taskId}">
+              <span class="mit-step">${esc(it.stepTitle)}</span>
+              <span class="mit-task">${esc(it.taskTitle)}</span>
+            </button>
+            <button type="button" class="mit-start" data-start="${it.taskId}" title="着手（進行中にしてポモ開始）">${icon("play", { size: 13 }) || "▶"} 着手</button>
+          </div>`).join("")}
       </div>
     </section>` : "";
 
@@ -197,13 +201,19 @@ export async function render(root) {
       .mit-h .ic{color:${C.fill}}
       .mit-n{margin-left:auto;font-size:11px;font-weight:700;color:#fff;background:${C.fill};border-radius:999px;padding:1px 8px}
       .mit-rows{display:flex;flex-direction:column;gap:5px}
-      .mit-row{display:flex;align-items:center;gap:10px;width:100%;box-sizing:border-box;text-align:left;
-        border:1px solid ${C.line};background:${C.bg};color:${C.ink};font:inherit;cursor:pointer;border-radius:8px;padding:8px 11px}
-      .mit-row:hover{border-color:${C.fill};background:${C.track}}
+      .mit-row{display:flex;align-items:center;gap:10px;width:100%;box-sizing:border-box;
+        border:1px solid ${C.line};background:${C.bg};border-radius:8px;padding:8px 11px}
+      .mit-row:hover{border-color:${C.fill}}
+      .mit-check{flex:none;margin:0;cursor:pointer}
+      .mit-open{flex:1;min-width:0;display:flex;align-items:center;gap:10px;text-align:left;
+        border:0;background:transparent;color:${C.ink};font:inherit;cursor:pointer;padding:0}
       .mit-step{font-size:12.5px;font-weight:600;line-height:1.3;flex:none;max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .mit-task{font-size:11px;color:${C.muted};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
-      .mit-go{margin-left:auto;color:${C.muted};line-height:0;flex:none}
-      .mit-row:hover .mit-go{color:${C.fill}}
+      .mit-open:hover .mit-step{color:${C.fill}}
+      .mit-start{flex:none;display:inline-flex;align-items:center;gap:4px;font:inherit;font-size:11px;font-weight:700;
+        color:#fff;background:${C.fill};border:1px solid ${C.fill};border-radius:7px;padding:5px 10px;cursor:pointer;line-height:1}
+      .mit-start:hover{filter:brightness(1.06)}
+      .mit-start:disabled{opacity:.6;cursor:default}
       .home-stack{display:flex;flex-direction:column;gap:16px}
       .home-sec{padding:0;overflow:hidden}
       .home-sec-head{display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;
@@ -262,9 +272,39 @@ export async function render(root) {
       .td-more:hover{text-decoration:underline}
     </style>`;
 
-  // E1 MIT バンド: 各行クリックでそのタスクの着手準備タブへ直行（root 直下なので即配線可）。
-  root.querySelectorAll(".mit-row[data-prep]").forEach((el) => {
+  // E1 MIT バンド: 行を「操作できる」3アクションに分割（テキスト＝準備タブ / チェック＝消し込み / ▶＝着手）。
+  // テキスト＝準備タブへ（従来動作）
+  root.querySelectorAll(".mit-open[data-prep]").forEach((el) => {
     el.onclick = () => openTaskForm({ taskId: +el.dataset.prep, tab: "prep", onSaved: () => render(root) });
+  });
+  // チェック＝その段取り手順を done にして保存→消し込み（MITから消える）
+  root.querySelectorAll(".mit-check").forEach((cb) => {
+    cb.onchange = async () => {
+      const row = cb.closest(".mit-row");
+      const taskId = +row.dataset.task, idx = +row.dataset.idx;
+      cb.disabled = true;
+      try {
+        const d = await getPrep(taskId);
+        const prep = (d && d.prep) || {};
+        if (prep.steps && Array.isArray(prep.steps.items) && prep.steps.items[idx]) {
+          prep.steps.items[idx].done = cb.checked;
+          await savePrep(taskId, prep);
+        }
+        render(root); // MIT を再算出（done になった手順は !done フィルタで消える）
+      } catch { cb.disabled = false; cb.checked = false; } // 失敗時は戻す
+    };
+  });
+  // ▶着手＝進行中＋ポモ開始（exec-support の今すぐ着手と同じ E3 アクション）
+  root.querySelectorAll(".mit-start[data-start]").forEach((btn) => {
+    btn.onclick = async () => {
+      if (btn.dataset.busy === "1") return;
+      btn.dataset.busy = "1"; btn.disabled = true;
+      const taskId = +btn.dataset.start;
+      const t = (tasks || []).find((x) => x.id === taskId) || taskId;
+      try { await setTaskStarted(t); } catch { /* API ダウンでも続行 */ }
+      try { const pm = await import("./pomodoro.js"); pm.startFocusFor(taskId, (typeof t === "object" ? t.title : "")); } catch { /* noop */ }
+      btn.dataset.busy = ""; btn.disabled = false;
+    };
   });
 
   // 各埋め込みは load() の共有キャッシュ経由（二重 fetch なし）。
