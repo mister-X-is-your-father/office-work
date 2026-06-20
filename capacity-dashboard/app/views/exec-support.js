@@ -399,18 +399,23 @@ const PLUGINS = [
         const stepsData = ctx && ctx.prep && ctx.prep.steps;
         const steps = (stepsData && stepsData.items) || [];
         if (!deadlineIso || !steps.length) return;
-        if (typeof confirm === "function" && !confirm(`締切 ${dueLabel(deadlineIso)} から逆算して、${steps.length} 手順に作業日を割り当てます。各手順の既存の期日は上書きされます。実行しますか？`)) return;
+        // 完了済み(done)手順は動かさない＝未完了だけを再配置（元 index を保持して結果を戻す）。
+        const placeIdx = steps.map((s, i) => (s && s.done) ? -1 : i).filter((i) => i >= 0);
+        if (!placeIdx.length) return; // 未完了手順なし＝何もしない
+        const placeSteps = placeIdx.map((i) => steps[i]);
+        if (typeof confirm === "function" && !confirm(`締切 ${dueLabel(deadlineIso)} から逆算して、未完了の ${placeSteps.length} 手順に作業日を割り当てます（完了済みは動かしません・今日以降に配置）。各手順の既存の期日は上書きされます。実行しますか？`)) return;
         backBtn.dataset.busy = "1"; backBtn.disabled = true;
         try {
           const { capH, windows, holidaysSet, unavailRanges, bufferPct, todayIso, committedByDay } = await loadBackcastCtx(ctx, deadlineIso);
-          const { dueByIndex, unplaced } = backcast({ steps, deadlineIso, capH, windows, holidaysSet, unavailRanges, bufferPct, todayIso, committedByDay });
-          steps.forEach((it, i) => { if (dueByIndex.has(i)) it.due = dueByIndex.get(i); });
+          const { dueByIndex, unplaced } = backcast({ steps: placeSteps, deadlineIso, capH, windows, holidaysSet, unavailRanges, bufferPct, todayIso, committedByDay });
+          // dueByIndex のキーは placeSteps 内の index → 元の steps の index へ戻す。
+          placeIdx.forEach((origIdx, newIdx) => { if (dueByIndex.has(newIdx)) steps[origIdx].due = dueByIndex.get(newIdx); });
           save();
-          // オーバーコミット早期警告（F3）: 入り切らない手順があれば予定化カードに残る赤いバナー、
+          // オーバーコミット早期警告（F3）: 入り切らない未完了手順があれば予定化カードに残る赤いバナー、
           // 全部置けたら解除（＝再逆算で unplaced==0 になればバナーは消える）。
           if (ctx) {
             ctx._overcommit = unplaced > 0
-              ? { unplaced, total: steps.length, deadlineIso }
+              ? { unplaced, total: placeSteps.length, deadlineIso }
               : null;
           }
           // 段取りカードを再描画して新しい期日を表示（タスク本体の due_date は変更しない）。
