@@ -67,6 +67,16 @@ export async function updateTask(taskId, patch) {
 export async function setEstimate(taskId, seconds) {
   return updateTask(taskId, { time_estimate: seconds });
 }
+// タスクを「進行中」に（着手）。started_at に現在時刻をセット＝statusOf が doing 判定（capacity.js hasStarted）。
+// task がオブジェクトで既に着手済み（started_at あり）なら何もしない＝着手時刻を上書きしない（冪等）。
+// 戻り値: 着手をセットしたら true / 既に着手済みで何もしなければ false。
+export async function setTaskStarted(task) {
+  const id = (task && typeof task === "object") ? task.id : task;
+  const cur = (task && typeof task === "object") ? task.started_at : null;
+  if (cur && !String(cur).startsWith("0001")) return false; // 既に着手済み（上書きしない）
+  await updateTask(id, { started_at: new Date().toISOString() });
+  return true;
+}
 export async function logTime(taskId, seconds, note = "", loggedOn = null) {
   const body = { seconds, note };
   if (loggedOn) body.logged_on = loggedOn;

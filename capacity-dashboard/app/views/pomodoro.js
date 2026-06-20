@@ -14,6 +14,7 @@ const KEY = "ts.pomo";            // 実行中状態（下記 st 形）
 const CNT = "ts.pomo.count.";     // 今日の完了集中回数（日付キー）
 const BASE_TITLE = document.title || "TaskStation";
 let _pomoTimer = null;            // 冪等マウント用: 軽量ループのタイマーは常に1本
+let _ctl = null;                  // 外部開始用: mountPomodoro 内のクロージャ(open/loop/card)への橋渡し
 
 // st: { taskId, taskTitle, mode: focus|break|countdown|countup, focusMin, breakMin, durMin,
 //       endsAt(focus/break/countdown), startedAt(countup), paused, remainMs, elapsedMs }
@@ -192,6 +193,18 @@ async function record(taskId, taskTitle, seconds) {
   }
 }
 
+// 外部（実行サポートの「今すぐ着手」等）から集中セッションを開始する。
+//   稼働中のセッションがあれば壊さない（記録漏れ防止）＝カードを開いて見せるだけで false を返す。
+//   セッションが無ければ focus 状態を st に積み、マウント済みなら即カード表示＋計測開始。
+export function startFocusFor(taskId, taskTitle, focusMin = 25, breakMin = 5) {
+  const cur = st.get();
+  if (cur) { if (_ctl) _ctl.show(); return false; } // 既に何か走っている→上書きしない
+  st.set({ taskId: taskId != null ? taskId : null, taskTitle: taskTitle || "", paused: false,
+           mode: "focus", focusMin, breakMin, endsAt: Date.now() + focusMin * 60000 });
+  if (_ctl) _ctl.show();
+  return true;
+}
+
 export function mountPomodoro(topbar) {
   if (_pomoTimer) { clearInterval(_pomoTimer); _pomoTimer = null; }
   ensureStyle();
@@ -332,6 +345,9 @@ export function mountPomodoro(topbar) {
     timer = setInterval(loop, 1000);
   };
   btn.onclick = open;
+
+  // 外部（startFocusFor）からカードを開いて/再描画して計測表示を反映させるための橋渡し。
+  _ctl = { show: () => { if (!card) open(); else { card._idle = false; loop(); } } };
 
   // カード全体に色/透明度を適用（半透明＝背景rgba＋ぼかし。文字は不透明のまま）
   // 背景はインラインで効く＝CSSのダーク上書きより強いので、ここでテーマ判定して暗面rgbaを使う。

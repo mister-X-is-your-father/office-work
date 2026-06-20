@@ -8,7 +8,7 @@
 // 仕様: docs/exec-support-spec.md。データ形は固定（taskform/将来の一覧が依存）:
 //   prep = { next_step, steps, schedule, if_then, prereqs, obstacles, dod, score }
 import { getPrep, savePrep, getSettings, saveProtectedWindows } from "../lib/exec.js";
-import { updateTask } from "../lib/api.js";
+import { updateTask, setTaskStarted } from "../lib/api.js";
 import { load, isAiUser } from "../lib/store.js";
 import { shiftISO, committedHoursByDayInRange } from "../lib/capacity.js";
 import { esc } from "../lib/ui.js";
@@ -1388,9 +1388,22 @@ export async function renderExecSupport(container, { taskId, task = null, onChan
     if (due) { due.focus(); due.scrollIntoView({ block: "nearest", behavior: "smooth" }); }
   });
 
-  container.querySelector("#es-go").addEventListener("click", () => {
-    const next = (prep.next_step && prep.next_step.text || "").trim();
-    showToast(next ? `さあ着手: ${next.length > 28 ? next.slice(0, 27) + "…" : next}` : "まずは「次の一歩」を1つ決めましょう");
+  const goBtn = container.querySelector("#es-go");
+  goBtn.addEventListener("click", async () => {
+    if (goBtn.dataset.busy === "1") return;
+    goBtn.dataset.busy = "1"; goBtn.disabled = true;
+    try {
+      // 1) ステータスを「進行中」に（着手時刻セット・既に着手済みなら冪等で何もしない）。
+      if (ctx.taskId != null) { try { await setTaskStarted(ctx.task || ctx.taskId); } catch { /* API ダウンでも続行 */ } }
+      // 2) 集中タイマー（ポモドーロ）を開始（動的 import で遅延ロード・循環回避）。
+      try { const pm = await import("./pomodoro.js"); pm.startFocusFor(ctx.taskId, ctx.task && ctx.task.title); } catch { /* ポモ未マウント等は無視 */ }
+      const next = (prep.next_step && prep.next_step.text || "").trim();
+      showToast(next
+        ? `着手しました（進行中・ポモ開始）: ${next.length > 22 ? next.slice(0, 21) + "…" : next}`
+        : "着手しました（進行中・ポモ開始）");
+    } finally {
+      goBtn.dataset.busy = ""; goBtn.disabled = false;
+    }
   });
 
   // 念のため初期メーターを同期（render とズレないように）。
