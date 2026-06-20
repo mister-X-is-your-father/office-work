@@ -1168,8 +1168,8 @@ function ganttStyles() {
   .gv .gantt.tight .gh-day.wk{border-right:1px solid ${C.line}}
   .gv .bar-area{position:absolute;left:var(--label-w);top:0;right:0;height:${ROW_H}px}
   .gv .bar{position:absolute;border-radius:5px;overflow:hidden}
-  .gv .bar.plan{top:14px;height:11px;background:${C.track};box-shadow:inset 0 0 0 1px rgba(58,134,255,.35)}
-  .gv .bar.plan::after{content:"";position:absolute;inset:0;background:rgba(58,134,255,.16)}
+  .gv .bar.plan{top:14px;height:11px;background:${C.track};box-shadow:inset 0 0 0 1px rgba(58,134,255,.35);overflow:visible}
+  .gv .bar.plan::after{content:"";position:absolute;inset:0;background:rgba(58,134,255,.16);border-radius:inherit}
   .gv .bar.act{top:28px;height:15px;background:${C.track};box-shadow:inset 0 0 0 1px rgba(0,0,0,.05)}
   .gv .bar.act.over{box-shadow:inset 0 0 0 1.5px ${C.over}}
   .gv .bar.clipL{border-radius:0 5px 5px 0}
@@ -1179,8 +1179,10 @@ function ganttStyles() {
   .gv .bar.plan.draggable{cursor:grab;touch-action:none}
   .gv .bar.plan.draggable:hover{box-shadow:inset 0 0 0 1.5px ${C.fill}}
   .gv .bar.plan.dragging{cursor:grabbing;opacity:.9;z-index:7;box-shadow:inset 0 0 0 1.5px ${C.fill}}
-  .gv .bar-h{position:absolute;top:0;bottom:0;width:7px;cursor:ew-resize;z-index:1}
-  .gv .bar-h.l{left:0}.gv .bar-h.r{right:0}
+  .gv .bar-h{position:absolute;top:0;bottom:0;width:14px;cursor:ew-resize;z-index:1}
+  .gv .bar-h.l{left:-5px}.gv .bar-h.r{right:-5px}
+  /* hover 時のみ、左右の掴み代を淡青で示す（plan は overflow:visible なので外側張り出し分も見える） */
+  .gv .bar.plan.draggable:hover .bar-h{background:rgba(58,134,255,.22);border-radius:4px}
   /* タップ端末向け「⋮」日程シフトボタン（プログレッシブ拡張）。バー右端に小さく重ねる。
      マウス環境では既定 非表示で、行/バーのホバー or フォーカス時のみ控えめに出す（DnD の邪魔をしない）。
      タッチ環境（hover:none / pointer:coarse）では常時可視＝唯一の操作手段になる。 */
