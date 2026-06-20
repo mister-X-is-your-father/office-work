@@ -8,7 +8,9 @@
 ## 0. 一言で
 タスクの「着手の不確実性」を機械的に削る仕組み。**準備（フェーズ1）＝完成**。**キャパ保護＝第一弾＋F1完成**。
 **実行ループ（波E）＝完成**: E1今日やる1手→E2朝の通知→E3今すぐ着手(進行中＋ポモ)→手順done消し込み→E4検知(遅れ督促)→E4再逆算(残りを今日から組み直し)→E5報告(report/statusに今日やる1手・進行中を反映)。
-正直な体感: 準備75 / 実行80 / 運用75。キャパ保護＝第一弾＋F1＋F4(今週予算)＋F5(割り込みゼロサム)完成。残り＝**F6 ディープワーク枠(要設計判断)**のみ。Slack無人送信は不要指示。
+正直な体感: 準備75 / 実行80 / 運用80。**波E（実行ループ）＋波F（キャパ保護）とも一通り完成**＝実行サポートのエピックは機能的に完了。
+キャパ保護＝第一弾＋F1横断逆算＋F4今週予算＋F5割り込みゼロサム＋F6ディープワーク枠。Slack無人送信は不要指示。
+残りは任意の磨き（再逆算の自動発火・deep枠の視覚バッジ等）と、判断保留(C12定期一時停止・C5/C6視覚リデザイン)のみ。
 
 ## 1. 完了済み（コミット済み・全てブラウザE2E検証）
 - **MVP**: exec `/prep/:taskId` ストア＋クライアント＋着手準備パネル＋taskform「実行準備」タブ（`3d8e1f8`,`7adfa14`）
@@ -49,6 +51,10 @@
   設定したら期限欄下に警告（別日にするか何かを外す）。#tf-due blur ＋ #tf-asg change で checkDueCapacity。capacity/recurrence を
   import。taskform は共有＝指示役直接編集(hook対象外)。3ブランチ(非稼働日/満杯/空き)を実フォームで検証・console0。
   ※E2E教訓: store を `?t=` でcache-bustすると taskform が使うクリーン store と別インスタンスになり反映されない＝検証時はクリーンimportで load(true)。
+- **波F-F6 ディープワーク枠**（`f9d9f19`）: 保護時間帯に種別 `deep` を追加＝重要タスク専用の集中枠。逆算の容量を per-task 化＝
+  通常タスクは deep を避ける(差引)が、優先度高(priority>=4)の逆算だけ deep を実空きに開放。`protectedHoursOnDow(.., {includeDeep})`＋
+  `backcast(.., taskIsImportant)`＋`loadBackcastCtx` が ctx.task.priority>=4 判定。PW_KINDS/pwClean に deep。buffer/block は常に差引(不変)。
+  実バンドルで通常=あふれ/重要=配置/buffer は重要でも差引、を決定論確認・console0。
 
 ## 2. アーキテクチャ（ファイルと責務）
 - `app/views/exec-support.js`（**私=指示役は直接編集不可**・委譲のみ）: プラグイン・レジストリ `PLUGINS`（next_step/steps/schedule/if_then/prereqs/obstacles/dod）、`backcast()`（逆算・今日床止め・容量/祝日/休暇/保護枠/バッファ考慮）、メーター演出、診断、保護時間帯エディタ、F3警告バナー。`renderExecSupport(container,{taskId,task})` / `ensureStyle()` をexport。
@@ -79,9 +85,8 @@
 - **波F キャパ保護 残り**:
   - ~~F4 キャパ予算可視化~~ → 完了（`e28e451`・home の今週予算バンド）。
   - ~~F5 割り込みゼロサム~~ → 完了（`5a8ff93`・taskform の期限満杯/非稼働日警告）。
-  - **F6 ディープワーク枠（要設計判断・波Fの最後）**: 最重要タスク専用の確保枠（保護枠の逆）。保護時間帯は backcast が「避ける」枠だが、
-    deep枠は「重要タスクが使う／他が侵せない」＝per-task のセマンティクスが要る。モデル選択(protected_windows に kind:'deep' を足し、
-    重要タスクの逆算だけ deep枠を実空きに含める 等)を**ユーザーと相談してから**。C12 と同じく判断保留扱い。
+  - ~~F6 ディープワーク枠~~ → 完了（`f9d9f19`・protected_windows に kind:'deep'・重要タスク(priority>=4)の逆算だけ deep を実空きに開放）。
+  - **波F＝完了。** 任意の磨き候補: deep枠の視覚バッジ（編集UIで種別ごとの色分け）／再逆算の自動発火／F6の「重要」判定を priority 以外(prep score 等)にも広げるか。
   ※ F1 は他タスクの **plans** を引く（prep の段取り手順の due は未考慮＝将来 materialize 時に拡張余地）。
 - **判断保留（要ユーザー入力）**: C12 定期一時停止のモデル選択 / C5・C6 視覚リデザイン（light変更＝目視パリティ承認前提）。
 - **判断保留（要ユーザー入力）**: C12 定期一時停止のモデル選択 / C5・C6 視覚リデザイン（light変更＝目視パリティ承認前提）。
