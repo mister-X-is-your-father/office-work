@@ -39,3 +39,30 @@ test("時刻つき予定を立て済みのタスクは期日通知から除外�
 test("meId なしは空", () => {
   assert.deepEqual(notifyEvents({ tasks: baseTasks, plansByTask: plans, recurrences: [], meId: null }, DAY), []);
 });
+
+test("今日が期日の段取り手順(E2)を営業開始に通知・done/別日/他人/完了タスクは除外", () => {
+  const tasks = [
+    { id: 1, title: "資料作成", done: false, assignees: [{ id: ME }] },
+    { id: 3, title: "他人タスク", done: false, assignees: [{ id: 99 }] },
+    { id: 4, title: "完了タスク", done: true, assignees: [{ id: ME }] },
+  ];
+  const stepsByTask = {
+    "1": [
+      { idx: 0, title: "今日の手順", due: DAY, done: false },   // ← 通知される
+      { idx: 1, title: "完了済み手順", due: DAY, done: true },  // done=除外
+      { idx: 2, title: "明日の手順", due: "2026-06-13", done: false }, // 別日=除外
+    ],
+    "3": [{ idx: 0, title: "他人の手順", due: DAY, done: false }],  // 他人タスク=除外
+    "4": [{ idx: 0, title: "完了タスクの手順", due: DAY, done: false }], // 完了タスク=除外
+  };
+  const ev = notifyEvents({ tasks, plansByTask: new Map(), recurrences: [], meId: ME, calStart: 9, stepsByTask }, DAY);
+  assert.deepEqual(ev.map((e) => e.key), [`step:1:0:${DAY}`]);
+  assert.equal(ev[0].minute, 540); // calStart 9:00
+  assert.equal(ev[0].title, "資料作成");
+  assert.equal(ev[0].body, "今日やる手順: 今日の手順");
+});
+
+test("stepsByTask 未指定でも従来どおり動く（後方互換）", () => {
+  const ev = notifyEvents({ tasks: baseTasks, plansByTask: plans, recurrences: [], meId: ME, calStart: 9 }, DAY);
+  assert.deepEqual(ev.map((e) => e.key), ["due:2:" + DAY, "plan:10"]);
+});

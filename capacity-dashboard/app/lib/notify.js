@@ -17,9 +17,12 @@ export const saveNotifyPrefs = (uid, prefs) => localStorage.setItem(`ts.notify.$
 const hhmm = (m) => `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
 
 // 今日(dayISO)の通知イベント [{key, minute, title, body}]（分=0..1439・対象は meId 本人のみ）
-export function notifyEvents({ tasks, plansByTask, recurrences, meId, calStart = 8 }, dayISO) {
+//   stepsByTask（任意・E2）= { "<taskId>": [{idx,title,due,done}] }。「今日が期日の段取り手順」を
+//   営業開始(calStart)にまとめて通知＝朝に「今日やる1手」を提示する。担当に meId を含むタスクのみ。
+export function notifyEvents({ tasks, plansByTask, recurrences, meId, calStart = 8, stepsByTask = null }, dayISO) {
   const out = [];
   if (!meId) return out;
+  const taskById = new Map((tasks || []).map((t) => [t.id, t]));
   const plannedTaskIds = new Set(); // 時刻つきpredicate（期限通知の重複排除用）
   for (const t of tasks || []) {
     if (t.done) continue;
@@ -45,6 +48,16 @@ export function notifyEvents({ tasks, plansByTask, recurrences, meId, calStart =
     if (!t.due_date || t.due_date.startsWith("0001") || dateOnly(t.due_date) !== dayISO) continue;
     if (!(t.assignees || []).some((a) => a.id === meId)) continue;
     out.push({ key: `due:${t.id}:${dayISO}`, minute: calStart * 60, title: t.title, body: "今日が期限" });
+  }
+  // 今日が期日の段取り手順（E2）→ 営業開始にまとめて。担当に meId を含む未完了タスクの未完了手順のみ。
+  for (const [tidStr, steps] of Object.entries(stepsByTask || {})) {
+    const t = taskById.get(+tidStr);
+    if (!t || t.done) continue;
+    if (!(t.assignees || []).some((a) => a.id === meId)) continue;
+    for (const s of steps || []) {
+      if (!s || s.due !== dayISO || s.done || !((s.title || "").trim())) continue;
+      out.push({ key: `step:${t.id}:${s.idx}:${dayISO}`, minute: calStart * 60, title: t.title, body: `今日やる手順: ${s.title}` });
+    }
   }
   return out.sort((a, b) => a.minute - b.minute);
 }
@@ -97,9 +110,13 @@ export function startNotifications(getData) {
     const dayISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     const nowMin = now.getHours() * 60 + now.getMinutes();
     const fired = firedSet(dayISO);
+    // E2: 着手準備の段取り手順（今日が期日）を取得して通知源に加える。動的 import＝
+    // notify.js の静的依存を純粋に保ち（exec.js は location 参照で node テストを壊す）、exec ダウン時も握る。
+    let stepsByTask = null;
+    try { const ex = await import("./exec.js"); stepsByTask = (await ex.getPrepScores())?.steps_by_task || null; } catch { /* exec ダウン時は手順通知なしで続行 */ }
     const events = notifyEvents({
       tasks: data.tasks, plansByTask: data.plansByTask, recurrences: data.recurrences,
-      meId: me.id, calStart: (data.settings && data.settings.calStart) || 8,
+      meId: me.id, calStart: (data.settings && data.settings.calStart) || 8, stepsByTask,
     }, dayISO);
     let dirty = false;
     for (const ev of events) {
