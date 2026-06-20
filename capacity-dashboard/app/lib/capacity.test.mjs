@@ -4,8 +4,45 @@ import {
   toH, dateOnly, hasDate, isActiveOn, taskHoursOn, isBusinessDay, businessDays,
   loadByMember, weekLoadByMember, estimateVsActual, triage, sumByMemberDay,
   shiftISO, taskRanges, dependencyEdges, dayScale, toMemberDayEntries, taskPlannedHoursByMemberOn,
-  buildTaskTree, depLayers, applyBarDrag,
+  buildTaskTree, depLayers, applyBarDrag, committedHoursByDayInRange,
 } from "./capacity.js";
+
+test("committedHoursByDayInRange: plans を日別に集計（範囲外・除外・done を弾く）", () => {
+  const tasks = [
+    { id: 10, title: "A", done: false, assignees: [{ id: 1 }], time_planned: 7200 },
+    { id: 11, title: "B(除外対象)", done: false, assignees: [{ id: 1 }], time_planned: 3600 },
+    { id: 12, title: "C(完了)", done: true, assignees: [{ id: 1 }], time_planned: 3600 },
+  ];
+  const plansByTask = new Map([
+    [10, [{ plan_date: "2026-06-10", seconds: 7200, user_id: 1 }, // 2h 当日
+          { plan_date: "2026-06-12", seconds: 3600, user_id: 1 }, // 1h 範囲内
+          { plan_date: "2026-06-20", seconds: 3600, user_id: 1 }]], // 範囲外（無視）
+    [11, [{ plan_date: "2026-06-10", seconds: 3600, user_id: 1 }]], // excludeTaskId で無視
+    [12, [{ plan_date: "2026-06-10", seconds: 3600, user_id: 1 }]], // done で無視
+  ]);
+  const m = committedHoursByDayInRange(tasks, plansByTask, 1, "2026-06-10", "2026-06-12", { excludeTaskId: 11 });
+  assert.equal(m.get("2026-06-10"), 2); // A のみ（B除外・C完了）
+  assert.equal(m.get("2026-06-12"), 1);
+  assert.equal(m.has("2026-06-20"), false); // 範囲外
+  assert.equal(m.get("2026-06-11"), undefined); // 予定なし日は欠落
+});
+
+test("committedHoursByDayInRange: plans 無しは見積り営業日割り、他メンバーは拾わない", () => {
+  // 見積り 8h を 6/11(木)-6/12(金) の2営業日に割る = 各日4h。担当 id=2。
+  const tasks = [{ id: 20, title: "D", done: false, assignees: [{ id: 2 }],
+                   time_estimate: 8 * 3600, start_date: "2026-06-11T00:00:00Z", end_date: "2026-06-12T00:00:00Z" }];
+  const m2 = committedHoursByDayInRange(tasks, null, 2, "2026-06-10", "2026-06-15");
+  assert.equal(m2.get("2026-06-11"), 4);
+  assert.equal(m2.get("2026-06-12"), 4);
+  const m1 = committedHoursByDayInRange(tasks, null, 1, "2026-06-10", "2026-06-15"); // 別メンバー
+  assert.equal(m1.size, 0);
+});
+
+test("committedHoursByDayInRange: 不正範囲・memberId null は空 Map", () => {
+  const tasks = [{ id: 30, done: false, assignees: [{ id: 1 }], time_planned: 3600 }];
+  assert.equal(committedHoursByDayInRange(tasks, null, 1, "2026-06-12", "2026-06-10").size, 0); // from>to
+  assert.equal(committedHoursByDayInRange(tasks, null, null, "2026-06-10", "2026-06-12").size, 0);
+});
 
 test("depLayers: 段組み＋クリティカルパス(最長鎖)", () => {
   // 1→2→4, 1→3, 3→4  : 最長鎖は 1→2→4 もしくは 1→3→4(同長3)

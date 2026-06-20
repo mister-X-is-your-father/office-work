@@ -120,6 +120,28 @@ export function loadByMember(tasks, members, isoDay, capH = 8, plansByTask = nul
   }));
 }
 
+// 【F1 横断逆算の実空き源】指定メンバーが各日に既にコミット済みの予定負荷(h) を
+// Map<"YYYY-MM-DD", h> で返す。逆算が「他タスクで既に埋まっている分」を差し引くのに使う。
+//   範囲は [fromIso, toIso] inclusive（逆算窓ぶんだけ・全カレンダー走査を避ける）。
+//   plans 優先（無ければ見積り営業日割り＝loadByMember と同じ単一真実 #4）。
+//   excludeTaskId（=逆算対象タスク自身）と done タスクは除外。多担当はそのメンバーにフル（按分しない）。
+export function committedHoursByDayInRange(tasks, plansByTask, memberId, fromIso, toIso, { excludeTaskId = null, holidays = null } = {}) {
+  const out = new Map();
+  if (!fromIso || !toIso || memberId == null || fromIso > toIso) return out;
+  const days = [];
+  for (let cur = fromIso, i = 0; cur <= toIso && i < 4000; cur = shiftISO(cur, 1), i++) days.push(cur);
+  for (const t of tasks || []) {
+    if (excludeTaskId != null && t.id === excludeTaskId) continue;
+    if (t.done) continue;
+    const entries = planEntriesFor(plansByTask, t.id);
+    for (const day of days) {
+      const h = taskPlannedHoursByMemberOn(t, day, entries, { holidays }).get(memberId) || 0;
+      if (h > 0) out.set(day, round1((out.get(day) || 0) + h));
+    }
+  }
+  return out;
+}
+
 // 週（isoDays配列）の人別×日 負荷。plansByTask を渡すと plans 優先。
 // opts.holidays(Set): 見積り営業日割りで祝日を除外。
 // 最適化(C8): 旧実装は members×days×tasks の三重走査で taskPlannedHoursByMemberOn を

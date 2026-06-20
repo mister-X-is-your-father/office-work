@@ -10,7 +10,7 @@
 import { getPrep, savePrep, getSettings, saveProtectedWindows } from "../lib/exec.js";
 import { updateTask } from "../lib/api.js";
 import { load, isAiUser } from "../lib/store.js";
-import { shiftISO } from "../lib/capacity.js";
+import { shiftISO, committedHoursByDayInRange } from "../lib/capacity.js";
 import { esc } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
 import { fmtDisplayDow, parseSmartDate } from "../lib/form.js";
@@ -94,8 +94,9 @@ function localTodayIso() {
 //   todayIso=ローカル今日の "YYYY-MM-DD"。後ろ向きに辿る際、この日より前へは配置しない（床止め）。
 //     省略時は内部でローカル今日を算出（後方互換・呼び出し側からは必ず渡す）。
 //     ＝配置可能区間は [todayIso 〜 deadlineIso] の営業日のみ。締切が過去なら 0 日→全手順 unplaced。
+//   committedByDay=Map<"YYYY-MM-DD", h>（他タスクが既にその日に入れている予定負荷・F1）。省略時は0扱い。
 // 返り値: { dueByIndex: Map<stepIndex, iso>, unplaced: number }
-export function backcast({ steps, deadlineIso, capH = 8, windows = [], holidaysSet = null, unavailRanges = [], bufferPct = 0, todayIso = localTodayIso() }) {
+export function backcast({ steps, deadlineIso, capH = 8, windows = [], holidaysSet = null, unavailRanges = [], bufferPct = 0, todayIso = localTodayIso(), committedByDay = null }) {
   const dueByIndex = new Map();
   const list = steps || [];
   if (!list.length || !deadlineIso || deadlineIso.startsWith("0001")) {
@@ -122,10 +123,11 @@ export function backcast({ steps, deadlineIso, capH = 8, windows = [], holidaysS
   };
   // バッファ率を 0〜90 の整数へ正規化（不正・範囲外は安全側へ丸め）。
   const buf = Math.max(0, Math.min(90, Math.round(Number(bufferPct) || 0)));
+  const committedOn = (iso) => (committedByDay && committedByDay.get) ? (committedByDay.get(iso) || 0) : 0;
   const capOf = (iso) => {
     const dow = new Date(iso + "T00:00:00Z").getUTCDay();
-    // capH からバッファ分を引いた「実空き」、さらに保護時間帯を差し引く（下限0）。
-    return Math.max(0, capH * (1 - buf / 100) - protectedHoursOnDow(windows, dow));
+    // capH からバッファ分を引いた「実空き」、保護時間帯＋他タスクの当日予定(F1)を差し引く（下限0）。
+    return Math.max(0, capH * (1 - buf / 100) - protectedHoursOnDow(windows, dow) - committedOn(iso));
   };
 
   // 手順を逆順（末尾＝締切寄り）に詰める。
@@ -166,8 +168,8 @@ export function backcast({ steps, deadlineIso, capH = 8, windows = [], holidaysS
 
 // 逆算に必要なデータをまとめて取得（store.load + exec の保護時間帯）。
 //   ctx.task.assignees の非AI先頭を担当に、無ければ me。担当の休暇レンジを引く。
-async function loadBackcastCtx(ctx) {
-  const { settings, holidaysSet, unavailabilityByMember, me } = await load();
+async function loadBackcastCtx(ctx, deadlineIso = null) {
+  const { settings, holidaysSet, unavailabilityByMember, me, tasks, plansByTask } = await load();
   // exec の team 設定から保護時間帯とバッファ率を取得（ダウン時は保護枠無し・バッファ0で続行）。
   let windows = [];
   let bufferPct = 0;
@@ -180,8 +182,14 @@ async function loadBackcastCtx(ctx) {
   const owner = assignees.find((a) => !isAiUser(a)) || me || null;
   const uid = owner && owner.id;
   const unavailRanges = (uid != null && unavailabilityByMember.get) ? (unavailabilityByMember.get(uid) || []) : [];
+  const todayIso = localTodayIso();
+  // F1: 担当が他タスクで既に埋めている当日予定(plans)を逆算窓ぶん集計し、実空きから差し引く。
+  //   逆算対象タスク自身(ctx.taskId)は二重計上しないよう除外。
+  const committedByDay = (uid != null && deadlineIso)
+    ? committedHoursByDayInRange(tasks, plansByTask, uid, todayIso, deadlineIso, { excludeTaskId: ctx && ctx.taskId, holidays: holidaysSet })
+    : new Map();
   // 床止め用のローカル今日。backcast へ必ず渡す（過去日へ手順を置かないため）。
-  return { capH: settings.capH || 8, windows, holidaysSet, unavailRanges, bufferPct, todayIso: localTodayIso() };
+  return { capH: settings.capH || 8, windows, holidaysSet, unavailRanges, bufferPct, todayIso, committedByDay };
 }
 
 // ── プラグイン・レジストリ ─────────────────────────────────────────
@@ -387,8 +395,8 @@ const PLUGINS = [
         if (typeof confirm === "function" && !confirm(`締切 ${dueLabel(deadlineIso)} から逆算して、${steps.length} 手順に作業日を割り当てます。各手順の既存の期日は上書きされます。実行しますか？`)) return;
         backBtn.dataset.busy = "1"; backBtn.disabled = true;
         try {
-          const { capH, windows, holidaysSet, unavailRanges, bufferPct, todayIso } = await loadBackcastCtx(ctx);
-          const { dueByIndex, unplaced } = backcast({ steps, deadlineIso, capH, windows, holidaysSet, unavailRanges, bufferPct, todayIso });
+          const { capH, windows, holidaysSet, unavailRanges, bufferPct, todayIso, committedByDay } = await loadBackcastCtx(ctx, deadlineIso);
+          const { dueByIndex, unplaced } = backcast({ steps, deadlineIso, capH, windows, holidaysSet, unavailRanges, bufferPct, todayIso, committedByDay });
           steps.forEach((it, i) => { if (dueByIndex.has(i)) it.due = dueByIndex.get(i); });
           save();
           // オーバーコミット早期警告（F3）: 入り切らない手順があれば予定化カードに残る赤いバナー、
