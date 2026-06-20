@@ -61,9 +61,29 @@ export async function render(root) {
   for (const id of nodeIds) { const l = level.get(id); (byLevel.get(l) || byLevel.set(l, []).get(l)).push(id); }
   const maxLevel = Math.max(...nodeIds.map((id) => level.get(id)));
   const pos = new Map();
+
+  // 列内順序をバリセンタ法（Sugiyama の交差削減ヒューリスティック）で決める＝辺交差の削減。
+  // pred/succ は既存の隣接リスト（描画される辺）。初期順は id 昇順＝安定な開始点。決定論的（乱数なし）。
+  const levels = [];
+  for (let l = 0; l <= maxLevel; l++) levels[l] = (byLevel.get(l) || []).slice().sort((a, b) => a - b);
+  const buildIdx = () => { const m = new Map(); for (const col of levels) col.forEach((id, i) => m.set(id, i)); return m; };
+  // ids を neighborsOf(id) の平均インデックス(idxMap)で安定ソート。近傍が無い要素は現在位置を維持。
+  const orderByBary = (idsArr, neighborsOf, idxMap) => {
+    const bary = new Map();
+    idsArr.forEach((id, i) => {
+      const ns = (neighborsOf(id) || []).filter((n) => idxMap.has(n));
+      bary.set(id, ns.length ? ns.reduce((s, n) => s + idxMap.get(n), 0) / ns.length : i);
+    });
+    return idsArr.map((id, i) => [id, i]).sort((a, b) => (bary.get(a[0]) - bary.get(b[0])) || (a[1] - b[1])).map((x) => x[0]);
+  };
+  for (let iter = 0; iter < 4; iter++) {
+    let idx = buildIdx();
+    for (let l = 1; l <= maxLevel; l++) { levels[l] = orderByBary(levels[l], (id) => pred.get(id), idx); idx = buildIdx(); }
+    for (let l = maxLevel - 1; l >= 0; l--) { levels[l] = orderByBary(levels[l], (id) => succ.get(id), idx); idx = buildIdx(); }
+  }
   let maxRows = 0;
   for (let l = 0; l <= maxLevel; l++) {
-    const col = (byLevel.get(l) || []).sort((a, b) => a - b);
+    const col = levels[l] || [];
     maxRows = Math.max(maxRows, col.length);
     col.forEach((id, i) => pos.set(id, { x: l * COLW + PAD, y: i * ROWH + PAD }));
   }
