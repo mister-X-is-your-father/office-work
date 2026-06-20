@@ -363,9 +363,25 @@ export async function render(root) {
   // チップ: 向き切替 / 削除（最後の1件も外せる＝条件なし=既定の期限順）
   root.querySelectorAll(".tb-sc-k").forEach((b) => { b.onclick = () => { const s = V.sorts[+b.dataset.i]; if (s) { s.dir = -(s.dir || 1); V.manualMode = false; reRender(); } }; });
   root.querySelectorAll(".tb-sc-x").forEach((b) => { b.onclick = () => { V.sorts.splice(+b.dataset.i, 1); reRender(); }; });
-  // 列ヘッダ: クリック=第1条件に（単一化）・Shift+クリック=条件として追加/切替（最大5件）
-  root.querySelectorAll("th[data-k]").forEach((h) => {
-    h.onclick = (e) => {
+  // ══ B22: イベント委譲 ══════════════════════════════════════════════════
+  // 行数・要素数に比例していた per-element 結線（チップ7種・進捗・選択・行クリック・
+  // 列ヘッダ・アウトライン行・定期帯行）を、コンテナ少数の委譲リスナ＋closest 分岐に置換。
+  // render() スコープ内なので参照する閉包変数（tasks/members/labels/today/rows/V/UID/root/reRender）は
+  // 旧 per-element 結線と同一＝挙動同値。render 冒頭で root.innerHTML を総入替するためコンテナは毎回新規
+  // ＝onXXX 代入はリーク・二重化しない。
+  // ─────────────────────────────────────────────────────────────────────
+
+  // 表モードの選択ロジック（toggle/range/all）。行チェック・全選択ヘッダの委譲から呼ぶ。
+  const selH = (!isOutline && rows.length) ? selectionHandlers(rows, () => render(root)) : null;
+
+  // ── 列ヘッダ（thead）: ソート切替＋全選択 ──
+  const thead = root.querySelector("table thead");
+  if (thead) {
+    thead.onclick = (e) => {
+      // 全選択チェック（#tb-selall）
+      if (e.target.closest("#tb-selall")) { if (selH) selH.onSelectAll(); return; }
+      // 列ヘッダ: クリック=第1条件に（単一化）・Shift+クリック=条件として追加/切替（最大5件）
+      const h = e.target.closest("th[data-k]"); if (!h) return;
       const k = h.dataset.k;
       V.manualMode = false;
       if (e.shiftKey) {
@@ -377,30 +393,107 @@ export async function render(root) {
       }
       reRender();
     };
-  });
-  root.querySelectorAll("tr[data-id]").forEach((tr) => {
-    tr.onclick = (e) => {
-      if (V.manualMode || e.target.closest(".tb-fable, .tb-rowck")) return;
-      // 編集セル(.tb-gc)はグリッド編集が受け持つ＝行クリックでフォームを開かない（Excel風: クリックは選択）。
-      // 列挙セルのボタンは stopPropagation 済でここに来ない。タイトル等のテキストセルはここで吸収する。
-      if (e.target.closest(".tb-gc")) { gridSelectFromEl(e.target.closest(".tb-gc"), root); return; }
-      openTaskForm({ taskId: +tr.dataset.id, onSaved: () => render(root) });
+  }
+
+  // ── 行内（tbody）: チップ7種・fable・進捗・行チェック・グリッド選択・行クリック編集 ──
+  const tbody = root.querySelector("table tbody");
+  if (tbody) {
+    // クリック（bubble）。最も具体的なターゲットから順に判定し、最初に一致したら処理して return。
+    // ＝旧チップ群の e.stopPropagation() を「順序return」で等価再現。
+    tbody.onclick = (e) => {
+      let el;
+      if ((el = e.target.closest(".tb-stbtn")))   { openStatusMenu(el, +el.dataset.st, tasks, root); return; }
+      if ((el = e.target.closest(".tb-projbtn")))  { openProjectMenu(el, +el.dataset.proj, tasks, root); return; }
+      if ((el = e.target.closest(".tb-asbtn")))    { openAssigneeMenu(el, +el.dataset.as, tasks, members, root); return; }
+      if ((el = e.target.closest(".tb-catbtn")))   { openCategoryMenu(el, +el.dataset.cat, tasks, labels, root); return; }
+      if ((el = e.target.closest(".tb-priobtn")))  { openPrioMenu(el, +el.dataset.prio, tasks, root); return; }
+      if ((el = e.target.closest(".tb-duebtn")))   { openDueMenu(el, +el.dataset.due, tasks, root, today); return; }
+      if ((el = e.target.closest(".tb-estbtn")))   { openEstMenu(el, +el.dataset.est, tasks, root); return; }
+      if ((el = e.target.closest(".tb-fable"))) {
+        // 旧 fable: ボタン disabled/innerHTML 書換ありの async 経路（el を b として使う）。
+        const b = el; b.disabled = true;
+        import("../lib/exec.js").then(async ({ runAi }) => {
+          try { const j = await runAi(+b.dataset.fable, b.dataset.title); b.innerHTML = `${icon("play", { size: 11 })}…`; b.title = `キュー #${j.job.id} に追加済み`; }
+          catch { b.disabled = false; }
+        }).catch(() => { b.disabled = false; });
+        return;
+      }
+      if ((el = e.target.closest(".tb-pctbar"))) { setProgress(el, +el.dataset.pct, root, e.clientX, tasks); return; }
+      if ((el = e.target.closest(".tb-rowck[data-ck]"))) {
+        // 行チェック: 旧 wireSelection は e.preventDefault() を残していた（現挙動踏襲）。
+        e.preventDefault();
+        if (selH) selH.onRowCheck(+el.dataset.ck, e.shiftKey);
+        return;
+      }
+      // ここで manualMode をガード（チップ/進捗/チェックより後＝マイソート中もそれらは生きる）。
+      // マイソート中はグリッド選択も行クリック編集も無効（原典どおり）。タップ＝編集は wireDrag が担う。
+      if (V.manualMode) return;
+      if ((el = e.target.closest(".tb-gc"))) { gridSelectFromEl(el, root); return; }
+      const tr = e.target.closest("tr[data-id]"); if (tr) openTaskForm({ taskId: +tr.dataset.id, onSaved: () => render(root) });
     };
-    // ダブルクリック: 読み取り専用セル/行余白＝フォーム / テキスト系セル＝インライン編集（列挙はクリックでポップアップ済）。
-    tr.ondblclick = (e) => {
-      const gc = e.target.closest(".tb-gc");
-      if (gc) { gridEditFromEl(gc, root); return; }
-      if (e.target.closest(".tb-fable, .tb-rowck")) return;
-      openTaskForm({ taskId: +tr.dataset.id, onSaved: () => render(root) });
+    // ダブルクリック（bubble）: グリッド編集／行ダブルクリック編集。
+    tbody.ondblclick = (e) => {
+      const gc = e.target.closest(".tb-gc"); if (gc) { gridEditFromEl(gc, root); return; }
+      if (e.target.closest(".tb-fable, .tb-rowck, .tb-pctbar")) return; // 行編集フォームを誤起動させない
+      const tr = e.target.closest("tr[data-id]"); if (tr) openTaskForm({ taskId: +tr.dataset.id, onSaved: () => render(root) });
     };
-    tr.oncontextmenu = (e) => { e.preventDefault(); openRowMenu(e.clientX, e.clientY, +tr.dataset.id, tasks, root); };
-  });
-  // 階層: 折りたたみトグル（展開/折りたたみのみ）＋ 行クリックで編集。トグルのたびに永続化。
-  root.querySelectorAll(".ol-tw").forEach((tw) => {
-    if (!tw.dataset.id) return; // 子なしのプレースホルダは無反応
-    tw.onclick = (e) => { e.stopPropagation(); const id = +tw.dataset.id; olCollapsed.has(id) ? olCollapsed.delete(id) : olCollapsed.add(id); saveOlCollapsed(UID); render(root); };
-  });
-  // 全展開／全折りたたみ（階層モードのみ）。全折りたたみ=子を持つ全ノードを畳む。
+    // 右クリック（bubble）: 行メニュー。
+    tbody.oncontextmenu = (e) => {
+      const tr = e.target.closest("tr[data-id]"); if (!tr) return;
+      e.preventDefault(); openRowMenu(e.clientX, e.clientY, +tr.dataset.id, tasks, root);
+    };
+    // capture mousedown: 列挙セルのボタン押下時にアクティブセルを同期（旧 wireGrid の per-button capture を集約）。
+    // capture は addEventListener でのみ指定可。総入替で tbody は毎回新規＝二重化しない。
+    tbody.addEventListener("mousedown", (e) => {
+      const btn = e.target.closest("td.tb-gc button"); if (!btn) return;
+      const cell = btn.closest("td.tb-gc"); const tr = cell && cell.closest("tr[data-id]");
+      if (tr) { gAnchor = null; gActive = { id: +tr.dataset.id, col: cell.dataset.col }; }
+    }, true);
+    // keydown（bubble）: 進捗バーのキーボード操作（←→/↑↓/Home/End/Space/Enter）。
+    tbody.onkeydown = (e) => {
+      const bar = e.target.closest(".tb-pctbar"); if (!bar) return;
+      const cur = +bar.getAttribute("aria-valuenow") || 0;
+      let next = null;
+      if (e.key === "ArrowRight" || e.key === "ArrowUp") next = Math.min(100, cur + 25);
+      else if (e.key === "ArrowLeft" || e.key === "ArrowDown") next = Math.max(0, cur - 25);
+      else if (e.key === "Home") next = 0;
+      else if (e.key === "End") next = 100;
+      else if (e.key === " " || e.key === "Enter") next = (cur + 25) > 100 ? 0 : cur + 25;
+      if (next === null) return;
+      e.preventDefault(); e.stopPropagation(); // stopPropagation維持＝document グリッドハンドラへ漏らさない
+      const rc = bar.getBoundingClientRect();
+      setProgress(bar, +bar.dataset.pct, root, rc.left + rc.width * (next / 100), tasks);
+    };
+  }
+
+  // ── アウトライン（.ol-card）: 折りたたみトグル・チェック完了・＋サブタスク・行クリック編集 ──
+  const card = root.querySelector(".ol-card");
+  if (card) {
+    card.onclick = (e) => {
+      // 1. 折りたたみトグル（.ol-tw[data-id]）。子なしプレースホルダ（.ol-tw.none＝data-id無し）は無反応。
+      const tw = e.target.closest(".ol-tw");
+      if (tw) { if (tw.dataset.id) { const id = +tw.dataset.id; olCollapsed.has(id) ? olCollapsed.delete(id) : olCollapsed.add(id); saveOlCollapsed(UID); render(root); } return; }
+      // 2. チェック（.ol-cb）で done を即トグル。
+      const cb = e.target.closest(".ol-cb");
+      if (cb) {
+        const id = +cb.dataset.id, done = cb.dataset.done === "1";
+        const t = (tasks || []).find((x) => x.id === id);
+        const before = { done: !!(t && t.done), percent_done: (t && t.percent_done) || 0 };
+        const after = done ? { done: false, percent_done: before.percent_done } : { done: true, percent_done: 100 };
+        const applyDone = (taskId, s) => updateTask(taskId, { done: s.done, percent_done: s.percent_done });
+        applyDone(id, after).then(() => { pushScalarEdit("完了切替", id, before, after, applyDone); invalidate(); render(root); }).catch(() => {});
+        return;
+      }
+      // 3. ＋ でインライン入力を開きサブタスク追加。
+      const add = e.target.closest(".ol-addsub");
+      if (add) { openInlineSubtask(add, +add.dataset.pid, +add.dataset.proj, root); return; }
+      // 4. 行クリックで編集。
+      const row = e.target.closest(".ol-row");
+      if (row) openTaskForm({ taskId: +row.dataset.id, onSaved: () => render(root) });
+    };
+  }
+
+  // 全展開／全折りたたみ（階層モードのみ・ツールバー単発）。
   const olExp = root.querySelector("#tb-ol-expand");
   if (olExp) olExp.onclick = () => { olCollapsed.clear(); saveOlCollapsed(UID); render(root); };
   const olCol = root.querySelector("#tb-ol-collapse");
@@ -409,79 +502,24 @@ export async function render(root) {
     buildTaskTree(rows.map((r) => r.t)).forEach(function add(n) { if (n.children.length) { olCollapsed.add(n.task.id); n.children.forEach(add); } });
     saveOlCollapsed(UID); render(root);
   };
-  root.querySelectorAll(".ol-row").forEach((rowEl) => {
-    rowEl.onclick = (e) => {
-      if (e.target.closest(".ol-tw:not(.none)") || e.target.closest(".ol-cb") || e.target.closest(".ol-addsub")) return; // トグル/チェック/＋は専用ハンドラ
-      openTaskForm({ taskId: +rowEl.dataset.id, onSaved: () => render(root) });
-    };
-  });
-  // 階層: ドラッグ＆ドロップで親（プロジェクト＝親タスク）へ付け替え。階層モードのみ。
+  // 階層: ドラッグ＆ドロップで親（プロジェクト＝親タスク）へ付け替え。階層モードのみ（click 委譲と共存）。
   if (isOutline) wireOutlineDnD(root, rows, () => render(root));
-  // 階層: チェック（.ol-cb）で done を即トグル。行クリック（編集）とは分離。
-  root.querySelectorAll(".ol-cb").forEach((cb) => {
-    cb.onclick = (e) => {
-      e.stopPropagation();
-      const id = +cb.dataset.id, done = cb.dataset.done === "1";
-      const t = (tasks || []).find((x) => x.id === id);
-      const before = { done: !!(t && t.done), percent_done: (t && t.percent_done) || 0 };
-      const after = done ? { done: false, percent_done: before.percent_done } : { done: true, percent_done: 100 };
-      const applyDone = (taskId, s) => updateTask(taskId, { done: s.done, percent_done: s.percent_done });
-      applyDone(id, after).then(() => { pushScalarEdit("完了切替", id, before, after, applyDone); invalidate(); render(root); }).catch(() => {});
-    };
-  });
-  // 階層: ＋ でインライン入力を開き、確定で親タスクのサブタスクを新規作成。
-  root.querySelectorAll(".ol-addsub").forEach((b) => {
-    b.onclick = (e) => { e.stopPropagation(); openInlineSubtask(b, +b.dataset.pid, +b.dataset.proj, root); };
-  });
-  // 最上部の定期帯: ヘッダで折りたたみ（本人ごとに永続）＋ 行クリックで編集モーダル
+
+  // 最上部の定期帯: ヘッダで折りたたみ（本人ごとに永続）＋ 行クリックで編集モーダル（委譲）。
   const recHead = root.querySelector("#tb-rec-head");
   if (recHead) recHead.onclick = () => { setRecCollapsed(UID, !loadRecCollapsed(UID)); render(root); };
-  root.querySelectorAll(".tb-rec-row").forEach((rowEl) => {
-    rowEl.onclick = () => {
-      const rec = (recurrences || []).find((x) => x.id === +rowEl.dataset.rid);
-      if (rec) openRecurrenceForm({ existing: rec, members, holidaysByDate, onSaved: () => { invalidate(); render(root); } });
-    };
-  });
-  root.querySelectorAll(".tb-stbtn").forEach((b) => {
-    b.onclick = (e) => { e.stopPropagation(); openStatusMenu(b, +b.dataset.st, tasks, root); };
-  });
-  // 一覧から直接編集（担当/分類/重要度/期限/見積）。各セルはボタン＝行クリック(編集)とは分離。
-  root.querySelectorAll(".tb-projbtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openProjectMenu(b, +b.dataset.proj, tasks, root); }; });
-  root.querySelectorAll(".tb-asbtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openAssigneeMenu(b, +b.dataset.as, tasks, members, root); }; });
-  root.querySelectorAll(".tb-catbtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openCategoryMenu(b, +b.dataset.cat, tasks, labels, root); }; });
-  root.querySelectorAll(".tb-priobtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openPrioMenu(b, +b.dataset.prio, tasks, root); }; });
-  root.querySelectorAll(".tb-duebtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openDueMenu(b, +b.dataset.due, tasks, root, today); }; });
-  root.querySelectorAll(".tb-estbtn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); openEstMenu(b, +b.dataset.est, tasks, root); }; });
-  // 進捗バーのクリック=クリック位置から 0/25/50/75/100 をクイックセット。←→/Home/End/Space も対応。
-  root.querySelectorAll(".tb-pctbar").forEach((bar) => {
-    bar.onclick = (e) => { e.stopPropagation(); setProgress(bar, +bar.dataset.pct, root, e.clientX, tasks); };
-    bar.ondblclick = (e) => { e.stopPropagation(); }; // 行のダブルクリック（編集フォーム）に伝播させない
-    bar.onpointerdown = (e) => { e.stopPropagation(); }; // 手動ソート中のドラッグ検知に拾われない（保険）
-    bar.onkeydown = (e) => {
-      const id = +bar.dataset.pct, cur = +bar.getAttribute("aria-valuenow") || 0;
-      let next = null;
-      if (e.key === "ArrowRight" || e.key === "ArrowUp") next = Math.min(100, cur + 25);
-      else if (e.key === "ArrowLeft" || e.key === "ArrowDown") next = Math.max(0, cur - 25);
-      else if (e.key === "Home") next = 0;
-      else if (e.key === "End") next = 100;
-      else if (e.key === " " || e.key === "Enter") next = (cur + 25) > 100 ? 0 : cur + 25;
-      if (next === null) return;
-      e.preventDefault(); e.stopPropagation();
-      const rc = bar.getBoundingClientRect();
-      setProgress(bar, id, root, rc.left + rc.width * (next / 100), tasks);
-    };
-  });
-  // 複数選択（チェックボックス＋全選択＋Shift範囲）＋ 一括操作バー。表モードのみ。
-  if (!isOutline) { wireSelection(root, rows, () => render(root)); wireBulk(root, rows, tasks, members, today, labels); }
+  const recList = root.querySelector(".tb-rec-list");
+  if (recList) recList.onclick = (e) => {
+    const rowEl = e.target.closest(".tb-rec-row"); if (!rowEl) return;
+    const rec = (recurrences || []).find((x) => x.id === +rowEl.dataset.rid);
+    if (rec) openRecurrenceForm({ existing: rec, members, holidaysByDate, onSaved: () => { invalidate(); render(root); } });
+  };
+
+  // 一括操作バー（sticky・単発）。表モードのみ。
+  if (!isOutline) wireBulk(root, rows, tasks, members, today, labels);
   // Excel風グリッド編集（キーボード移動・インライン編集・コピペ・フィルダウン）。表モードのみ。
+  // ※ アクティブセル同期の per-button capture mousedown は上の tbody capture 委譲へ移管済み。
   if (!isOutline) wireGrid(root, rows, tasks, members, labels, today);
-  root.querySelectorAll(".tb-fable").forEach((b) => {
-    b.onclick = async (e) => {
-      e.stopPropagation(); b.disabled = true;
-      try { const { runAi } = await import("../lib/exec.js"); const j = await runAi(+b.dataset.fable, b.dataset.title); b.innerHTML = `${icon("play", { size: 11 })}…`; b.title = `キュー #${j.job.id} に追加済み`; }
-      catch { b.disabled = false; }
-    };
-  });
   // 余白クリックで選択解除（document全体＝コンテンツ右側の地まで拾う）。一覧表示中のみ作動。
   lastRoot = root;
   if (!docDeselectWired) {
@@ -1284,11 +1322,7 @@ function gridEditFromEl(cell, root) { gridSelectFromEl(cell, root); gridEditActi
 
 function wireGrid(root, rows, tasks, members, labels, today) {
   gCtx = { root, tasks, members, labels, today };
-  // 列挙セルのボタンクリック時もアクティブセルを同期（ポップアップは既存ハンドラが開く）。
-  root.querySelectorAll("td.tb-gc").forEach((cell) => {
-    const btn = cell.querySelector("button");
-    if (btn) btn.addEventListener("mousedown", () => { const tr = cell.closest("tr[data-id]"); if (tr) { gAnchor = null; gActive = { id: +tr.dataset.id, col: cell.dataset.col }; } }, true);
-  });
+  // ※ 列挙セルのボタン mousedown でのアクティブセル同期は render() の tbody capture 委譲（B22）に移管済み。
   gridHighlight();
   if (gKeyWired) return;
   gKeyWired = true;
@@ -1335,7 +1369,10 @@ function wireGrid(root, rows, tasks, members, labels, today) {
 }
 
 // ── 複数選択（チェックボックス＋全選択＋Shift範囲）。既存 selectedIds/anchorId を活用。 ──
-function wireSelection(root, rows, rerender) {
+// B22: per-element 結線をやめ、ロジック（toggle/range/all）だけを返すファクトリにした。
+// render() 側の tbody.onclick / thead.onclick 委譲がこのハンドラを行チェック・全選択ヘッダで呼ぶ。
+// 挙動は不変（旧 .tb-rowck[data-ck].onclick / #tb-selall.onclick と同一）。
+function selectionHandlers(rows, rerender) {
   const ids = rows.map((r) => r.t.id);
   const toggle = (id) => { selectedIds.has(id) ? selectedIds.delete(id) : selectedIds.add(id); anchorId = id; };
   const range = (id) => {
@@ -1344,22 +1381,19 @@ function wireSelection(root, rows, rerender) {
     const [lo, hi] = a < b ? [a, b] : [b, a];
     for (let i = lo; i <= hi; i++) selectedIds.add(ids[i]);
   };
-  root.querySelectorAll(".tb-rowck[data-ck]").forEach((ck) => {
-    ck.onclick = (e) => {
-      e.stopPropagation(); e.preventDefault();
-      const id = +ck.dataset.ck;
-      if (e.shiftKey && anchorId != null) range(id); else toggle(id);
-      rerender();
-    };
-  });
-  const all = root.querySelector("#tb-selall");
-  if (all) all.onclick = (e) => {
-    e.stopPropagation();
+  // 行チェック（.tb-rowck[data-ck]）クリック相当。旧: e.stopPropagation/e.preventDefault は委譲側が行う。
+  const onRowCheck = (id, shiftKey) => {
+    if (shiftKey && anchorId != null) range(id); else toggle(id);
+    rerender();
+  };
+  // 全選択ヘッダ（#tb-selall）クリック相当。
+  const onSelectAll = () => {
     const allSel = ids.length && ids.every((id) => selectedIds.has(id));
     if (allSel) { ids.forEach((id) => selectedIds.delete(id)); anchorId = null; }
     else { ids.forEach((id) => selectedIds.add(id)); anchorId = ids[ids.length - 1] ?? null; }
     rerender();
   };
+  return { onRowCheck, onSelectAll };
 }
 
 // ── 一括操作バー（選択タスク全件に適用）。各アクションは既存の単体ロジック/APIを流用。 ──
