@@ -9,6 +9,7 @@ import { statusOf } from "../lib/kinds.js";
 import { C, esc, fmtH, todayISO, member_color, announce } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
 import { openTaskForm } from "./taskform.js";
+import { getPrepScores } from "../lib/exec.js";
 
 // 最終更新時刻（render ごとに更新）。「時点」表示に併記する。
 const fmtClock = (d) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -83,6 +84,24 @@ export async function render(root) {
 
   // 遅延（期限超過）: 未完了 かつ 期限 < 今日。期限の古い順（超過日数の大きい順）。
   const open = (tasks || []).filter(isOpen);
+
+  // E5: 着手準備の「今日やる手順」（due<=today の未完了手順・遅れ含む）をチーム横断で集約＋進行中数。
+  let stepsByTask = {};
+  try { stepsByTask = (await getPrepScores())?.steps_by_task || {}; } catch { stepsByTask = {}; }
+  const taskById = new Map((tasks || []).map((t) => [t.id, t]));
+  const todaySteps = [];
+  for (const [tidStr, steps] of Object.entries(stepsByTask)) {
+    const t = taskById.get(+tidStr);
+    if (!t || !isOpen(t)) continue;
+    for (const s of steps || []) {
+      if (s && s.due && s.due <= day && !s.done && (s.title || "").trim()) {
+        todaySteps.push({ task: t, stepTitle: s.title, late: s.due < day, due: s.due });
+      }
+    }
+  }
+  todaySteps.sort((a, b) => (a.due || "").localeCompare(b.due || ""));
+  const doingCount = open.filter((t) => statusOf(t) === "doing").length;
+
   const late = open.filter((t) => { const d = dueISO(t); return d && d < day; })
     .sort((a, b) => (dueISO(a)).localeCompare(dueISO(b)) || a.id - b.id);
   const overdueDays = (t) => Math.round((Date.parse(day) - Date.parse(dueISO(t))) / 86400000);
@@ -108,6 +127,17 @@ export async function render(root) {
         const meta = `<span class="st-late">${mdOf(dueISO(t))}・${n}日超過</span>`;
         return taskRow(t, meta);
       }).join("")}</div>${moreLine(late.length, Math.min(MAX_ROWS, late.length))}`;
+
+  const stepsSection = todaySteps.length === 0
+    ? empty("着手準備の今日やる手順なし")
+    : `<div class="st-rows">${todaySteps.slice(0, MAX_ROWS).map((it) => {
+        const who = humanAssignees(it.task)[0] || null;
+        const lateBadge = it.late ? `<span class="st-late">遅れ</span>` : "";
+        return `<button type="button" class="st-row" data-id="${it.task.id}">
+          <span class="st-row-t">${esc(it.stepTitle)} <span class="st-step-task">${esc(it.task.title)}</span></span>
+          <span class="st-row-m">${avatar(who)}${lateBadge}</span>
+        </button>`;
+      }).join("")}</div>${moreLine(todaySteps.length, Math.min(MAX_ROWS, todaySteps.length))}`;
 
   const memberSection = memberRows.length === 0
     ? empty("メンバーがいません")
@@ -163,12 +193,18 @@ export async function render(root) {
       <button type="button" class="st-kpi free" data-drill="capacity" title="負荷計画を見る"><div class="l">空き工数</div><div class="v">${fmtH(Math.max(0, totCap - totAsg))}</div></button>
       <button type="button" class="st-kpi ${over.length ? "over" : ""}" data-drill="over" title="過負荷のメンバーを負荷計画で見る"><div class="l">過負荷</div><div class="v">${over.length}<small>名</small></div></button>
       <button type="button" class="st-kpi" data-drill="must" title="今日必須のタスクを見る"><div class="l">今日必須</div><div class="v">${must.length}<small>件</small></div></button>
+      <button type="button" class="st-kpi" data-drill="steps" title="今日やる手順へ移動"><div class="l">進行中</div><div class="v">${doingCount}<small>件</small></div></button>
       <button type="button" class="st-kpi ${late.length ? "over" : ""}" data-drill="late" title="遅延セクションへ移動"><div class="l">遅延</div><div class="v">${late.length}<small>件</small></div></button>
     </div>
 
     <div class="card st-card st-late-card" id="st-sec-late">
       ${head("alertTriangle", "遅延（期限超過）", late.length, "danger")}
       ${lateSection}
+    </div>
+
+    <div class="card st-card" id="st-sec-steps">
+      ${head("play", "今日やる手順（着手準備）", todaySteps.length)}
+      ${stepsSection}
     </div>
 
     <div class="card st-card">
@@ -199,6 +235,9 @@ export async function render(root) {
       if (d === "late") {
         const sec = root.querySelector("#st-sec-late");
         if (sec) { sec.scrollIntoView({ behavior: "smooth", block: "start" }); announce("遅延セクションへ移動しました"); }
+      } else if (d === "steps") {
+        const sec = root.querySelector("#st-sec-steps");
+        if (sec) { sec.scrollIntoView({ behavior: "smooth", block: "start" }); announce("今日やる手順へ移動しました"); }
       } else if (d === "must") {
         location.hash = "#/triage";
       } else {
@@ -302,6 +341,7 @@ function css() {
   .st-row-m{display:flex;align-items:center;gap:8px;font-size:11.5px;color:${C.muted};flex:none}
   .st-ava{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;color:#fff;font-size:9.5px;font-weight:700;flex:none}
   .st-late{color:${C.over};font-weight:700;font-variant-numeric:tabular-nums}
+  .st-step-task{font-size:11px;color:${C.muted};font-weight:500}
   .st-due{font-variant-numeric:tabular-nums}
   .st-due.today{color:${C.over};font-weight:700}
   .st-doneat{color:${C.free};font-weight:600;font-variant-numeric:tabular-nums}

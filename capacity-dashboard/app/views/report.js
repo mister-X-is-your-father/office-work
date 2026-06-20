@@ -14,6 +14,7 @@ import { statusOf } from "../lib/kinds.js";
 import { C, esc, fmtH, todayISO } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
 import { icon } from "../lib/icons.js";
+import { getPrepScores } from "../lib/exec.js";
 
 // 期限 ISO（未設定/ゼロ日付＝空）。home.js / 一覧 / quad と同じ判定。
 const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(0, 10) : "");
@@ -110,8 +111,13 @@ function copyLabel(t, bk, day) {
 
 // コピペ用テキスト全体を生成。0 件バケットは行ごと省略。代表は先頭 MAX_COPY 件＋「他n件」。
 const MAX_COPY = 5;
-function buildText(buckets, targetName, day, comment) {
+function buildText(buckets, targetName, day, comment, todaySteps) {
   const lines = [`【進捗報告 ${mdOf(day)}】${targetName}`];
+  if ((todaySteps || []).length) {
+    const shown = todaySteps.slice(0, MAX_COPY).map((s) => s.late ? `${s.stepTitle}（遅れ）` : s.stepTitle);
+    const rest = todaySteps.length - shown.length;
+    lines.push(`🎯 今日やる1手(${todaySteps.length}): ${shown.join(" / ")}${rest > 0 ? ` …他${rest}件` : ""}`);
+  }
   const seg = (id) => {
     const arr = buckets[id];
     if (!arr.length) return null;
@@ -141,7 +147,7 @@ function repList(arr, labeler) {
   const rest = arr.length - shown.length;
   return shown.join(" / ") + (rest > 0 ? ` 他${rest}件` : "");
 }
-function buildReport(buckets, hr, day) {
+function buildReport(buckets, hr, day, todaySteps) {
   const h = hr || {};
   const trim = (s) => (s || "").trim();
   const lines = [`お疲れさまです。本日(${mdOf(day)})の進捗です。`];
@@ -149,6 +155,12 @@ function buildReport(buckets, hr, day) {
   // 全体感: 回答があれば反映。無ければ省略。
   const feel = trim(h.feel);
   if (feel) lines.push(`■ 全体感: ${feel}`);
+
+  // 今日やる1手（準備済みの計画）: あれば必ず提示＝「準備して今日これをやる」を上司に見せる。
+  if ((todaySteps || []).length) {
+    const lbl = (s) => s.late ? `${s.stepTitle}（遅れ）` : s.stepTitle;
+    lines.push(`■ 今日やる1手（準備済み）: ${repList(todaySteps, lbl)}`);
+  }
 
   // 完了: 回答優先。未入力なら done バケットから自動補完。
   const doneNote = trim(h.doneNote);
@@ -220,6 +232,22 @@ export async function render(root) {
 
   let buckets = bucketize(scoped, day, weekEnd, doneRange);
 
+  // E5: 今日やる1手（着手準備の段取りで due<=today の未完了手順・遅れ含む）を対象タスクから集約。
+  let stepsByTask = {};
+  try { stepsByTask = (await getPrepScores())?.steps_by_task || {}; } catch { stepsByTask = {}; }
+  const scopedTitle = new Map(scoped.map((t) => [t.id, t.title]));
+  const todaySteps = [];
+  for (const [tidStr, steps] of Object.entries(stepsByTask)) {
+    const tid = +tidStr;
+    if (!scopedTitle.has(tid)) continue;
+    for (const s of steps || []) {
+      if (s && s.due && s.due <= day && !s.done && (s.title || "").trim()) {
+        todaySteps.push({ taskTitle: scopedTitle.get(tid), stepTitle: s.title, late: s.due < day, due: s.due });
+      }
+    }
+  }
+  todaySteps.sort((a, b) => (a.due || "").localeCompare(b.due || ""));
+
   // 報告文ヒアリング回答（本人ごと・当日キー）を復元。壊れた JSON は無視。
   // comment（素データ用の見通し/コメント）も hearing に載せ、当日中は永続化する。
   let hearing = { feel: "", doneNote: "", nextNote: "", lateNote: "", shareNote: "", comment: "" };
@@ -241,6 +269,7 @@ export async function render(root) {
       <span class="rp-chip"><b>${buckets.done.length}</b> 完了</span>
       <span class="rp-chip ${lateN > 0 ? "bad" : "ok"}"><b>${lateN}</b> 遅延</span>
       <span class="rp-chip"><b>${buckets.today.length}</b> 今日中<small>計${fmtH(todayHours)}</small></span>
+      <span class="rp-chip"><b>${todaySteps.length}</b> 今日やる手順</span>
     </div>`;
 
   const targetOpts = [
@@ -394,8 +423,8 @@ export async function render(root) {
   // 表示テキスト: report=報告文ジェネレーター / raw=従来の素データ列挙。
   function paintText() {
     textEl.value = mode === "raw"
-      ? buildText(buckets, targetName, day, comment)
-      : buildReport(buckets, hearing, day);
+      ? buildText(buckets, targetName, day, comment, todaySteps)
+      : buildReport(buckets, hearing, day, todaySteps);
   }
 
   // ヒアリング回答を localStorage（本人ごと・当日キー）へ保存。
