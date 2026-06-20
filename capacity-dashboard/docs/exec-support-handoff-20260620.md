@@ -7,8 +7,8 @@
 
 ## 0. 一言で
 タスクの「着手の不確実性」を機械的に削る仕組み。**準備（フェーズ1）＝完成**。**キャパ保護＝第一弾＋F1完成**。
-**実行ループ＝E1（今日やる1手の集約）まで完成・E2以降が次**。
-正直な体感: 準備75 / 実行40 / 運用35。「計画を絶対に実現」には残りの実行ループ（E2〜E5）が要る。
+**実行ループ＝E1（今日やる1手の集約）＋E3（今すぐ着手→進行中＋ポモ開始）完成・E2/E4/E5が次**。
+正直な体感: 準備75 / 実行50 / 運用35。「計画を絶対に実現」には残りの実行ループ（E2・E4・E5）が要る。
 
 ## 1. 完了済み（コミット済み・全てブラウザE2E検証）
 - **MVP**: exec `/prep/:taskId` ストア＋クライアント＋着手準備パネル＋taskform「実行準備」タブ（`3d8e1f8`,`7adfa14`）
@@ -25,6 +25,10 @@
 - **波E-E1 今日やる1手**（`6c03a5a`）: prep段取りで `due==today` の未完了手順をホーム最上部に MIT バンドとして集約→
   クリックで `openTaskForm({tab:"prep"})`。`exec.py GET /prep` に `steps_by_task` 追加（要デプロイ＝反映済み）＋ `home.js`。
   capdemo でブラウザ目視（表示・将来期日除外・クリック→準備タブ）確認・console0。
+- **波E-E3 今すぐ着手**（`1d34fe2`）: 着手準備フッターの「今すぐ着手」(#es-go) を実アクションに配線＝
+  `api.setTaskStarted`（started_at セット＝進行中・冪等／非破壊#9）＋ `pomodoro.startFocusFor`（集中セッション開始・
+  module-level `_ctl` 経由でカード表示）。exec-support は pomodoro を動的 import。capdemo で実クリック→focus 稼働・
+  冪等保持・未着手→SET→復元・console0 を確認。**MIT 行からの直接▶着手・手順 done チェック化は未着手（次の自然な一手）。**
 
 ## 2. アーキテクチャ（ファイルと責務）
 - `app/views/exec-support.js`（**私=指示役は直接編集不可**・委譲のみ）: プラグイン・レジストリ `PLUGINS`（next_step/steps/schedule/if_then/prereqs/obstacles/dod）、`backcast()`（逆算・今日床止め・容量/祝日/休暇/保護枠/バッファ考慮）、メーター演出、診断、保護時間帯エディタ、F3警告バナー。`renderExecSupport(container,{taskId,task})` / `ensureStyle()` をexport。
@@ -53,9 +57,9 @@
 - **波E 実行ループ（本丸・残り）**:
   - ~~E1 今日の手順 自動抽出~~ → 完了（`6c03a5a`）。現状の MIT バンドは手順を**表示するだけ**＝チェック不可。
     **次の自然な一手**＝段取り手順に `done` を足し、MIT バンド＋steps プラグインでチェック可能に（E4 の土台にもなる）。
-  - E2 着手日・トリガー通知（`lib/notify.js` 連携・手順の due==today や if-then 時刻で発火）… 指示役管轄寄り
-  - E3 今すぐ着手→ステータス進行中＋ポモ開始（`pomodoro.js` 連携）。現状 exec-support フッターの「今すぐ着手」は
-    トースト表示のみの no-op＝ここを updateTask(status=進行中)＋ポモ開始に繋ぐ… 指示役管轄寄り
+  - E2 着手日・トリガー通知（`lib/notify.js` 連携・手順の due==today や if-then 時刻で発火）… 指示役管轄寄り・**次の推奨**
+  - ~~E3 今すぐ着手→進行中＋ポモ開始~~ → 完了（`1d34fe2`・`api.setTaskStarted`＋`pomodoro.startFocusFor`）。
+    残り＝MIT 行からの直接▶着手・段取り手順の done チェック化（E4 未実行検知の土台）。
   - E4 未実行検知→自動再逆算 / E5 報告・アカウンタビリティ（report/status・上司対策C=要bot/webhook）
 - **波F キャパ保護 残り**: ~~F1 横断逆算~~ 完了（`9cd9bda`）/ F4 キャパ予算可視化 / F5 割り込みゼロサム / F6 ディープワーク枠。
   ※ F1 は他タスクの **plans** を引く（prep の段取り手順の due は未考慮＝将来 materialize 時に拡張余地）。
