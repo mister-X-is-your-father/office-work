@@ -55,6 +55,12 @@
   通常タスクは deep を避ける(差引)が、優先度高(priority>=4)の逆算だけ deep を実空きに開放。`protectedHoursOnDow(.., {includeDeep})`＋
   `backcast(.., taskIsImportant)`＋`loadBackcastCtx` が ctx.task.priority>=4 判定。PW_KINDS/pwClean に deep。buffer/block は常に差引(不変)。
   実バンドルで通常=あふれ/重要=配置/buffer は重要でも差引、を決定論確認・console0。
+- **アクティビティ（行動・進捗ログ）**（`7b0eb27`）: 新ビュー `views/activity.js`（実績グループ・ルート `#/activity`）＝
+  「何月何日に誰がどのタスクにどれだけ／どう進んだ」を時系列フィードで一望。4種統合＝実績時間(getTimes)/進捗差分・完了
+  (exec `/activity`)/作成(created)/完了(done_at補完)。セグメント「自分(今日)/全体(直近2週)」。**進捗の明示ログ**＝
+  `exec.py /activity`(GET/POST・append-only activity.json・アクターはトークン確定/サーバ刻)＋`exec.js getActivity/logActivity`＋
+  **`api.js updateTask` に進捗フック**（percent_done/done 変化時だけ /activity 追記＝全編集経路を単一の関所で網羅・fire-and-forget）。
+  ※進捗の差分履歴(30→50%)は updateTask 経由の変更のみ記録（直接DB編集や過去分は対象外＝今後の蓄積型）。
 
 ## 2. アーキテクチャ（ファイルと責務）
 - `app/views/exec-support.js`（**私=指示役は直接編集不可**・委譲のみ）: プラグイン・レジストリ `PLUGINS`（next_step/steps/schedule/if_then/prereqs/obstacles/dod）、`backcast()`（逆算・今日床止め・容量/祝日/休暇/保護枠/バッファ考慮）、メーター演出、診断、保護時間帯エディタ、F3警告バナー。`renderExecSupport(container,{taskId,task})` / `ensureStyle()` をexport。
