@@ -40,10 +40,12 @@ function estHours(v) {
 }
 
 // その曜日(0=日)に重なる保護時間帯の合計時間(h)。windows=[{days,start,end}]。
-function protectedHoursOnDow(windows, dow) {
+// includeDeep=false のとき deep 枠は集計しない（重要タスクの逆算が deep 枠を実空きに使えるように）。
+function protectedHoursOnDow(windows, dow, { includeDeep = true } = {}) {
   let total = 0;
   for (const w of windows || []) {
     if (!w || !Array.isArray(w.days) || !w.days.includes(dow)) continue;
+    if (w.kind === "deep" && !includeDeep) continue; // 重要タスクは deep 枠を差し引かない（=使える）
     const s = hhmmToH(w.start), e = hhmmToH(w.end);
     if (s == null || e == null || e <= s) continue;
     total += e - s;
@@ -95,8 +97,9 @@ function localTodayIso() {
 //     省略時は内部でローカル今日を算出（後方互換・呼び出し側からは必ず渡す）。
 //     ＝配置可能区間は [todayIso 〜 deadlineIso] の営業日のみ。締切が過去なら 0 日→全手順 unplaced。
 //   committedByDay=Map<"YYYY-MM-DD", h>（他タスクが既にその日に入れている予定負荷・F1）。省略時は0扱い。
+//   taskIsImportant=true（優先度高 priority>=4）なら deep 枠を実空きに含める（F6 ディープワーク枠）。既定 false＝通常どおり deep も避ける。
 // 返り値: { dueByIndex: Map<stepIndex, iso>, unplaced: number }
-export function backcast({ steps, deadlineIso, capH = 8, windows = [], holidaysSet = null, unavailRanges = [], bufferPct = 0, todayIso = localTodayIso(), committedByDay = null }) {
+export function backcast({ steps, deadlineIso, capH = 8, windows = [], holidaysSet = null, unavailRanges = [], bufferPct = 0, todayIso = localTodayIso(), committedByDay = null, taskIsImportant = false }) {
   const dueByIndex = new Map();
   const list = steps || [];
   if (!list.length || !deadlineIso || deadlineIso.startsWith("0001")) {
@@ -127,7 +130,7 @@ export function backcast({ steps, deadlineIso, capH = 8, windows = [], holidaysS
   const capOf = (iso) => {
     const dow = new Date(iso + "T00:00:00Z").getUTCDay();
     // capH からバッファ分を引いた「実空き」、保護時間帯＋他タスクの当日予定(F1)を差し引く（下限0）。
-    return Math.max(0, capH * (1 - buf / 100) - protectedHoursOnDow(windows, dow) - committedOn(iso));
+    return Math.max(0, capH * (1 - buf / 100) - protectedHoursOnDow(windows, dow, { includeDeep: !taskIsImportant }) - committedOn(iso));
   };
 
   // 手順を逆順（末尾＝締切寄り）に詰める。
@@ -189,7 +192,9 @@ async function loadBackcastCtx(ctx, deadlineIso = null) {
     ? committedHoursByDayInRange(tasks, plansByTask, uid, todayIso, deadlineIso, { excludeTaskId: ctx && ctx.taskId, holidays: holidaysSet })
     : new Map();
   // 床止め用のローカル今日。backcast へ必ず渡す（過去日へ手順を置かないため）。
-  return { capH: settings.capH || 8, windows, holidaysSet, unavailRanges, bufferPct, todayIso, committedByDay };
+  // F6: 優先度が高い（priority>=4＝高/緊急）タスクは deep 枠を実空きに使える。
+  const taskIsImportant = (((ctx && ctx.task && ctx.task.priority) || 0) >= 4);
+  return { capH: settings.capH || 8, windows, holidaysSet, unavailRanges, bufferPct, todayIso, committedByDay, taskIsImportant };
 }
 
 // ── プラグイン・レジストリ ─────────────────────────────────────────
@@ -406,8 +411,8 @@ const PLUGINS = [
         if (typeof confirm === "function" && !confirm(`締切 ${dueLabel(deadlineIso)} から逆算して、未完了の ${placeSteps.length} 手順に作業日を割り当てます（完了済みは動かしません・今日以降に配置）。各手順の既存の期日は上書きされます。実行しますか？`)) return;
         backBtn.dataset.busy = "1"; backBtn.disabled = true;
         try {
-          const { capH, windows, holidaysSet, unavailRanges, bufferPct, todayIso, committedByDay } = await loadBackcastCtx(ctx, deadlineIso);
-          const { dueByIndex, unplaced } = backcast({ steps: placeSteps, deadlineIso, capH, windows, holidaysSet, unavailRanges, bufferPct, todayIso, committedByDay });
+          const { capH, windows, holidaysSet, unavailRanges, bufferPct, todayIso, committedByDay, taskIsImportant } = await loadBackcastCtx(ctx, deadlineIso);
+          const { dueByIndex, unplaced } = backcast({ steps: placeSteps, deadlineIso, capH, windows, holidaysSet, unavailRanges, bufferPct, todayIso, committedByDay, taskIsImportant });
           // dueByIndex のキーは placeSteps 内の index → 元の steps の index へ戻す。
           placeIdx.forEach((origIdx, newIdx) => { if (dueByIndex.has(newIdx)) steps[origIdx].due = dueByIndex.get(newIdx); });
           save();
@@ -906,11 +911,12 @@ const DOW_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const PW_KINDS = [
   { v: "buffer", label: "バッファ（緩衝）" },
   { v: "block", label: "ブロック（固定）" },
+  { v: "deep", label: "ディープワーク（重要専用）" },
 ];
 // 保護枠の正規化（保存・逆算に渡す形）。__id 等の内部キーは落とす。
 function pwClean(w) {
   const days = Array.isArray(w.days) ? w.days.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6) : [];
-  const kind = w.kind === "block" ? "block" : "buffer";
+  const kind = (w.kind === "block" || w.kind === "deep") ? w.kind : "buffer";
   const out = { label: String(w.label || "").trim(), days, start: w.start || "", end: w.end || "", kind };
   if (w.id != null && w.id !== "") out.id = w.id;
   return out;
@@ -966,7 +972,7 @@ function mountProtectedEditor(host) {
       ? state.windows.map((w) => rowHtml(w, dis)).join("")
       : `<div class="es-pw-empty">保護時間帯はまだありません。${dis ? "" : "「追加」で作成できます。"}</div>`;
     box.innerHTML = `
-      <div class="es-pw-intro">トラブルが来やすい時間帯（例: 昼の対応）を保護し、重要タスクをそこに置かない／バッファを確保します。逆算スケジュールがこの枠を避けて作業日を割り当てます。</div>
+      <div class="es-pw-intro">トラブルが来やすい時間帯（例: 昼の対応）を保護し、重要タスクをそこに置かない／バッファを確保します。逆算スケジュールがこの枠を避けて作業日を割り当てます。ディープワーク枠は逆に、優先度の高い重要タスクの逆算だけが使える集中時間です。</div>
       ${dis ? `<div class="es-pw-deny">${icon("lock", { size: 14 })} 保護時間帯の編集は管理者のみです（閲覧のみ可能）。</div>` : ""}
       <div class="es-pwrows">${rows}</div>
       <div class="es-pw-foot">
