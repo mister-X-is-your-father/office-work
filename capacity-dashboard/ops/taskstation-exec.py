@@ -405,10 +405,13 @@ class H(BaseHTTPRequestHandler):
                 return self._json(401, {"error": "unauthorized"})
             return self._json(200, {"settings": load_settings(), "can_edit": bool(uid)})
         if self.path.split("?")[0].rstrip("/") == "/prep":
-            # バッチ: 全タスクの着手準備スコアだけを {taskId: score} で返す（ホーム/一覧のメーター用・軽量）。
+            # バッチ: 全タスクの着手準備スコア {taskId: score}（ホーム/一覧のメーター用・軽量）に加え、
+            # E1「今日やる1手」用に期日付きの段取り手順を {taskId: [{title,due,done}]} で返す。
+            # 期日付き手順のみ返す＝ペイロードを抑える。today 判定は TZ 都合でクライアント側で行う。
             if not uid and not auth_any(tok):
                 return self._json(401, {"error": "unauthorized"})
             scores = {}
+            steps_by_task = {}
             for k, v in (load_prep() or {}).items():
                 try:
                     s = int((v or {}).get("score", 0))
@@ -416,7 +419,15 @@ class H(BaseHTTPRequestHandler):
                     s = 0
                 if s:
                     scores[k] = s
-            return self._json(200, {"scores": scores})
+                try:
+                    items = (((v or {}).get("steps") or {}).get("items")) or []
+                    dated = [{"title": (it.get("title") or ""), "due": it.get("due"), "done": bool(it.get("done"))}
+                             for it in items if isinstance(it, dict) and it.get("due")]
+                    if dated:
+                        steps_by_task[k] = dated
+                except (TypeError, ValueError, AttributeError):
+                    pass
+            return self._json(200, {"scores": scores, "steps_by_task": steps_by_task})
         m_pg = re.match(r"^/prep/(\d+)", self.path)
         if m_pg:
             # 着手準備の読み取りは全ログインユーザー可。

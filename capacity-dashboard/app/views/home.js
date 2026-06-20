@@ -111,12 +111,42 @@ export async function render(root) {
   // 着手準備スコア（実行可能性メーター）を一括取得。exec 停止時は空で続行＝ホームは壊さない。
   // 戻り値 {scores:{ "<taskId>": number }}。未準備タスクは欠落＝0扱い。
   let prepScores = {};
-  try { prepScores = (await getPrepScores())?.scores || {}; } catch { prepScores = {}; }
+  let stepsByTask = {};
+  try {
+    const pr = await getPrepScores();
+    prepScores = pr?.scores || {};
+    stepsByTask = pr?.steps_by_task || {};
+  } catch { prepScores = {}; stepsByTask = {}; }
   // 営業日割り＋人別容量（週末/祝日/休暇=0）で今日KPIを正確に（§土日祝ギャップ）
   const capacityFor = (m, d) => capacityOn(m, d, { holidays: holidaysSet, unavailabilityByMember, capH: settings.capH });
   const rows = loadByMember(tasks, members, day, settings.capH, plansByTask, { holidays: holidaysSet, capacityFor });
   const ev = estimateVsActual(tasks);
   const tri = triage(tasks, day);
+
+  // E1: 着手準備の段取りで「期日が今日」の手順を MIT として集約（未完了タスク・未完了手順のみ）。
+  const taskById = new Map((tasks || []).map((t) => [t.id, t]));
+  const mitItems = [];
+  for (const [tidStr, steps] of Object.entries(stepsByTask)) {
+    const t = taskById.get(+tidStr);
+    if (!t || !isOpen(t)) continue;
+    for (const s of steps || []) {
+      if (s && s.due === day && !s.done && (s.title || "").trim()) {
+        mitItems.push({ taskId: t.id, taskTitle: t.title, stepTitle: s.title });
+      }
+    }
+  }
+  const mitHtml = mitItems.length ? `
+    <section class="mit card">
+      <div class="mit-h">${icon("play", { size: 15 }) || "▶"}<span>今日やる1手</span><span class="mit-n">${mitItems.length}</span></div>
+      <div class="mit-rows">
+        ${mitItems.map((it) => `
+          <button type="button" class="mit-row" data-prep="${it.taskId}">
+            <span class="mit-step">${esc(it.stepTitle)}</span>
+            <span class="mit-task">${esc(it.taskTitle)}</span>
+            <span class="mit-go">${icon("chevronRight", { size: 14 }) || "›"}</span>
+          </button>`).join("")}
+      </div>
+    </section>` : "";
 
   const totCap = rows.reduce((s, r) => s + r.capH, 0), totAsg = rows.reduce((s, r) => s + r.assignedH, 0);
   const over = rows.filter(r => r.status === "over");
@@ -150,6 +180,7 @@ export async function render(root) {
       <a class="kpi ${over.length ? "over" : ""}" href="#/today" title="${overTitle}"><div class="l">過負荷</div><div class="v">${over.length}<small>名</small></div></a>
       <a class="kpi" href="#/triage" title="トリアージへ"><div class="l">今日必須</div><div class="v">${must.length}<small>件</small></div></a>
     </div>
+    ${mitHtml}
     <div class="home-stack">
       ${section("todo", "やること")}
       ${section("today", "今日の稼働予定")}
@@ -161,6 +192,18 @@ export async function render(root) {
       a.kpi{color:inherit;text-decoration:none;display:block;cursor:pointer;transition:box-shadow .12s,border-color .12s,transform .12s}
       a.kpi:hover{border-color:${C.fill};box-shadow:0 2px 8px rgba(20,30,50,.12);transform:translateY(-1px)}
       a.kpi:focus-visible{outline:2px solid ${C.fill};outline-offset:2px}
+      .mit{padding:12px 16px;margin-bottom:16px;border-left:3px solid ${C.fill}}
+      .mit-h{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700;color:${C.ink};margin-bottom:8px}
+      .mit-h .ic{color:${C.fill}}
+      .mit-n{margin-left:auto;font-size:11px;font-weight:700;color:#fff;background:${C.fill};border-radius:999px;padding:1px 8px}
+      .mit-rows{display:flex;flex-direction:column;gap:5px}
+      .mit-row{display:flex;align-items:center;gap:10px;width:100%;box-sizing:border-box;text-align:left;
+        border:1px solid ${C.line};background:${C.bg};color:${C.ink};font:inherit;cursor:pointer;border-radius:8px;padding:8px 11px}
+      .mit-row:hover{border-color:${C.fill};background:${C.track}}
+      .mit-step{font-size:12.5px;font-weight:600;line-height:1.3;flex:none;max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .mit-task{font-size:11px;color:${C.muted};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+      .mit-go{margin-left:auto;color:${C.muted};line-height:0;flex:none}
+      .mit-row:hover .mit-go{color:${C.fill}}
       .home-stack{display:flex;flex-direction:column;gap:16px}
       .home-sec{padding:0;overflow:hidden}
       .home-sec-head{display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;
@@ -218,6 +261,11 @@ export async function render(root) {
       .td-more{display:inline-flex;align-items:center;gap:3px;margin-top:6px;font-size:11.5px;font-weight:600;color:${C.fill};text-decoration:none}
       .td-more:hover{text-decoration:underline}
     </style>`;
+
+  // E1 MIT バンド: 各行クリックでそのタスクの着手準備タブへ直行（root 直下なので即配線可）。
+  root.querySelectorAll(".mit-row[data-prep]").forEach((el) => {
+    el.onclick = () => openTaskForm({ taskId: +el.dataset.prep, tab: "prep", onSaved: () => render(root) });
+  });
 
   // 各埋め込みは load() の共有キャッシュ経由（二重 fetch なし）。
   // 開いているセクションのみ描画。teardown を保持し、再描画/折りたたみ時に解除。
