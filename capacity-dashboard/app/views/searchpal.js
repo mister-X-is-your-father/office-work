@@ -2,7 +2,7 @@
 // TickTickの検索のブラッシュアップ: コマンドパレット型（キーボード完結・↑↓選択）・完了込み・ランク付け。
 import { load, projectName } from "../lib/store.js";
 import { searchTasks } from "../lib/search.js";
-import { esc, todayISO } from "../lib/ui.js";
+import { esc, todayISO, openOverlay } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
 
 let overlay = null;
@@ -21,19 +21,22 @@ function rowHtml(t, projects, i, sel) {
 export function openSearch() {
   if (overlay) return; // 多重起動防止
   ensureStyle();
-  overlay = document.createElement("div");
-  overlay.className = "sp-ov";
-  overlay.innerHTML = `
-    <div class="sp-box" role="dialog" aria-modal="true" aria-label="タスク検索">
+  const box = document.createElement("div");
+  box.className = "sp-box";
+  box.setAttribute("role", "dialog");
+  box.setAttribute("aria-modal", "true");
+  box.setAttribute("aria-label", "タスク検索");
+  box.innerHTML = `
       <input id="sp-in" autocomplete="off" placeholder="タスクを検索（タイトル・説明・分類・ワークスペース）" aria-label="検索語">
-      <div class="sp-list" id="sp-list"><div class="sp-hint">入力で検索 ・ ↑↓ 選択 ・ Enter 開く ・ Esc 閉じる</div></div>
-    </div>`;
-  document.body.appendChild(overlay);
-  const input = overlay.querySelector("#sp-in");
-  const list = overlay.querySelector("#sp-list");
+      <div class="sp-list" id="sp-list"><div class="sp-hint">入力で検索 ・ ↑↓ 選択 ・ Enter 開く ・ Esc 閉じる</div></div>`;
+  const input = box.querySelector("#sp-in");
+  const list = box.querySelector("#sp-list");
   let results = [], sel = 0, data = null;
 
-  const close = () => { overlay.remove(); overlay = null; };
+  // 共有 openOverlay にカードを渡す（背景生成/Escape/背景クリック/フォーカストラップ/スクロールロックを自動付与）。
+  const ui = openOverlay(box, { align: "top", onClose: () => { overlay = null; }, initialFocus: input });
+  overlay = ui.bg; // 多重起動ガードの真値として保持
+  const close = ui.close;
   const open = (id) => { close(); openTaskForm({ taskId: id }); };
 
   const paint = () => {
@@ -58,13 +61,11 @@ export function openSearch() {
   };
   input.addEventListener("input", run);
   input.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape") { ev.preventDefault(); close(); }
-    else if (ev.key === "ArrowDown") { ev.preventDefault(); if (results.length) { sel = (sel + 1) % results.length; paint(); } }
+    // Escape／背景クリックは openOverlay が担当（document capture keydown + 背景 mousedown）。
+    if (ev.key === "ArrowDown") { ev.preventDefault(); if (results.length) { sel = (sel + 1) % results.length; paint(); } }
     else if (ev.key === "ArrowUp") { ev.preventDefault(); if (results.length) { sel = (sel - 1 + results.length) % results.length; paint(); } }
     else if (ev.key === "Enter") { ev.preventDefault(); if (results[sel]) open(results[sel].id); }
   });
-  overlay.onmousedown = (ev) => { if (ev.target === overlay) close(); };
-  input.focus();
 }
 
 // app.js から1回だけ呼ぶ: トップバーに🔍ボタン＋Ctrl/Cmd+K のグローバルフック
@@ -92,8 +93,8 @@ let _style = false;
 function ensureStyle() {
   if (_style) return; _style = true;
   const s = document.createElement("style");
+  // バックドロップ（旧 .sp-ov）は openOverlay の共有 .ov-bg.ov-top に置換済み。ここはカード本体以下のみ。
   s.textContent = `
-  .sp-ov{position:fixed;inset:0;z-index:40;background:rgba(15,22,36,.42);display:flex;align-items:flex-start;justify-content:center;padding-top:11vh}
   .sp-box{width:min(640px,92vw);background:#fff;border-radius:14px;box-shadow:0 24px 70px rgba(10,18,35,.35);overflow:hidden}
   .sp-box input{width:100%;box-sizing:border-box;border:0;border-bottom:1px solid var(--line);font:inherit;font-size:15px;padding:15px 18px;outline:none}
   .sp-list{max-height:54vh;overflow-y:auto;padding:6px}

@@ -113,11 +113,49 @@ function ensureOverlayStyle() {
   .ui-refresh-spin{width:30px;height:30px;border-radius:50%;
     border:3px solid var(--line);border-top-color:var(--fill);animation:ui-ov-rot .7s linear infinite}
   @keyframes ui-ov-rot{to{transform:rotate(360deg)}}
+  /* 中央モーダルの共有バックドロップ（openOverlay）。カード本体は各呼び出し側が既存CSSで描画＝視覚不変。 */
+  .ov-bg{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;
+    background:rgba(15,22,36,.42);animation:ui-ov-in .12s ease-out;padding:16px;box-sizing:border-box}
+  .ov-bg.ov-top{align-items:flex-start;padding-top:11vh}
   @media (prefers-reduced-motion:reduce){
     .ui-refresh-ov{animation:none}
     .ui-refresh-spin{animation-duration:1.6s}
+    .ov-bg{animation:none}
   }`;
   document.head.appendChild(s);
+}
+
+// ── 中央モーダルの共有プリミティブ openOverlay ───────────────────────────
+// 各画面のバラバラなモーダル開閉（バックドロップ生成/Escape/背景クリック/フォーカストラップ/スクロールロック）を統一。
+//   card: 呼び出し側が作るカード要素（.tf-card / .sp-box / .cal-ovm-card 等。既存クラス・CSSのまま＝視覚パリティ維持）。
+//   opts: { onClose?, align?('center'|'top'), closeOnBackdrop?(=true), initialFocus?(HTMLElement) }
+//   戻り値: { bg, card, close }。close() で keydown/背景/trapFocus 解除＋スクロール復帰＋bg除去＋onClose。多重closeは無害。
+// ＝ caller は「カードを作って openOverlay に渡す」だけ。背景・Escape・背景クリック・Tab閉じ込め・body固定が自動で付く。
+export function openOverlay(card, opts = {}) {
+  ensureOverlayStyle();
+  const bg = document.createElement("div");
+  bg.className = "ov-bg" + (opts.align === "top" ? " ov-top" : "");
+  if (card) bg.appendChild(card);
+  document.body.appendChild(bg);
+  const prevOverflow = document.body.style.overflow;
+  document.body.style.overflow = "hidden"; // 背面スクロールロック
+  let closed = false;
+  const release = trapFocus(card);
+  const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); close(); } };
+  const onDown = (e) => { if (e.target === bg && opts.closeOnBackdrop !== false) close(); };
+  function close() {
+    if (closed) return; closed = true;
+    document.removeEventListener("keydown", onKey, true);
+    bg.removeEventListener("mousedown", onDown);
+    release();
+    document.body.style.overflow = prevOverflow;
+    bg.remove();
+    if (typeof opts.onClose === "function") opts.onClose();
+  }
+  bg.addEventListener("mousedown", onDown);
+  document.addEventListener("keydown", onKey, true); // capture＝内部入力の stopPropagation でも Esc を拾える
+  if (opts.initialFocus && typeof opts.initialFocus.focus === "function") opts.initialFocus.focus();
+  return { bg, card, close };
 }
 
 // 再取得オーバーレイ: rootEl に薄い半透明オーバーレイ＋スピナーを出し、await fn() の間表示。

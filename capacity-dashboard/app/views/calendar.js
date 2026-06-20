@@ -8,7 +8,7 @@ import { expandRecurrences } from "../lib/recurrence.js";
 import { PRIO, NEUTRAL, KINDS } from "../lib/kinds.js";
 import { dateOnly, shiftISO } from "../lib/capacity.js";
 import { deletePlan, logPlan, updateRecurrence } from "../lib/api.js";
-import { C, fmtH, esc, member_color, todayISO, announce } from "../lib/ui.js";
+import { C, fmtH, esc, member_color, todayISO, announce, openOverlay } from "../lib/ui.js";
 import { splitMeta } from "../lib/form.js"; // note の "[資料] URL" 行を抽出
 import { icon } from "../lib/icons.js";
 
@@ -391,7 +391,7 @@ function wireDnD() {
 // recurrences.overrides[origISO] に {date, start_minute, duration_seconds} or {skip:true} を保存。
 // 基準値と同じ項目は保存しない（差分のみ）。全部基準値どおりなら例外を解除。
 function openOccurrenceEditor(recId, origISO) {
-  if (document.querySelector(".cal-ovm")) return; // モーダル積層防止（連打対策）
+  if (document.querySelector(".cal-ovm-card")) return; // モーダル積層防止（連打対策）。openOverlay 移行後はカード本体で判定
   const rec = (_data.recurrences || []).find((r) => r.id === recId);
   if (!rec) return;
   const ov = (rec.overrides || {})[origISO] || {};
@@ -401,11 +401,11 @@ function openOccurrenceEditor(recId, origISO) {
   const curMin = ov.start_minute != null ? ov.start_minute : baseMin;
   const curDur = Math.round(((ov.duration_seconds || rec.duration_seconds || 0) / 3600) * 100) / 100;
 
-  const wrap = document.createElement("div");
-  wrap.className = "cal-ovm";
-  wrap.innerHTML = `
-    <div class="cal-ovm-bg"></div>
-    <div class="cal-ovm-card">
+  const cardEl = document.createElement("div");
+  cardEl.className = "cal-ovm-card";
+  cardEl.setAttribute("role", "dialog");
+  cardEl.setAttribute("aria-modal", "true");
+  cardEl.innerHTML = `
       <div class="cal-ovm-h"><b>${esc(rec.title)}</b><span>この回だけ変更（${origISO.replace(/-/g, "/")} の回）</span></div>
       <label class="cal-ovm-l">日付</label>
       <input id="ov-date" class="cal-ovm-in" type="text" inputmode="numeric" autocomplete="off" value="${curDate.replace(/-/g, "/")}">
@@ -422,19 +422,17 @@ function openOccurrenceEditor(recId, origISO) {
         <span style="flex:1"></span>
         <button id="ov-cancel" class="cal-ovm-ghost">キャンセル</button>
         <button id="ov-save" class="cal-ovm-save">この回を変更</button>
-      </div>
-    </div>`;
-  document.body.appendChild(wrap);
-  const $ = (s) => wrap.querySelector(s);
-  const close = () => wrap.remove();
-  wrap.querySelector(".cal-ovm-bg").onclick = close;
+      </div>`;
+  const ui = openOverlay(cardEl, { onClose: () => {} }); // center 既定。背景クリック/Escape/フォーカストラップ/スクロールロックを自動付与
+  const close = ui.close;
+  const $ = (s) => cardEl.querySelector(s);
   $("#ov-cancel").onclick = close;
 
   let _ovBusy = false;
   const saveOverrides = async (newOv) => {
     if (_ovBusy) return; // 二重PUT防止（連打対策）
     _ovBusy = true;
-    const btns = wrap.querySelectorAll(".cal-ovm-acts button");
+    const btns = cardEl.querySelectorAll(".cal-ovm-acts button");
     btns.forEach((b) => (b.disabled = true)); // await 前に無効化
     try {
       const overrides = { ...(rec.overrides || {}) };
@@ -704,8 +702,7 @@ function css() {
   .cal-unplace:hover{background:rgba(0,0,0,.42)}
   .cal-rs{position:absolute;left:0;right:0;bottom:0;height:7px;cursor:ns-resize}
   .cal-rs::after{content:"";position:absolute;left:50%;bottom:2px;width:22px;height:3px;margin-left:-11px;border-radius:2px;background:rgba(255,255,255,.65)}
-  .cal-ovm{position:fixed;inset:0;z-index:70;display:flex;align-items:center;justify-content:center}
-  .cal-ovm-bg{position:absolute;inset:0;background:rgba(20,30,50,.38)}
+  /* バックドロップ/中央寄せ（旧 .cal-ovm / .cal-ovm-bg）は共有 openOverlay の .ov-bg が担当。カード本体のみここで描画＝視覚不変。 */
   .cal-ovm-card{position:relative;width:min(360px,92vw);background:#fff;border:1px solid ${C.line};border-radius:14px;box-shadow:0 18px 50px rgba(20,30,50,.28);padding:18px 20px}
   .cal-ovm-h b{font-size:14.5px;display:block}
   .cal-ovm-h span{font-size:11.5px;color:${C.muted}}
