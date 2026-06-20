@@ -2275,14 +2275,14 @@ function css() {
   /* ステータスはワンクリックで変更（押せる見た目＝枠＋▾＋hover） */
   .tb-stbtn{font-family:inherit;cursor:pointer;border:1px solid rgba(20,30,50,.12);display:inline-flex;align-items:center;gap:4px;transition:box-shadow .12s,border-color .12s}
   .tb-stbtn:hover{border-color:rgba(20,30,50,.24);box-shadow:0 1px 4px rgba(20,30,50,.16)}
-  .tb-st-car{font-size:8px;opacity:.6;margin-right:-1px}
+  .tb-st-car{font-size:11px;opacity:.6;margin-right:-1px}
   .tb-ctx-ck{display:inline-block;width:13px;color:${C.fill};font-weight:700}
   /* 一覧から直接編集できるセル＝普段は素／hoverで枠＋▾が出て「押せる」と分かる */
   .tb-cell{font-family:inherit;font-size:13px;color:inherit;background:transparent;border:1px solid transparent;border-radius:7px;padding:3px 7px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;max-width:100%;text-align:left;line-height:1.5}
   .tb-cell:hover{background:#eef4ff;border-color:#dbe7ff}
   .tb-cell.tb-num{font-variant-numeric:tabular-nums}
   .tb-cell.over{color:${C.over};font-weight:600}
-  .tb-cell-car{font-size:8px;opacity:0;color:${C.muted};transition:opacity .1s;margin-left:auto;padding-left:2px}
+  .tb-cell-car{font-size:11px;opacity:0;color:${C.muted};transition:opacity .1s;margin-left:auto;padding-left:2px}
   .tb-cell:hover .tb-cell-car{opacity:.6}
   @media (hover:none){.tb-cell-car{opacity:.45}}  /* タッチ端末はhoverが無いので▾を常時薄く表示＝編集可能と分かる */
   .tb-prio-none{color:${C.muted}}
