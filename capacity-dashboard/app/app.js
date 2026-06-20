@@ -205,7 +205,9 @@ async function applyMenuVisibility() {
   try {
     const { me, settings } = await store.load();
     const mv = (settings && settings.menuVisibility) || {};
-    const hidden = new Set((me && mv[String(me.id)]) || []);
+    // B54: 全員の既定非表示（"_default"）と本人個別の非表示の和集合を隠す（個別∪_default）。
+    // 既定行で全員から一括で隠せ、個別行でさらにその人だけ追加で隠せる。
+    const hidden = new Set([...(mv._default || []), ...((me && mv[String(me.id)]) || [])]);
     for (const k of ALWAYS_VISIBLE) hidden.delete(k); // 必須メニューは常時表示
     _hidden = hidden;
     const nav = document.getElementById("nav");

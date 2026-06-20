@@ -717,7 +717,7 @@ function menuVisibilitySection(members, me) {
         <span class="sx-scope"><span class="dot" style="background:${C.free}"></span>変更は即保存・対象者の次回読み込みで反映</span>
       </header>
       <div class="sx-body">
-        <div class="sx-mvhint">行＝メンバー、列＝メニュー項目のマトリクスです（チェック＝表示）。各行・各列の見出しで一括ON/OFF、左上で全員一括もできます。<b>ホーム</b>は常に表示されます。</div>
+        <div class="sx-mvhint">行＝メンバー、列＝メニュー項目のマトリクスです（チェック＝表示）。最上段の<b>既定（全員）</b>行で全員から一括で隠せます。各メンバー行はそのメンバーを<b>さらに</b>隠します（既定との和）。既定で隠した項目はメンバー行では淡色・変更不可になります。各行・各列の見出しで一括ON/OFF、左上で全員一括もできます。<b>ホーム</b>は常に表示されます。</div>
         ${list.length ? `
         <div class="sx-mvbulk">
           <button class="sx-mvbtn" id="mv-all-on">全員すべて表示</button>
@@ -770,16 +770,36 @@ function wireMenuVisibility(root, members, me, mvInit) {
         <span class="sx-mvchl">${esc(ROUTES[k].label)}</span>
       </th>`;
     }).join("");
+    // 既定（全員）の非表示集合。実行時の各ユーザー非表示は「_default ∪ 個別」（和集合・app.js側で実装済み）。
+    const defHidden = new Set(mv["_default"] || []);
+    // 既定（全員）行＝tbody 先頭。トグルで全員から一括で隠す/出す。home は forced。
+    const defCells = keys.map((k) => {
+      const forced = ALWAYS_VISIBLE.has(k);
+      const on = forced || !defHidden.has(k);
+      return `<td class="sx-mvtd">
+        <input type="checkbox" data-mv-uid="_default" data-mvk="${k}"${on ? " checked" : ""}${forced ? " disabled" : ""}>
+      </td>`;
+    }).join("");
+    const defRow = `<tr class="sx-mvdefrow">
+      <th class="sx-mvrh sx-mvdefrh" data-mvrow="_default" title="クリックでこの既定行を一括">既定（全員）</th>
+      ${defCells}
+    </tr>`;
     const bodyRows = list.map((u) => {
-      const hidden = new Set(mv[String(u.id)] || []);
+      const indivHidden = new Set(mv[String(u.id)] || []);
       const cells = keys.map((k) => {
         const forced = ALWAYS_VISIBLE.has(k);
-        const on = forced || !hidden.has(k);
-        return `<td class="sx-mvtd">
-          <input type="checkbox" data-mv-uid="${u.id}" data-mvk="${k}"${on ? " checked" : ""}${forced ? " disabled" : ""}>
+        const defOff = defHidden.has(k);   // 既定で全員非表示
+        const indivOff = indivHidden.has(k); // この人だけさらに非表示
+        const on = forced || (!defOff && !indivOff); // 実効表示
+        // forced か defOff の列はメンバー個別では変更不可（和集合の意味＝既定で隠れたら個別では戻せない）。
+        const disabled = forced || defOff;
+        const cls = "sx-mvtd" + (defOff && !forced ? " sx-mvtd-defoff" : "");
+        const title = (defOff && !forced) ? ' title="「既定（全員）」で非表示中"' : "";
+        return `<td class="${cls}"${title}>
+          <input type="checkbox" data-mv-uid="${u.id}" data-mvk="${k}"${on ? " checked" : ""}${disabled ? " disabled" : ""}>
         </td>`;
       }).join("");
-      // 行見出し＝メンバー名。クリックでその行を全員→全項目一括トグル。
+      // 行見出し＝メンバー名。クリックでその行を全項目一括トグル。
       return `<tr>
         <th class="sx-mvrh" data-mvrow="${u.id}" title="クリックでこのメンバーを一括">${memberName(u)}</th>
         ${cells}
@@ -791,27 +811,31 @@ function wireMenuVisibility(root, members, me, mvInit) {
           <tr><th class="sx-mvcorner" rowspan="2">メンバー</th>${grpHeader}</tr>
           <tr>${colHeader}</tr>
         </thead>
-        <tbody>${bodyRows}</tbody>
+        <tbody>${defRow}${bodyRows}</tbody>
       </table>`;
-    host.querySelectorAll("input[data-mvk]").forEach((cb) => { cb.onchange = scheduleSave; });
+    // セル変更: メンバー行はそのまま保存、既定行は既定集合が変わる＝メンバー行の表示が変わるので rebuild。
+    host.querySelectorAll("input[data-mvk]").forEach((cb) => {
+      cb.onchange = (cb.dataset.mvUid === "_default") ? scheduleSaveRebuild : scheduleSave;
+    });
     // 列一括（見出しクリック）: 列内の有効チェックボックスを、現状が全ONなら全OFFへ、でなければ全ONへ。
+    // 列は既定行セルも含む＝既定に影響しうるので必ず rebuild。
     host.querySelectorAll("th[data-mvcol]").forEach((th) => {
       th.onclick = () => {
         const k = th.dataset.mvcol;
         const cbs = [...host.querySelectorAll(`input[data-mvk="${cssEsc(k)}"]:not(:disabled)`)];
         const next = !cbs.every((c) => c.checked);
         cbs.forEach((c) => { c.checked = next; });
-        scheduleSave();
+        scheduleSaveRebuild();
       };
     });
-    // 行一括（メンバー名クリック）。
+    // 行一括（行見出しクリック）。既定行（_default）は既定集合が変わるので rebuild、メンバー行は通常保存。
     host.querySelectorAll("th[data-mvrow]").forEach((th) => {
       th.onclick = () => {
         const uid = th.dataset.mvrow;
         const cbs = [...host.querySelectorAll(`input[data-mv-uid="${cssEsc(uid)}"]:not(:disabled)`)];
         const next = !cbs.every((c) => c.checked);
         cbs.forEach((c) => { c.checked = next; });
-        scheduleSave();
+        (uid === "_default") ? scheduleSaveRebuild() : scheduleSave();
       };
     });
   };
@@ -824,17 +848,20 @@ function wireMenuVisibility(root, members, me, mvInit) {
   let _mvTimer = null;               // デバウンスタイマー
   const MV_DEBOUNCE = 350;
 
-  // マトリクスに出ている uid 集合（行＝現在の対象メンバー）。
-  const visibleUids = new Set(list.map((u) => String(u.id)));
+  // マトリクスに出ている uid 集合（行＝現在の対象メンバー ＋ 既定行 _default）。
+  // _default を含めることで applyToMv 冒頭で既定行の旧設定を delete→作り直し、最新状態を反映できる。
+  const visibleUids = new Set([...list.map((u) => String(u.id)), "_default"]);
 
-  // マトリクス全体の現在のチェック状態から mv（{uid: [hiddenKey,...]}）を作り直す。
+  // マトリクス全体の現在のチェック状態から mv（{uid: [hiddenKey,...], _default: [...]}）を作り直す。
   // ※マトリクスに出ていない uid（過去に設定したが今は対象外の人）の既存設定は壊さず温存する。
   const applyToMv = () => {
-    for (const k of Object.keys(mv)) if (visibleUids.has(k)) delete mv[k]; // 表示中の行だけ作り直す
+    for (const k of Object.keys(mv)) if (visibleUids.has(k)) delete mv[k]; // 表示中の行（＋既定行）だけ作り直す
     const perUser = new Map();
     host.querySelectorAll("input[data-mvk]").forEach((cb) => {
       const uid = cb.dataset.mvUid, k = cb.dataset.mvk;
-      if (!cb.checked && !ALWAYS_VISIBLE.has(k)) {
+      // forced（ALWAYS_VISIBLE）と disabled セル（メンバー行で既定非表示の列）は記録しない。
+      // ＝既定で隠れた列を個別 hidden に重複記録せず、和集合の意味を保つ。
+      if (!cb.checked && !ALWAYS_VISIBLE.has(k) && !cb.disabled) {
         const arr = perUser.get(uid) || []; arr.push(k); perUser.set(uid, arr);
       }
     });
@@ -861,17 +888,29 @@ function wireMenuVisibility(root, members, me, mvInit) {
     return _mvSaving;
   };
 
-  // トグル/一括時に呼ぶ：mv を即時更新し、保存をデバウンス。
-  function scheduleSave() {
-    applyToMv();
+  // 保存のデバウンス（mv は呼び出し前に applyToMv 済みの前提）。
+  const debouncedSave = () => {
     if (_mvTimer) clearTimeout(_mvTimer);
     _mvTimer = setTimeout(() => { _mvTimer = null; flushSave(); }, MV_DEBOUNCE);
+  };
+  // メンバー行用：mv を即時更新し、保存をデバウンス（rebuild 不要）。
+  function scheduleSave() {
+    applyToMv();
+    debouncedSave();
   }
+  // 既定行・列見出し一括・全員ボタン用：既定集合が変わるとメンバー行の disabled/checked が変わるため、
+  // 反映してから DOM を再構築（buildMatrix）して実効状態に揃える。
+  const scheduleSaveRebuild = () => {
+    applyToMv();
+    buildMatrix();
+    debouncedSave();
+  };
 
   // 全員一括（左上ボタン）: 全行×全列の有効チェックを一括設定。
+  // メンバー行の defOff セルは disabled なので触れず、既定行とメンバー行の有効セルだけ動く。rebuild で整合。
   const setAll = (on) => {
     host.querySelectorAll("input[data-mvk]:not(:disabled)").forEach((cb) => { cb.checked = on; });
-    scheduleSave();
+    scheduleSaveRebuild();
   };
   const onBtn = root.querySelector("#mv-all-on");
   const offBtn = root.querySelector("#mv-all-off");
@@ -1046,6 +1085,12 @@ function css() {
   .sx-mvtd{padding:0;text-align:center}
   .sx-mvtd input{width:16px;height:16px;cursor:pointer;margin:7px auto;display:block}
   .sx-mvtd input:disabled{cursor:default;opacity:.4}
+  /* 既定（全員）行＝最上段。区切り（下線太め）＋淡い面で強調、行見出しは太字 */
+  .sx-mvdefrow td,.sx-mvdefrow th{background:var(--track);border-bottom:2px solid var(--line-strong)}
+  .sx-mvdefrh{font-weight:800;color:${C.ink}}
+  .sx-mvtbl tbody tr.sx-mvdefrow:hover td,.sx-mvtbl tbody tr.sx-mvdefrow:hover .sx-mvrh{background:var(--track)}
+  /* 既定で全員非表示の列のメンバーセル＝淡色・変更不可（実効OFFの可視化） */
+  .sx-mvtd-defoff input{opacity:.45}
   .sx-mvtbl tbody tr:hover td,.sx-mvtbl tbody tr:hover .sx-mvrh{background:var(--track)}
 
   /* ダークモード: ハードコードした淡色面/tintを反転（ライト値は不変） */

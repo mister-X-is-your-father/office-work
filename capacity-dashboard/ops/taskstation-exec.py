@@ -562,13 +562,14 @@ class H(BaseHTTPRequestHandler):
                 st["sort_presets"] = out
             if "menu_visibility" in body:
                 # メニュー表示制御: {"<userId>": ["hiddenRouteKey", ...]}（各人の非表示メニュー集合・ブロックリスト）。
+                # 特殊キー "_default" は全員の既定非表示（B54）＝実行時に「_default ∪ 個別」で隠す（app.js 側）。
                 # 未登録ユーザーは全表示＝現状維持。新規ルートも既定表示。上限つきでサニタイズ。
                 mv = body["menu_visibility"]
                 out = {}
                 if isinstance(mv, dict):
                     for uid_key, keys in list(mv.items())[:200]:
                         ukey = str(uid_key)[:12]
-                        if not ukey.lstrip("-").isdigit():
+                        if ukey != "_default" and not ukey.lstrip("-").isdigit():  # 数値uid または "_default" のみ許可
                             continue
                         seen = []
                         for k in (keys or [])[:80]:
