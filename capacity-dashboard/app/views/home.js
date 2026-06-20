@@ -124,29 +124,35 @@ export async function render(root) {
   const ev = estimateVsActual(tasks);
   const tri = triage(tasks, day);
 
-  // E1: 着手準備の段取りで「期日が今日」の手順を MIT として集約（未完了タスク・未完了手順のみ）。
+  // E4: 着手準備の段取りで「期日が今日以前（=今日＋期日超過）」の手順を MIT として集約。
+  // 未完了タスク・未完了手順のみ。遅れ（期日超過）は赤バッジで督促し、古い順に先頭へ。
   const taskById = new Map((tasks || []).map((t) => [t.id, t]));
+  const daysBetween = (fromISO, toISO) => Math.round((Date.parse(toISO) - Date.parse(fromISO)) / 86400000);
   const mitItems = [];
   for (const [tidStr, steps] of Object.entries(stepsByTask)) {
     const t = taskById.get(+tidStr);
     if (!t || !isOpen(t)) continue;
     for (const s of steps || []) {
-      if (s && s.due === day && !s.done && (s.title || "").trim()) {
-        mitItems.push({ taskId: t.id, taskTitle: t.title, stepTitle: s.title, idx: s.idx });
+      if (s && s.due && s.due <= day && !s.done && (s.title || "").trim()) {
+        const lateDays = s.due < day ? daysBetween(s.due, day) : 0;
+        mitItems.push({ taskId: t.id, taskTitle: t.title, stepTitle: s.title, idx: s.idx, due: s.due, lateDays });
       }
     }
   }
+  // 遅れ（期日が古い順）を先頭に、同日内は安定
+  mitItems.sort((a, b) => (a.due || "").localeCompare(b.due || ""));
   const mitHtml = mitItems.length ? `
     <section class="mit card">
       <div class="mit-h">${icon("play", { size: 15 }) || "▶"}<span>今日やる1手</span><span class="mit-n">${mitItems.length}</span></div>
       <div class="mit-rows">
         ${mitItems.map((it) => `
-          <div class="mit-row" data-task="${it.taskId}" data-idx="${it.idx}">
+          <div class="mit-row${it.lateDays > 0 ? " late" : ""}" data-task="${it.taskId}" data-idx="${it.idx}">
             <input type="checkbox" class="mit-check" aria-label="この手順を完了にする" title="完了にする">
             <button type="button" class="mit-open" data-prep="${it.taskId}">
               <span class="mit-step">${esc(it.stepTitle)}</span>
               <span class="mit-task">${esc(it.taskTitle)}</span>
             </button>
+            ${it.lateDays > 0 ? `<span class="mit-late" title="期日を${it.lateDays}日超過">遅れ${it.lateDays}日</span>` : ""}
             <button type="button" class="mit-start" data-start="${it.taskId}" title="着手（進行中にしてポモ開始）">${icon("play", { size: 13 }) || "▶"} 着手</button>
           </div>`).join("")}
       </div>
@@ -210,6 +216,8 @@ export async function render(root) {
       .mit-step{font-size:12.5px;font-weight:600;line-height:1.3;flex:none;max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .mit-task{font-size:11px;color:${C.muted};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
       .mit-open:hover .mit-step{color:${C.fill}}
+      .mit-late{flex:none;font-size:10px;font-weight:700;color:#fff;background:${C.over};border-radius:999px;padding:1px 7px;white-space:nowrap}
+      .mit-row.late{border-color:${C.over}}
       .mit-start{flex:none;display:inline-flex;align-items:center;gap:4px;font:inherit;font-size:11px;font-weight:700;
         color:#fff;background:${C.fill};border:1px solid ${C.fill};border-radius:7px;padding:5px 10px;cursor:pointer;line-height:1}
       .mit-start:hover{filter:brightness(1.06)}
