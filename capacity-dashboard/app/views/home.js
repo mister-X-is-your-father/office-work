@@ -1,7 +1,7 @@
 // 総合ホーム（実データ）。縦積み: KPI / やること / 今日の稼働予定 / 稼働プラン / 月間ガント。
 // 各セクションは折りたたみヘッダ付き。開閉状態は本人ごと localStorage に保存・復元。
 import { load, isAiUser } from "../lib/store.js";
-import { loadByMember, estimateVsActual, triage } from "../lib/capacity.js";
+import { loadByMember, estimateVsActual, triage, weekLoadByMember } from "../lib/capacity.js";
 import { capacityOn } from "../lib/recurrence.js";
 import { statusOf } from "../lib/kinds.js";
 import { C, esc, fmtH, todayISO, member_color } from "../lib/ui.js";
@@ -124,6 +124,24 @@ export async function render(root) {
   const ev = estimateVsActual(tasks);
   const tri = triage(tasks, day);
 
+  // F4 キャパ予算: 自分の「今週（今日〜週末）」の稼働容量合計 − 既コミット負荷 = 残高。
+  // 容量は capacityFor（週末/祝日/休暇=0）の合計、負荷は weekLoadByMember の weekH。
+  const dowOf = (iso) => new Date(iso + "T00:00:00Z").getUTCDay();
+  const endDow = Number.isInteger(settings.weekStart) ? (settings.weekStart + 6) % 7 : 0; // 既定=日曜終わり
+  const addToEnd = (endDow - dowOf(day) + 7) % 7;
+  const weekDays = []; for (let i = 0; i <= addToEnd; i++) weekDays.push(shiftISO(day, i));
+  const meMember = members.find((m) => m.id === (me && me.id)) || (me ? { id: me.id, name: me.name || me.username } : null);
+  let budget = null;
+  if (meMember) {
+    const capSum = weekDays.reduce((s, d) => s + capacityFor(meMember, d), 0);
+    const wl = weekLoadByMember(tasks, [meMember], weekDays, settings.capH, plansByTask, { holidays: holidaysSet });
+    const committed = (wl[0] && wl[0].weekH) || 0;
+    const remaining = Math.max(0, capSum - committed);
+    const over = Math.max(0, committed - capSum);
+    const pct = capSum > 0 ? Math.min(100, Math.round((committed / capSum) * 100)) : (committed > 0 ? 100 : 0);
+    budget = { capSum, committed, remaining, over, pct };
+  }
+
   // E4: 着手準備の段取りで「期日が今日以前（=今日＋期日超過）」の手順を MIT として集約。
   // 未完了タスク・未完了手順のみ。遅れ（期日超過）は赤バッジで督促し、古い順に先頭へ。
   const taskById = new Map((tasks || []).map((t) => [t.id, t]));
@@ -158,6 +176,20 @@ export async function render(root) {
       </div>
     </section>` : "";
 
+  // F4 キャパ予算バンド: capSum>0（自分が今週に容量を持つ）ときだけ描画。残りわずか/超過は色で警告。
+  const budgetHtml = (budget && budget.capSum > 0) ? (() => {
+    const b = budget;
+    const state = b.over > 0 ? { cls: "over", label: `超過 +${fmtH(b.over)}` }
+      : (b.remaining <= b.capSum * 0.15 ? { cls: "tight", label: "残りわずか" }
+      : { cls: "ok", label: "計画的に進められます" });
+    return `
+      <section class="cb card cb-${state.cls}">
+        <div class="cb-h">${icon("calendarDays", { size: 15 }) || ""}<span>今週のキャパ予算</span><span class="cb-state ${state.cls}">${esc(state.label)}</span></div>
+        <div class="cb-bar"><i class="${state.cls}" style="width:${b.pct}%"></i></div>
+        <div class="cb-meta">残り <b>${fmtH(b.remaining)}</b> ／ 今週 ${fmtH(b.capSum)}<small>（コミット ${fmtH(b.committed)}）</small></div>
+      </section>`;
+  })() : "";
+
   const totCap = rows.reduce((s, r) => s + r.capH, 0), totAsg = rows.reduce((s, r) => s + r.assignedH, 0);
   const over = rows.filter(r => r.status === "over");
   const must = tri.filter(t => t.cls === "must");
@@ -191,6 +223,7 @@ export async function render(root) {
       <a class="kpi" href="#/triage" title="トリアージへ"><div class="l">今日必須</div><div class="v">${must.length}<small>件</small></div></a>
     </div>
     ${mitHtml}
+    ${budgetHtml}
     <div class="home-stack">
       ${section("todo", "やること")}
       ${section("today", "今日の稼働予定")}
@@ -222,6 +255,23 @@ export async function render(root) {
         color:#fff;background:${C.fill};border:1px solid ${C.fill};border-radius:7px;padding:5px 10px;cursor:pointer;line-height:1}
       .mit-start:hover{filter:brightness(1.06)}
       .mit-start:disabled{opacity:.6;cursor:default}
+      /* F4 キャパ予算バンド: 残高ゲージ。ok=好調 / tight=残りわずか(amber) / over=超過(赤)。 */
+      .cb{padding:12px 16px;margin-bottom:16px}
+      .cb-h{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700;color:${C.ink};margin-bottom:9px}
+      .cb-h .ic{color:${C.fill}}
+      .cb-state{margin-left:auto;font-size:11px;font-weight:700;border-radius:999px;padding:2px 10px}
+      .cb-state.ok{color:${C.free};background:rgba(47,166,107,.12)}
+      .cb-state.tight{color:${C.amber};background:rgba(230,160,30,.14)}
+      .cb-state.over{color:${C.over};background:rgba(229,72,77,.12)}
+      .cb-bar{position:relative;height:10px;background:${C.track};border-radius:6px;overflow:hidden;margin-bottom:8px}
+      .cb-bar i{position:absolute;left:0;top:0;bottom:0;border-radius:6px;background:${C.fill}}
+      .cb-bar i.ok{background:${C.free}}
+      .cb-bar i.tight{background:${C.amber}}
+      .cb-bar i.over{background:${C.over}}
+      .cb-meta{font-size:12px;color:${C.ink}}
+      .cb-meta b{font-weight:800;font-variant-numeric:tabular-nums}
+      .cb-meta small{font-size:11px;color:${C.muted};margin-left:4px}
+      .cb-over{border-left:3px solid ${C.over}}
       .home-stack{display:flex;flex-direction:column;gap:16px}
       .home-sec{padding:0;overflow:hidden}
       .home-sec-head{display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;
