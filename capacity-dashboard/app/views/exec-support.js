@@ -74,25 +74,43 @@ function isWorkDay(iso, holidaysSet, unavailRanges) {
   return true;
 }
 
+// ローカル今日の "YYYY-MM-DD"（床止め用）。iso 比較は文字列の辞書順で行えるよう zero-pad。
+function localTodayIso() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 // ── 逆算スケジュール（純関数・TDD対象） ─────────────────────────────
 // 締切日から後ろ向きに営業日（土日/祝日/担当の休暇を除外）を辿り、
 // 手順を逆順（最後の手順が締切寄り）に各日の作業可能時間へ詰める。
-//   1日の作業可能時間 = capH − その曜日に重なる保護時間帯の合計（下限0）。
+//   1日の作業可能時間 = capH×(1 − bufferPct/100) − その曜日に重なる保護時間帯の合計（下限0）。
+//     ＝1日バッファ（容量を食いつぶさない）を確保したうえで保護枠も差し引く。
 //   見積り無しの手順は「1日1件」扱い（その日の残量を使い切る＝1日1件で次の日へ）。
-// 引数: { steps:[{est}], deadlineIso, capH, windows, holidaysSet, unavailRanges }
+// 引数: { steps:[{est}], deadlineIso, capH, windows, holidaysSet, unavailRanges, bufferPct, todayIso }
+//   bufferPct=各日の容量から差し引くバッファ率（0〜90 整数・省略時0＝後方互換）。
+//   todayIso=ローカル今日の "YYYY-MM-DD"。後ろ向きに辿る際、この日より前へは配置しない（床止め）。
+//     省略時は内部でローカル今日を算出（後方互換・呼び出し側からは必ず渡す）。
+//     ＝配置可能区間は [todayIso 〜 deadlineIso] の営業日のみ。締切が過去なら 0 日→全手順 unplaced。
 // 返り値: { dueByIndex: Map<stepIndex, iso>, unplaced: number }
-export function backcast({ steps, deadlineIso, capH = 8, windows = [], holidaysSet = null, unavailRanges = [] }) {
+export function backcast({ steps, deadlineIso, capH = 8, windows = [], holidaysSet = null, unavailRanges = [], bufferPct = 0, todayIso = localTodayIso() }) {
   const dueByIndex = new Map();
   const list = steps || [];
   if (!list.length || !deadlineIso || deadlineIso.startsWith("0001")) {
     return { dueByIndex, unplaced: list.length };
   }
+  // 床止め: 過去（昨日以前）には配置しない。todayIso が不正なら床止め無し（後方互換）。
+  const floorIso = (typeof todayIso === "string" && /^\d{4}-\d{2}-\d{2}$/.test(todayIso)) ? todayIso : null;
   // 締切日から後ろ向きに営業日を生成するイテレータ。
   let cursor = deadlineIso;
   let guard = 0;
   const nextWorkDay = () => {
     // 現在の cursor 以前で最初の作業可能日を返し、cursor をその前日へ進める。
     while (guard++ < 4000) {
+      // 床止め: cursor が今日より前まで遡ったら、以降は配置不可（過去には置かない）。
+      if (floorIso && cursor < floorIso) return null;
       if (isWorkDay(cursor, holidaysSet, unavailRanges)) {
         const day = cursor;
         cursor = shiftISO(cursor, -1);
@@ -102,9 +120,12 @@ export function backcast({ steps, deadlineIso, capH = 8, windows = [], holidaysS
     }
     return null;
   };
+  // バッファ率を 0〜90 の整数へ正規化（不正・範囲外は安全側へ丸め）。
+  const buf = Math.max(0, Math.min(90, Math.round(Number(bufferPct) || 0)));
   const capOf = (iso) => {
     const dow = new Date(iso + "T00:00:00Z").getUTCDay();
-    return Math.max(0, capH - protectedHoursOnDow(windows, dow));
+    // capH からバッファ分を引いた「実空き」、さらに保護時間帯を差し引く（下限0）。
+    return Math.max(0, capH * (1 - buf / 100) - protectedHoursOnDow(windows, dow));
   };
 
   // 手順を逆順（末尾＝締切寄り）に詰める。
@@ -147,13 +168,20 @@ export function backcast({ steps, deadlineIso, capH = 8, windows = [], holidaysS
 //   ctx.task.assignees の非AI先頭を担当に、無ければ me。担当の休暇レンジを引く。
 async function loadBackcastCtx(ctx) {
   const { settings, holidaysSet, unavailabilityByMember, me } = await load();
+  // exec の team 設定から保護時間帯とバッファ率を取得（ダウン時は保護枠無し・バッファ0で続行）。
   let windows = [];
-  try { windows = ((await getSettings()).settings || {}).protected_windows || []; } catch { /* exec ダウン時は保護枠無しで続行 */ }
+  let bufferPct = 0;
+  try {
+    const s = (await getSettings()).settings || {};
+    windows = s.protected_windows || [];
+    bufferPct = Math.max(0, Math.min(90, Math.round(Number(s.daily_buffer_pct) || 0)));
+  } catch { /* exec ダウン時は保護枠無し・バッファ0で続行 */ }
   const assignees = (ctx && ctx.task && ctx.task.assignees) || [];
   const owner = assignees.find((a) => !isAiUser(a)) || me || null;
   const uid = owner && owner.id;
   const unavailRanges = (uid != null && unavailabilityByMember.get) ? (unavailabilityByMember.get(uid) || []) : [];
-  return { capH: settings.capH || 8, windows, holidaysSet, unavailRanges };
+  // 床止め用のローカル今日。backcast へ必ず渡す（過去日へ手順を置かないため）。
+  return { capH: settings.capH || 8, windows, holidaysSet, unavailRanges, bufferPct, todayIso: localTodayIso() };
 }
 
 // ── プラグイン・レジストリ ─────────────────────────────────────────
@@ -167,6 +195,30 @@ async function loadBackcastCtx(ctx) {
 function ensureRowIds(items) {
   for (const it of items) if (!it.__id) it.__id = uid();
   return items;
+}
+
+// オーバーコミット早期警告バナー（F3）。逆算後 unplaced>0 のときだけ予定化カード内に残る赤い警告を出す。
+//   状態は ctx._overcommit = { unplaced, total, deadlineIso }（transient・prep には保存しない）。
+//   逆算前 / unplaced==0 は何も出さない（＝再逆算して全部置けたら自然に消える）。
+function overcommitBannerHtml(ctx) {
+  const oc = ctx && ctx._overcommit;
+  if (!oc || !(oc.unplaced > 0)) return "";
+  const dl = oc.deadlineIso ? dueLabel(oc.deadlineIso) : "この締切";
+  return `
+    <div class="es-oc" role="alert">
+      <div class="es-oc-head">
+        <span class="es-oc-ic">${icon("alertTriangle", { size: 15 })}</span>
+        <span class="es-oc-msg">この締切（${esc(dl)}）は今のキャパでは <b>${oc.unplaced}/${oc.total}</b> 手順が入り切りません。</span>
+      </div>
+      <div class="es-oc-sub">どれかで空けないと締切に間に合いません。たとえば:</div>
+      <ul class="es-oc-opts">
+        <li>締切を延ばす（交渉する）</li>
+        <li>手順を減らす・各手順を縮小する</li>
+        <li>誰かに委譲する</li>
+        <li>他タスクの優先度を下げて空ける</li>
+        <li>バッファ／保護時間帯を見直す</li>
+      </ul>
+    </div>`;
 }
 
 const PLUGINS = [
@@ -301,6 +353,7 @@ const PLUGINS = [
             <button type="button" class="es-btn es-backbtn" data-act="backcast"${canBackcast ? "" : " disabled"}>${icon("calendarDays", { size: 15 })}逆算スケジュール</button>
             <span class="es-back-hint">${esc(hint)}</span>
           </div>
+          ${overcommitBannerHtml(ctx)}
           <button type="button" class="es-pw-link" data-act="pw-toggle" aria-expanded="false">${icon("lock", { size: 12 })} 保護時間帯を編集</button>
           <div class="es-pw-host" data-pw-host></div>
         </div>`;
@@ -334,14 +387,22 @@ const PLUGINS = [
         if (typeof confirm === "function" && !confirm(`締切 ${dueLabel(deadlineIso)} から逆算して、${steps.length} 手順に作業日を割り当てます。各手順の既存の期日は上書きされます。実行しますか？`)) return;
         backBtn.dataset.busy = "1"; backBtn.disabled = true;
         try {
-          const { capH, windows, holidaysSet, unavailRanges } = await loadBackcastCtx(ctx);
-          const { dueByIndex, unplaced } = backcast({ steps, deadlineIso, capH, windows, holidaysSet, unavailRanges });
+          const { capH, windows, holidaysSet, unavailRanges, bufferPct, todayIso } = await loadBackcastCtx(ctx);
+          const { dueByIndex, unplaced } = backcast({ steps, deadlineIso, capH, windows, holidaysSet, unavailRanges, bufferPct, todayIso });
           steps.forEach((it, i) => { if (dueByIndex.has(i)) it.due = dueByIndex.get(i); });
           save();
+          // オーバーコミット早期警告（F3）: 入り切らない手順があれば予定化カードに残る赤いバナー、
+          // 全部置けたら解除（＝再逆算で unplaced==0 になればバナーは消える）。
+          if (ctx) {
+            ctx._overcommit = unplaced > 0
+              ? { unplaced, total: steps.length, deadlineIso }
+              : null;
+          }
           // 段取りカードを再描画して新しい期日を表示（タスク本体の due_date は変更しない）。
-          if (ctx && typeof ctx.rerenderCard === "function") ctx.rerenderCard("steps");
-          if (unplaced > 0) {
-            if (typeof alert === "function") alert(`容量／期間が不足しています。${unplaced} 手順が未配置のままです（締切までの営業日と1日の作業可能時間が足りません）。配置できた分だけ期日を設定しました。`);
+          if (ctx && typeof ctx.rerenderCard === "function") {
+            ctx.rerenderCard("steps");
+            // 予定化カード自身も再描画してバナーの表示/非表示を反映。
+            ctx.rerenderCard("schedule");
           }
         } finally {
           backBtn.dataset.busy = ""; backBtn.disabled = false;
@@ -707,6 +768,16 @@ export function ensureStyle() {
   .es-back{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:2px}
   .es-backbtn{font-size:12px;padding:7px 11px}
   .es-back-hint{font-size:10.5px;color:var(--muted);line-height:1.4;flex:1;min-width:140px}
+  /* オーバーコミット早期警告バナー（F3） */
+  .es-oc{display:flex;flex-direction:column;gap:6px;border:1px solid var(--over,#e5484d);border-radius:10px;background:rgba(229,72,77,.08);padding:10px 12px;margin-top:4px}
+  .es-oc-head{display:flex;align-items:flex-start;gap:7px}
+  .es-oc-ic{line-height:0;color:var(--over,#e5484d);flex:none;margin-top:1px}
+  .es-oc-msg{font-size:12px;color:var(--ink);line-height:1.5}
+  .es-oc-msg b{color:var(--over,#e5484d);font-weight:800;font-variant-numeric:tabular-nums}
+  .es-oc-sub{font-size:11px;color:var(--muted);line-height:1.5}
+  .es-oc-opts{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:3px}
+  .es-oc-opts li{font-size:11.5px;color:var(--ink);line-height:1.5}
+  html[data-theme="dark"] .es-oc{background:rgba(229,72,77,.14)}
   .es-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding-top:2px}
   .es-foot-score{font-size:11.5px;color:var(--muted)}
   .es-foot-score b{color:var(--ink);font-variant-numeric:tabular-nums}

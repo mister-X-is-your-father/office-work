@@ -42,7 +42,7 @@ conf = json.load(open(CONF_PATH))
 ALLOWED = set(conf.get("allowed_user_ids", []))
 
 SETTINGS_PATH = f"{HOME}/.config/taskstation/settings.json"
-SETTINGS_DEFAULT = {"cap_hours": 8, "cal_start": 8, "cal_end": 20, "excluded_project_ids": [], "sort_presets": [], "menu_visibility": {}, "protected_windows": []}
+SETTINGS_DEFAULT = {"cap_hours": 8, "cal_start": 8, "cal_end": 20, "excluded_project_ids": [], "sort_presets": [], "menu_visibility": {}, "protected_windows": [], "daily_buffer_pct": 0}
 
 
 def load_settings():
@@ -539,6 +539,9 @@ class H(BaseHTTPRequestHandler):
             st = load_settings()
             if "cap_hours" in body:
                 st["cap_hours"] = max(1, min(24, float(body["cap_hours"])))
+            if "daily_buffer_pct" in body:
+                # 1日の容量のうち割り込み用に確保する割合(0-90%)。逆算スケジュールが埋めない＝キャパ保護。
+                st["daily_buffer_pct"] = max(0, min(90, int(body["daily_buffer_pct"])))
             if "cal_start" in body:
                 st["cal_start"] = max(0, min(23, int(body["cal_start"])))
             if "cal_end" in body:
