@@ -334,9 +334,11 @@ export function mountPomodoro(topbar) {
   btn.onclick = open;
 
   // カード全体に色/透明度を適用（半透明＝背景rgba＋ぼかし。文字は不透明のまま）
+  // 背景はインラインで効く＝CSSのダーク上書きより強いので、ここでテーマ判定して暗面rgbaを使う。
   function applyCardStyle(c, cfg) {
     const op = Math.max(0.3, Math.min(1, cfg.opacity ?? 1));
-    c.style.background = `rgba(255,255,255,${op})`;
+    const dark = document.documentElement.dataset.theme === "dark";
+    c.style.background = dark ? `rgba(31,36,44,${op})` : `rgba(255,255,255,${op})`;
     c.style.backdropFilter = op < 1 ? "blur(7px)" : "";
     c.style.webkitBackdropFilter = op < 1 ? "blur(7px)" : "";
     c.style.setProperty("--pm-accent", cfg.accent || "#3a86ff");
@@ -582,6 +584,24 @@ function ensureStyle() {
   .pm-time.brk{color:#2fa66b}
   .pm-task{font-size:12px;color:var(--muted);text-align:center;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .pm-task.none{opacity:.6}
-  .pm-hint{font-size:10.5px;color:var(--muted);margin-top:8px;line-height:1.5}`;
+  .pm-hint{font-size:10.5px;color:var(--muted);margin-top:8px;line-height:1.5}
+
+  /* ===== ダークモード上書き（lightは不変。<button>はglobalのinput/select規則の対象外＝明示が必要） ===== */
+  /* カード面: background はJS(applyCardStyle)がテーマ判定でinline上書きするので、ここでは枠/影のみ */
+  html[data-theme="dark"] .pm-card{border-color:var(--line);box-shadow:0 18px 50px rgba(0,0,0,.5)}
+  html[data-theme="dark"] .pm-tabs button{background:var(--card);border-color:var(--line);color:var(--muted)}
+  html[data-theme="dark"] .pm-tabs button.on{border-color:var(--fill);color:#8db8ff;background:rgba(58,134,255,.16)}
+  html[data-theme="dark"] .pm-in{background:var(--card);color:var(--ink);border-color:var(--line)}
+  html[data-theme="dark"] .pm-go.sub{background:var(--card);color:#8db8ff}
+  html[data-theme="dark"] .pm-go.sub.stop{background:var(--card);border-color:rgba(229,72,77,.45);color:#ff9b96}
+  html[data-theme="dark"] .pm-pip{background:var(--card);border-color:var(--line);color:var(--muted)}
+  html[data-theme="dark"] .pm-pip:hover{color:#8db8ff;border-color:rgba(58,134,255,.45)}
+  html[data-theme="dark"] .pm-picker{border-top-color:var(--line)}
+  html[data-theme="dark"] .pm-pk-card{background:var(--card);border-color:var(--line)}
+  html[data-theme="dark"] .pm-pk-card:hover{border-color:rgba(58,134,255,.45)}
+  html[data-theme="dark"] .pm-pk-card.on{border-color:var(--pm-accent,var(--fill));background:rgba(58,134,255,.16)}
+  html[data-theme="dark"] .pm-pk-swatch{border-color:var(--card)}
+  html[data-theme="dark"] .pm-time{color:var(--ink)}
+  html[data-theme="dark"] .pm-time.brk{color:#7fd6a6}`;
   document.head.appendChild(s);
 }

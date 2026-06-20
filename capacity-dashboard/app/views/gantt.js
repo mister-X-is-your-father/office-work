@@ -1284,5 +1284,48 @@ function ganttStyles() {
   .gv .legend .sw{width:20px;height:10px;border-radius:3px}
   .gv .legend .sw.plan{background:rgba(58,134,255,.16);box-shadow:inset 0 0 0 1px rgba(58,134,255,.35)}
   .gv .empty{padding:34px;text-align:center;color:${C.muted};font-size:13px}
+
+  /* ===== ダークモード上書き（lightは不変・末尾で html[data-theme="dark"] のみ追加） ===== */
+  /* ツールバー: セグメントボタン/週select/担当chip の白面を card 面へ（.on の青塗りは反転不要＝触らない） */
+  html[data-theme="dark"] .gv .seg button{background:var(--card)}
+  html[data-theme="dark"] .gv .gv-wsel{background:var(--card)}
+  html[data-theme="dark"] .gv .chip{background:var(--card)}
+  /* sticky 日付ヘッダ（角/月コーナー/グリッド）と月バンドの白/淡灰面 */
+  html[data-theme="dark"] .gv .grid-head{background:var(--card)}
+  html[data-theme="dark"] .gv .gh-corner{background:var(--card)}
+  html[data-theme="dark"] .gv .gh-mc{background:var(--card)}
+  html[data-theme="dark"] .gv .gh-month{background:var(--surface-2)}
+  /* 週末日付ヘッダの淡灰（白オーバーレイで暗面でも微差を出す） */
+  html[data-theme="dark"] .gv .gh-day.weekend{background:rgba(255,255,255,.03)}
+  /* 行 hover / 超過行 と左固定ラベルの白・赤淡面 */
+  html[data-theme="dark"] .gv .row:hover{background:rgba(255,255,255,.04)}
+  html[data-theme="dark"] .gv .row:hover .r-label{background:rgba(255,255,255,.04)}
+  html[data-theme="dark"] .gv .row.delayed .r-label{background:rgba(229,72,77,.16)}
+  html[data-theme="dark"] .gv .r-label{background:var(--card)}
+  /* 週末セルの薄い黒オーバーレイ→暗面では白オーバーレイへ */
+  html[data-theme="dark"] .gv .cell.weekend{background:rgba(255,255,255,.025)}
+  /* バーの「⋮」シフトボタン: 白面+影→浮いた面+暗い影 */
+  html[data-theme="dark"] .gv .bar-shift{background:var(--surface-raised);box-shadow:0 1px 3px rgba(0,0,0,.5)}
+  html[data-theme="dark"] .gv .bar-shift:hover{background:var(--surface-raised)}
+  /* 日程シフトの小メニュー（浮いたポップ）: 白面/白ボタン/淡borderを暗面へ */
+  html[data-theme="dark"] .gv-shiftmenu{background:var(--card);box-shadow:0 14px 38px rgba(0,0,0,.5)}
+  html[data-theme="dark"] .gv-shiftmenu .sm-b{background:var(--card)}
+  html[data-theme="dark"] .gv-shiftmenu .sm-b:hover{border-color:var(--line-strong)}
+  html[data-theme="dark"] .gv-shiftmenu .sm-edit{background:var(--card)}
+  /* 人別: 親プロジェクトのサブグループ見出しの淡青灰面 */
+  html[data-theme="dark"] .gv .grp.mp-sub{background:var(--surface-2)}
+  html[data-theme="dark"] .gv .grp.mp-sub .grp-label{background:var(--surface-2)}
+  html[data-theme="dark"] .gv .grp.mp-sub .grp-label:hover{background:var(--surface-raised)}
+  /* ドラッグ中の浮遊ラベル: light は ink面+白字。dark は ink が明色＝白on白で読めない→暗い浮面+明文字へ反転 */
+  html[data-theme="dark"] .gv-draglabel{background:var(--surface-raised);color:var(--ink);box-shadow:0 4px 12px rgba(0,0,0,.5)}
+  /* 日別予定ポップ（浮いたポップ）: 白面/白ボタン/淡borderを暗面へ（.dp-save の青塗り白字は触らない） */
+  html[data-theme="dark"] .gv-daypop{background:var(--card);box-shadow:0 12px 34px rgba(0,0,0,.5)}
+  html[data-theme="dark"] .gv-daypop .dp-q{background:var(--card)}
+  html[data-theme="dark"] .gv-daypop .dp-q:hover{border-color:var(--line-strong)}
+  html[data-theme="dark"] .gv-daypop .dp-clear{background:var(--card)}
+  /* 見出し行（grp / grp-label）の淡白面とその hover */
+  html[data-theme="dark"] .gv .grp{background:var(--surface-2)}
+  html[data-theme="dark"] .gv .grp-label{background:var(--surface-2)}
+  html[data-theme="dark"] .gv .grp-label:hover{background:var(--surface-raised)}
   </style>`;
 }

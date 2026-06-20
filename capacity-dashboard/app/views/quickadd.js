@@ -269,6 +269,32 @@ function ensureStyle() {
   .qa-tip-desc{color:var(--ink);padding-right:10px}
   .qa-tip-ex{color:var(--muted);white-space:nowrap}
   .qa-tip-eg{margin-top:9px;padding-top:8px;border-top:1px solid var(--line);font-size:11px;color:var(--muted)}
-  .qa-tip-eg code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink)}`;
+  .qa-tip-eg code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink)}
+
+  /* ===== ダークモード上書き（light非破壊・末尾追加） ===== */
+  /* 白入力欄 → カード面。placeholder も淡色を muted 寄せに。 */
+  html[data-theme="dark"] .qa-wrap input{background:var(--card)}
+  html[data-theme="dark"] .qa-wrap input::placeholder{color:var(--muted)}
+  /* 白ポップ → カード面＋影を黒系に。 */
+  html[data-theme="dark"] .qa-pop{background:var(--card);border-color:var(--line);box-shadow:0 10px 30px rgba(0,0,0,.45)}
+  /* 近白チップ → 沈んだ面。 */
+  html[data-theme="dark"] .qa-chip{background:var(--surface-2)}
+  /* タイトルチップ（淡青）→ 半透明アクセント青。 */
+  html[data-theme="dark"] .qa-chip.title{background:rgba(58,134,255,.16);border-color:rgba(58,134,255,.4)}
+  /* 警告（淡赤）→ 半透明赤＋明るい赤文字。 */
+  html[data-theme="dark"] .qa-chip.warn{background:rgba(229,72,77,.16);border-color:rgba(229,72,77,.4);color:#ff9b96}
+  /* 成功（淡緑）→ 半透明緑＋明るい緑文字。 */
+  html[data-theme="dark"] .qa-chip.ok{background:rgba(47,166,107,.16);border-color:rgba(47,166,107,.4);color:#7fd6a6}
+  /* 認識トークン（淡青）→ 半透明アクセント青。 */
+  html[data-theme="dark"] .qa-tok{background:rgba(58,134,255,.16);border-color:rgba(58,134,255,.4)}
+  /* テキスト扱い（淡灰）→ 沈んだ面。 */
+  html[data-theme="dark"] .qa-tok.text{background:var(--surface-2);border-color:var(--line)}
+  /* 未照合（淡赤）→ 半透明赤＋明るい赤文字。 */
+  html[data-theme="dark"] .qa-tok.miss{background:rgba(229,72,77,.16);border-color:rgba(229,72,77,.4);color:#ff9b96}
+  html[data-theme="dark"] .qa-tok.miss .ic{color:#ff9b96}
+  /* テキスト化済みの未照合 → 沈んだ面。 */
+  html[data-theme="dark"] .qa-tok.text.miss{background:var(--surface-2);border-color:var(--line)}
+  /* 早見表ポップの影を黒系に。 */
+  html[data-theme="dark"] .qa-tip{box-shadow:0 10px 30px rgba(0,0,0,.5)}`;
   document.head.appendChild(s);
 }

@@ -345,5 +345,19 @@ function css() {
   .dg-canvas.dg-hover .dg-edge.dim{opacity:.1}
   .dg-canvas.dg-hover .dg-edge.hl{opacity:1}
   /* B38 filter: 集合外を dim（hover 中は hover の dim が優先されるよう hover 未起動時のみ適用） */
-  .dg-canvas.dg-filtering:not(.dg-hover) .dg-node.filter-out{opacity:.16}`;
+  .dg-canvas.dg-filtering:not(.dg-hover) .dg-node.filter-out{opacity:.16}
+  /* ===== ダークモード上書き（light は不変。構造色は var()、色面は rgba tint。
+     .dg-sel(=select)/.dg-st.todo/.doing/.waiting/.done は app/index.html の
+     グローバルダークブロックで既出のためここでは触らない） ===== */
+  html[data-theme="dark"] .dg-clear{background:var(--card);color:${C.muted}}
+  html[data-theme="dark"] .dg-clear:hover{background:var(--track)}
+  html[data-theme="dark"] .dg-zoom{background:var(--card)}
+  html[data-theme="dark"] .dg-zbtn:hover{background:var(--track)}
+  html[data-theme="dark"] .dg-zfit:hover{background:var(--track)}
+  html[data-theme="dark"] .dg-node{background:var(--card);color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.4)}
+  html[data-theme="dark"] .dg-node.crit{box-shadow:0 2px 8px rgba(229,72,77,.30)}
+  html[data-theme="dark"] .dg-node.done{background:rgba(47,166,107,.12)}
+  html[data-theme="dark"] .dg-node.blocked{border-color:rgba(245,166,35,.55)}
+  html[data-theme="dark"] .dg-node.ready{box-shadow:0 0 0 1px ${C.free} inset,0 1px 3px rgba(0,0,0,.4)}
+  html[data-theme="dark"] .dg-canvas.dg-hover .dg-node.hl{box-shadow:0 3px 12px rgba(0,0,0,.5)}`;
 }

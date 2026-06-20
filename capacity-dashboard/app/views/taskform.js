@@ -870,6 +870,46 @@ export function ensureStyle() {
   .tf-cancel{background:#fff;color:${C.muted}}.tf-cancel:hover{color:${C.ink}}
   .tf-save{background:${C.fill};color:#fff;border-color:${C.fill}}.tf-save:hover{filter:brightness(1.05)}
   .tf-save:disabled{opacity:.6;cursor:default}
-  @media(max-width:560px){.tf-row{flex-direction:column;gap:0}}`;
+  @media(max-width:560px){.tf-row{flex-direction:column;gap:0}}
+
+  /* ── ダークモード上書き（light は不変・末尾で生の明色を暗側へ。最重要=入力欄の白塗りを潰す） ── */
+  /* カード/オーバーレイ: 影を暗背景向けに強める（任意のポリッシュ） */
+  html[data-theme="dark"] .tf-card{box-shadow:0 18px 50px rgba(0,0,0,.5)}
+  /* AIノート/コメント欄の近白面 → card */
+  html[data-theme="dark"] .tf-ainotes{background:var(--card)}
+  /* Fable実行ボタン（白地のアウトラインボタン）→ card 面。文字/枠は青(C.fill)維持、hover時の青塗り+白字も維持 */
+  html[data-theme="dark"] .tf-fable-run{background:var(--card)}
+  /* 閉じる×のhover淡灰 → track */
+  html[data-theme="dark"] .tf-x:hover{background:var(--track)}
+  /* テンプレ箱（淡青の面+枠）→ 半透明の青面/青枠 */
+  html[data-theme="dark"] .tf-tplbox{background:rgba(58,134,255,.16);border-color:rgba(58,134,255,.40)}
+  /* 入力欄の白塗り（最重要）→ card。disabled の淡灰 → 沈んだ面 */
+  html[data-theme="dark"] .tf-in{background:var(--card)}
+  html[data-theme="dark"] .tf-in:disabled{background:var(--surface-2)}
+  /* ステータスセグメント: 白ボタン面/hover淡青 → card/track（onの青塗り+白字は維持） */
+  html[data-theme="dark"] .tf-seg button{background:var(--card)}
+  html[data-theme="dark"] .tf-seg button:hover{background:var(--track)}
+  /* 進捗クイックボタン: 白面/hover淡青/on淡青 → card/track/半透明青 */
+  html[data-theme="dark"] .tf-pct-quick button{background:var(--card)}
+  html[data-theme="dark"] .tf-pct-quick button:hover{background:var(--track)}
+  html[data-theme="dark"] .tf-pct-quick button.on{background:rgba(58,134,255,.18)}
+  /* 見積りステッパー: 白面/hover淡青 → card/半透明青 */
+  html[data-theme="dark"] .tf-step-btns button{background:var(--card)}
+  html[data-theme="dark"] .tf-step-btns button:hover{background:rgba(58,134,255,.18)}
+  /* コンボボックス候補DD（浮いたポップ）: 白面+明い影 → 浮き面/暗い影。on行の淡青 → 半透明青 */
+  html[data-theme="dark"] .tf-cbx-dd{background:var(--surface-raised);box-shadow:0 10px 30px rgba(0,0,0,.5)}
+  html[data-theme="dark"] .tf-cbx-it.on{background:rgba(58,134,255,.18)}
+  /* 実績バッジ（淡青）→ 半透明青面 */
+  html[data-theme="dark"] .tf-spent{background:rgba(58,134,255,.16)}
+  /* 添付追加（淡青の破線枠/hover淡青面）→ 半透明青枠/面 */
+  html[data-theme="dark"] .tf-att-add{border-color:rgba(58,134,255,.40)}
+  html[data-theme="dark"] .tf-att-add:hover{background:rgba(58,134,255,.12)}
+  /* チェック行 hover の淡青 → track */
+  html[data-theme="dark"] .tf-check:hover{background:var(--track)}
+  /* チップ（淡灰面）→ 沈んだ面 */
+  html[data-theme="dark"] .tf-chip{background:var(--surface-2)}
+  /* フッターの白ボタン（テンプレ保存/キャンセル）→ card 面（保存=青塗りは維持） */
+  html[data-theme="dark"] .tf-acts .tf-tpl-save{background:var(--card)}
+  html[data-theme="dark"] .tf-cancel{background:var(--card)}`;
   document.head.appendChild(s);
 }

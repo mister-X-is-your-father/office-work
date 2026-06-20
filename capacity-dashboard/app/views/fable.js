@@ -208,5 +208,11 @@ function css() {
   .fb-extra{width:100%;margin-top:8px;font:inherit;font-size:12.5px;padding:7px 10px;border:1px solid ${C.line};border-radius:8px;box-sizing:border-box}
   .fb-extra:focus{outline:none;border-color:${C.fill}}
   .fb-console-card{position:sticky;top:12px}
-  .fb-console{background:#101418;color:#cfe3cf;border-radius:10px;padding:12px;font-size:11.5px;line-height:1.5;height:480px;overflow:auto;white-space:pre-wrap;word-break:break-word;margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}`;
+  .fb-console{background:#101418;color:#cfe3cf;border-radius:10px;padding:12px;font-size:11.5px;line-height:1.5;height:480px;overflow:auto;white-space:pre-wrap;word-break:break-word;margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+
+  /* ===== ダークモード上書き（lightは不変。生#fff入力/丸ボタンをダーク化。hover時の青塗り白字は維持） ===== */
+  html[data-theme="dark"] .fb-play{background:var(--card)}
+  html[data-theme="dark"] .fb-plan{background:var(--card)}
+  html[data-theme="dark"] .fb-plan:hover{border-color:var(--fill)}
+  html[data-theme="dark"] .fb-sel{background:var(--card);color:var(--ink)}`;
 }

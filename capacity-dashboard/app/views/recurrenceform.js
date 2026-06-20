@@ -500,6 +500,11 @@ export function ensureRecurrenceStyle() {
   .rf-acts{display:flex;justify-content:flex-end;margin:6px 0 2px}
   .rf-acts .tf-save{font:inherit;font-size:13.5px;font-weight:600;padding:9px 18px;border-radius:9px;cursor:pointer;border:1px solid ${C.fill};background:${C.fill};color:#fff}
   .rf-acts .tf-save:hover{filter:brightness(1.05)}
-  .rf-acts .tf-save:disabled{opacity:.6;cursor:default}`;
+  .rf-acts .tf-save:disabled{opacity:.6;cursor:default}
+  /* ===== ダークモード上書き（lightは不変・生の明色のみ暗側へ。.on の青塗り+白字＝アクセントは触らない） ===== */
+  html[data-theme="dark"] .rf-dowbtn{background:var(--card)}
+  html[data-theme="dark"] .rf-occ-chip{background:var(--surface-2)}
+  html[data-theme="dark"] .rf-order{background:var(--surface-2)}
+  html[data-theme="dark"] .rf-mv{background:var(--card)}`;
   document.head.appendChild(s);
 }

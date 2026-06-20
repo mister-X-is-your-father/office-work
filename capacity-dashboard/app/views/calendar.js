@@ -753,5 +753,7 @@ function css() {
   html[data-theme="dark"] .cal-tap{background:var(--card)}
   html[data-theme="dark"] .cal-tap:hover{background:rgba(58,134,255,.13)}
   html[data-theme="dark"] .cal-pop{background:var(--card)}
-  html[data-theme="dark"] .cal-pop-it:hover{background:rgba(58,134,255,.13)}`;
+  html[data-theme="dark"] .cal-pop-it:hover{background:rgba(58,134,255,.13)}
+  html[data-theme="dark"] .cal-nav-btn{background:var(--card);color:var(--ink)}
+  html[data-theme="dark"] .cal-nav-date{background:var(--card);color:var(--ink)}`;
 }

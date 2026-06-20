@@ -105,6 +105,12 @@ function ensureStyle() {
   .sp-title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .sp-cat{flex:none;font-size:10.5px;color:var(--fill);border:1px solid #cfe0ff;border-radius:5px;padding:0 6px}
   .sp-meta{flex:none;margin-left:auto;font-size:11.5px;color:var(--muted);white-space:nowrap}
-  .sp-late{color:#e5484d;font-weight:600}`;
+  .sp-late{color:#e5484d;font-weight:600}
+
+  /* ===== ダークモード上書き（lightは不変・末尾で html[data-theme="dark"] のみ追加） ===== */
+  html[data-theme="dark"] .sp-box{background:var(--card);box-shadow:0 24px 70px rgba(0,0,0,.5)}
+  html[data-theme="dark"] .sp-row:hover,html[data-theme="dark"] .sp-row.sel{background:rgba(58,134,255,.16)}
+  html[data-theme="dark"] .sp-cat{border-color:rgba(58,134,255,.40)}
+  html[data-theme="dark"] .sp-late{color:#ff9b96}`;
   document.head.appendChild(s);
 }
