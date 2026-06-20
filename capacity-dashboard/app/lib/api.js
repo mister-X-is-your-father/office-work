@@ -62,7 +62,28 @@ export async function updateTask(taskId, patch) {
   const body = {};
   for (const k of TASK_SCALARS) if (k in cur) body[k] = cur[k];
   Object.assign(body, patch);
-  return req(`/tasks/${taskId}`, { method: "POST", body });
+  const res = await req(`/tasks/${taskId}`, { method: "POST", body });
+  logProgressChange(taskId, cur, patch); // 進捗/完了の活動ログ（ベストエフォート・非ブロッキング）
+  return res;
+}
+// updateTask は SPA のスカラ更新の単一の関所（#9）。ここで percent_done/done の変化だけを活動ログ(exec /activity)へ
+// 追記＝全編集経路（taskform/一覧グリッド/スマートリスト/かんばん 等）を個別フックせず網羅。fire-and-forget で
+// updateTask の戻り/挙動を一切妨げない（exec 未接続でも黙ってスキップ）。
+function logProgressChange(taskId, cur, patch) {
+  try {
+    const oldPct = cur.percent_done || 0;
+    const newPct = ("percent_done" in patch) ? (patch.percent_done || 0) : oldPct;
+    const doneNow = ("done" in patch) && !!patch.done && !cur.done; // 未完了→完了
+    const pctChanged = ("percent_done" in patch) && newPct !== oldPct;
+    if (!doneNow && !pctChanged) return;
+    import("./exec.js").then((ex) => {
+      ex.logActivity({
+        task_id: taskId, title: cur.title || "",
+        type: doneNow ? "done" : "progress",
+        from: oldPct, to: doneNow ? 100 : newPct,
+      }).catch(() => {});
+    }).catch(() => {});
+  } catch { /* noop */ }
 }
 export async function setEstimate(taskId, seconds) {
   return updateTask(taskId, { time_estimate: seconds });

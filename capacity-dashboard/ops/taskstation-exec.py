@@ -63,6 +63,20 @@ def save_prep(d):
     with open(PREP_PATH, "w") as f:
         json.dump(d, f, ensure_ascii=False)
 
+# アクティビティ（行動・進捗ログ）。append-only の配列。直近 ACTIVITY_MAX 件のみ保持（肥大化防止）。
+# 進捗(percent_done)変更や完了をクライアント(api.updateTask)が追記。アクター uid はトークンから確定。
+ACTIVITY_PATH = f"{HOME}/.config/taskstation/activity.json"
+ACTIVITY_MAX = 2000
+def load_activity():
+    try:
+        d = json.load(open(ACTIVITY_PATH))
+        return d if isinstance(d, list) else []
+    except (OSError, ValueError):
+        return []
+def save_activity(d):
+    with open(ACTIVITY_PATH, "w") as f:
+        json.dump(d[-ACTIVITY_MAX:], f, ensure_ascii=False)
+
 # ---- TaskStation API ----
 
 def ts_req(path, token, method="GET", body=None):
@@ -429,6 +443,11 @@ class H(BaseHTTPRequestHandler):
                 except (TypeError, ValueError, AttributeError):
                     pass
             return self._json(200, {"scores": scores, "steps_by_task": steps_by_task})
+        if self.path.split("?")[0].rstrip("/") == "/activity":
+            # 行動・進捗ログのフィード（全ログインユーザーが閲覧可）。直近 500 件を保存順で返す（並べ替えはクライアント）。
+            if not uid and not auth_any(tok):
+                return self._json(401, {"error": "unauthorized"})
+            return self._json(200, {"activity": load_activity()[-500:]})
         m_pg = re.match(r"^/prep/(\d+)", self.path)
         if m_pg:
             # 着手準備の読み取りは全ログインユーザー可。
@@ -541,6 +560,30 @@ class H(BaseHTTPRequestHandler):
             prep[m_pp.group(1)] = body
             save_prep(prep)
             return self._json(200, {"prep": body})
+        if self.path.split("?")[0].rstrip("/") == "/activity":
+            # 進捗/完了ログの追記（全ログインユーザー）。アクター uid はトークンから確定＝詐称不可。時刻はサーバ刻。
+            actor = uid or auth_any(tok)
+            if not actor:
+                return self._json(401, {"error": "unauthorized"})
+            try:
+                body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or 0) or b"{}")
+            except ValueError:
+                return self._json(400, {"error": "bad json"})
+            if not isinstance(body, dict) or not body.get("task_id"):
+                return self._json(400, {"error": "task_id required"})
+            entry = {
+                "task_id": body.get("task_id"),
+                "type": body.get("type") if body.get("type") in ("progress", "done") else "progress",
+                "from": body.get("from"),
+                "to": body.get("to"),
+                "title": str(body.get("title") or "")[:200],
+                "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "actor_uid": actor,
+            }
+            items = load_activity()
+            items.append(entry)
+            save_activity(items)
+            return self._json(200, {"ok": True, "entry": entry})
         if not uid:
             return self._json(401, {"error": "unauthorized"})
         if self.path.startswith("/settings"):

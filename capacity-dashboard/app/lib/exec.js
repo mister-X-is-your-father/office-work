@@ -41,6 +41,11 @@ export function getPrep(taskId) { return req(`/prep/${taskId}`); }
 export function savePrep(taskId, prep) { return req(`/prep/${taskId}`, { method: "POST", body: prep }); }
 // バッチ: 全タスクの着手準備スコア {taskId: score} を一括取得（ホーム/一覧のメーターバッジ用・軽量）。
 export function getPrepScores() { return req("/prep"); }
+
+// アクティビティ（行動・進捗ログ）。getActivity=直近フィード取得 / logActivity=進捗・完了の追記。
+// アクター uid はサーバがトークンから確定（詐称不可）・時刻もサーバ刻。entry={task_id,type:"progress"|"done",from,to,title}。
+export function getActivity() { return req("/activity"); }
+export function logActivity(entry) { return req("/activity", { method: "POST", body: entry }); }
 // 保護時間帯（トラブル想定枠/バッファ）: [{id,label,days:[0..6],start:"HH:MM",end:"HH:MM",kind:"buffer"|"block"}]。
 // 逆算スケジュールが尊重（重要タスクをここに置かない/バッファ確保）。読み取りは getSettings().settings.protected_windows。書き込みは管理者のみ。
 export function saveProtectedWindows(windows) { return req("/settings", { method: "POST", body: { protected_windows: windows } }); }
