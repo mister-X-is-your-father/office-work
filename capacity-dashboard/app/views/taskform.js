@@ -6,6 +6,8 @@
 import { load, invalidate, TEMPLATE_WS, ensureInbox } from "../lib/store.js";
 import { getTask, createTaskInProject, createProject, updateTask, addAssignee, removeAssignee, addRelation, removeRelation, createLabel, addTaskLabel, removeTaskLabel, getAttachments, uploadAttachments, deleteAttachment, fetchAttachmentBlob, setTaskWaiting, getComments, createComment } from "../lib/api.js";
 import { categoryLabels, REVIEW_LABEL, WAITING_LABEL, statusOf, STATUS } from "../lib/kinds.js";
+import { loadByMember } from "../lib/capacity.js";
+import { capacityOn } from "../lib/recurrence.js";
 import { C, esc, fmtH, trapFocus } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
 // 共有フォーム部品（スマート日付/[資料][ゴール]規約/時間ステッパー/資料チップ）は lib/form.js に集約
@@ -184,6 +186,7 @@ export async function openTaskForm({ taskId = null, onSaved, tab = null } = {}) 
           </div>
           <label class="tf-l">期限</label>
           <input id="tf-due" class="tf-in" type="text" inputmode="numeric" autocomplete="off" value="${fieldDisplay(task, "due_date")}" placeholder="1112 → 11/12">
+          <div id="tf-due-warn" class="tf-due-warn" hidden></div>
           <label class="tf-l">先行タスク <span class="tf-hint">（前に完了が必要）</span></label>
           <div class="tf-cbx">
             <input id="tf-dep" class="tf-in" autocomplete="off" placeholder="検索して追加">
@@ -348,6 +351,35 @@ export async function openTaskForm({ taskId = null, onSaved, tab = null } = {}) 
     el.onblur = () => { const iso = parseSmartDate(el.value); if (iso) el.value = fmtDisplayDow(iso); };
     attachDatePicker(el, { holidaysByDate });
   }
+
+  // F5 割り込みゼロサム: 期限日が主担当の満杯/非稼働日なら警告（別日にするか何かを外す）。
+  // その日の主担当の負荷(loadByMember)を実空き(capacityOn=週末/祝日/休暇=0)と突き合わせる＝黙って詰め込ませない。
+  const dueWarnEl = $("#tf-due-warn");
+  const checkDueCapacity = () => {
+    if (!dueWarnEl) return;
+    const iso = parseSmartDate(($("#tf-due") || {}).value || "");
+    const asgId = +(($("#tf-asg") || {}).value || 0);
+    const m = asgId ? (members || []).find((x) => x.id === asgId) : null;
+    if (!iso || !m) { dueWarnEl.hidden = true; return; }
+    const capFor = (mm, d) => capacityOn(mm, d, { holidays: loaded.holidaysSet, unavailabilityByMember: loaded.unavailabilityByMember, capH: loaded.settings.capH });
+    const row = loadByMember(tasks, [m], iso, loaded.settings.capH, loaded.plansByTask, { holidays: loaded.holidaysSet, capacityFor: capFor })[0];
+    if (!row) { dueWarnEl.hidden = true; return; }
+    const name = esc(m.name || m.username);
+    if (row.capH <= 1e-6) {
+      dueWarnEl.className = "tf-due-warn over";
+      dueWarnEl.innerHTML = `${icon("alertTriangle", { size: 13 })}<span>その日は ${name} の非稼働日（休/週末/祝日）です。別日を検討してください。</span>`;
+      dueWarnEl.hidden = false;
+    } else if (row.assignedH >= row.capH - 1e-6) {
+      dueWarnEl.className = "tf-due-warn " + (row.status === "over" ? "over" : "tight");
+      dueWarnEl.innerHTML = `${icon("alertTriangle", { size: 13 })}<span>その日は ${name} がほぼ満杯（${fmtH(row.assignedH)}/${fmtH(row.capH)}）。別日にするか、何かを外しましょう。</span>`;
+      dueWarnEl.hidden = false;
+    } else {
+      dueWarnEl.hidden = true;
+    }
+  };
+  $("#tf-due").addEventListener("blur", checkDueCapacity);
+  { const asgEl = $("#tf-asg"); if (asgEl) asgEl.addEventListener("change", checkDueCapacity); }
+  checkDueCapacity(); // 編集時の初期表示（既に満杯日に期限があるタスクを開いたら警告）
 
   // 見積り: 共有部品（".25"補完・↑↓キー/▲▼ボタンで0.25刻み）
   wireHourInput(wrap, "tf-est");
@@ -802,6 +834,13 @@ export function ensureStyle() {
   .tf-x:hover{background:#f1f4f8;color:${C.ink}}
   .tf-body{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:0 26px;padding:8px 22px 4px;align-items:start}
   .tf-main{min-width:0}
+  /* F5 割り込みゼロサム: 期限が満杯/非稼働日のときの注意（tight=琥珀 / over=赤）。 */
+  .tf-due-warn{margin-top:6px;font-size:11.5px;line-height:1.5;display:flex;align-items:flex-start;gap:6px;border-radius:8px;padding:7px 10px}
+  .tf-due-warn[hidden]{display:none}
+  .tf-due-warn.tight{color:#9a6700;background:rgba(230,160,30,.13)}
+  .tf-due-warn.over{color:${C.over};background:rgba(229,72,77,.1)}
+  .tf-due-warn svg{flex:none;margin-top:1px}
+  html[data-theme="dark"] .tf-due-warn.tight{color:${C.amber}}
   .tf-side{min-width:0;border-left:1px solid ${C.line};padding-left:24px}
   .tf-body > .tf-err{grid-column:1/-1}
   @media(max-width:680px){.tf-body{grid-template-columns:1fr}.tf-side{border-left:0;padding-left:0}}
