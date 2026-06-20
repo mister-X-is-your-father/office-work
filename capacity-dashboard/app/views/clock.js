@@ -175,7 +175,61 @@ const todayPlans = (data, taskId, memberId, day, aids = []) =>
   plansOf(data, taskId).filter((p) => dateOnly(p.plan_date) === day && (p.user_id === memberId || !p.user_id || !aids.includes(p.user_id)));
 const aidsOf = (data, taskId) => ((data.tasks.find((x) => x.id === taskId) || {}).assignees || []).map((a) => a.id);
 
-function wireInteractions(container, data, day, rerender, states) {
+// 再スケジュールメニュー専用CSSを document.head へ一度きり注入（冪等）。
+// css() はrenderClock(円時計)時しかDOMに入らないため、today.js(積み上げ)から
+// openRescheduleMenu を呼んでもスタイルが当たるよう、メニュー分はここで保証する。
+let _menuStyleInjected = false;
+function ensureMenuStyle() {
+  if (_menuStyleInjected) return;
+  if (typeof document === "undefined" || !document.head) return;
+  _menuStyleInjected = true;
+  const s = document.createElement("style");
+  s.id = "ck-menu-style";
+  s.textContent = `
+  .ck-modal-card{position:relative;background:#fff;border-radius:14px;box-shadow:0 12px 40px rgba(20,30,50,.25);padding:18px 18px 16px;width:min(360px,92vw);max-height:80vh;overflow:auto}
+  .ck-mh{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:2px}
+  .ck-mh b{font-size:15px}.ck-msub{font-size:11.5px;color:#6b7480}
+  .ck-mlbl{font-size:11px;color:#6b7480;margin:10px 0 7px}
+  .ck-days{display:flex;flex-direction:column;gap:6px}
+  .ck-day{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid ${C.line};background:#fff;border-radius:9px;padding:9px 12px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;text-align:left}
+  .ck-day:hover{border-color:#cfe0ff;background:#f3f8ff}
+  .ck-day .fh{font-size:11.5px;font-weight:600;color:#2fa66b}
+  .ck-day.part .fh{color:#f5872e}
+  .ck-none{font-size:12px;color:#6b7480;padding:8px 2px}
+  .ck-macts{display:flex;gap:8px;margin-top:14px;justify-content:flex-end}
+  .ck-macts button{border:1px solid ${C.line};background:#fff;border-radius:8px;padding:7px 12px;font:inherit;font-size:12.5px;cursor:pointer}
+  .ck-drop,.ck-menu button.danger{color:#e5484d;border-color:#f3c9cb!important}
+  .ck-drop:hover,.ck-menu button.danger:hover{background:#fdecec}
+  .ck-cancel:hover,.ck-back:hover{background:#f3f5f8}
+  .ck-menu{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+  .ck-menu button{border:1px solid ${C.line};background:#fff;border-radius:9px;padding:10px 12px;font:inherit;font-size:13px;font-weight:600;text-align:left;cursor:pointer}
+  .ck-menu button:hover{border-color:#cfe0ff;background:#f3f8ff}
+  .ck-pwho{display:inline-flex;align-items:center;gap:8px}
+  .ck-pav{width:22px;height:22px;border-radius:50%;display:inline-grid;place-items:center;color:#fff;font-size:11px;font-weight:700}
+  .ck-back{border:1px solid ${C.line};background:#fff;border-radius:8px;padding:7px 12px;font:inherit;font-size:12.5px;cursor:pointer}
+  /* ===== ダーク上書き（メニュー分。ライト値は上で維持＝非回帰） ===== */
+  html[data-theme="dark"] .ck-day,
+  html[data-theme="dark"] .ck-modal-card,
+  html[data-theme="dark"] .ck-macts button,
+  html[data-theme="dark"] .ck-menu button,
+  html[data-theme="dark"] .ck-back{background:var(--card);color:var(--ink)}
+  html[data-theme="dark"] .ck-day:hover,
+  html[data-theme="dark"] .ck-menu button:hover{border-color:rgba(58,134,255,.5);background:rgba(58,134,255,.12)}
+  html[data-theme="dark"] .ck-cancel:hover,
+  html[data-theme="dark"] .ck-back:hover{background:var(--track)}
+  html[data-theme="dark"] .ck-drop:hover,
+  html[data-theme="dark"] .ck-menu button.danger:hover{background:rgba(229,72,77,.15)}`;
+  document.head.appendChild(s);
+}
+
+// 再スケジュール操作メニュー（別日へ移す/レビュー依頼/今日から外す）。clock(円時計)/today(積み上げ)で共有。
+// ctx = { taskId, memberId, neededH, title, t, aids }
+// env = { data, day, rerender, freeBy }   freeBy: Map(memberId → 空きH)（省略時は空Map）
+export function openRescheduleMenu(ctx, env) {
+  ensureMenuStyle();
+  const { data, day, rerender } = env;
+  const freeBy = env.freeBy || new Map();
+  const CAP = (env.data.settings && env.data.settings.capH) || 8;
   let card = null, _close = null;
   const ensureModal = () => {
     if (card) return;
@@ -187,7 +241,6 @@ function wireInteractions(container, data, day, rerender, states) {
     _close = ui.close;
   };
   const close = () => { if (_close) _close(); };
-  const freeBy = new Map((states || []).map((s) => [s.member.id, s.freeH]));
   const head = (title, sub) => `<div class="ck-mh"><b>${esc(title)}</b>${sub ? `<span class="ck-msub">${esc(sub)}</span>` : ""}</div>`;
 
   // --- 書き込みアクション ---
@@ -250,11 +303,19 @@ function wireInteractions(container, data, day, rerender, states) {
     card.querySelector(".ck-back").onclick = () => menu(ctx);
   }
 
+  menu(ctx);
+}
+
+function wireInteractions(container, data, day, rerender, states) {
+  const freeBy = new Map((states || []).map((s) => [s.member.id, s.freeH]));
   container.querySelectorAll(".ck-more").forEach((btn) => {
     btn.onclick = (e) => {
       e.stopPropagation();
       const taskId = +btn.dataset.task, t = data.tasks.find((x) => x.id === taskId) || {};
-      menu({ taskId, memberId: +btn.dataset.member, neededH: +btn.dataset.h, title: btn.dataset.title, t, aids: (t.assignees || []).map((a) => a.id) });
+      openRescheduleMenu(
+        { taskId, memberId: +btn.dataset.member, neededH: +btn.dataset.h, title: btn.dataset.title, t, aids: (t.assignees || []).map((a) => a.id) },
+        { data, day, rerender, freeBy }
+      );
     };
   });
 }
@@ -315,36 +376,10 @@ function css() {
   .ck-legend .sw.review{background-image:radial-gradient(transparent 2.2px,#fff 2.4px,#fff 3.2px,transparent 3.4px)}
   .ck-legend .sw.pin{background-image:radial-gradient(#fff 0 2.4px,transparent 2.6px)}
   .ck-legend .sep{width:1px;height:14px;background:${C.line}}
-  .ck-modal-card{position:relative;background:#fff;border-radius:14px;box-shadow:0 12px 40px rgba(20,30,50,.25);padding:18px 18px 16px;width:min(360px,92vw);max-height:80vh;overflow:auto}
-  .ck-mh{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:2px}
-  .ck-mh b{font-size:15px}.ck-msub{font-size:11.5px;color:#6b7480}
-  .ck-mlbl{font-size:11px;color:#6b7480;margin:10px 0 7px}
-  .ck-days{display:flex;flex-direction:column;gap:6px}
-  .ck-day{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid ${C.line};background:#fff;border-radius:9px;padding:9px 12px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;text-align:left}
-  .ck-day:hover{border-color:#cfe0ff;background:#f3f8ff}
-  .ck-day .fh{font-size:11.5px;font-weight:600;color:#2fa66b}
-  .ck-day.part .fh{color:#f5872e}
-  .ck-none{font-size:12px;color:#6b7480;padding:8px 2px}
-  .ck-macts{display:flex;gap:8px;margin-top:14px;justify-content:flex-end}
-  .ck-macts button{border:1px solid ${C.line};background:#fff;border-radius:8px;padding:7px 12px;font:inherit;font-size:12.5px;cursor:pointer}
-  .ck-drop,.ck-menu button.danger{color:#e5484d;border-color:#f3c9cb!important}
-  .ck-drop:hover,.ck-menu button.danger:hover{background:#fdecec}
-  .ck-cancel:hover,.ck-back:hover{background:#f3f5f8}
-  .ck-menu{display:flex;flex-direction:column;gap:6px;margin-top:10px}
-  .ck-menu button{border:1px solid ${C.line};background:#fff;border-radius:9px;padding:10px 12px;font:inherit;font-size:13px;font-weight:600;text-align:left;cursor:pointer}
-  .ck-menu button:hover{border-color:#cfe0ff;background:#f3f8ff}
-  .ck-pwho{display:inline-flex;align-items:center;gap:8px}
-  .ck-pav{width:22px;height:22px;border-radius:50%;display:inline-grid;place-items:center;color:#fff;font-size:11px;font-weight:700}
-  .ck-back{border:1px solid ${C.line};background:#fff;border-radius:8px;padding:7px 12px;font:inherit;font-size:12.5px;cursor:pointer}
   /* ===== ダーク上書き（ライト値は上で維持＝非回帰） ===== */
-  /* 白カード/パネル → card 変数へ */
+  /* 白カード/パネル → card 変数へ（メニュー分は ensureMenuStyle へ移設） */
   html[data-theme="dark"] .ck-kpi,
-  html[data-theme="dark"] .ck-card,
-  html[data-theme="dark"] .ck-day,
-  html[data-theme="dark"] .ck-modal-card,
-  html[data-theme="dark"] .ck-macts button,
-  html[data-theme="dark"] .ck-menu button,
-  html[data-theme="dark"] .ck-back{background:var(--card);color:var(--ink)}
+  html[data-theme="dark"] .ck-card{background:var(--card);color:var(--ink)}
   /* 淡色tintの面（バー余白/セクション見出し/hover）→ track へ */
   html[data-theme="dark"] .ck-bar{background:var(--track)}
   html[data-theme="dark"] .ck-bar i:last-child{background:var(--track)!important}
@@ -362,13 +397,6 @@ function css() {
   html[data-theme="dark"] .ck-row.free .ck-tn{color:#63cf95}
   /* 超過カード枠の淡ピンク → 半透明赤 */
   html[data-theme="dark"] .ck-card.is-over{border-color:rgba(229,72,77,.45)}
-  /* hover系の淡青/淡灰 → 半透明アクセント/track */
-  html[data-theme="dark"] .ck-day:hover,
-  html[data-theme="dark"] .ck-menu button:hover{border-color:rgba(58,134,255,.5);background:rgba(58,134,255,.12)}
-  html[data-theme="dark"] .ck-cancel:hover,
-  html[data-theme="dark"] .ck-back:hover{background:var(--track)}
-  html[data-theme="dark"] .ck-drop:hover,
-  html[data-theme="dark"] .ck-menu button.danger:hover{background:rgba(229,72,77,.15)}
   /* タグ枠線の淡色 → 半透明アクセント */
   html[data-theme="dark"] .ck-tag{border-color:rgba(245,135,46,.45)}
   html[data-theme="dark"] .ck-tag.adhoc{border-color:rgba(58,134,255,.5)}

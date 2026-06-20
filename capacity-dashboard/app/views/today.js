@@ -4,7 +4,7 @@ import { todayItemsByMember } from "../lib/today_items.js";
 import { KINDS } from "../lib/kinds.js";
 import { projectName } from "../lib/store.js";
 import { C, fmtH, esc, todayISO, member_color } from "../lib/ui.js";
-import { renderClock } from "./clock.js";
+import { renderClock, openRescheduleMenu } from "./clock.js";
 
 let CAP = 8; // 設定（容量 h/日）で上書き
 const PJPAL = ["#3a86ff", "#2fa66b", "#b657d6", "#e5772d", "#0ea5e9", "#f5a623", "#ef476f", "#14b8a6"];
@@ -32,7 +32,7 @@ const segHtml = (mode) => `<div class="t-seg">
 // opts.fluid: ホーム埋め込みで固定高(px箱)をやめ、コンテナ幅に応じた可変高にする（積み上げのみ）。
 function paintBody(body, data, day, mode, rerender, opts = {}) {
   if (mode === "clock") renderClock(body, data, day, rerender);
-  else renderStacked(body, data, day, opts);
+  else renderStacked(body, data, day, rerender, opts);
 }
 
 export async function render(root) {
@@ -97,8 +97,9 @@ export async function renderInto(container, opts = {}) {
 // kind ごとに固定色＝凡例と一致。模様（斜線/ドット）は円時計側のみで、積み上げはベタ色で区別する。
 const KINDCOL = { meeting: "#7c8597", recurring: "#9aa3b2" };
 
-function renderStacked(body, data, day, opts = {}) {
+function renderStacked(body, data, day, rerender, opts = {}) {
   const { tasks, members, projects } = data;
+  const canEdit = !!(data.settings && data.settings.canEdit);
   const taskById = new Map((tasks || []).map((t) => [t.id, t]));
   const pjIdx = new Map();
   const pjColor = (pid) => {
@@ -152,7 +153,7 @@ function renderStacked(body, data, day, opts = {}) {
   for (const r of rows) for (const t of r.tasks) if (t.kind === "meeting" || t.kind === "recurring") usedKinds.add(t.kind);
   // 先に chart を生成して pjIdx を埋める（colHtml 内の pjColor 呼び出しで使用プロジェクトが確定）→
   // その後で usedPjs スナップショットを取り、凡例に正しく反映させる。
-  const chart = rows.length ? chartHtml(rows, { yMax, PLOT_H, FOOT_H, pxPerH, taskById, pjColor, memberColor }) : empty();
+  const chart = rows.length ? chartHtml(rows, { yMax, PLOT_H, FOOT_H, pxPerH, taskById, pjColor, memberColor, canEdit }) : empty();
   const usedPjs = [...pjIdx.keys()];
 
   body.innerHTML = `
@@ -169,6 +170,23 @@ function renderStacked(body, data, day, opts = {}) {
       ${rows.length ? legendHtml(usedPjs, projects, pjColor, usedKinds) : ""}
     </div>
     ${rows.length ? `<div class="t54-hint">タイル＝今日のタスク・会議・定例（高さ＝工数）。容量線(${CAP}h)を超えた分が赤、線の下の点線が空き工数。</div>` : ""}`;
+
+  // 積み上げのタスクタイル(.t54-seg-act)クリック → 円時計と同じ再スケジュールメニュー。
+  // occurrence(会議/定例)と非canEdit には data 属性を付けていないので配線されない。
+  if (canEdit) {
+    const freeBy = new Map(rows.map((r) => [r.id, r.freeH]));
+    body.querySelectorAll(".t54-seg-act[data-task]").forEach((seg) => {
+      seg.onclick = (e) => {
+        e.stopPropagation();
+        const taskId = +seg.dataset.task, memberId = +seg.dataset.member;
+        const t = taskById.get(taskId) || {};
+        openRescheduleMenu(
+          { taskId, memberId, neededH: +seg.dataset.h, title: seg.dataset.title, t, aids: (t.assignees || []).map((a) => a.id) },
+          { data, day, rerender, freeBy }
+        );
+      };
+    });
+  }
 }
 
 function chartHtml(rows, g) {
@@ -208,7 +226,10 @@ function colHtml(r, i, g) {
     const col = isOcc ? (KINDCOL[t.kind] || C.full) : pjColor(taskById.get(t.taskId)?.project_id);
     const small = hpx < 40 ? " small" : "";
     const kindLabel = isOcc ? `${KINDS[t.kind].label}・` : "";
-    segs += `<div class="t54-seg${small}" style="height:${hpx}px;background:${col}" title="${kindLabel}${esc(t.title)} ・ ${fmtH(t.h)}">
+    // タスク(!isOcc)かつ canEdit のときだけ、再スケジュール用の data 属性＋クリック可クラスを付ける。
+    // occurrence(会議/定例)や非canEdit は従来どおり（data 属性なし・クリック不可）。
+    const act = (!isOcc && g.canEdit) ? ` t54-seg-act" data-task="${t.taskId}" data-member="${r.id}" data-h="${t.h}" data-title="${esc(t.title)}` : "";
+    segs += `<div class="t54-seg${small}${act}" style="height:${hpx}px;background:${col}" title="${kindLabel}${esc(t.title)} ・ ${fmtH(t.h)}">
         <div class="t54-tname">${esc(t.title)}</div><div class="t54-thrs"><b>${fmtH(t.h)}</b></div></div>`;
   }
   if (!r.tasks.length) {
@@ -268,6 +289,8 @@ function css() {
   .t54-stack .t54-seg:last-child{border-radius:9px 9px 0 0}
   .t54-seg::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(255,255,255,.10),rgba(0,0,0,.06))}
   .t54-seg:hover{filter:brightness(1.05)}
+  .t54-seg-act{cursor:pointer}
+  .t54-seg-act:hover{outline:2px solid rgba(255,255,255,.5);outline-offset:-2px}
   .t54-tname{font-size:12px;font-weight:600;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative;z-index:1}
   .t54-thrs{font-size:10.5px;line-height:1.2;margin-top:2px;opacity:.92;position:relative;z-index:1}
   .t54-seg.small{justify-content:center}.t54-seg.small .t54-thrs{display:none}.t54-seg.small .t54-tname{font-size:11px}
