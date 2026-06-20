@@ -2,7 +2,7 @@
 // 色=重要度／模様=種別／外周=超過／空き=薄グレー／カテゴリ別の折りたたみセクション。
 import { todayItemsByMember, suggestDays } from "../lib/today_items.js";
 import { KINDS, KIND_ORDER, PRIO, NEUTRAL } from "../lib/kinds.js";
-import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
+import { C, fmtH, esc, member_color, todayISO, openOverlay } from "../lib/ui.js";
 import { dateOnly, hasDate, shiftISO } from "../lib/capacity.js";
 import { deletePlan, logPlan, updateTask, requestReview } from "../lib/api.js";
 import { invalidate } from "../lib/store.js";
@@ -161,8 +161,7 @@ export function renderClock(container, data, day, rerender) {
     <div class="ck-subtitle">並び=会議→定例→レビュー→重要度（12時起点）／色=重要度／模様=種別／ピン=当日追加／外周=超過</div>
     ${states.length ? kpiStrip(states) : ""}
     <div class="ck-grid">${states.map((m, i) => cardHTML(m, i)).join("")}</div>
-    ${states.length ? legend() : `<div class="ck-empty">今日のメンバー負荷がありません。</div>`}
-    <div class="ck-modal" id="ck-modal" hidden><div class="ck-modal-bg"></div><div class="ck-modal-card" id="ck-modal-card"></div></div>`;
+    ${states.length ? legend() : `<div class="ck-empty">今日のメンバー負荷がありません。</div>`}`;
   wireInteractions(container, data, day, rerender, states);
   return container;
 }
@@ -177,10 +176,17 @@ const todayPlans = (data, taskId, memberId, day, aids = []) =>
 const aidsOf = (data, taskId) => ((data.tasks.find((x) => x.id === taskId) || {}).assignees || []).map((a) => a.id);
 
 function wireInteractions(container, data, day, rerender, states) {
-  const modal = container.querySelector("#ck-modal");
-  const card = container.querySelector("#ck-modal-card");
-  const close = () => { modal.hidden = true; card.innerHTML = ""; };
-  modal.querySelector(".ck-modal-bg").onclick = close;
+  let card = null, _close = null;
+  const ensureModal = () => {
+    if (card) return;
+    card = document.createElement("div");
+    card.className = "ck-modal-card";
+    card.setAttribute("role", "dialog");
+    card.setAttribute("aria-modal", "true");
+    const ui = openOverlay(card, { onClose: () => { card = null; _close = null; } });
+    _close = ui.close;
+  };
+  const close = () => { if (_close) _close(); };
   const freeBy = new Map((states || []).map((s) => [s.member.id, s.freeH]));
   const head = (title, sub) => `<div class="ck-mh"><b>${esc(title)}</b>${sub ? `<span class="ck-msub">${esc(sub)}</span>` : ""}</div>`;
 
@@ -208,6 +214,7 @@ function wireInteractions(container, data, day, rerender, states) {
 
   // --- パネル（メニュー → 各操作） ---
   function menu(ctx) {
+    ensureModal();
     const planBased = todayPlans(data, ctx.taskId, ctx.memberId, day, ctx.aids).length > 0;
     card.innerHTML = head(ctx.title, fmtH(ctx.neededH)) + `
       <div class="ck-menu">
@@ -220,7 +227,6 @@ function wireInteractions(container, data, day, rerender, states) {
     card.querySelector('[data-a="review"]').onclick = () => panelReview(ctx);
     const d = card.querySelector('[data-a="drop"]'); if (d) d.onclick = () => dropToday(ctx);
     card.querySelector(".ck-cancel").onclick = close;
-    modal.hidden = false;
   }
   function panelMove(ctx) {
     const tomorrow = shiftISO(day, 1);
@@ -309,9 +315,6 @@ function css() {
   .ck-legend .sw.review{background-image:radial-gradient(transparent 2.2px,#fff 2.4px,#fff 3.2px,transparent 3.4px)}
   .ck-legend .sw.pin{background-image:radial-gradient(#fff 0 2.4px,transparent 2.6px)}
   .ck-legend .sep{width:1px;height:14px;background:${C.line}}
-  .ck-modal{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center}
-  .ck-modal[hidden]{display:none}
-  .ck-modal-bg{position:absolute;inset:0;background:rgba(20,30,50,.32)}
   .ck-modal-card{position:relative;background:#fff;border-radius:14px;box-shadow:0 12px 40px rgba(20,30,50,.25);padding:18px 18px 16px;width:min(360px,92vw);max-height:80vh;overflow:auto}
   .ck-mh{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:2px}
   .ck-mh b{font-size:15px}.ck-msub{font-size:11.5px;color:#6b7480}

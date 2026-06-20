@@ -225,6 +225,11 @@ export async function openTaskForm({ taskId = null, onSaved, tab = null } = {}) 
   let _initialSnapshot = null; // B65: 全UI配線後にスナップショット確定（それまではdirty判定を無効化）
   // B66: 開く前にフォーカスがあった要素を記憶（閉じる時に復帰させる）。
   const prevFocus = document.activeElement;
+  // C7: モーダル表示中は背面スクロールをロック（他モーダル＝openOverlay と挙動を揃える）。閉じる時に復帰。
+  // ※taskform は破棄警告つき close / 背景クリックで閉じない / フォーカス復帰 を持つため openOverlay には載せず、
+  //   唯一欠けていたスクロールロックだけここで補う。
+  const prevBodyOverflow = document.body.style.overflow;
+  document.body.style.overflow = "hidden";
   // B66: モーダル内でTabを巡回（フォーカストラップ）。close時に解除関数を呼ぶ。
   const releaseTrap = trapFocus(card);
   // B65: 未保存破棄警告。開いた時点のフォーム値スナップショットを取り、変更があれば閉じる前にconfirm。
@@ -255,6 +260,7 @@ export async function openTaskForm({ taskId = null, onSaved, tab = null } = {}) 
     }
     document.removeEventListener("keydown", onEsc);
     releaseTrap();
+    document.body.style.overflow = prevBodyOverflow; // C7: スクロールロック解除
     wrap.remove();
     // B66: 開く前のフォーカス要素へ復帰（DOMに残っていれば）。
     if (prevFocus && typeof prevFocus.focus === "function" && document.contains(prevFocus)) prevFocus.focus();
