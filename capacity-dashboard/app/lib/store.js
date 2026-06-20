@@ -149,6 +149,19 @@ async function _loadImpl() {
   return cache;
 }
 export function invalidate() { cache = null; }
+// 単一タスクのキャッシュ部分更新（B21 行パッチ化の土台）。invalidate せず、キャッシュ内の
+// 当該タスク**実体**に fields をマージ上書きする。cache.tasks と cache.rawTasks は同一実体を
+// 指す（_loadImpl 参照）ので、片方を Object.assign すれば両方に反映される。
+// ※ 配列要素の「置換」はしない（rawTasks が古い実体を握り不整合になるため）＝必ずマージ。
+// fields には getTask(id) の戻り全体（assignees/labels/related_tasks 等込み）を渡す想定。
+// 戻り値: 更新できたら true / キャッシュ未ロードor当該タスク不在で false（呼び側はフルrender へフォールバック）。
+export function patchTask(id, fields) {
+  if (!cache) return false;
+  const t = (cache.rawTasks || []).find((x) => x.id === id);
+  if (!t) return false;
+  Object.assign(t, fields);
+  return true;
+}
 export function projectName(projects, id) {
   const p = (projects || []).find((p) => p.id === id);
   return p ? p.title : "—";

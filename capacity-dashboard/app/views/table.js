@@ -1,7 +1,7 @@
 // タスク一覧（表・mock60 相当）。**複数軸の組み合わせソート**＋**個人ごとの並び順**（マイソート＝手動）。
 // 並び設定（ソート軸の連なり・手動順・絞り込み）は **見ている本人ごとに localStorage 保存**＝
 // 共有データ（DB）は一切変えないので、誰がどう並べても他メンバーの見え方に影響しない（衝突しない）。
-import { load, invalidate, isAiUser } from "../lib/store.js";
+import { load, invalidate, isAiUser, patchTask } from "../lib/store.js";
 import { savePresets } from "../lib/exec.js";
 import { updateTask, deleteTask, addAssignee, removeAssignee, addTaskLabel, removeTaskLabel, createLabel, setTaskWaiting, createTaskInProject, addRelation, removeRelation, getTask } from "../lib/api.js";
 import { PRIO, prioBucket, kindOf, kindRank, isReviewTask, categoryLabels, categoryColor, REVIEW_LABEL, WAITING_LABEL, statusOf, STATUS } from "../lib/kinds.js";
@@ -19,6 +19,72 @@ history.initHistoryHotkeys(); // Ctrl/Cmd+Z=取消・Ctrl+Y/Ctrl+Shift+Z=やり�
 // 履歴の undo/redo から呼ぶ再描画。最後に描画した一覧 root（lastRoot）へ再適用する。
 // 一覧を離れていても render は安全（store から再取得するだけ）。
 function historyRerender() { invalidate(); if (lastRoot && lastRoot.isConnected) render(lastRoot); }
+
+// ══ B21: 行パッチ化（patchRow）═══════════════════════════════════════════
+// 単一スカラ編集後の「invalidate(); render(root)」（=全タスク再fetch[N+1]＋全DOM再構築）を、
+// 「編集した1行だけ差し替える」高速経路に置換する。挙動は完全不変（速くなるだけ）で、
+// 失敗・危険時は必ず historyRerender()（従来のフル再描画）へフォールバック＝最悪でも従来動作。
+// B22（イベント委譲）済みのため差し替えた <tr> は再結線不要。
+//
+// canPatchInPlace(col): 1行差替で表示集合・順序・件数が崩れない列だけ true（保守的＝疑わしきは false）。
+function canPatchInPlace(col) {
+  if (col === "proj") return false;                 // 親子=他行/アウトライン/parent列に波及。初期実装は常にfallback
+  if (V.preset) return false;                       // プリセット選択中は全列fallback（taskMatches依存列の列挙は脆い）
+  if (!V.manualMode) {                              // 組み合わせソート時のみソート軸を見る（マイソートはV.order固定で順序不変）
+    const SORTMAP = { state: "state", prio: "prio", due: "due", est: "est", pct: "pct", who: "who", cat: "cat" };
+    const sk = new Set(V.sorts.map((s) => s.key));
+    if (SORTMAP[col] && sk.has(SORTMAP[col])) return false;
+    if (col === "due" && (V.sorts.length === 0 || sk.has("due"))) return false; // tieBreak/既定期限順がdueを見る
+  }
+  if (V.doneMode !== "show" && (col === "state" || col === "pct")) return false; // done化で表示集合から外れ得る
+  if (V.cat && col === "cat") return false;
+  if (V.qaWho && col === "who") return false;
+  if (V.qaDue && col === "due") return false;
+  const q = (V.q || "").trim();
+  if (q && (col === "title" || col === "who" || col === "cat" || col === "proj")) return false; // 検索対象列
+  return true;
+}
+
+// patchRow: 編集済み1行だけを再fetch→キャッシュ更新→DOM差替し、summary/プリセット件数も再fetchなしで更新。
+// 危険・失敗時は historyRerender() へフォールバック（boolean を返すが呼び側は基本 fire-and-forget）。
+async function patchRow(taskId, root, opts = {}) {
+  const col = opts.col;
+  // 1) 表モード専用。アウトライン中・root切断はフォールバック。
+  if (!root || !root.isConnected) { historyRerender(); return false; }
+  const isOutline = location.hash.includes("outline") || V.mode === "outline";
+  if (isOutline) { historyRerender(); return false; }
+  // 2) 安全判定（疑わしきはフォールバック）。
+  if (!canPatchInPlace(col)) { historyRerender(); return false; }
+  // 3) 最新取得＋キャッシュ更新（getTask 1回。失敗/未ロードはフォールバック）。
+  let fresh;
+  try { fresh = await getTask(taskId); } catch { historyRerender(); return false; }
+  if (!patchTask(taskId, fresh)) { historyRerender(); return false; }
+  // 4) 対象行 DOM 特定（無ければフォールバック）。
+  const tr = root.querySelector(`tr[data-id="${taskId}"]`);
+  if (!tr) { historyRerender(); return false; }
+  // 5) 行派生→HTML再生成→差し替え（B22委譲済みで再結線不要）。outerHTML 後は tr 参照は無効＝以降使わない。
+  const manual = V.manualMode && !isOutline;
+  const r = deriveRow(fresh, lastDeriveCtx || { execOk: false, meId: -1, today: todayISO() });
+  tr.outerHTML = rowHtml(r, lastMembers || [], 0, manual);   // rowHtml の第3引数 i は本文未使用＝0でよい
+  // 6) 集計（summary＋プリセット件数）を「現在表示中の行」を再派生して更新（再fetchなし）。
+  try {
+    const cache = await load();                 // invalidate していないのでキャッシュ即返（再fetchなし）
+    const tById = new Map((cache.tasks || []).map((t) => [t.id, t]));
+    const today = (lastDeriveCtx && lastDeriveCtx.today) || todayISO();
+    const visIds = [...root.querySelectorAll("table tbody tr[data-id]")].map((el) => +el.dataset.id);
+    const visRows = visIds.map((id) => tById.get(id)).filter(Boolean).map((t) => deriveRow(t, lastDeriveCtx || { execOk: false, meId: -1, today }));
+    const sumEl = root.querySelector(".tb-summary");
+    if (sumEl) sumEl.textContent = listSummaryText(visRows, today);
+    // プリセット件数バッジ更新（プリセット未選択=visRows が「他フィルタ後・プリセット前」集合に一致）。
+    const slCtx = { today, next7: next7End(today) };
+    const setBadge = (key, count) => { const b = root.querySelector(`.tb-ptab[data-preset="${key}"] .tb-ptcnt`); if (b) b.textContent = String(count); };
+    setBadge("", visRows.length);                       // 「すべて」タブ
+    for (const v of BUILTIN_VIEWS) setBadge(v.key, visRows.filter((rr) => taskMatches(rr.t, { ...EMPTY_FILTER, ...v.filter }, slCtx)).length);
+  } catch { /* 集計更新失敗は致命でない（行は差し替え済）。次回 render で整う */ }
+  // 7) グリッド/選択/フラッシュ復元。gridHighlight は querySelector で引き直す＝差替後も正しく当たる。
+  gridHighlight();
+  return true;
+}
 
 // ── 一覧のインライン編集を1アクションとして履歴に積む共通ヘルパ ─────────────
 // applyPatch(patch) は updateTask 等を呼んで該当値を適用する関数（before/after を渡して逆操作/再操作）。
@@ -72,6 +138,8 @@ let flashId = null;          // ドロップ直後にジワっと色が戻る着
 let selectedIds = new Set(); // まとめて移動用の複数選択（マイソート中のみ・Ctrl/Shiftで操作）
 let anchorId = null;         // Shift範囲選択の起点
 let lastRoot = null, docDeselectWired = false; // 余白クリック解除（document全体・右側の地まで拾う）
+// B21 行パッチ化: patchRow が render と同じ派生コンテキスト／メンバーで1行だけ再生成するための直近スナップ。
+let lastDeriveCtx = null, lastMembers = null;
 let historyUnsub = null; // Undo/Redo ボタンの活性同期（subscribe 解除関数。再描画ごとに張り替える）
 
 const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(0, 10) : "");
@@ -104,6 +172,25 @@ function presetTabHtml(key, iconHtml, label, count, on) {
   </button>`;
 }
 
+// ── B21: 行派生（純関数）。render の rows 構築と patchRow で共用＝1行だけ作り直せる。 ──
+// ctx = { execOk, meId, today }。式は render 旧インライン（fable の ((me&&me.id)||-1)=meId）と完全一致。
+function deriveRow(t, ctx) {
+  return {
+    t, title: t.title, who: (t.assignees || []).find((a) => !isAiUser(a)) || null,
+    fable: ctx.execOk && !t.done && (t.assignees || []).some((a) => isAiUser(a)) && ((t.created_by || {}).id || 0) === ctx.meId,
+    parent: (((t.related_tasks || {}).parenttask) || [])[0] || null,
+    review: isReviewTask(t), prio: prioBucket(t.priority), cat: categoryLabels(t)[0] || null,
+    due: dueISO(t), est: (t.time_estimate || 0) / HOUR, pct: t.percent_done || 0,
+    done: !!t.done, status: statusOf(t),
+  };
+}
+// ── B21: 件数内訳サマリ（純関数）。render と patchRow で共用（挙動同値）。 ──
+function listSummaryText(rows, today) {
+  const overdueN = rows.filter((r) => !r.done && r.due && r.due < today).length;
+  const estTotal = rows.reduce((s, r) => s + (r.est || 0), 0);
+  return `${rows.length}件` + (overdueN ? `・期限切れ${overdueN}` : "") + (estTotal ? `・見積${fmtH(estTotal)}` : "");
+}
+
 export async function render(root) {
   const { tasks, members, me = null, settings = {}, labels = [], recurrences = [], holidaysByDate = null } = await load();
   const presets = settings.sortPresets || [];   // グローバル共有プリセット
@@ -118,15 +205,10 @@ export async function render(root) {
   const mysorts = loadMySorts(UID); // 保存したマイソート（本人ごと）
   let execOk = false;
   try { const ex = await import("../lib/exec.js"); execOk = !!(await ex.execMe()); } catch { /* noop */ }
-  let rows = (tasks || []).map((t) => ({
-    t, title: t.title, who: (t.assignees || []).find((a) => !isAiUser(a)) || null,
-    fable: execOk && !t.done && (t.assignees || []).some((a) => isAiUser(a))
-      && ((t.created_by || {}).id || 0) === ((me && me.id) || -1),
-    parent: (((t.related_tasks || {}).parenttask) || [])[0] || null,   // プロジェクト＝親タスク（related_tasks.parenttask）
-    review: isReviewTask(t), prio: prioBucket(t.priority), cat: categoryLabels(t)[0] || null,
-    due: dueISO(t), est: (t.time_estimate || 0) / HOUR, pct: t.percent_done || 0,
-    done: !!t.done, status: statusOf(t),
-  }));
+  // B21: 行派生は deriveRow（純関数）に集約＝patchRow が1行だけ同じ式で作り直せる。
+  // deriveCtx は patchRow 用に最新値をモジュール変数へ退避（下で lastDeriveCtx に保存）。
+  const deriveCtx = { execOk, meId: (me && me.id) || -1, today };
+  let rows = (tasks || []).map((t) => deriveRow(t, deriveCtx));
   const doneToday = (t) => t.done && t.done_at && !t.done_at.startsWith("0001") && t.done_at.slice(0, 10) === today;
   if (V.doneMode === "hide") rows = rows.filter((r) => !r.done);
   else if (V.doneMode === "today") rows = rows.filter((r) => !r.done || doneToday(r.t));
@@ -218,15 +300,15 @@ export async function render(root) {
     ? "階層表示（プロジェクト＞タスク）・チェックで完了、＋でサブタスク追加"
     : (manual ? "・ 行をどこでもドラッグして自分用に並べ替え" : `・ ソート条件を重ねて並べ替え（列ヘッダ: クリック=第1条件 / Shift+クリック=条件を追加・最大${MAX_SORTS}）`);
   // vtitle の件数内訳サマリ（表示中の集合に対して）: 件数・期限切れ（未完了で期限が今日より前）・見積合計h。
-  const overdueN = rows.filter((r) => !r.done && r.due && r.due < today).length;
-  const estTotal = rows.reduce((s, r) => s + (r.est || 0), 0);
-  const summary = `${rows.length}件`
-    + (overdueN ? `・期限切れ${overdueN}` : "")
-    + (estTotal ? `・見積${fmtH(estTotal)}` : "");
+  // B21: listSummaryText（純関数）に集約＝patchRow が再fetchなしで同じ式で更新できる。
+  const summary = listSummaryText(rows, today);
+  // B21: patchRow が render と同じコンテキスト／メンバーで1行だけ作り直せるよう直近値を退避。
+  lastDeriveCtx = deriveCtx;
+  lastMembers = members;
   root.innerHTML = `
     <style>${css()}</style>
     <div class="tb-head">
-      <h1 class="vtitle">タスク一覧 <small>${summary} ${subtitle}</small></h1>
+      <h1 class="vtitle">タスク一覧 <small><span class="tb-summary">${summary}</span> ${subtitle}</small></h1>
       <span class="tb-search">${icon("search", { size: 15, cls: "tb-search-ic" })}<input id="tb-q" class="tb-search-in" type="text" placeholder="タスクを検索（名前・PJ・分類・担当）" value="${esc(V.q || "")}">${V.q ? `<button id="tb-q-clr" class="tb-search-x" type="button" title="検索をクリア">×</button>` : ""}</span>
     </div>
     <div class="tb-ptabs" role="tablist" aria-label="プリセット">
@@ -726,13 +808,13 @@ function openStatusMenu(chipEl, id, tasks, root) {
     // 連絡待ち（GTD Waiting For）= 予約ラベルで表現。未完了化＋ラベル付与だけ。
     if (key === "waiting") {
       Promise.all([updateTask(id, { done: false }), setTaskWaiting(t, true)]).then(() => {
-        pushScalarEdit("ステータス変更", id, before, after, applyState); reload();
+        pushScalarEdit("ステータス変更", id, before, after, applyState); patchRow(id, root, { col: "state" });
       }).catch(() => {});
       return;
     }
     // 連絡待ち以外に変えるときは待ちラベルを外す。
     Promise.all([updateTask(id, st.patch), setTaskWaiting(t, false)]).then(() => {
-      pushScalarEdit("ステータス変更", id, before, after, applyState); reload();
+      pushScalarEdit("ステータス変更", id, before, after, applyState); patchRow(id, root, { col: "state" });
     }).catch(() => {});
   };
   const it = (key, label) => ({ label, check: cur === key, on: () => set(key) });
@@ -750,7 +832,7 @@ function openPrioMenu(chipEl, id, tasks, root) {
   const opts = [[0, "なし"], [1, "低"], [2, "中"], [3, "高"], [4, "MUST"]];
   const before = cur;
   const applyPrio = (taskId, p) => updateTask(taskId, { priority: p });
-  const items = opts.map(([v, label]) => ({ label, check: (cur >= 4 ? 4 : cur) === v, on: () => updateTask(id, { priority: v }).then(() => { pushScalarEdit("重要度変更", id, before, v, applyPrio); reload(); }).catch(() => {}) }));
+  const items = opts.map(([v, label]) => ({ label, check: (cur >= 4 ? 4 : cur) === v, on: () => updateTask(id, { priority: v }).then(() => { pushScalarEdit("重要度変更", id, before, v, applyPrio); patchRow(id, root, { col: "prio" }); }).catch(() => {}) }));
   const r = chipEl.getBoundingClientRect();
   openMenu(r.left, r.bottom + 4, items);
 }
@@ -764,7 +846,7 @@ function openDueMenu(chipEl, id, tasks, root, today) {
   const cur = (t.due_date && !t.due_date.startsWith("0001")) ? t.due_date.slice(0, 10) : "";
   // before/after は "YYYY-MM-DD" or "" を ISO へ。undo/redo で同じ経路。
   const applyDue = (taskId, iso) => updateTask(taskId, { due_date: iso ? iso + "T00:00:00Z" : ZERO });
-  const set = (iso) => applyDue(id, iso).then(() => { pushScalarEdit("期限変更", id, cur, iso || "", applyDue); reload(); }).catch(() => {});
+  const set = (iso) => applyDue(id, iso).then(() => { pushScalarEdit("期限変更", id, cur, iso || "", applyDue); patchRow(id, root, { col: "due" }); }).catch(() => {});
   const dow = new Date(today + "T00:00:00Z").getUTCDay();   // 0=日 … 6=土
   const sat = shiftISO(today, (6 - dow + 7) % 7);           // 今週の土曜（今日以降）
   const items = [
@@ -798,7 +880,7 @@ function openEstMenu(chipEl, id, tasks, root) {
   let hv = toHv(cur);
   const applyEst = (taskId, sec) => updateTask(taskId, { time_estimate: sec });
   // 「適用」するまで保存しない: グリッド選択/直接入力は pending(h/mn/hv)のみ更新。適用・クリアで保存＋履歴記録、キャンセル/外側クリックは破棄。
-  const save = (sec) => { applyEst(id, sec).then(() => { if (sec !== cur) pushScalarEdit("見積変更", id, cur, sec, applyEst); invalidate(); render(root); }).catch(() => {}); };
+  const save = (sec) => { applyEst(id, sec).then(() => { if (sec !== cur) pushScalarEdit("見積変更", id, cur, sec, applyEst); patchRow(id, root, { col: "est" }); }).catch(() => {}); };
   const build = () => [
     { input: "hmgrid", h, m: mn, hv, hOpts, mOpts: mBase,
       // グリッド選択は pending 更新のみ（保存しない）。hv に反映し再描画→直接入力欄にも出る＝適用時に拾える。
@@ -845,7 +927,7 @@ function openAssigneeMenu(chipEl, id, tasks, members, root) {
   const recordAssignees = () => pushSetEdit("担当変更", before, t.assignees.map((a) => a.id), curAssignees, addFn, removeFn);
   // 「適用するまで保存しない」: トグルはローカルの t.assignees を更新するだけ。
   // 閉じた時に onClose で before→最終集合の差分を1回だけ API へ収束適用＋履歴1アクション（順序逆転を防ぐ）。
-  const commit = async () => { await applySetConverge(t.assignees.map((a) => a.id), () => before, addFn, removeFn); recordAssignees(); invalidate(); render(root); };
+  const commit = async () => { await applySetConverge(t.assignees.map((a) => a.id), () => before, addFn, removeFn); recordAssignees(); patchRow(id, root, { col: "who" }); };
   const build = () => {
     const items = (members || []).map((m) => ({
       label: m.name || m.username,
@@ -876,7 +958,7 @@ function openCategoryMenu(chipEl, id, tasks, labels, root) {
   const recordLabels = () => pushSetEdit("分類変更", before, t.labels.map((x) => x.id), curLabels, addFn, removeFn);
   // 「適用するまで保存しない」: トグルはローカルの t.labels を更新するだけ。
   // 閉じた時に onClose で before→最終集合の差分を1回だけ API へ収束適用＋履歴1アクション（順序逆転を防ぐ）。
-  const commit = async () => { await applySetConverge(t.labels.map((x) => x.id), () => before, addFn, removeFn); recordLabels(); invalidate(); render(root); };
+  const commit = async () => { await applySetConverge(t.labels.map((x) => x.id), () => before, addFn, removeFn); recordLabels(); patchRow(id, root, { col: "cat" }); };
   const cats = (labels || []).filter((l) => l.title !== REVIEW_LABEL && l.title !== WAITING_LABEL);
   const build = () => {
     const items = cats.map((l) => ({
@@ -1018,7 +1100,7 @@ function setProgress(barEl, id, root, clientX, tasks) {
   const after = { percent_done: pct, done: pct >= 100 };
   if (after.percent_done === before.percent_done && after.done === before.done) return; // 変化なし＝何もしない
   const applyPct = (taskId, s) => updateTask(taskId, { percent_done: s.percent_done, done: s.done });
-  applyPct(id, after).then(() => { pushScalarEdit("進捗変更", id, before, after, applyPct); invalidate(); render(root); }).catch(() => {});
+  applyPct(id, after).then(() => { pushScalarEdit("進捗変更", id, before, after, applyPct); patchRow(id, root, { col: "pct" }); }).catch(() => {});
 }
 
 // ══ Excel風グリッド編集 ══════════════════════════════════════════════
