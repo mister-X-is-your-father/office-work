@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   upsertIntentBlock, eisenhowerPriority, hhmmToMinutes, unknownsToSteps, CI_OPEN, CI_CLOSE,
+  stepsToPlanSpecs, PLAN_NOTE_PREFIX,
 } from "./onapply.js";
 
 test("upsertIntentBlock: 空説明に意図ブロックを先頭付与", () => {
@@ -83,4 +84,24 @@ test("unknownsToSteps: 高影響・未解消のみ先行検証手順化（slice=
 test("unknownsToSteps: 空配列は空", () => {
   assert.deepEqual(unknownsToSteps([]), []);
   assert.deepEqual(unknownsToSteps(null), []);
+});
+
+test("stepsToPlanSpecs: 未完了・期日・見積りある自作業のみ plan 化（待ち/完了/未割当は除外）", () => {
+  const steps = [
+    { title: "設計", est: "2", due: "2026-06-22" },              // ○
+    { title: "承認待ち", est: "2", due: "2026-06-23", kind: "承認" }, // × 待ち
+    { title: "完了済", est: "1", due: "2026-06-22", done: true },    // × done
+    { title: "期日なし", est: "1", due: "" },                      // × due無し
+    { title: "見積なし", est: "", due: "2026-06-24" },             // × est無し
+    { title: "実装", est: "1.5", due: "2026-06-24", kind: "自作業" }, // ○
+  ];
+  const r = stepsToPlanSpecs(steps);
+  assert.equal(r.length, 2);
+  assert.deepEqual(r[0], { seconds: 7200, date: "2026-06-22", note: PLAN_NOTE_PREFIX + "設計" });
+  assert.deepEqual(r[1], { seconds: 5400, date: "2026-06-24", note: PLAN_NOTE_PREFIX + "実装" });
+});
+
+test("stepsToPlanSpecs: 空/未配置は空配列", () => {
+  assert.deepEqual(stepsToPlanSpecs([]), []);
+  assert.deepEqual(stepsToPlanSpecs(null), []);
 });

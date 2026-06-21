@@ -8,11 +8,11 @@
 // 仕様: docs/exec-support-spec.md。データ形は固定（taskform/将来の一覧が依存）:
 //   prep = { next_step, steps, schedule, if_then, prereqs, obstacles, dod, score }
 import { getPrep, savePrep, getSettings, saveProtectedWindows } from "../lib/exec.js";
-import { updateTask, setTaskStarted, logPlan } from "../lib/api.js";
+import { updateTask, setTaskStarted, logPlan, getPlans, deletePlan } from "../lib/api.js";
 import { load, isAiUser } from "../lib/store.js";
 import { shiftISO, committedHoursByDayInRange } from "../lib/capacity.js";
 import { backcast, localTodayIso, ccpmPlan, feverStatus, orderStepsForBackcast } from "../lib/ccpm.js";
-import { upsertIntentBlock, eisenhowerPriority, hhmmToMinutes, unknownsToSteps } from "../lib/onapply.js";
+import { upsertIntentBlock, eisenhowerPriority, hhmmToMinutes, unknownsToSteps, stepsToPlanSpecs, PLAN_NOTE_PREFIX } from "../lib/onapply.js";
 import { esc } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
 import { fmtDisplayDow, parseSmartDate } from "../lib/form.js";
@@ -309,6 +309,10 @@ const PLUGINS = [
             <button type="button" class="es-btn es-backbtn" data-act="backcast"${canBackcast ? "" : " disabled"}>${icon("calendarDays", { size: 15 })}逆算スケジュール</button>
             <span class="es-back-hint">${esc(hint)}</span>
           </div>
+          <div class="es-oa">
+            <button type="button" class="es-btn es-oa-btn" data-act="apply-plan">${icon("calendar", { size: 14 })}逆算を稼働予定へ反映</button>
+            <span class="es-oa-msg" data-oa-msg-plan></span>
+          </div>
           <label class="es-check es-ccpm-tg">
             <input type="checkbox" data-k="ccpm"${data.ccpm ? " checked" : ""}>
             <span>CCPM逆算（前倒し締切＋集約バッファ＋fever）</span>
@@ -413,6 +417,32 @@ const PLUGINS = [
         } finally {
           backBtn.dataset.busy = ""; backBtn.disabled = false;
         }
+      });
+
+      // ── 逆算結果を稼働予定(task_time_plans)へ反映（B: 準備の逆算→キャパ予定の橋渡し） ──
+      const planBtn = root.querySelector('[data-act="apply-plan"]');
+      if (planBtn) planBtn.addEventListener("click", async () => {
+        if (planBtn.dataset.busy === "1") return;
+        const msg = root.querySelector('[data-oa-msg-plan]');
+        const show = (t) => { if (msg) { msg.textContent = t; setTimeout(() => { if (msg.textContent === t) msg.textContent = ""; }, 3500); } };
+        const steps = (ctx && ctx.prep && ctx.prep.steps && ctx.prep.steps.items) || [];
+        const specs = stepsToPlanSpecs(steps);
+        if (!specs.length) { show("逆算で日付が付いた自作業の手順がありません（先に逆算してください）"); return; }
+        if (typeof confirm === "function" && !confirm(`逆算で日付の付いた ${specs.length} 手順を稼働予定（週プランナー/稼働予定）に反映します。前回この方法で入れた予定は置き換えます（手動の予定は残ります）。実行しますか？`)) return;
+        planBtn.dataset.busy = "1"; planBtn.disabled = true;
+        try {
+          const { me } = await load();
+          // 前回の［逆算］予定だけ消す（手動・今日のカエル等は note prefix が違うので保護される）
+          let prev = [];
+          try { prev = await getPlans(ctx.taskId); } catch { prev = []; }
+          for (const p of (prev || [])) {
+            if (p && String(p.note || "").startsWith(PLAN_NOTE_PREFIX)) { try { await deletePlan(ctx.taskId, p.id); } catch { /* noop */ } }
+          }
+          // 新規作成
+          for (const sp of specs) { try { await logPlan(ctx.taskId, sp.seconds, sp.date, sp.note, me && me.id); } catch { /* noop */ } }
+          show(`${specs.length}件を稼働予定に反映しました（週プランナー/稼働予定で確認）`);
+        } catch { show("稼働予定への反映に失敗（接続をご確認ください）"); }
+        finally { planBtn.dataset.busy = ""; planBtn.disabled = false; }
       });
 
       // ── 保護時間帯エディタ（逆算が尊重する team 設定） ──

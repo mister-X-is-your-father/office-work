@@ -1,6 +1,18 @@
 // onApply（捕捉した実行準備 → 物理アクション）の純粋ロジック。
 // browser 依存（document/api）を持たないので node でユニットテストできる。
 // 実際の副作用（updateTask/logPlan/createTaskInProject 等）は views/exec-support.js の wire 側が担う。
+import { estHours } from "./ccpm.js";
+
+// 逆算で日付が付いた手順 → 稼働予定(task_time_plans)に積む plan 仕様の配列へ。
+//   対象: 未完了 かつ 期日あり かつ 見積りあり かつ 自作業(kind未設定/自作業)。
+//   ＝完了済み・未割当・承認/レビュー/外部待ち(自容量を食わない)は除外。
+//   note に prefix を付け、再同期時に「自分が作った予定だけ」を消せるようにする（手動予定は保護）。
+export function stepsToPlanSpecs(steps, { notePrefix = "［逆算］" } = {}) {
+  return (steps || [])
+    .filter((s) => s && !s.done && s.due && estHours(s.est) && (!s.kind || s.kind === "自作業"))
+    .map((s) => ({ seconds: Math.round(estHours(s.est) * 3600), date: s.due, note: notePrefix + String(s.title || "").trim() }));
+}
+export const PLAN_NOTE_PREFIX = "［逆算］";
 
 // 最小の HTML エスケープ（description 等へ埋める user 文字列用）。
 const escHtml = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
