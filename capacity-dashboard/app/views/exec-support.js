@@ -772,6 +772,17 @@ function eisenhowerActionLabel(data) {
 
 const PLUGIN_BY_ID = Object.fromEntries(PLUGINS.map((p) => [p.id, p]));
 
+// シナリオ別の合理的な手法セット（1クリックで有効化）。pluginIds は順序付き。未実装idは適用時に無視。
+const PREP_SETS = [
+  { id: "deadline_project", label: "重要締切プロジェクト完遂", scenario: "絶対落とせない大型締切。曖昧・他者依存・ペースのズレ・燃え尽きを全方位で潰す総合布陣", pluginIds: ["commanders_intent","dod","steps","unknowns_register","dependencies","schedule","main_effort","review_cadence","early_warning","kill_pivot"] },
+  { id: "vague_big", label: "大きく曖昧なタスクの分解着手", scenario: "何から手をつけるか分からない大きく曖昧なタスク。理解のズレを潰し最小の動く一本から弾みをつける", pluginIds: ["commanders_intent","backbrief","next_step","steps","vertical_slice","dod","schedule"] },
+  { id: "interrupt_heavy", label: "割り込み多い環境で死守", scenario: "会議・チャット・突発依頼で集中が断片化。重要タスクの時間を会計的に守り中断から速く復帰", pluginIds: ["mit_today","main_effort","schedule","if_then","wip_pace","comms_plan","commitment"] },
+  { id: "dependency_heavy", label: "他者依存・承認待ちが多い", scenario: "承認・レビュー・他部署成果・外部入力が律速。待ちを最前方で起動し放置を防ぐ", pluginIds: ["stakeholders","dependencies","raci_delegate","prereqs","schedule","escalation","comms_plan"] },
+  { id: "research", label: "研究・探索タスク", scenario: "答えが見えない/技術検証/終盤に未知が爆発しがち。怖いところを先に触り沼で溶かさない", pluginIds: ["commanders_intent","unknowns_register","spike","dod","kill_pivot","schedule","aar"] },
+  { id: "routine", label: "ルーティンを淡々と", scenario: "中身が決まった定常作業を確実に消化。軽量に予定化し再開摩擦と忘却だけ潰す", pluginIds: ["next_step","mit_today","schedule","runbook","if_then"] },
+  { id: "high_stakes", label: "失敗できないリスク高タスク", scenario: "失敗コストが極端に高い一発勝負。失敗シナリオを先に潰し早期警告と撤退路を完備", pluginIds: ["commanders_intent","obstacles","unknowns_register","rehearsal","review_cadence","early_warning","kill_pivot","commitment"] },
+];
+
 // ── 診断「何が止めてる?」→手法サジェスト ───────────────────────────
 // 症状ボタン → 効く手法(pluginId) の明示マップ。
 //   PLUGINS の symptoms タグから自動逆引きすると粒度がズレるため、判断軸を明示する。
@@ -996,6 +1007,10 @@ export function ensureStyle() {
   .es-card.es-flash{animation:es-flash 1.4s ease-out;border-color:var(--fill)}
   /* 手法セクション（ON/OFF＋並べ替え） */
   .es-tgl-head{display:flex;align-items:center;gap:6px;width:100%;font-size:11px;font-weight:700;color:var(--muted);margin-bottom:8px;letter-spacing:.02em}
+  .es-set-rows{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px}
+  .es-set-b{font:inherit;font-size:11.5px;font-weight:600;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:999px;padding:6px 12px;cursor:pointer;text-align:left}
+  .es-set-b:hover{border-color:var(--fill);color:var(--fill);background:var(--track)}
+  .es-set-b:active{transform:translateY(1px)}
   .es-tgl-rows{display:flex;flex-direction:column;gap:6px}
   .es-tgrow{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:5px 8px}
   .es-tgrow.off{opacity:.6}
@@ -1371,7 +1386,13 @@ export async function renderExecSupport(container, { taskId, task = null, onChan
         </label>
       </div>`;
     }).join("");
-    return `<div class="es-tgl-head">${icon("settings", { size: 13 })} 手法の取捨と表示順</div>
+    const setBtns = PREP_SETS
+      .filter((s) => s.pluginIds.some((id) => PLUGIN_BY_ID[id]))
+      .map((s) => `<button type="button" class="es-set-b" data-set="${esc(s.id)}" title="${esc(s.scenario)}">${esc(s.label)}</button>`)
+      .join("");
+    return `<div class="es-tgl-head">${icon("listChecks", { size: 13 })} シナリオ別セット（1クリックで布陣）</div>
+      <div class="es-set-rows">${setBtns}</div>
+      <div class="es-tgl-head" style="margin-top:12px">${icon("settings", { size: 13 })} 手法の取捨と表示順</div>
       <div class="es-tgl-rows">${rows}</div>`;
   };
 
@@ -1480,6 +1501,25 @@ export async function renderExecSupport(container, { taskId, task = null, onChan
         normEnabled();
         rebuildToggles();
         rebuildCards();
+      });
+    });
+    // シナリオ別セット: 押すと該当手法だけを順序付きで有効化（未実装idは無視）。順序も配列順に整える。
+    togglesBox.querySelectorAll("[data-set]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const set = PREP_SETS.find((s) => s.id === btn.dataset.set);
+        if (!set) return;
+        const ids = set.pluginIds.filter((id) => PLUGIN_BY_ID[id]); // 実在のみ
+        if (!ids.length) return;
+        // 並び順: セットの手法を先頭に（セット順）、残りの既知手法を従来順で後ろに。
+        const rest = loadOrder().filter((id) => !ids.includes(id));
+        const newOrder = [...ids, ...rest];
+        saveOrder(newOrder);
+        enabled = ids.slice();          // 有効集合 = セットの手法に置き換え
+        normEnabled();                  // order に従い正規化（既存ヘルパ）
+        saveEnabled(enabled);
+        rebuildToggles();               // トグルパネル再描画（チェック状態・順序反映）
+        rebuildCards();                 // カード群再構築＋updateMeter（既存）
+        save();                         // score 再計算分を保存（既存と同様）
       });
     });
   }
