@@ -61,6 +61,11 @@
   `exec.py /activity`(GET/POST・append-only activity.json・アクターはトークン確定/サーバ刻)＋`exec.js getActivity/logActivity`＋
   **`api.js updateTask` に進捗フック**（percent_done/done 変化時だけ /activity 追記＝全編集経路を単一の関所で網羅・fire-and-forget）。
   ※進捗の差分履歴(30→50%)は updateTask 経由の変更のみ記録（直接DB編集や過去分は対象外＝今後の蓄積型）。
+- **ふりかえり（実行の歩留まり）**（`6fba127`）: 新ビュー `views/retro.js`（実績G・ルート `#/retro`）＝「やると決めた→実行したか」を数字で。
+  `lib/execmetrics.js`（純関数・テスト4件＝計126）: stepDigestion(今日以前期日の手順 done/total)/taskEngagement(今日やる対象=今日期日 or
+  今日plan・未完了 の着手率＋未着手items)/dailyExecSeries(過去N日 完了数・実働h・触れたタスク数)。画面=率カード3枚＋未着手の拾い上げ
+  （クリックで編集）＋週14日トレンドバー。**率は“今日”が対象**（過去日の「やると決めた母数」は未スナップショット＝週はトレンドで見る設計）。
+  ＜次の磨き候補＞ 日次の母数スナップショット保存で「過去の実行率トレンド」も出せる／ホームに今日の実行率mini。
 
 ## 2. アーキテクチャ（ファイルと責務）
 - `app/views/exec-support.js`（**私=指示役は直接編集不可**・委譲のみ）: プラグイン・レジストリ `PLUGINS`（next_step/steps/schedule/if_then/prereqs/obstacles/dod）、`backcast()`（逆算・今日床止め・容量/祝日/休暇/保護枠/バッファ考慮）、メーター演出、診断、保護時間帯エディタ、F3警告バナー。`renderExecSupport(container,{taskId,task})` / `ensureStyle()` をexport。
