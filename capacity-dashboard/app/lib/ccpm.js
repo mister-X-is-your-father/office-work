@@ -70,6 +70,7 @@ export function localTodayIso() {
 //   1日の作業可能時間 = capH×(1 − bufferPct/100) − その曜日に重なる保護時間帯の合計（下限0）。
 //     ＝1日バッファ（容量を食いつぶさない）を確保したうえで保護枠も差し引く。
 //   見積り無しの手順は「1日1件」扱い（その日の残量を使い切る＝1日1件で次の日へ）。
+//   kind≠自作業（承認/レビュー/外部待ち）の手順は「待ち」＝est を営業日数(ceil(est/capH)・最低1)に換算して丸ごと占有し、自分の作業容量は消費しない（保護枠/他タスク予定に影響されない経過日数）。
 // 引数: { steps:[{est}], deadlineIso, capH, windows, holidaysSet, unavailRanges, bufferPct, todayIso }
 //   bufferPct=各日の容量から差し引くバッファ率（0〜90 整数・省略時0＝後方互換）。
 //   todayIso=ローカル今日の "YYYY-MM-DD"。後ろ向きに辿る際、この日より前へは配置しない（床止め）。
@@ -116,7 +117,24 @@ export function backcast({ steps, deadlineIso, capH = 8, windows = [], holidaysS
   let curDay = null, remain = 0;
   let unplaced = 0;
   for (let i = list.length - 1; i >= 0; i--) {
-    const est = estHours(list[i] && list[i].est); // null=見積り無し（1日1件）
+    const it = list[i];
+    // 待ち（kind≠自作業＝承認/レビュー/外部待ち）: リードタイムを営業日で丸ごと占有する。
+    //   ＝自分の作業容量は消費しない（保護枠/他タスク予定/バッファに左右されない純粋な経過日数）。
+    //   leadDays = ceil(est/capH)（最低1日）。完了日(due)は占有区間のうち最も締切寄りの日。
+    if (it && it.kind && it.kind !== "自作業") {
+      const leadDays = Math.max(1, Math.ceil((estHours(it.est) || 0) / (capH > 0 ? capH : 8)));
+      curDay = null; remain = 0; // 待ちは新しい日から（他作業と同居させない）
+      let doneDay = null, ok = true;
+      for (let k = 0; k < leadDays; k++) {
+        const day = nextWorkDay();
+        if (day == null) { ok = false; break; }
+        if (k === 0) doneDay = day; // 最初に取れた日＝最も締切寄り＝待ちの完了日
+      }
+      if (!ok || doneDay == null) { unplaced = i + 1; break; }
+      dueByIndex.set(i, doneDay);
+      continue;
+    }
+    const est = estHours(it && it.est); // null=見積り無し（1日1件）
     if (curDay == null) {
       curDay = nextWorkDay();
       if (curDay == null) { unplaced = i + 1; break; }
@@ -202,8 +220,9 @@ export function compressSteps(steps, aggressivePct) {
   const pct = Math.max(0, Math.min(90, Math.round(Number(aggressivePct) || 0)));
   let removedSlackH = 0;
   const out = (steps || []).map((s) => {
+    const isWait = s && s.kind && s.kind !== "自作業";
     const e = estHours(s && s.est);
-    if (e == null) return { ...s };
+    if (e == null || isWait) return { ...s }; // 見積り無し・待ち（外部リードタイム）は圧縮しない
     const ne = round2(e * (1 - pct / 100));
     removedSlackH += (e - ne);
     return { ...s, est: ne };
@@ -244,8 +263,11 @@ export function ccpmPlan({
     steps: compressed, deadlineIso: workDeadlineIso, capH, windows, holidaysSet, unavailRanges,
     bufferPct, todayIso, committedByDay, taskIsImportant,
   });
-  // 圧縮後の総作業時間（見積りある手順のみ・fever の残作業量に使う）。
-  const chainWorkH = round2(compressed.reduce((s, st) => s + (estHours(st && st.est) || 0), 0));
+  // 圧縮後の総作業時間（自分の作業＝kind=自作業 のみ。待ちは自容量を消費しないので fever の残作業から除外）。
+  const chainWorkH = round2(compressed.reduce((s, st) => {
+    const isWait = st && st.kind && st.kind !== "自作業";
+    return s + (isWait ? 0 : (estHours(st && st.est) || 0));
+  }, 0));
   return { dueByIndex, unplaced, personalDueIso, workDeadlineIso, bufferDays, bufferH, removedSlackH, chainWorkH };
 }
 

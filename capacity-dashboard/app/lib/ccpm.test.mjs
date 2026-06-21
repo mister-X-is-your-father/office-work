@@ -328,6 +328,46 @@ test("orderStepsForBackcast: slice 無しは恒等（順序不変）", () => {
   assert.deepEqual(origByOrdered, [0, 1]);
 });
 
+// ── steps強化: kind リードタイム（待ち＝容量非消費で営業日占有）──────
+test("backcast[kind待ち]: 承認待ちはリードタイムを営業日で占有し作業を前へ押す", () => {
+  // A(自6) B(承認16h=2営業日待ち) C(自6), 締切06-30(火) today06-22(月) capH8。
+  const steps = [{ title: "A", est: 6 }, { title: "B", est: 16, kind: "承認" }, { title: "C", est: 6 }];
+  const { dueByIndex, unplaced } = backcast({ steps, deadlineIso: "2026-06-30", capH: 8, todayIso: "2026-06-22" });
+  assert.equal(unplaced, 0);
+  assert.equal(dueByIndex.get(2), "2026-06-30"); // C=締切日
+  assert.equal(dueByIndex.get(1), "2026-06-29"); // 待ち完了=06-29（占有は06-29と06-26の2営業日）
+  assert.equal(dueByIndex.get(0), "2026-06-25"); // A=待ちの手前（06-26は待ちが占有→木へ）
+});
+
+test("backcast[kind待ち]: est空の待ちは1営業日占有", () => {
+  const steps = [{ title: "X", est: "", kind: "レビュー" }];
+  const { dueByIndex } = backcast({ steps, deadlineIso: "2026-06-30", capH: 8, todayIso: "2026-06-22" });
+  assert.equal(dueByIndex.get(0), "2026-06-30");
+});
+
+test("backcast[kind待ち]: 容量(committed/protected)に影響されず占有する", () => {
+  // 締切日が他タスクで満杯でも、待ちは自容量を使わないのでその日を占有できる。
+  const committedByDay = new Map([["2026-06-30", 100]]);
+  const steps = [{ title: "承認", est: 8, kind: "承認" }];
+  const { dueByIndex } = backcast({ steps, deadlineIso: "2026-06-30", capH: 8, todayIso: "2026-06-22", committedByDay });
+  assert.equal(dueByIndex.get(0), "2026-06-30"); // committed に関係なく占有
+});
+
+test("compressSteps: 待ち(kind≠自作業)のリードタイムは圧縮しない", () => {
+  const r = compressSteps([{ est: 10 }, { est: 16, kind: "承認" }], 30);
+  assert.equal(r.steps[0].est, 7);    // 自作業は圧縮
+  assert.equal(r.steps[1].est, 16);   // 待ちは不変
+  assert.equal(r.removedSlackH, 3);   // 10-7 のみ
+});
+
+test("ccpmPlan: chainWorkH は待ちを除外（自作業のみ）", () => {
+  const r = ccpmPlan({
+    steps: [{ est: 6 }, { est: 16, kind: "承認" }], deadlineIso: "2026-06-30", capH: 8, todayIso: "2026-06-22",
+    personalDueOffset: 0, aggressivePct: 0,
+  });
+  assert.equal(r.chainWorkH, 6); // 承認16hは除外
+});
+
 test("slice前方配置: 骨格手順が今日寄り・非骨格が締切寄りに置かれる", () => {
   // 3手順×6h, capH8, 締切06-26(金), today06-22(月)。c だけ骨格。
   const steps = [{ title: "a", est: 6 }, { title: "b", est: 6 }, { title: "c", est: 6, slice: true }];
