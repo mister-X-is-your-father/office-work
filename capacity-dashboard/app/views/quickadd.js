@@ -84,7 +84,7 @@ function helpTipHtml() {
   ).join("");
   return `<div class="qa-tip-head">入力構文の早見表</div>
     <table class="qa-tip-tbl">${rows}</table>
-    <div class="qa-tip-eg">例: <code>明日15時 MTG準備 #会議 1h</code></div>`;
+    <div class="qa-tip-eg">例: <code>明日15時 MTG準備 #会議 !高 1h</code></div>`;
 }
 
 // 投入先は常にインボックスWS（無ければ作成）。WSはUIから排除＝新規は既定でInboxへ。
@@ -118,7 +118,7 @@ export function mountQuickAdd(topbar, { onCreated } = {}) {
   const wrap = document.createElement("div");
   wrap.className = "qa-wrap";
   wrap.innerHTML = `
-    <input id="qa-in" autocomplete="off" placeholder="クイック追加（/ でフォーカス）例: 明日15時 MTG準備 #会議 1h" aria-label="クイック追加">
+    <input id="qa-in" autocomplete="off" placeholder="クイック追加（/ でフォーカス）例: 明日15時 MTG準備 #会議 !高 1h" aria-label="クイック追加">
     <button type="button" id="qa-help-btn" class="qa-help-btn" title="入力構文ヘルプ" aria-label="入力構文ヘルプ" aria-expanded="false">${icon("lightbulb", { size: 15 })}</button>
     <div class="qa-pop" id="qa-pop" hidden></div>
     <div class="qa-tip" id="qa-tip" role="dialog" aria-label="入力構文の早見表" hidden>${helpTipHtml()}</div>`;
