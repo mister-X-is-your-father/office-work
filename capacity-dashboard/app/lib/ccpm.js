@@ -249,6 +249,19 @@ export function ccpmPlan({
   return { dueByIndex, unplaced, personalDueIso, workDeadlineIso, bufferDays, bufferH, removedSlackH, chainWorkH };
 }
 
+// slice（骨格＝walking skeleton）を配置上「先頭」へ寄せる。backcast は逆順に詰める
+// （配列先頭ほど今日寄り＝最早）ので、slice=true を先頭グループへ安定ソートすると骨格が今日寄りに配置される。
+//   表示順は変えず「配置順」だけを変えるため、元 index へ戻すマップを返す。
+//   返り値: { ordered: [...slice先頭に並べ替えた手順], origByOrdered: [orderedの各位置→元steps index] }。
+//   slice が無ければ恒等（順序不変）＝後方互換。
+export function orderStepsForBackcast(steps) {
+  const list = steps || [];
+  const sliceIdx = [], restIdx = [];
+  list.forEach((s, i) => { (s && s.slice ? sliceIdx : restIdx).push(i); });
+  const origByOrdered = [...sliceIdx, ...restIdx];
+  return { ordered: origByOrdered.map((i) => list[i]), origByOrdered };
+}
+
 // fever（バッファ消費率）: 残作業を1日容量で割った投影終了日が、前倒し締切(personalDue)を
 // どれだけ超過するか＝プロジェクトバッファを何日消費したか。bufferDays に対する割合で緑/黄/赤。
 //   これは plan-vs-actual の厳密なバーンダウンではなく「今のペースで前倒し締切に間に合うか」の前向き推定（ヒューリスティック）。

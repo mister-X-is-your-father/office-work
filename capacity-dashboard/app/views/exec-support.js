@@ -11,7 +11,7 @@ import { getPrep, savePrep, getSettings, saveProtectedWindows } from "../lib/exe
 import { updateTask, setTaskStarted } from "../lib/api.js";
 import { load, isAiUser } from "../lib/store.js";
 import { shiftISO, committedHoursByDayInRange } from "../lib/capacity.js";
-import { backcast, localTodayIso, ccpmPlan, feverStatus } from "../lib/ccpm.js";
+import { backcast, localTodayIso, ccpmPlan, feverStatus, orderStepsForBackcast } from "../lib/ccpm.js";
 import { esc } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
 import { fmtDisplayDow, parseSmartDate } from "../lib/form.js";
@@ -370,6 +370,9 @@ const PLUGINS = [
         const placeIdx = steps.map((s, i) => (s && s.done) ? -1 : i).filter((i) => i >= 0);
         if (!placeIdx.length) return; // 未完了手順なし＝何もしない
         const placeSteps = placeIdx.map((i) => steps[i]);
+        // slice（骨格）を配置上先頭＝今日寄りへ。表示順は不変、配置順だけ変える（元index対応を合成）。
+        const { ordered, origByOrdered } = orderStepsForBackcast(placeSteps);
+        const placeIdxOrdered = origByOrdered.map((ps) => placeIdx[ps]); // ordered の各位置 → 元 steps index
         const confirmMsg = data.ccpm
           ? `CCPM逆算（前倒し締切 ${Math.max(0, Math.round(Number(data.personalDueOffset ?? 2) || 0))} 営業日前・安全余裕 ${Math.max(0, Math.min(90, Math.round(Number(data.aggressivePct ?? 30) || 0)))}%・バッファ${(data.projectBufferDays != null && String(data.projectBufferDays).trim() !== "") ? String(data.projectBufferDays).trim() + "日" : "自動"}）で、締切 ${dueLabel(deadlineIso)} から未完了の ${placeSteps.length} 手順に作業日を割り当てます（完了済みは動かしません・今日以降に配置）。各手順の既存の期日は上書きされます。実行しますか？`
           : `締切 ${dueLabel(deadlineIso)} から逆算して、未完了の ${placeSteps.length} 手順に作業日を割り当てます（完了済みは動かしません・今日以降に配置）。各手順の既存の期日は上書きされます。実行しますか？`;
@@ -382,8 +385,8 @@ const PLUGINS = [
             const personalDueOffset = Math.max(0, Math.round(Number(data.personalDueOffset ?? 2) || 0));
             const aggressivePct = Math.max(0, Math.min(90, Math.round(Number(data.aggressivePct ?? 30) || 0)));
             const projectBufferDaysOverride = (data.projectBufferDays != null && String(data.projectBufferDays).trim() !== "") ? data.projectBufferDays : null;
-            const plan = ccpmPlan({ ...bctx, steps: placeSteps, deadlineIso, personalDueOffset, aggressivePct, projectBufferDaysOverride });
-            placeIdx.forEach((origIdx, newIdx) => { if (plan.dueByIndex.has(newIdx)) steps[origIdx].due = plan.dueByIndex.get(newIdx); });
+            const plan = ccpmPlan({ ...bctx, steps: ordered, deadlineIso, personalDueOffset, aggressivePct, projectBufferDaysOverride });
+            placeIdxOrdered.forEach((origIdx, oi) => { if (plan.dueByIndex.has(oi)) steps[origIdx].due = plan.dueByIndex.get(oi); });
             save();
             if (ctx) ctx._overcommit = plan.unplaced > 0 ? { unplaced: plan.unplaced, total: placeSteps.length, deadlineIso } : null;
             const dailyCapH = bctx.capH * (1 - (bctx.bufferPct || 0) / 100);
@@ -391,9 +394,9 @@ const PLUGINS = [
             if (ctx) ctx._fever = { ...fever, bufferDays: plan.bufferDays, personalDueIso: plan.personalDueIso, workDeadlineIso: plan.workDeadlineIso };
           } else {
             // ── 既存 backcast 経路（OFF＝現行挙動を1ミリも変えない）。bctx の spread は明示引数版と等価 ──
-            const { dueByIndex, unplaced } = backcast({ ...bctx, steps: placeSteps, deadlineIso });
-            // dueByIndex のキーは placeSteps 内の index → 元の steps の index へ戻す。
-            placeIdx.forEach((origIdx, newIdx) => { if (dueByIndex.has(newIdx)) steps[origIdx].due = dueByIndex.get(newIdx); });
+            const { dueByIndex, unplaced } = backcast({ ...bctx, steps: ordered, deadlineIso });
+            // dueByIndex のキーは ordered(配置順) の index → 合成マップで元の steps index へ戻す。
+            placeIdxOrdered.forEach((origIdx, oi) => { if (dueByIndex.has(oi)) steps[origIdx].due = dueByIndex.get(oi); });
             save();
             // オーバーコミット早期警告（F3）: 入り切らない未完了手順があれば予定化カードに残る赤いバナー、
             // 全部置けたら解除（＝再逆算で unplaced==0 になればバナーは消える）。

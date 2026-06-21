@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   backcast, estHours, hhmmToH, isUnavailable, isWorkDay, protectedHoursOnDow, localTodayIso,
   addBusinessDays, businessDaysBefore, compressSteps, projectBufferDays, ccpmPlan, feverStatus,
+  orderStepsForBackcast,
 } from "./ccpm.js";
 
 // 2026-06 の曜日: 06-01=月。06-20(土)/06-21(日)/06-27(土)/06-28(日) が週末。
@@ -311,4 +312,29 @@ test("feverStatus: bufferDays=0 で超過があれば即100%赤", () => {
   const r = feverStatus({ remainingWorkH: 40, dailyCapH: 8, todayIso: "2026-06-22", personalDueIso: "2026-06-24", bufferDays: 0 });
   assert.equal(r.consumedPct, 100);
   assert.equal(r.tier, "red");
+});
+
+// ── steps強化: slice 前方配置（walking skeleton）─────────────────────
+test("orderStepsForBackcast: slice を先頭へ安定ソート＋元indexマップ", () => {
+  const steps = [{ title: "a" }, { title: "b", slice: true }, { title: "c" }, { title: "d", slice: true }];
+  const { ordered, origByOrdered } = orderStepsForBackcast(steps);
+  assert.deepEqual(ordered.map((s) => s.title), ["b", "d", "a", "c"]); // slice群(安定)→rest群(安定)
+  assert.deepEqual(origByOrdered, [1, 3, 0, 2]);
+});
+
+test("orderStepsForBackcast: slice 無しは恒等（順序不変）", () => {
+  const { ordered, origByOrdered } = orderStepsForBackcast([{ title: "a" }, { title: "b" }]);
+  assert.deepEqual(ordered.map((s) => s.title), ["a", "b"]);
+  assert.deepEqual(origByOrdered, [0, 1]);
+});
+
+test("slice前方配置: 骨格手順が今日寄り・非骨格が締切寄りに置かれる", () => {
+  // 3手順×6h, capH8, 締切06-26(金), today06-22(月)。c だけ骨格。
+  const steps = [{ title: "a", est: 6 }, { title: "b", est: 6 }, { title: "c", est: 6, slice: true }];
+  const { ordered } = orderStepsForBackcast(steps);
+  const { dueByIndex } = backcast({ steps: ordered, deadlineIso: "2026-06-26", capH: 8, todayIso: "2026-06-22" });
+  const dueOf = (t) => dueByIndex.get(ordered.findIndex((s) => s.title === t));
+  assert.equal(dueOf("c"), "2026-06-24"); // 骨格=最早(今日寄り)
+  assert.equal(dueOf("a"), "2026-06-25");
+  assert.equal(dueOf("b"), "2026-06-26"); // 非骨格=締切寄り
 });
