@@ -77,6 +77,16 @@ def save_activity(d):
     with open(ACTIVITY_PATH, "w") as f:
         json.dump(d[-ACTIVITY_MAX:], f, ensure_ascii=False)
 
+def _clamp_pct(v):
+    # 進捗ログの from/to は 0..100 の百分率。範囲外/非数は無害化（偽イベント注入対策）。
+    if v is None:
+        return None
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return None
+    return max(0, min(100, n))
+
 # ---- TaskStation API ----
 
 def ts_req(path, token, method="GET", body=None):
@@ -574,8 +584,8 @@ class H(BaseHTTPRequestHandler):
             entry = {
                 "task_id": body.get("task_id"),
                 "type": body.get("type") if body.get("type") in ("progress", "done") else "progress",
-                "from": body.get("from"),
-                "to": body.get("to"),
+                "from": _clamp_pct(body.get("from")),
+                "to": _clamp_pct(body.get("to")),
                 "title": str(body.get("title") or "")[:200],
                 "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "actor_uid": actor,
@@ -653,7 +663,7 @@ class H(BaseHTTPRequestHandler):
                     days = sorted({int(d) for d in (w.get("days") or []) if str(d).lstrip("-").isdigit() and 0 <= int(d) <= 6})
                     if not days:
                         continue
-                    kind = w.get("kind") if w.get("kind") in ("buffer", "block") else "buffer"
+                    kind = w.get("kind") if w.get("kind") in ("buffer", "block", "deep") else "buffer"
                     wid = str(w.get("id", "")).strip()[:24] or f"{start}-{end}-{''.join(map(str,days))}"
                     out.append({"id": wid, "label": label, "days": days, "start": start, "end": end, "kind": kind})
                 st["protected_windows"] = out
