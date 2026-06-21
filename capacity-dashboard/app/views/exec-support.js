@@ -8,10 +8,11 @@
 // 仕様: docs/exec-support-spec.md。データ形は固定（taskform/将来の一覧が依存）:
 //   prep = { next_step, steps, schedule, if_then, prereqs, obstacles, dod, score }
 import { getPrep, savePrep, getSettings, saveProtectedWindows } from "../lib/exec.js";
-import { updateTask, setTaskStarted } from "../lib/api.js";
+import { updateTask, setTaskStarted, logPlan } from "../lib/api.js";
 import { load, isAiUser } from "../lib/store.js";
 import { shiftISO, committedHoursByDayInRange } from "../lib/capacity.js";
 import { backcast, localTodayIso, ccpmPlan, feverStatus, orderStepsForBackcast } from "../lib/ccpm.js";
+import { upsertIntentBlock, eisenhowerPriority, hhmmToMinutes, unknownsToSteps } from "../lib/onapply.js";
 import { esc } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
 import { fmtDisplayDow, parseSmartDate } from "../lib/form.js";
@@ -613,6 +614,10 @@ const PLUGINS = [
             placeholder="絶対外さない必須条件（1〜3個・読点区切り可）" value="${esc(data.mustHold || "")}">
           <input class="es-in" data-k="acceptableLoss" type="text" autocomplete="off"
             placeholder="間に合わなければ削ってよい要素（任意）" value="${esc(data.acceptableLoss || "")}">
+          <div class="es-oa">
+            <button type="button" class="es-btn es-oa-btn" data-act="apply-intent">${icon("flag", { size: 14 })}意図をタスクに記録</button>
+            <span class="es-oa-msg" data-oa-msg></span>
+          </div>
         </div>`;
     },
     wire(root, data, ctx, save) {
@@ -620,6 +625,20 @@ const PLUGINS = [
       root.querySelector('[data-k="endState"]').addEventListener("input", (e) => { data.endState = e.target.value; save(); });
       root.querySelector('[data-k="mustHold"]').addEventListener("input", (e) => { data.mustHold = e.target.value; save(); });
       root.querySelector('[data-k="acceptableLoss"]').addEventListener("input", (e) => { data.acceptableLoss = e.target.value; save(); });
+      const intentBtn = root.querySelector('[data-act="apply-intent"]');
+      if (intentBtn) intentBtn.addEventListener("click", async () => {
+        if (intentBtn.dataset.busy === "1") return;
+        const msg = root.querySelector('[data-oa-msg]');
+        const show = (t) => { if (msg) { msg.textContent = t; setTimeout(() => { if (msg.textContent === t) msg.textContent = ""; }, 3000); } };
+        intentBtn.dataset.busy = "1"; intentBtn.disabled = true;
+        try {
+          const newDesc = upsertIntentBlock((ctx && ctx.task && ctx.task.description) || "", data);
+          if (ctx && ctx.taskId != null) await updateTask(ctx.taskId, { description: newDesc });
+          if (ctx && ctx.task) ctx.task.description = newDesc;
+          show("タスクの説明に意図を記録しました");
+        } catch { show("記録に失敗（接続をご確認ください）"); }
+        finally { intentBtn.dataset.busy = ""; intentBtn.disabled = false; }
+      });
     },
     score(data) {
       return nonEmpty(data.purpose) && nonEmpty(data.endState) ? 15 : ((nonEmpty(data.purpose) || nonEmpty(data.endState)) ? 7 : 0);
@@ -647,10 +666,13 @@ const PLUGINS = [
             <input class="es-in es-w120" data-k="estMin" type="text" inputmode="numeric"
               placeholder="確保分（既定60）" value="${esc(data.estMin || "")}">
           </div>
+          <div class="es-oa">
+            <button type="button" class="es-btn es-oa-btn" data-act="apply-frog">${icon("alarm", { size: 14 })}朝イチ枠を確保</button>
+            <span class="es-oa-msg" data-oa-msg></span>
+          </div>
         </div>`;
     },
     wire(root, data, ctx, save) {
-      // TODO(2026-06-21): 枠確保アクション(logPlan)は actions パスで
       const frog = root.querySelector('[data-k="isFrog"]');
       frog.addEventListener("change", () => { data.isFrog = frog.checked; save(); });
       const slot = root.querySelector('[data-k="slotStart"]');
@@ -659,6 +681,26 @@ const PLUGINS = [
       const est = root.querySelector('[data-k="estMin"]');
       est.addEventListener("input", () => { data.estMin = est.value; save(); });
       est.addEventListener("change", () => { data.estMin = est.value; save(); });
+      const frogBtn = root.querySelector('[data-act="apply-frog"]');
+      if (frogBtn) frogBtn.addEventListener("click", async () => {
+        if (frogBtn.dataset.busy === "1") return;
+        const msg = root.querySelector('[data-oa-msg]');
+        const show = (t) => { if (msg) { msg.textContent = t; setTimeout(() => { if (msg.textContent === t) msg.textContent = ""; }, 3000); } };
+        if (!data.isFrog) { show("「今日のカエルにする」をONにしてください"); return; }
+        frogBtn.dataset.busy = "1"; frogBtn.disabled = true;
+        try {
+          const { me } = await load();
+          const today = localTodayIso();
+          const startMin = hhmmToMinutes(data.slotStart || "09:00");
+          const estMin = Math.max(15, Math.round(Number(data.estMin) || 60));
+          if (ctx && ctx.taskId != null) {
+            await logPlan(ctx.taskId, estMin * 60, today, "今日のカエル", me && me.id, startMin);
+            await updateTask(ctx.taskId, { start_date: today + "T00:00:00Z" });
+          }
+          show(`朝イチ枠（${data.slotStart || "09:00"}・${estMin}分）を今日に確保`);
+        } catch { show("枠の確保に失敗"); }
+        finally { frogBtn.dataset.busy = ""; frogBtn.disabled = false; }
+      });
     },
     score(data) { return data.isFrog ? 15 : 0; },
   },
@@ -694,6 +736,10 @@ const PLUGINS = [
             <span>緊急</span>
           </label>
           <div class="es-hint" data-act-label>${esc(label)}</div>
+          <div class="es-oa">
+            <button type="button" class="es-btn es-oa-btn" data-act="apply-eis">${icon("grid", { size: 14 })}優先度に反映</button>
+            <span class="es-oa-msg" data-oa-msg></span>
+          </div>
         </div>`;
     },
     wire(root, data, ctx, save) {
@@ -705,6 +751,21 @@ const PLUGINS = [
       imp.addEventListener("change", () => { data.important = imp.checked; data.decided = true; save(); refresh(); });
       const urg = root.querySelector('[data-k="urgent"]');
       urg.addEventListener("change", () => { data.urgent = urg.checked; data.decided = true; save(); refresh(); });
+      const eisBtn = root.querySelector('[data-act="apply-eis"]');
+      if (eisBtn) eisBtn.addEventListener("click", async () => {
+        if (eisBtn.dataset.busy === "1") return;
+        const msg = root.querySelector('[data-oa-msg]');
+        const show = (t) => { if (msg) { msg.textContent = t; setTimeout(() => { if (msg.textContent === t) msg.textContent = ""; }, 3000); } };
+        const pr = eisenhowerPriority(data.important, data.urgent);
+        if (pr == null) { show(data.urgent ? "委譲を検討（重要でない緊急）" : "後回し/取り下げを検討"); return; }
+        eisBtn.dataset.busy = "1"; eisBtn.disabled = true;
+        try {
+          if (ctx && ctx.taskId != null) await updateTask(ctx.taskId, { priority: pr });
+          if (ctx && ctx.task) ctx.task.priority = pr;
+          show(pr === 4 ? "優先度=緊急(4) に設定" : "優先度=高(3) に設定");
+        } catch { show("優先度の反映に失敗"); }
+        finally { eisBtn.dataset.busy = ""; eisBtn.disabled = false; }
+      });
     },
     score(data) { return data.decided ? 10 : 0; },
   },
@@ -771,6 +832,10 @@ const PLUGINS = [
           <div class="es-hint">未知・崩れたら致命的な前提を、解消方法・証拠・期日付きで列挙。怖いところを先に潰す（高影響は赤・解消でチェック）。</div>
           <div class="es-rows">${rows}</div>
           <button type="button" class="es-add" data-act="add">${icon("arrowUp", { size: 13, cls: "es-add-ic" })}未知を追加</button>
+          <div class="es-oa">
+            <button type="button" class="es-btn es-oa-btn" data-act="apply-unknowns">${icon("search", { size: 14 })}高影響を段取りへ「先行検証」として入れる</button>
+            <span class="es-oa-msg" data-oa-msg></span>
+          </div>
         </div>`;
     },
     wire(root, data, ctx, save) {
@@ -797,6 +862,23 @@ const PLUGINS = [
         save(); rerender();
         const inputs = root.querySelectorAll('.es-unk [data-k="unknown"]');
         if (inputs.length) inputs[inputs.length - 1].focus();
+      });
+      const unkBtn = root.querySelector('[data-act="apply-unknowns"]');
+      if (unkBtn) unkBtn.addEventListener("click", () => {
+        const msg = root.querySelector('[data-oa-msg]');
+        const show = (t) => { if (msg) { msg.textContent = t; setTimeout(() => { if (msg.textContent === t) msg.textContent = ""; }, 3000); } };
+        const cand = unknownsToSteps(data.items, { uid });
+        if (!cand.length) { show("高影響・未解消の未知がありません"); return; }
+        const steps = (ctx && ctx.prep && ctx.prep.steps) || null;
+        if (!steps) { show("段取りカードが見つかりません"); return; }
+        steps.items = steps.items || [];
+        const exist = new Set(steps.items.map((s) => s.title));
+        const add = cand.filter((s) => !exist.has(s.title));
+        if (!add.length) { show("すでに追加済みです"); return; }
+        steps.items.unshift(...add);
+        save();
+        if (ctx && typeof ctx.rerenderCard === "function") { ctx.rerenderCard("steps"); ctx.rerenderCard("schedule"); }
+        show(`${add.length}件を段取りに「先行検証」として追加`);
       });
     },
     score(data) {
@@ -1051,6 +1133,9 @@ export function ensureStyle() {
   .es-unk-l2{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding-left:24px}
   .es-unk .es-unk-res{flex:none;margin:0;cursor:pointer}
   .es-unk-l2 .es-w120{width:120px;flex:none}
+  .es-oa{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px}
+  .es-oa-btn{font-size:12px;padding:6px 11px}
+  .es-oa-msg{font-size:11px;color:var(--free,#2fa66b);font-weight:600}
   .es-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding-top:2px}
   .es-foot-score{font-size:11.5px;color:var(--muted)}
   .es-foot-score b{color:var(--ink);font-variant-numeric:tabular-nums}
