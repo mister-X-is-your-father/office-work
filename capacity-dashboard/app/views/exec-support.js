@@ -1059,6 +1059,230 @@ const PLUGINS = [
     },
     score(data) { return (data.wires || []).some((w) => w.indicator && nonEmpty(w.action)) ? 10 : 0; },
   },
+
+  // I. 関係者と根回し max=15（新規・波3・既定OFF）
+  {
+    id: "stakeholders",
+    icon: "network",
+    label: "関係者と根回し",
+    max: 15,
+    symptoms: ["依存", "割り込み"],
+    defaults: () => ({ items: [] }),
+    render(data) {
+      ensureRowIds(data.items || (data.items = []));
+      const sel = (cur, opts, k) => opts.map(([v, l]) => `<option value="${v}"${(cur || opts[0][0]) === v ? " selected" : ""}>${l}</option>`).join("");
+      const ROLE = [["decide", "意思決定者"], ["approve", "承認"], ["influence", "影響"], ["support", "協力"]];
+      const POW = [["high", "影響大"], ["mid", "中"], ["low", "小"]];
+      const STANCE = [["unknown", "不明"], ["pro", "賛成"], ["neutral", "中立"], ["con", "反対"]];
+      const rows = data.items.map((it) => `
+        <div class="es-row es-wrap${it.done ? " done" : ""}" data-id="${it.__id}">
+          <input type="checkbox" class="es-step-done" data-k="done"${it.done ? " checked" : ""} aria-label="接触済み" title="接触済み">
+          <input class="es-in es-grow" data-k="name" type="text" placeholder="関係者" value="${esc(it.name || "")}">
+          <select class="es-in es-w120" data-k="role" aria-label="役割">${sel(it.role, ROLE)}</select>
+          <select class="es-in es-w64" data-k="power" aria-label="影響力">${sel(it.power, POW)}</select>
+          <select class="es-in es-w64" data-k="stance" aria-label="立場">${sel(it.stance, STANCE)}</select>
+          <input class="es-in es-grow" data-k="action" type="text" placeholder="先回りアクション" value="${esc(it.action || "")}">
+          <button type="button" class="es-rowx" data-act="del" aria-label="削除">${icon("x", { size: 14 })}</button>
+        </div>`).join("");
+      return `
+        <div class="es-field">
+          <div class="es-hint">成否を左右する関係者を権力×立場で捉え、承認者・意思決定者に先回りで合意形成（承認No/未返答を構造的に封じる）。</div>
+          <div class="es-rows">${rows}</div>
+          <button type="button" class="es-add" data-act="add">${icon("arrowUp", { size: 13, cls: "es-add-ic" })}関係者を追加</button>
+        </div>`;
+    },
+    wire(root, data, ctx, save) {
+      const rerender = () => { root.querySelector(".es-field").outerHTML = this.render(data); this.wire(root, data, ctx, save); };
+      root.querySelectorAll(".es-row").forEach((rowEl) => {
+        const it = data.items.find((x) => x.__id === rowEl.dataset.id);
+        if (!it) return;
+        rowEl.querySelector('[data-k="name"]').addEventListener("input", (e) => { it.name = e.target.value; save(); });
+        rowEl.querySelector('[data-k="action"]').addEventListener("input", (e) => { it.action = e.target.value; save(); });
+        rowEl.querySelector('[data-k="role"]').addEventListener("change", (e) => { it.role = e.target.value; save(); });
+        rowEl.querySelector('[data-k="power"]').addEventListener("change", (e) => { it.power = e.target.value; save(); });
+        rowEl.querySelector('[data-k="stance"]').addEventListener("change", (e) => { it.stance = e.target.value; save(); });
+        const dn = rowEl.querySelector('[data-k="done"]');
+        dn.addEventListener("change", () => { it.done = dn.checked; save(); rerender(); });
+        rowEl.querySelector('[data-act="del"]').addEventListener("click", () => {
+          const i = data.items.findIndex((x) => x.__id === it.__id);
+          if (i >= 0) data.items.splice(i, 1);
+          save(); rerender();
+        });
+      });
+      root.querySelector('[data-act="add"]').addEventListener("click", () => {
+        data.items.push({ __id: uid(), name: "", role: "decide", power: "high", stance: "unknown", action: "", done: false });
+        save(); rerender();
+        const inputs = root.querySelectorAll('.es-row [data-k="name"]');
+        if (inputs.length) inputs[inputs.length - 1].focus();
+      });
+    },
+    score(data) {
+      const items = (data.items || []).filter((x) => nonEmpty(x.name));
+      if (!items.length) return 0;
+      const done = items.filter((x) => x.done).length;
+      return done === items.length ? 15 : Math.floor(15 * (done / items.length));
+    },
+  },
+
+  // J. 役割分担と委譲 max=15（新規・波3・既定OFF）
+  {
+    id: "raci_delegate",
+    icon: "hand",
+    label: "役割分担と委譲",
+    max: 15,
+    symptoms: ["依存", "燃え尽き"],
+    defaults: () => ({ items: [] }),
+    render(data) {
+      ensureRowIds(data.items || (data.items = []));
+      const rows = data.items.map((it) => `
+        <div class="es-row es-wrap${it.delegated ? " done" : ""}" data-id="${it.__id}">
+          <input type="checkbox" class="es-step-done" data-k="delegated"${it.delegated ? " checked" : ""} aria-label="委譲済み" title="委譲済み">
+          <input class="es-in es-grow" data-k="part" type="text" placeholder="作業/成果物" value="${esc(it.part || "")}">
+          <input class="es-in es-w120" data-k="r" type="text" placeholder="R 実行者" value="${esc(it.r || "")}">
+          <input class="es-in es-w120" data-k="a" type="text" placeholder="A 最終責任" value="${esc(it.a || "")}">
+          <input class="es-in es-w120" data-k="dueRaw" type="text" placeholder="相手期日" value="${esc(it.dueRaw || "")}">
+          <button type="button" class="es-rowx" data-act="del" aria-label="削除">${icon("x", { size: 14 })}</button>
+        </div>`).join("");
+      return `
+        <div class="es-field">
+          <div class="es-hint">作業ごとに実行者(R)・最終責任(A)を割り当て、自分がRでない部分を相手の期日付きで委譲＝抱え込み(確定遅延)を解消。</div>
+          <div class="es-rows">${rows}</div>
+          <button type="button" class="es-add" data-act="add">${icon("arrowUp", { size: 13, cls: "es-add-ic" })}作業を追加</button>
+        </div>`;
+    },
+    wire(root, data, ctx, save) {
+      const rerender = () => { root.querySelector(".es-field").outerHTML = this.render(data); this.wire(root, data, ctx, save); };
+      root.querySelectorAll(".es-row").forEach((rowEl) => {
+        const it = data.items.find((x) => x.__id === rowEl.dataset.id);
+        if (!it) return;
+        ["part", "r", "a", "dueRaw"].forEach((k) => rowEl.querySelector(`[data-k="${k}"]`).addEventListener("input", (e) => { it[k] = e.target.value; save(); }));
+        const dl = rowEl.querySelector('[data-k="delegated"]');
+        dl.addEventListener("change", () => { it.delegated = dl.checked; save(); rerender(); });
+        rowEl.querySelector('[data-act="del"]').addEventListener("click", () => {
+          const i = data.items.findIndex((x) => x.__id === it.__id);
+          if (i >= 0) data.items.splice(i, 1);
+          save(); rerender();
+        });
+      });
+      root.querySelector('[data-act="add"]').addEventListener("click", () => {
+        data.items.push({ __id: uid(), part: "", r: "", a: "", dueRaw: "", delegated: false });
+        save(); rerender();
+        const inputs = root.querySelectorAll('.es-row [data-k="part"]');
+        if (inputs.length) inputs[inputs.length - 1].focus();
+      });
+    },
+    score(data) {
+      const items = (data.items || []).filter((x) => nonEmpty(x.part));
+      if (!items.length) return 0;
+      const del = items.filter((x) => x.delegated).length;
+      return del === items.length ? 15 : Math.floor(15 * (del / items.length));
+    },
+  },
+
+  // K. エスカレーション経路 max=10（新規・波3・既定OFF）
+  {
+    id: "escalation",
+    icon: "trendingUp",
+    label: "エスカレーション経路",
+    max: 10,
+    symptoms: ["依存", "先延ばし"],
+    defaults: () => ({ items: [] }),
+    render(data) {
+      ensureRowIds(data.items || (data.items = []));
+      const CH = [["chat", "チャット"], ["meet", "会議"], ["face", "対面"]];
+      const chOpts = (cur) => CH.map(([v, l]) => `<option value="${v}"${(cur || "chat") === v ? " selected" : ""}>${l}</option>`).join("");
+      const rows = data.items.map((it) => `
+        <div class="es-row es-wrap${it.armed ? " done" : ""}" data-id="${it.__id}">
+          <input type="checkbox" class="es-step-done" data-k="armed"${it.armed ? " checked" : ""} aria-label="発動監視ON" title="発動監視ON">
+          <input class="es-in es-grow" data-k="waitOn" type="text" placeholder="待っている相手/事柄" value="${esc(it.waitOn || "")}">
+          <input class="es-in es-w64" data-k="thresholdDays" type="text" inputmode="numeric" placeholder="上限日" value="${esc(it.thresholdDays || "")}">
+          <input class="es-in es-grow" data-k="level1" type="text" placeholder="まず誰へ何で" value="${esc(it.level1 || "")}">
+          <select class="es-in es-w120" data-k="channel" aria-label="手段">${chOpts(it.channel)}</select>
+          <button type="button" class="es-rowx" data-act="del" aria-label="削除">${icon("x", { size: 14 })}</button>
+        </div>`).join("");
+      return `
+        <div class="es-field">
+          <div class="es-hint">「N営業日返答が無ければ次は誰へ・どの手段で上げるか」を着手前に固定し、催促の心理的摩擦を事前合意済みルールに置換。</div>
+          <div class="es-rows">${rows}</div>
+          <button type="button" class="es-add" data-act="add">${icon("arrowUp", { size: 13, cls: "es-add-ic" })}経路を追加</button>
+        </div>`;
+    },
+    wire(root, data, ctx, save) {
+      const rerender = () => { root.querySelector(".es-field").outerHTML = this.render(data); this.wire(root, data, ctx, save); };
+      root.querySelectorAll(".es-row").forEach((rowEl) => {
+        const it = data.items.find((x) => x.__id === rowEl.dataset.id);
+        if (!it) return;
+        ["waitOn", "thresholdDays", "level1"].forEach((k) => rowEl.querySelector(`[data-k="${k}"]`).addEventListener("input", (e) => { it[k] = e.target.value; save(); }));
+        rowEl.querySelector('[data-k="channel"]').addEventListener("change", (e) => { it.channel = e.target.value; save(); });
+        const am = rowEl.querySelector('[data-k="armed"]');
+        am.addEventListener("change", () => { it.armed = am.checked; save(); rerender(); });
+        rowEl.querySelector('[data-act="del"]').addEventListener("click", () => {
+          const i = data.items.findIndex((x) => x.__id === it.__id);
+          if (i >= 0) data.items.splice(i, 1);
+          save(); rerender();
+        });
+      });
+      root.querySelector('[data-act="add"]').addEventListener("click", () => {
+        data.items.push({ __id: uid(), waitOn: "", thresholdDays: "", level1: "", channel: "chat", armed: false });
+        save(); rerender();
+        const inputs = root.querySelectorAll('.es-row [data-k="waitOn"]');
+        if (inputs.length) inputs[inputs.length - 1].focus();
+      });
+    },
+    score(data) { return (data.items || []).some((x) => nonEmpty(x.waitOn) && nonEmpty(x.level1)) ? 10 : 0; },
+  },
+
+  // L. 報連相プラン max=10（新規・波3・既定OFF）
+  {
+    id: "comms_plan",
+    icon: "message",
+    label: "報連相プラン",
+    max: 10,
+    symptoms: ["割り込み", "不確実性"],
+    defaults: () => ({ items: [] }),
+    render(data) {
+      ensureRowIds(data.items || (data.items = []));
+      const TYPE = [["report", "報告"], ["inform", "連絡"], ["consult", "相談"]];
+      const CAD = [["adhoc", "都度"], ["daily", "日次"], ["weekly", "週次"], ["ms", "節目"]];
+      const sel = (cur, opts) => opts.map(([v, l]) => `<option value="${v}"${(cur || opts[0][0]) === v ? " selected" : ""}>${l}</option>`).join("");
+      const rows = data.items.map((it) => `
+        <div class="es-row es-wrap" data-id="${it.__id}">
+          <input class="es-in es-grow" data-k="audience" type="text" placeholder="相手" value="${esc(it.audience || "")}">
+          <select class="es-in es-w64" data-k="type" aria-label="種別">${sel(it.type, TYPE)}</select>
+          <input class="es-in es-grow" data-k="content" type="text" placeholder="何を" value="${esc(it.content || "")}">
+          <select class="es-in es-w120" data-k="cadence" aria-label="頻度">${sel(it.cadence, CAD)}</select>
+          <button type="button" class="es-rowx" data-act="del" aria-label="削除">${icon("x", { size: 14 })}</button>
+        </div>`).join("");
+      return `
+        <div class="es-field">
+          <div class="es-hint">誰に何をどの頻度で報告/連絡/相談するかを定例化し、情報不足由来の横やり・手戻りを軽い定期同期で前倒し。</div>
+          <div class="es-rows">${rows}</div>
+          <button type="button" class="es-add" data-act="add">${icon("arrowUp", { size: 13, cls: "es-add-ic" })}報連相を追加</button>
+        </div>`;
+    },
+    wire(root, data, ctx, save) {
+      const rerender = () => { root.querySelector(".es-field").outerHTML = this.render(data); this.wire(root, data, ctx, save); };
+      root.querySelectorAll(".es-row").forEach((rowEl) => {
+        const it = data.items.find((x) => x.__id === rowEl.dataset.id);
+        if (!it) return;
+        ["audience", "content"].forEach((k) => rowEl.querySelector(`[data-k="${k}"]`).addEventListener("input", (e) => { it[k] = e.target.value; save(); }));
+        rowEl.querySelector('[data-k="type"]').addEventListener("change", (e) => { it.type = e.target.value; save(); });
+        rowEl.querySelector('[data-k="cadence"]').addEventListener("change", (e) => { it.cadence = e.target.value; save(); });
+        rowEl.querySelector('[data-act="del"]').addEventListener("click", () => {
+          const i = data.items.findIndex((x) => x.__id === it.__id);
+          if (i >= 0) data.items.splice(i, 1);
+          save(); rerender();
+        });
+      });
+      root.querySelector('[data-act="add"]').addEventListener("click", () => {
+        data.items.push({ __id: uid(), audience: "", type: "report", content: "", cadence: "weekly" });
+        save(); rerender();
+        const inputs = root.querySelectorAll('.es-row [data-k="audience"]');
+        if (inputs.length) inputs[inputs.length - 1].focus();
+      });
+    },
+    score(data) { return (data.items || []).some((x) => nonEmpty(x.audience) && nonEmpty(x.content)) ? 10 : 0; },
+  },
 ];
 
 // 緊急×重要 → 推奨アクション文言（render/wire 共用）。
