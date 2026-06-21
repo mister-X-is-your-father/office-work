@@ -66,6 +66,10 @@
   今日plan・未完了 の着手率＋未着手items)/dailyExecSeries(過去N日 完了数・実働h・触れたタスク数)。画面=率カード3枚＋未着手の拾い上げ
   （クリックで編集）＋週14日トレンドバー。**率は“今日”が対象**（過去日の「やると決めた母数」は未スナップショット＝週はトレンドで見る設計）。
   ＜次の磨き候補＞ 日次の母数スナップショット保存で「過去の実行率トレンド」も出せる／ホームに今日の実行率mini。
+- **停滞検知＆掘り起こし（②）**（`46a732f`）: ふりかえり画面に「止まっているタスク（7日以上 動きなし）」section 追加＝
+  未完了 かつ 計画の意思あり（期日/開始/見積り/着手痕跡）かつ N日(既定7)動きの無いタスクを停滞日数降順で炙り出す。
+  `lib/execmetrics.js stalledTasks(tasks, timeEntries, activityLog, today, {thresholdDays})`（純未整理backlogは除外）。
+  動き＝実績/進捗ログ/started_at/created(基準)の最新日。capdemo で実データ15件検知を確認・console0。①と対でレーダー外の未実行を捕捉。
 
 ## 2. アーキテクチャ（ファイルと責務）
 - `app/views/exec-support.js`（**私=指示役は直接編集不可**・委譲のみ）: プラグイン・レジストリ `PLUGINS`（next_step/steps/schedule/if_then/prereqs/obstacles/dod）、`backcast()`（逆算・今日床止め・容量/祝日/休暇/保護枠/バッファ考慮）、メーター演出、診断、保護時間帯エディタ、F3警告バナー。`renderExecSupport(container,{taskId,task})` / `ensureStyle()` をexport。
