@@ -1,13 +1,14 @@
 // 総合ホーム（実データ）。縦積み: KPI / やること / 今日の稼働予定 / 稼働プラン / 月間ガント。
 // 各セクションは折りたたみヘッダ付き。開閉状態は本人ごと localStorage に保存・復元。
 import { load, isAiUser } from "../lib/store.js";
-import { loadByMember, estimateVsActual, triage, weekLoadByMember } from "../lib/capacity.js";
+import { loadByMember, estimateVsActual, triage, weekLoadByMember, dateOnly } from "../lib/capacity.js";
 import { capacityOn } from "../lib/recurrence.js";
 import { statusOf } from "../lib/kinds.js";
 import { C, esc, fmtH, todayISO, member_color } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
-import { getPrepScores, getPrep, savePrep } from "../lib/exec.js";
-import { setTaskStarted } from "../lib/api.js";
+import { getPrepScores, getPrep, savePrep, getActivity } from "../lib/exec.js";
+import { setTaskStarted, getTimes } from "../lib/api.js";
+import { stepDigestion, taskEngagement, stalledTasks } from "../lib/execmetrics.js";
 import { icon } from "../lib/icons.js";
 import * as today from "./today.js";
 import * as workplan from "./workplan.js";
@@ -190,6 +191,33 @@ export async function render(root) {
       </section>`;
   })() : "";
 
+  // 今日の実行 mini: 手順消化率 / タスク着手率 / 停滞件数（ふりかえりと同じ純関数）。
+  // 実績(getTimes N+1)＋進捗ログ(getActivity)は失敗時 空で続行＝ホームを壊さない。
+  let execActivityLog = [];
+  try { execActivityLog = (await getActivity())?.activity || []; } catch { execActivityLog = []; }
+  let execTimeEntries = [];
+  try {
+    const tt = (tasks || []).filter((t) => (t.time_spent || 0) > 0);
+    const pairs = await Promise.all(tt.map((t) => getTimes(t.id).then((es) => [t.id, es || []]).catch(() => [t.id, []])));
+    for (const [tid, es] of pairs) for (const e of es) if (e && e.logged_on) execTimeEntries.push({ day: dateOnly(e.logged_on), seconds: e.seconds || 0, taskId: tid });
+  } catch { execTimeEntries = []; }
+  const exStep = stepDigestion(stepsByTask, day);
+  const exEng = taskEngagement(tasks, plansByTask, day);
+  const exStalled = stalledTasks(tasks, execTimeEntries, execActivityLog, day, { thresholdDays: 7 });
+
+  // 達成度の色クラス（率が低いほど注意）。対象0は "—"。
+  const exLvl = (pct, den) => (den <= 0 ? "na" : pct < 40 ? "low" : pct < 80 ? "mid" : "high");
+  const exMiniHtml = `
+    <button type="button" class="exmini card" id="exmini" title="ふりかえりを開く">
+      <span class="exmini-h">${icon("trendingUp", { size: 15 }) || ""}<span>今日の実行</span></span>
+      <span class="exmini-stats">
+        <span class="exmini-st ex-${exLvl(exStep.pct, exStep.total)}">手順 <b>${exStep.total ? exStep.pct + "%" : "—"}</b></span>
+        <span class="exmini-st ex-${exLvl(exEng.pct, exEng.target)}">着手 <b>${exEng.target ? exEng.pct + "%" : "—"}</b></span>
+        <span class="exmini-st${exStalled.length ? " ex-stale" : ""}">停滞 <b>${exStalled.length}</b>件</span>
+      </span>
+      <span class="exmini-go">ふりかえり ${icon("chevronRight", { size: 14 }) || "›"}</span>
+    </button>`;
+
   const totCap = rows.reduce((s, r) => s + r.capH, 0), totAsg = rows.reduce((s, r) => s + r.assignedH, 0);
   const over = rows.filter(r => r.status === "over");
   const must = tri.filter(t => t.cls === "must");
@@ -224,6 +252,7 @@ export async function render(root) {
     </div>
     ${mitHtml}
     ${budgetHtml}
+    ${exMiniHtml}
     <div class="home-stack">
       ${section("todo", "やること")}
       ${section("today", "今日の稼働予定")}
@@ -272,6 +301,22 @@ export async function render(root) {
       .cb-meta b{font-weight:800;font-variant-numeric:tabular-nums}
       .cb-meta small{font-size:11px;color:${C.muted};margin-left:4px}
       .cb-over{border-left:3px solid ${C.over}}
+      /* 今日の実行 mini バンド: 1行コンパクト。クリックでふりかえりへ。率が低いほど注意色。 */
+      .exmini{display:flex;align-items:center;gap:14px;width:100%;box-sizing:border-box;text-align:left;
+        padding:11px 16px;margin-bottom:16px;border:1px solid ${C.line};background:${C.card};color:${C.ink};
+        font:inherit;cursor:pointer;border-radius:12px;transition:border-color .12s,background .12s}
+      .exmini:hover{border-color:${C.fill};background:${C.track}}
+      .exmini-h{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:700;color:${C.ink};flex:none}
+      .exmini-h .ic{color:${C.fill}}
+      .exmini-stats{display:flex;align-items:center;gap:14px;flex:1;min-width:0;flex-wrap:wrap}
+      .exmini-st{font-size:12px;color:${C.muted};font-variant-numeric:tabular-nums}
+      .exmini-st b{font-size:13.5px;font-weight:800;color:${C.ink};margin-left:2px}
+      .exmini-st.ex-low b{color:${C.over}}
+      .exmini-st.ex-mid b{color:${C.amber}}
+      .exmini-st.ex-high b{color:${C.free}}
+      .exmini-st.ex-na b{color:${C.muted}}
+      .exmini-st.ex-stale b{color:${C.over}}
+      .exmini-go{margin-left:auto;font-size:11.5px;font-weight:600;color:${C.fill};flex:none;display:inline-flex;align-items:center;gap:2px}
       .home-stack{display:flex;flex-direction:column;gap:16px}
       .home-sec{padding:0;overflow:hidden}
       .home-sec-head{display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;
@@ -364,6 +409,10 @@ export async function render(root) {
       btn.dataset.busy = ""; btn.disabled = false;
     };
   });
+
+  // 今日の実行 mini: クリックでふりかえり（#/retro）へ。
+  const exminiEl = root.querySelector("#exmini");
+  if (exminiEl) exminiEl.onclick = () => { location.hash = "#/retro"; };
 
   // 各埋め込みは load() の共有キャッシュ経由（二重 fetch なし）。
   // 開いているセクションのみ描画。teardown を保持し、再描画/折りたたみ時に解除。
