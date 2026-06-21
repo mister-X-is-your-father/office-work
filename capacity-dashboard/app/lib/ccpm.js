@@ -147,3 +147,131 @@ export function backcast({ steps, deadlineIso, capH = 8, windows = [], holidaysS
   }
   return { dueByIndex, unplaced };
 }
+
+// ── CCPM 強化（前倒し締切＋安全余裕の集約バッファ＋fever）─────────────
+// 既存 backcast は一切変えず、その前段（締切の前倒し・手順estの圧縮・バッファ予約）と
+// 後段（バッファ消費率=fever）を純関数で足す。schedule プラグインから呼ぶ。
+//   CCPM の考え方: 各手順の楽観/悲観の安全余裕を抜いて1か所(プロジェクトバッファ)へ集約し、
+//   個別締切でなくバッファの食い具合で全体の遅れを早期検知する。
+const round2 = (x) => Math.round(x * 100) / 100;
+
+// iso から n 営業日ぶん移動した日付（n<0=前へ/ n>0=後ろへ・土日祝休暇を飛ばす）。n=0 はそのまま。
+//   開始日 iso 自体はカウントに含めない（addBusinessDays(金,1)=翌月曜 / addBusinessDays(月,-1)=前金曜）。
+export function addBusinessDays(iso, n, { holidaysSet = null, unavailRanges = [] } = {}) {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+  let k = Math.trunc(Number(n) || 0);
+  if (k === 0) return iso;
+  const step = k > 0 ? 1 : -1;
+  let cur = iso, remaining = Math.abs(k), guard = 0;
+  while (remaining > 0 && guard++ < 4000) {
+    cur = shiftISO(cur, step);
+    if (isWorkDay(cur, holidaysSet, unavailRanges)) remaining--;
+  }
+  return cur;
+}
+// iso の n 営業日前。
+export function businessDaysBefore(iso, n, opts) {
+  return addBusinessDays(iso, -Math.abs(Math.trunc(Number(n) || 0)), opts);
+}
+
+// startIso から数えて count 番目（1始まり・start 自身が営業日なら 1 とカウント）の営業日。
+function nthWorkDayFrom(startIso, count, { holidaysSet = null, unavailRanges = [] } = {}) {
+  if (count <= 0) return startIso;
+  let cur = startIso, seen = 0, guard = 0;
+  while (guard++ < 4000) {
+    if (isWorkDay(cur, holidaysSet, unavailRanges)) { seen++; if (seen >= count) return cur; }
+    cur = shiftISO(cur, 1);
+  }
+  return cur;
+}
+// [aIso, bIso] inclusive の営業日数（土日祝休暇除く）。a>b は 0。
+function countWorkDaysInclusive(aIso, bIso, { holidaysSet = null, unavailRanges = [] } = {}) {
+  if (!aIso || !bIso || aIso > bIso) return 0;
+  let n = 0, cur = aIso, guard = 0;
+  while (cur <= bIso && guard++ < 4000) {
+    if (isWorkDay(cur, holidaysSet, unavailRanges)) n++;
+    cur = shiftISO(cur, 1);
+  }
+  return n;
+}
+
+// 各手順の見積りを aggressivePct% ぶん圧縮（安全余裕を抜く）。見積り無し(null)は据え置き。
+//   返り値: { steps: [...est圧縮済みのコピー], removedSlackH: 抜いた余裕の合計h }。
+//   元配列は破壊しない（浅いコピー＋est差し替え）。順序・長さは不変＝呼び出し側の index 対応はそのまま。
+export function compressSteps(steps, aggressivePct) {
+  const pct = Math.max(0, Math.min(90, Math.round(Number(aggressivePct) || 0)));
+  let removedSlackH = 0;
+  const out = (steps || []).map((s) => {
+    const e = estHours(s && s.est);
+    if (e == null) return { ...s };
+    const ne = round2(e * (1 - pct / 100));
+    removedSlackH += (e - ne);
+    return { ...s, est: ne };
+  });
+  return { steps: out, removedSlackH: round2(removedSlackH) };
+}
+
+// プロジェクトバッファの日数を決める。既定=抜いた余裕の半分(h)を1日容量で割って切り上げ。
+//   override（手入力・空でない）があればそれを優先。返り値 { bufferDays, bufferH, auto }。
+export function projectBufferDays(removedSlackH, capH = 8, override = null) {
+  const cap = capH > 0 ? capH : 8;
+  const auto = Math.max(0, Math.ceil((Math.max(0, removedSlackH) / 2) / cap));
+  if (override != null && String(override).trim() !== "") {
+    const o = Math.max(0, Math.round(Number(override) || 0));
+    return { bufferDays: o, bufferH: round2(o * cap), auto };
+  }
+  return { bufferDays: auto, bufferH: round2(Math.max(0, removedSlackH) / 2), auto };
+}
+
+// CCPM 逆算: 前倒し締切＋集約バッファを差し引いた「作業締切」を求め、est を圧縮した手順を
+// 既存 backcast に流す。返り値は backcast の {dueByIndex, unplaced}（手順は与えた配列の index）＋
+//   { personalDueIso(前倒し締切), workDeadlineIso(バッファ手前=実作業の締切), bufferDays, bufferH, removedSlackH }。
+//   ※ steps は呼び出し側で done 除外済みの placeSteps を渡す前提（backcast と同じ作法）。
+export function ccpmPlan({
+  steps, deadlineIso, capH = 8, windows = [], holidaysSet = null, unavailRanges = [],
+  bufferPct = 0, todayIso = localTodayIso(), committedByDay = null, taskIsImportant = false,
+  personalDueOffset = 0, aggressivePct = 0, projectBufferDaysOverride = null,
+} = {}) {
+  const empty = { dueByIndex: new Map(), unplaced: (steps || []).length, personalDueIso: "", workDeadlineIso: "", bufferDays: 0, bufferH: 0, removedSlackH: 0, chainWorkH: 0 };
+  if (!deadlineIso || deadlineIso.startsWith("0001")) return empty;
+  const dl = deadlineIso.slice(0, 10);
+  const wopts = { holidaysSet, unavailRanges };
+  const personalDueIso = businessDaysBefore(dl, personalDueOffset, wopts);
+  const { steps: compressed, removedSlackH } = compressSteps(steps, aggressivePct);
+  const { bufferDays, bufferH } = projectBufferDays(removedSlackH, capH, projectBufferDaysOverride);
+  const workDeadlineIso = businessDaysBefore(personalDueIso, bufferDays, wopts);
+  const { dueByIndex, unplaced } = backcast({
+    steps: compressed, deadlineIso: workDeadlineIso, capH, windows, holidaysSet, unavailRanges,
+    bufferPct, todayIso, committedByDay, taskIsImportant,
+  });
+  // 圧縮後の総作業時間（見積りある手順のみ・fever の残作業量に使う）。
+  const chainWorkH = round2(compressed.reduce((s, st) => s + (estHours(st && st.est) || 0), 0));
+  return { dueByIndex, unplaced, personalDueIso, workDeadlineIso, bufferDays, bufferH, removedSlackH, chainWorkH };
+}
+
+// fever（バッファ消費率）: 残作業を1日容量で割った投影終了日が、前倒し締切(personalDue)を
+// どれだけ超過するか＝プロジェクトバッファを何日消費したか。bufferDays に対する割合で緑/黄/赤。
+//   これは plan-vs-actual の厳密なバーンダウンではなく「今のペースで前倒し締切に間に合うか」の前向き推定（ヒューリスティック）。
+//   入力: remainingWorkH(未完了手順の圧縮後est合計), dailyCapH(=capH×(1-bufferPct/100) 等の1日実空き),
+//        todayIso, personalDueIso, bufferDays, holidaysSet, unavailRanges, alertGreen/alertRed(閾値%)。
+//   返り値: { consumedDays, consumedPct, tier:"green"|"yellow"|"red", projectedFinishIso }。
+export function feverStatus({
+  remainingWorkH, dailyCapH = 8, todayIso = localTodayIso(), personalDueIso = "",
+  bufferDays = 0, holidaysSet = null, unavailRanges = [], alertGreen = 50, alertRed = 75,
+} = {}) {
+  const wopts = { holidaysSet, unavailRanges };
+  const remH = Math.max(0, Number(remainingWorkH) || 0);
+  if (remH <= 1e-9) return { consumedDays: 0, consumedPct: 0, tier: "green", projectedFinishIso: todayIso };
+  const cap = dailyCapH > 0 ? dailyCapH : 8;
+  const workDaysNeeded = Math.ceil(remH / cap);
+  const projectedFinishIso = nthWorkDayFrom(todayIso, workDaysNeeded, wopts);
+  let consumedDays = 0;
+  if (personalDueIso && projectedFinishIso > personalDueIso) {
+    consumedDays = countWorkDaysInclusive(shiftISO(personalDueIso, 1), projectedFinishIso, wopts);
+  }
+  const consumedPct = bufferDays > 0
+    ? Math.round((consumedDays / bufferDays) * 100)
+    : (consumedDays > 0 ? 100 : 0);
+  const tier = consumedPct > alertRed ? "red" : (consumedPct > alertGreen ? "yellow" : "green");
+  return { consumedDays, consumedPct, tier, projectedFinishIso };
+}

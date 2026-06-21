@@ -11,7 +11,7 @@ import { getPrep, savePrep, getSettings, saveProtectedWindows } from "../lib/exe
 import { updateTask, setTaskStarted } from "../lib/api.js";
 import { load, isAiUser } from "../lib/store.js";
 import { shiftISO, committedHoursByDayInRange } from "../lib/capacity.js";
-import { backcast, localTodayIso } from "../lib/ccpm.js";
+import { backcast, localTodayIso, ccpmPlan, feverStatus } from "../lib/ccpm.js";
 import { esc } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
 import { fmtDisplayDow, parseSmartDate } from "../lib/form.js";
@@ -95,6 +95,25 @@ function overcommitBannerHtml(ctx) {
         <li>他タスクの優先度を下げて空ける</li>
         <li>バッファ／保護時間帯を見直す</li>
       </ul>
+    </div>`;
+}
+
+// CCPM fever バー（バッファ消費率）。状態は ctx._fever（transient・prep には保存しない）。
+//   ctx._fever = { consumedPct, tier:"green"|"yellow"|"red", consumedDays, bufferDays, personalDueIso, workDeadlineIso }。
+function feverBarHtml(ctx) {
+  const f = ctx && ctx._fever;
+  if (!f) return "";
+  const w = Math.max(0, Math.min(100, f.consumedPct || 0));
+  const pdl = f.personalDueIso ? dueLabel(f.personalDueIso) : "—";
+  const wdl = f.workDeadlineIso ? dueLabel(f.workDeadlineIso) : "—";
+  return `
+    <div class="es-fever" data-tier="${esc(f.tier || "green")}">
+      <div class="es-fever-h">
+        <span class="es-fever-t">${icon("alarm", { size: 13 })} バッファ消費 <b>${f.consumedPct}%</b></span>
+        <span class="es-fever-sub">${f.consumedDays}/${f.bufferDays}日 ・ 前倒し締切 ${esc(pdl)} ・ 作業締切 ${esc(wdl)}</span>
+      </div>
+      <div class="es-fever-bar"><div class="es-fever-fill" style="width:${w}%"></div></div>
+      <div class="es-fever-note">${f.tier === "red" ? "バッファ超過。今すぐ巻き返し（前倒し締切を死守できるよう手順縮小/委譲/再逆算）。" : f.tier === "yellow" ? "バッファを消費中。ペースに注意。" : "順調（前倒し締切に間に合う見込み）。"}</div>
     </div>`;
 }
 
@@ -215,7 +234,7 @@ const PLUGINS = [
     icon: "calendar",
     max: 15,
     symptoms: ["計画が予定に落ちてない"],
-    defaults: () => ({ due: "", note: "" }),
+    defaults: () => ({ due: "", note: "", ccpm: false, personalDueOffset: 2, aggressivePct: 30, projectBufferDays: "" }),
     render(data, ctx) {
       // 締切＝タスク本体の due_date（"0001" センチネルは無効）。
       const taskDue = (ctx && ctx.task && ctx.task.due_date) || "";
@@ -240,6 +259,20 @@ const PLUGINS = [
             <button type="button" class="es-btn es-backbtn" data-act="backcast"${canBackcast ? "" : " disabled"}>${icon("calendarDays", { size: 15 })}逆算スケジュール</button>
             <span class="es-back-hint">${esc(hint)}</span>
           </div>
+          <label class="es-check es-ccpm-tg">
+            <input type="checkbox" data-k="ccpm"${data.ccpm ? " checked" : ""}>
+            <span>CCPM逆算（前倒し締切＋集約バッファ＋fever）</span>
+          </label>
+          ${data.ccpm ? `
+          <div class="es-ccpm-fields">
+            <label class="es-ccpm-f">前倒し締切
+              <input class="es-in es-w64" data-k="personalDueOffset" type="text" inputmode="numeric" value="${esc(data.personalDueOffset ?? 2)}"> 営業日前</label>
+            <label class="es-ccpm-f">安全余裕
+              <input class="es-in es-w64" data-k="aggressivePct" type="text" inputmode="numeric" value="${esc(data.aggressivePct ?? 30)}"> ％を抜く</label>
+            <label class="es-ccpm-f">バッファ
+              <input class="es-in es-w64" data-k="projectBufferDays" type="text" inputmode="numeric" placeholder="自動" value="${esc(data.projectBufferDays ?? "")}"> 日</label>
+          </div>
+          ${feverBarHtml(ctx)}` : ""}
           ${overcommitBannerHtml(ctx)}
           <button type="button" class="es-pw-link" data-act="pw-toggle" aria-expanded="false">${icon("lock", { size: 12 })} 保護時間帯を編集</button>
           <div class="es-pw-host" data-pw-host></div>
@@ -262,6 +295,19 @@ const PLUGINS = [
       });
       noteEl.addEventListener("input", () => { data.note = noteEl.value; save(); });
 
+      // ── CCPM逆算 トグル＋パラメータ（既定 OFF＝既存 backcast 経路を温存） ──
+      const ccpmEl = root.querySelector('[data-k="ccpm"]');
+      if (ccpmEl) ccpmEl.addEventListener("change", () => {
+        data.ccpm = ccpmEl.checked; save();
+        if (ctx && typeof ctx.rerenderCard === "function") ctx.rerenderCard("schedule"); // フィールド表示/非表示
+      });
+      const pdoEl = root.querySelector('[data-k="personalDueOffset"]');
+      if (pdoEl) pdoEl.addEventListener("input", () => { data.personalDueOffset = pdoEl.value; save(); });
+      const aggEl = root.querySelector('[data-k="aggressivePct"]');
+      if (aggEl) aggEl.addEventListener("input", () => { data.aggressivePct = aggEl.value; save(); });
+      const pbdEl = root.querySelector('[data-k="projectBufferDays"]');
+      if (pbdEl) pbdEl.addEventListener("input", () => { data.projectBufferDays = pbdEl.value; save(); });
+
       // ── 逆算スケジュール ──
       const backBtn = root.querySelector('[data-act="backcast"]');
       if (backBtn) backBtn.addEventListener("click", async () => {
@@ -275,20 +321,35 @@ const PLUGINS = [
         const placeIdx = steps.map((s, i) => (s && s.done) ? -1 : i).filter((i) => i >= 0);
         if (!placeIdx.length) return; // 未完了手順なし＝何もしない
         const placeSteps = placeIdx.map((i) => steps[i]);
-        if (typeof confirm === "function" && !confirm(`締切 ${dueLabel(deadlineIso)} から逆算して、未完了の ${placeSteps.length} 手順に作業日を割り当てます（完了済みは動かしません・今日以降に配置）。各手順の既存の期日は上書きされます。実行しますか？`)) return;
+        const confirmMsg = data.ccpm
+          ? `CCPM逆算（前倒し締切 ${Math.max(0, Math.round(Number(data.personalDueOffset ?? 2) || 0))} 営業日前・安全余裕 ${Math.max(0, Math.min(90, Math.round(Number(data.aggressivePct ?? 30) || 0)))}%・バッファ${(data.projectBufferDays != null && String(data.projectBufferDays).trim() !== "") ? String(data.projectBufferDays).trim() + "日" : "自動"}）で、締切 ${dueLabel(deadlineIso)} から未完了の ${placeSteps.length} 手順に作業日を割り当てます（完了済みは動かしません・今日以降に配置）。各手順の既存の期日は上書きされます。実行しますか？`
+          : `締切 ${dueLabel(deadlineIso)} から逆算して、未完了の ${placeSteps.length} 手順に作業日を割り当てます（完了済みは動かしません・今日以降に配置）。各手順の既存の期日は上書きされます。実行しますか？`;
+        if (typeof confirm === "function" && !confirm(confirmMsg)) return;
         backBtn.dataset.busy = "1"; backBtn.disabled = true;
         try {
-          const { capH, windows, holidaysSet, unavailRanges, bufferPct, todayIso, committedByDay, taskIsImportant } = await loadBackcastCtx(ctx, deadlineIso);
-          const { dueByIndex, unplaced } = backcast({ steps: placeSteps, deadlineIso, capH, windows, holidaysSet, unavailRanges, bufferPct, todayIso, committedByDay, taskIsImportant });
-          // dueByIndex のキーは placeSteps 内の index → 元の steps の index へ戻す。
-          placeIdx.forEach((origIdx, newIdx) => { if (dueByIndex.has(newIdx)) steps[origIdx].due = dueByIndex.get(newIdx); });
-          save();
-          // オーバーコミット早期警告（F3）: 入り切らない未完了手順があれば予定化カードに残る赤いバナー、
-          // 全部置けたら解除（＝再逆算で unplaced==0 になればバナーは消える）。
-          if (ctx) {
-            ctx._overcommit = unplaced > 0
-              ? { unplaced, total: placeSteps.length, deadlineIso }
-              : null;
+          const bctx = await loadBackcastCtx(ctx, deadlineIso);
+          if (data.ccpm) {
+            // ── CCPM逆算経路（ON のときだけ）: 前倒し締切＋集約バッファ＋fever ──
+            const personalDueOffset = Math.max(0, Math.round(Number(data.personalDueOffset ?? 2) || 0));
+            const aggressivePct = Math.max(0, Math.min(90, Math.round(Number(data.aggressivePct ?? 30) || 0)));
+            const projectBufferDaysOverride = (data.projectBufferDays != null && String(data.projectBufferDays).trim() !== "") ? data.projectBufferDays : null;
+            const plan = ccpmPlan({ ...bctx, steps: placeSteps, deadlineIso, personalDueOffset, aggressivePct, projectBufferDaysOverride });
+            placeIdx.forEach((origIdx, newIdx) => { if (plan.dueByIndex.has(newIdx)) steps[origIdx].due = plan.dueByIndex.get(newIdx); });
+            save();
+            if (ctx) ctx._overcommit = plan.unplaced > 0 ? { unplaced: plan.unplaced, total: placeSteps.length, deadlineIso } : null;
+            const dailyCapH = bctx.capH * (1 - (bctx.bufferPct || 0) / 100);
+            const fever = feverStatus({ remainingWorkH: plan.chainWorkH, dailyCapH, todayIso: bctx.todayIso, personalDueIso: plan.personalDueIso, bufferDays: plan.bufferDays, holidaysSet: bctx.holidaysSet, unavailRanges: bctx.unavailRanges });
+            if (ctx) ctx._fever = { ...fever, bufferDays: plan.bufferDays, personalDueIso: plan.personalDueIso, workDeadlineIso: plan.workDeadlineIso };
+          } else {
+            // ── 既存 backcast 経路（OFF＝現行挙動を1ミリも変えない）。bctx の spread は明示引数版と等価 ──
+            const { dueByIndex, unplaced } = backcast({ ...bctx, steps: placeSteps, deadlineIso });
+            // dueByIndex のキーは placeSteps 内の index → 元の steps の index へ戻す。
+            placeIdx.forEach((origIdx, newIdx) => { if (dueByIndex.has(newIdx)) steps[origIdx].due = dueByIndex.get(newIdx); });
+            save();
+            // オーバーコミット早期警告（F3）: 入り切らない未完了手順があれば予定化カードに残る赤いバナー、
+            // 全部置けたら解除（＝再逆算で unplaced==0 になればバナーは消える）。
+            if (ctx) ctx._overcommit = unplaced > 0 ? { unplaced, total: placeSteps.length, deadlineIso } : null;
+            if (ctx) ctx._fever = null;
           }
           // 段取りカードを再描画して新しい期日を表示（タスク本体の due_date は変更しない）。
           if (ctx && typeof ctx.rerenderCard === "function") {
@@ -843,6 +904,22 @@ export function ensureStyle() {
   .es-oc-opts{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:3px}
   .es-oc-opts li{font-size:11.5px;color:var(--ink);line-height:1.5}
   html[data-theme="dark"] .es-oc{background:rgba(229,72,77,.14)}
+  /* CCPM逆算トグル＋パラメータ＋fever バー */
+  .es-ccpm-tg{margin-top:2px}
+  .es-ccpm-fields{display:flex;flex-wrap:wrap;gap:10px;margin-top:2px}
+  .es-ccpm-f{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--muted)}
+  .es-ccpm-f .es-in{width:56px;flex:none}
+  .es-fever{margin-top:6px;border:1px solid var(--line);border-radius:9px;padding:8px 10px;background:var(--track);display:flex;flex-direction:column;gap:5px}
+  .es-fever-h{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+  .es-fever-t{font-size:12px;color:var(--ink);display:inline-flex;align-items:center;gap:5px}
+  .es-fever-t b{font-variant-numeric:tabular-nums}
+  .es-fever-sub{font-size:10.5px;color:var(--muted);margin-left:auto}
+  .es-fever-bar{position:relative;height:8px;background:var(--line);border-radius:5px;overflow:hidden}
+  .es-fever-fill{position:absolute;left:0;top:0;bottom:0;border-radius:5px;transition:width .25s ease,background .25s ease;background:#2f9e6b}
+  .es-fever[data-tier="yellow"] .es-fever-fill{background:#e5b73a}
+  .es-fever[data-tier="red"] .es-fever-fill{background:#e5484d}
+  .es-fever-note{font-size:10.5px;color:var(--muted);line-height:1.45}
+  .es-fever[data-tier="red"] .es-fever-note{color:var(--over,#e5484d);font-weight:600}
   .es-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding-top:2px}
   .es-foot-score{font-size:11.5px;color:var(--muted)}
   .es-foot-score b{color:var(--ink);font-variant-numeric:tabular-nums}
