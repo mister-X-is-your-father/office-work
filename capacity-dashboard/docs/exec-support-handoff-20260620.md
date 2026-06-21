@@ -55,6 +55,13 @@
   通常タスクは deep を避ける(差引)が、優先度高(priority>=4)の逆算だけ deep を実空きに開放。`protectedHoursOnDow(.., {includeDeep})`＋
   `backcast(.., taskIsImportant)`＋`loadBackcastCtx` が ctx.task.priority>=4 判定。PW_KINDS/pwClean に deep。buffer/block は常に差引(不変)。
   実バンドルで通常=あふれ/重要=配置/buffer は重要でも差引、を決定論確認・console0。
+- **タスク編集タブのスタイリッシュ化**（`afb8313`）: [基本/実行準備] を id指定でピル型セグメントコントロールに（アイコン付き・選択ピル浮き）。
+- **タスク一覧の余白＋余白クリック編集**（`a8c5da7`）: .tb td 縦padding 10→15px、タイトルを span 化し td 直撃(余白)クリック→編集、内容クリック(タイトル文字=グリッド選択/チップ=メニュー)は維持。
+- **実行準備フレームワーク 深化（研究→段階実装中）**: 研究Workflow(w1r166k63・6領域)で 32プラグイン＋7セットを設計＝**正本 docs/exec-prep-catalog.md**。
+  - 波0 セット選択UI（`8596a07`）: 歯車に「シナリオ別セット（1クリックで布陣）」7種。未実装pluginIdは無視＝波が進むと自動充実。`PREP_SETS` 定数。
+  - 波1 基盤4手法（`1951f98`）: commanders_intent/mit_today/eisenhower/backbrief（データ取得版・render/wire/score）＋**新規は既定OFF枠組み**（既存7に defaultOn:true、loadEnabled 既定を defaultOn のみに）。
+  - **残り 波2（逆算CCPM強化・steps強化[gate/slice/main_effort/wip]・unknowns_register／※backcast改修＝繊細・先に純関数テスト）→ 波3（dependencies/raci_delegate/stakeholders/escalation/comms_plan/review_cadence/early_warning）→ 波4（premortem強化/kill_pivot/aar/rehearsal/ooda_recheck/reward_bundle/commitment/runbook/timebox/vertical_slice/spike/backbrief子タスク・main_effort・mit_today枠確保 等の onApply 実アクション）。**
+  - 各波: exec-support.js へ委譲（マーカー）・ブラウザ検品・1波=1コミット。プラグインは PLUGINS 配列へ追加するだけで ON/OFF・並べ替え・メーター・セットに自動で乗る。
 - **アクティビティ（行動・進捗ログ）**（`7b0eb27`）: 新ビュー `views/activity.js`（実績グループ・ルート `#/activity`）＝
   「何月何日に誰がどのタスクにどれだけ／どう進んだ」を時系列フィードで一望。4種統合＝実績時間(getTimes)/進捗差分・完了
   (exec `/activity`)/作成(created)/完了(done_at補完)。セグメント「自分(今日)/全体(直近2週)」。**進捗の明示ログ**＝
