@@ -74,6 +74,16 @@ function ensureRowIds(items) {
   return items;
 }
 
+// 段取り行の属性チップ（関門/骨格/主努力/種別≠自作業）。render と wire(軽量更新) で共用。
+function stepBadgeChips(it) {
+  const b = [];
+  if (it.is_gate) b.push(`<span class="es-sb es-sb-gate">${icon("flag", { size: 11 })}関門</span>`);
+  if (it.slice) b.push(`<span class="es-sb es-sb-slice">骨格</span>`);
+  if (it.main_effort) b.push(`<span class="es-sb es-sb-main">★主努力</span>`);
+  if (it.kind && it.kind !== "自作業") b.push(`<span class="es-sb es-sb-kind">${esc(it.kind)}</span>`);
+  return b.join("");
+}
+
 // オーバーコミット早期警告バナー（F3）。逆算後 unplaced>0 のときだけ予定化カード内に残る赤い警告を出す。
 //   状態は ctx._overcommit = { unplaced, total, deadlineIso }（transient・prep には保存しない）。
 //   逆算前 / unplaced==0 は何も出さない（＝再逆算して全部置けたら自然に消える）。
@@ -154,20 +164,34 @@ const PLUGINS = [
     render(data) {
       ensureRowIds(data.items || (data.items = []));
       const n = data.items.length;
+      const KINDS = ["自作業", "承認", "レビュー", "外部待ち"];
+      const kindOpts = (cur) => KINDS.map((v) => `<option value="${v}"${(cur || "自作業") === v ? " selected" : ""}>${v}</option>`).join("");
       const rows = data.items.map((it, i) => `
-        <div class="es-row${it.done ? " done" : ""}" data-id="${it.__id}">
-          <span class="es-ord">
-            <button type="button" class="es-ordb" data-act="up" aria-label="上へ移動"${i === 0 ? " disabled" : ""}>${icon("arrowUp", { size: 13 })}</button>
-            <button type="button" class="es-ordb" data-act="down" aria-label="下へ移動"${i === n - 1 ? " disabled" : ""}>${icon("chevronDown", { size: 13 })}</button>
-          </span>
-          <input type="checkbox" class="es-step-done" data-k="done"${it.done ? " checked" : ""} aria-label="この手順を完了にする" title="完了にする">
-          <input class="es-in es-grow" data-k="title" type="text" placeholder="手順" value="${esc(it.title || "")}">
-          <input class="es-in es-w64" data-k="est" type="text" inputmode="decimal" placeholder="見積h" value="${esc(it.est || "")}">
-          <input class="es-in es-w120" data-k="due" type="text" placeholder="期日" value="${esc(it.due ? dueLabel(it.due) : "")}">
-          <button type="button" class="es-rowx" data-act="del" aria-label="この手順を削除">${icon("x", { size: 14 })}</button>
+        <div class="es-srow${it.done ? " done" : ""}${it.is_gate ? " es-srow-gate" : ""}${it.slice ? " es-srow-slice" : ""}" data-id="${it.__id}">
+          <div class="es-row">
+            <span class="es-ord">
+              <button type="button" class="es-ordb" data-act="up" aria-label="上へ移動"${i === 0 ? " disabled" : ""}>${icon("arrowUp", { size: 13 })}</button>
+              <button type="button" class="es-ordb" data-act="down" aria-label="下へ移動"${i === n - 1 ? " disabled" : ""}>${icon("chevronDown", { size: 13 })}</button>
+            </span>
+            <input type="checkbox" class="es-step-done" data-k="done"${it.done ? " checked" : ""} aria-label="この手順を完了にする" title="完了にする">
+            <input class="es-in es-grow" data-k="title" type="text" placeholder="手順" value="${esc(it.title || "")}">
+            <span class="es-sbs">${stepBadgeChips(it)}</span>
+            <input class="es-in es-w64" data-k="est" type="text" inputmode="decimal" placeholder="見積h" value="${esc(it.est || "")}">
+            <input class="es-in es-w120" data-k="due" type="text" placeholder="期日" value="${esc(it.due ? dueLabel(it.due) : "")}">
+            <button type="button" class="es-rowx es-step-detbtn" data-act="detail" aria-label="この手順の詳細" aria-expanded="false" title="詳細（種別/関門/骨格/主努力）">${icon("chevronDown", { size: 14 })}</button>
+            <button type="button" class="es-rowx" data-act="del" aria-label="この手順を削除">${icon("x", { size: 14 })}</button>
+          </div>
+          <div class="es-step-detail" hidden>
+            <label class="es-sd-f">種別 <select class="es-in es-w120" data-k="kind" aria-label="種別">${kindOpts(it.kind)}</select></label>
+            <label class="es-sd-c"><input type="checkbox" data-k="is_gate"${it.is_gate ? " checked" : ""}> 関門</label>
+            <label class="es-sd-c"><input type="checkbox" data-k="slice"${it.slice ? " checked" : ""}> 骨格（最初に通す）</label>
+            <label class="es-sd-c"><input type="checkbox" data-k="main_effort"${it.main_effort ? " checked" : ""}> 主努力</label>
+            <input class="es-in es-grow es-sd-gate${it.is_gate ? "" : " es-hide"}" data-k="gate_criteria" type="text" placeholder="関門の通過条件（例: レビュー承認が出る）" value="${esc(it.gate_criteria || "")}">
+          </div>
         </div>`).join("");
       return `
         <div class="es-field">
+          <div class="es-hint">手順を順序付け（見積h・期日は逆算で自動割当）。各手順の「${"▾"}」で 種別（承認/レビュー/外部待ち）・関門・骨格（最初に薄く一本通す）・主努力 を設定できます。</div>
           <div class="es-rows">${rows}</div>
           <button type="button" class="es-add" data-act="add">${icon("arrowUp", { size: 13, cls: "es-add-ic" })}手順を追加</button>
         </div>`;
@@ -181,9 +205,10 @@ const PLUGINS = [
         const t = data.items[i]; data.items[i] = data.items[j]; data.items[j] = t;
         save(); rerender();
       };
-      list.querySelectorAll(".es-row").forEach((rowEl) => {
+      list.querySelectorAll(".es-srow").forEach((rowEl) => {
         const it = data.items.find((x) => x.__id === rowEl.dataset.id);
         if (!it) return;
+        const refreshBadges = () => { const sbs = rowEl.querySelector(".es-sbs"); if (sbs) sbs.innerHTML = stepBadgeChips(it); };
         rowEl.querySelector('[data-k="title"]').addEventListener("input", (e) => { it.title = e.target.value; save(); });
         const doneEl = rowEl.querySelector('[data-k="done"]');
         if (doneEl) doneEl.addEventListener("change", () => {
@@ -199,6 +224,31 @@ const PLUGINS = [
           dueEl.value = iso ? dueLabel(iso) : "";
           save();
         });
+        // 詳細トグル（再描画せず開閉）
+        const detBtn = rowEl.querySelector('[data-act="detail"]');
+        const detail = rowEl.querySelector(".es-step-detail");
+        if (detBtn && detail) detBtn.addEventListener("click", () => {
+          const open = detail.hasAttribute("hidden");
+          detail.toggleAttribute("hidden", !open);
+          detBtn.setAttribute("aria-expanded", open ? "true" : "false");
+          detBtn.classList.toggle("es-open", open);
+        });
+        // サブフィールド（種別/関門/骨格/主努力/関門条件）— 軽量更新（詳細は開いたまま）
+        const kindEl = rowEl.querySelector('[data-k="kind"]');
+        if (kindEl) kindEl.addEventListener("change", () => { it.kind = kindEl.value; save(); refreshBadges(); });
+        const gateCb = rowEl.querySelector('[data-k="is_gate"]');
+        const gateCrit = rowEl.querySelector('[data-k="gate_criteria"]');
+        if (gateCb) gateCb.addEventListener("change", () => {
+          it.is_gate = gateCb.checked; save(); refreshBadges();
+          rowEl.classList.toggle("es-srow-gate", gateCb.checked);
+          if (gateCrit) gateCrit.classList.toggle("es-hide", !gateCb.checked);
+        });
+        const sliceCb = rowEl.querySelector('[data-k="slice"]');
+        if (sliceCb) sliceCb.addEventListener("change", () => { it.slice = sliceCb.checked; save(); refreshBadges(); rowEl.classList.toggle("es-srow-slice", sliceCb.checked); });
+        const meCb = rowEl.querySelector('[data-k="main_effort"]');
+        if (meCb) meCb.addEventListener("change", () => { it.main_effort = meCb.checked; save(); refreshBadges(); });
+        if (gateCrit) gateCrit.addEventListener("input", () => { it.gate_criteria = gateCrit.value; save(); });
+        // 並べ替え・削除（既存挙動を保持）
         rowEl.querySelector('[data-act="up"]').addEventListener("click", () => {
           const i = data.items.findIndex((x) => x.__id === it.__id);
           swap(i, i - 1);
@@ -211,15 +261,14 @@ const PLUGINS = [
           const i = data.items.findIndex((x) => x.__id === it.__id);
           if (i >= 0) data.items.splice(i, 1);
           save(); rerender();
-          // 逆算ボタンの有効/無効は手順数に依るので予定化カードも更新。
           if (ctx && typeof ctx.rerenderCard === "function") ctx.rerenderCard("schedule");
         });
       });
       root.querySelector('[data-act="add"]').addEventListener("click", () => {
-        data.items.push({ __id: uid(), title: "", est: "", due: "" });
+        data.items.push({ __id: uid(), title: "", est: "", due: "", kind: "自作業", is_gate: false, gate_criteria: "", slice: false, main_effort: false });
         save(); rerender();
         if (ctx && typeof ctx.rerenderCard === "function") ctx.rerenderCard("schedule");
-        const inputs = root.querySelectorAll('.es-row [data-k="title"]');
+        const inputs = root.querySelectorAll('.es-srow [data-k="title"]');
         if (inputs.length) inputs[inputs.length - 1].focus();
       });
     },
@@ -1067,7 +1116,25 @@ export function ensureStyle() {
   .es-pw-msg.err{color:var(--over,#e5484d)}
   .es-pw-link{font:inherit;font-size:11.5px;font-weight:600;color:var(--fill);background:transparent;border:0;border-bottom:1px dashed currentColor;padding:0 0 1px;cursor:pointer;align-self:flex-start}
   .es-pw-link:hover{filter:brightness(1.1)}
-  html[data-theme="dark"] .es-add:hover,html[data-theme="dark"] .es-gear:hover{background:var(--card)}`;
+  html[data-theme="dark"] .es-add:hover,html[data-theme="dark"] .es-gear:hover{background:var(--card)}
+  .es-srow{display:flex;flex-direction:column;gap:4px}
+  .es-srow.done [data-k="title"]{text-decoration:line-through;color:var(--muted)}
+  .es-srow-gate .es-row{box-shadow:-2px 0 0 0 var(--over,#e5484d) inset}
+  .es-srow-slice .es-row{box-shadow:-2px 0 0 0 var(--fill,#3a86ff) inset}
+  .es-sbs{display:inline-flex;gap:4px;flex:none}
+  .es-sbs:empty{display:none}
+  .es-sb{display:inline-flex;align-items:center;gap:2px;font-size:10px;font-weight:700;border-radius:5px;padding:1px 5px;line-height:1.6;white-space:nowrap}
+  .es-sb-gate{background:rgba(229,72,77,.12);color:var(--over,#e5484d)}
+  .es-sb-slice{background:rgba(58,134,255,.12);color:var(--fill,#3a86ff)}
+  .es-sb-main{background:rgba(229,183,58,.18);color:#b5860b}
+  .es-sb-kind{background:var(--track);color:var(--muted)}
+  .es-step-detbtn.es-open{color:var(--fill);transform:rotate(180deg)}
+  .es-step-detail{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:4px 8px 4px 30px}
+  .es-step-detail .es-sd-f{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)}
+  .es-step-detail .es-sd-c{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:var(--ink);cursor:pointer;user-select:none}
+  .es-step-detail .es-sd-c input{margin:0}
+  .es-sd-gate{min-width:180px}
+  .es-hide{display:none !important}`;
   document.head.appendChild(s);
 }
 
