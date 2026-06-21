@@ -890,6 +890,175 @@ const PLUGINS = [
       return max > 0 ? Math.round(18 * got / max) : 0;
     },
   },
+
+  // F. 依存・連絡待ちを先に起動 max=15（新規・波3・既定OFF）
+  {
+    id: "dependencies",
+    icon: "link",
+    label: "依存を先に起動",
+    max: 15,
+    symptoms: ["依存", "不確実性"],
+    defaults: () => ({ items: [] }),
+    render(data) {
+      ensureRowIds(data.items || (data.items = []));
+      const rows = data.items.map((it) => `
+        <div class="es-row es-wrap${it.arrived ? " done" : ""}" data-id="${it.__id}">
+          <input type="checkbox" class="es-step-done" data-k="arrived"${it.arrived ? " checked" : ""} aria-label="入手済み" title="入手済み">
+          <input class="es-in es-grow" data-k="what" type="text" placeholder="必要なもの（例: 部長承認・APIキー）" value="${esc(it.what || "")}">
+          <input class="es-in es-w120" data-k="from" type="text" placeholder="相手/出所" value="${esc(it.from || "")}">
+          <input class="es-in es-w64" data-k="leadDays" type="text" inputmode="numeric" placeholder="相手日数" value="${esc(it.leadDays || "")}">
+          <input class="es-in es-w120" data-k="neededBy" type="text" placeholder="必要期日" value="${esc(it.neededBy ? dueLabel(it.neededBy) : "")}">
+          <button type="button" class="es-rowx" data-act="del" aria-label="削除">${icon("x", { size: 14 })}</button>
+        </div>`).join("");
+      return `
+        <div class="es-field">
+          <div class="es-hint">他者・承認・データ・外部納品など自分が制御できない待ちを最前方で起動。相手のリードタイムを逆算に織り込む（真のボトルネック）。</div>
+          <div class="es-rows">${rows}</div>
+          <button type="button" class="es-add" data-act="add">${icon("arrowUp", { size: 13, cls: "es-add-ic" })}依存を追加</button>
+        </div>`;
+    },
+    wire(root, data, ctx, save) {
+      const rerender = () => { root.querySelector(".es-field").outerHTML = this.render(data); this.wire(root, data, ctx, save); };
+      root.querySelectorAll(".es-row").forEach((rowEl) => {
+        const it = data.items.find((x) => x.__id === rowEl.dataset.id);
+        if (!it) return;
+        rowEl.querySelector('[data-k="what"]').addEventListener("input", (e) => { it.what = e.target.value; save(); });
+        rowEl.querySelector('[data-k="from"]').addEventListener("input", (e) => { it.from = e.target.value; save(); });
+        rowEl.querySelector('[data-k="leadDays"]').addEventListener("input", (e) => { it.leadDays = e.target.value; save(); });
+        const nb = rowEl.querySelector('[data-k="neededBy"]');
+        nb.addEventListener("change", () => { const iso = smartToIso(nb.value); it.neededBy = iso; nb.value = iso ? dueLabel(iso) : ""; save(); });
+        const ar = rowEl.querySelector('[data-k="arrived"]');
+        ar.addEventListener("change", () => { it.arrived = ar.checked; save(); rerender(); });
+        rowEl.querySelector('[data-act="del"]').addEventListener("click", () => {
+          const i = data.items.findIndex((x) => x.__id === it.__id);
+          if (i >= 0) data.items.splice(i, 1);
+          save(); rerender();
+        });
+      });
+      root.querySelector('[data-act="add"]').addEventListener("click", () => {
+        data.items.push({ __id: uid(), what: "", from: "", leadDays: "", neededBy: "", arrived: false });
+        save(); rerender();
+        const inputs = root.querySelectorAll('.es-row [data-k="what"]');
+        if (inputs.length) inputs[inputs.length - 1].focus();
+      });
+    },
+    score(data) {
+      const items = (data.items || []).filter((x) => nonEmpty(x.what));
+      if (!items.length) return 0;
+      const arr = items.filter((x) => x.arrived).length;
+      return arr === items.length ? 15 : Math.floor(15 * (arr / items.length));
+    },
+  },
+
+  // G. 進捗レビュー・中間ゲート max=10（新規・波3・既定OFF）
+  {
+    id: "review_cadence",
+    icon: "calendarDays",
+    label: "中間ゲート定例",
+    max: 10,
+    symptoms: ["先延ばし", "不確実性"],
+    defaults: () => ({ interval: "毎週", checkpoints: [] }),
+    render(data) {
+      ensureRowIds(data.checkpoints || (data.checkpoints = []));
+      const intervals = ["毎日", "2日ごと", "毎週"];
+      const intOpts = intervals.map((v) => `<option value="${v}"${(data.interval || "毎週") === v ? " selected" : ""}>${v}</option>`).join("");
+      const rows = data.checkpoints.map((c) => `
+        <div class="es-row es-wrap" data-id="${c.__id}">
+          <input class="es-in es-grow" data-k="title" type="text" placeholder="関門名（例: 中間レビュー）" value="${esc(c.title || "")}">
+          <input class="es-in es-w120" data-k="date" type="text" placeholder="日付" value="${esc(c.date ? dueLabel(c.date) : "")}">
+          <input class="es-in es-w64" data-k="target_pct" type="text" inputmode="numeric" placeholder="目標%" value="${esc(c.target_pct || "")}">
+          <button type="button" class="es-rowx" data-act="del" aria-label="削除">${icon("x", { size: 14 })}</button>
+        </div>`).join("");
+      return `
+        <div class="es-field">
+          <div class="es-hint">締切までに到達目標%付きの中間チェックポイントを置き、遅延を小刻みに早期検知して巻き返す。</div>
+          <label class="es-sd-f">点検頻度 <select class="es-in es-w120" data-k="interval" aria-label="点検頻度">${intOpts}</select></label>
+          <div class="es-rows">${rows}</div>
+          <button type="button" class="es-add" data-act="add">${icon("arrowUp", { size: 13, cls: "es-add-ic" })}チェックポイントを追加</button>
+        </div>`;
+    },
+    wire(root, data, ctx, save) {
+      const rerender = () => { root.querySelector(".es-field").outerHTML = this.render(data); this.wire(root, data, ctx, save); };
+      const intEl = root.querySelector('[data-k="interval"]');
+      if (intEl) intEl.addEventListener("change", () => { data.interval = intEl.value; save(); });
+      root.querySelectorAll(".es-row").forEach((rowEl) => {
+        const c = data.checkpoints.find((x) => x.__id === rowEl.dataset.id);
+        if (!c) return;
+        rowEl.querySelector('[data-k="title"]').addEventListener("input", (e) => { c.title = e.target.value; save(); });
+        rowEl.querySelector('[data-k="target_pct"]').addEventListener("input", (e) => { c.target_pct = e.target.value; save(); });
+        const dt = rowEl.querySelector('[data-k="date"]');
+        dt.addEventListener("change", () => { const iso = smartToIso(dt.value); c.date = iso; dt.value = iso ? dueLabel(iso) : ""; save(); });
+        rowEl.querySelector('[data-act="del"]').addEventListener("click", () => {
+          const i = data.checkpoints.findIndex((x) => x.__id === c.__id);
+          if (i >= 0) data.checkpoints.splice(i, 1);
+          save(); rerender();
+        });
+      });
+      root.querySelector('[data-act="add"]').addEventListener("click", () => {
+        data.checkpoints.push({ __id: uid(), title: "", date: "", target_pct: "" });
+        save(); rerender();
+        const inputs = root.querySelectorAll('.es-row [data-k="title"]');
+        if (inputs.length) inputs[inputs.length - 1].focus();
+      });
+    },
+    score(data) { return (data.checkpoints || []).some((c) => nonEmpty(c.date)) ? 10 : 0; },
+  },
+
+  // H. 早期警告サイン（トリップワイヤー）max=10（新規・波3・既定OFF）
+  {
+    id: "early_warning",
+    icon: "bell",
+    label: "早期警告サイン",
+    max: 10,
+    symptoms: ["発覚遅れ", "停滞放置"],
+    defaults: () => ({ stallDays: "3", wires: [] }),
+    render(data) {
+      ensureRowIds(data.wires || (data.wires = []));
+      const inds = [
+        ["gate_miss", "中間ゲート未達"], ["buffer_over", "バッファ消費超過"], ["no_progress", "着手後N日無進捗"],
+        ["est_over", "見積り超過率"], ["dep_open", "依存タスク未完"],
+      ];
+      const indOpts = (cur) => inds.map(([v, l]) => `<option value="${v}"${cur === v ? " selected" : ""}>${l}</option>`).join("");
+      const rows = data.wires.map((w) => `
+        <div class="es-row es-wrap" data-id="${w.__id}">
+          <select class="es-in es-w160" data-k="indicator" aria-label="先行指標">${indOpts(w.indicator || "no_progress")}</select>
+          <input class="es-in es-w64" data-k="threshold" type="text" placeholder="閾値" value="${esc(w.threshold || "")}">
+          <input class="es-in es-grow" data-k="action" type="text" placeholder="踏んだらどうする" value="${esc(w.action || "")}">
+          <button type="button" class="es-rowx" data-act="del" aria-label="削除">${icon("x", { size: 14 })}</button>
+        </div>`).join("");
+      return `
+        <div class="es-field">
+          <div class="es-hint">「この先行指標がこの閾値を踏んだら手を打つ」を登録し、赤信号で能動的に気づく（遂行率の最後の安全網）。</div>
+          <label class="es-sd-f">停滞とみなす無進捗 <input class="es-in es-w64" data-k="stallDays" type="text" inputmode="numeric" value="${esc(data.stallDays || "3")}"> 営業日</label>
+          <div class="es-rows">${rows}</div>
+          <button type="button" class="es-add" data-act="add">${icon("arrowUp", { size: 13, cls: "es-add-ic" })}トリップワイヤーを追加</button>
+        </div>`;
+    },
+    wire(root, data, ctx, save) {
+      const rerender = () => { root.querySelector(".es-field").outerHTML = this.render(data); this.wire(root, data, ctx, save); };
+      const sd = root.querySelector('[data-k="stallDays"]');
+      if (sd) sd.addEventListener("input", () => { data.stallDays = sd.value; save(); });
+      root.querySelectorAll(".es-row").forEach((rowEl) => {
+        const w = data.wires.find((x) => x.__id === rowEl.dataset.id);
+        if (!w) return;
+        rowEl.querySelector('[data-k="indicator"]').addEventListener("change", (e) => { w.indicator = e.target.value; save(); });
+        rowEl.querySelector('[data-k="threshold"]').addEventListener("input", (e) => { w.threshold = e.target.value; save(); });
+        rowEl.querySelector('[data-k="action"]').addEventListener("input", (e) => { w.action = e.target.value; save(); });
+        rowEl.querySelector('[data-act="del"]').addEventListener("click", () => {
+          const i = data.wires.findIndex((x) => x.__id === w.__id);
+          if (i >= 0) data.wires.splice(i, 1);
+          save(); rerender();
+        });
+      });
+      root.querySelector('[data-act="add"]').addEventListener("click", () => {
+        data.wires.push({ __id: uid(), indicator: "no_progress", threshold: "", action: "" });
+        save(); rerender();
+        const inputs = root.querySelectorAll('.es-row [data-k="action"]');
+        if (inputs.length) inputs[inputs.length - 1].focus();
+      });
+    },
+    score(data) { return (data.wires || []).some((w) => w.indicator && nonEmpty(w.action)) ? 10 : 0; },
+  },
 ];
 
 // 緊急×重要 → 推奨アクション文言（render/wire 共用）。
@@ -1086,6 +1255,7 @@ export function ensureStyle() {
   .es-w64{width:64px;flex:none}
   .es-w120{width:120px;flex:none}
   .es-w160{width:160px;flex:none}
+  .es-row.es-wrap{flex-wrap:wrap}
   .es-rowx{border:0;background:transparent;color:var(--muted);cursor:pointer;padding:3px;border-radius:6px;line-height:0;flex:none}
   .es-rowx:hover{color:var(--over,#e5484d);background:var(--track)}
   .es-row .es-step-done{flex:none;margin:0;cursor:pointer}
