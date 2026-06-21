@@ -15,6 +15,7 @@ export const ROUTES = {
   workplan: { label: "稼働プラン",    grp: "計画",   mod: "./views/workplan.js", wide: true, ic: "hourglass" },
   summary:  { label: "概要",          grp: "実績",   mod: "./views/summary.js", wide: true, ic: "trendingUp" },
   activity: { label: "アクティビティ", grp: "実績",   mod: "./views/activity.js", wide: true, ic: "activity" },
+  retro:    { label: "ふりかえり",    grp: "実績",   mod: "./views/retro.js", wide: true, ic: "trendingUp" },
   estactual:{ label: "見積りvs実績",  grp: "実績",   mod: "./views/estactual.js", wide: true, ic: "ruler" },
   report:   { label: "報告",          grp: "実績",   mod: "./views/report.js", wide: true, ic: "message" },
   status:   { label: "ステータス",    grp: "実績",   mod: "./views/status.js", wide: true, ic: "activity" },
@@ -40,7 +41,7 @@ export const ROUTES = {
   // 隠しルート: ORDER に載せない＝通常ユーザーのナビには出ない。許可者のみ shell() がリンクを追加。
   fable:    { label: "Fable",         grp: "AI",     mod: "./views/fable.js", ic: "bot" },
 };
-export const ORDER = ["home", "smart", "today", "triage", "quad", "habits", "review", "calendar", "monthcal", "planner", "workplan", "summary", "activity", "estactual", "report", "status", "kanban", "list", "depgraph", "gantt", "recurring-task", "recurring-meeting", "leave", "export", "settings-personal", "settings-team"];
+export const ORDER = ["home", "smart", "today", "triage", "quad", "habits", "review", "calendar", "monthcal", "planner", "workplan", "summary", "activity", "retro", "estactual", "report", "status", "kanban", "list", "depgraph", "gantt", "recurring-task", "recurring-meeting", "leave", "export", "settings-personal", "settings-team"];
 
 // メニュー表示制御で「隠せない」必須ルート（誤って自分や他人を締め出さないための安全網）。
 export const ALWAYS_VISIBLE = new Set(["home"]);
