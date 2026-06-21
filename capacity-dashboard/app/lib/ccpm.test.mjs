@@ -267,19 +267,53 @@ test("ccpmPlan: aggressive圧縮でバッファ確保し作業締切が手前へ
   assert.equal(r.chainWorkH, 6); // 圧縮後 3+3
 });
 
-test("ccpmPlan: 前倒し＋バッファで入り切らなければ unplaced（過剰コミット検知）", () => {
-  // 1日8h・今日=06-22。締切06-23(火)だが offset2 で personalDue が今日より前→workDeadline 過去→全unplaced
+test("ccpmPlan: 前倒し分が今日より前でも空にせず本締切に配置し squeezed（#2修正）", () => {
+  // 締切06-23(火)・今日06-22(月)。offset2 で前倒し締切が今日より前→本締切まで戻して配置（空にしない）。
   const r = ccpmPlan({
     steps: [{ est: 4 }], deadlineIso: "2026-06-23", capH: 8, todayIso: "2026-06-22",
     personalDueOffset: 2, aggressivePct: 0,
   });
-  assert.equal(r.unplaced, 1);
-  assert.equal(r.dueByIndex.size, 0);
+  assert.equal(r.squeezed, true);
+  assert.equal(r.unplaced, 0);      // 4h は [06-22,06-23] に収まる
+  assert.equal(r.dueByIndex.size, 1); // 空にならない
 });
 
 test("ccpmPlan: 無効 deadline は全 unplaced", () => {
   const r = ccpmPlan({ steps: [{ est: 2 }], deadlineIso: "0001-01-01", personalDueOffset: 2 });
   assert.equal(r.unplaced, 1);
+});
+
+test("ccpmPlan[squeezed]: 短納期で作業締切が今日より前なら本締切まで配置し squeezed を立てる（空にしない）", () => {
+  // 締切06-24(水)・今日06-22(月)＝実質3営業日。前倒し2＋バッファで作業締切が今日より前へ突き抜ける。
+  const steps = [{ est: 1 }, { est: 2 }, { est: 1.5 }, { est: 1 }];
+  const r = ccpmPlan({ steps, deadlineIso: "2026-06-24", capH: 8, todayIso: "2026-06-22", personalDueOffset: 2, aggressivePct: 30 });
+  assert.equal(r.squeezed, true);
+  assert.ok(r.dueByIndex.size > 0, "空配置にならない");
+  // 配置は [今日, 本締切] の範囲に収まる
+  for (const iso of r.dueByIndex.values()) {
+    assert.ok(iso >= "2026-06-22" && iso <= "2026-06-24", `配置 ${iso} が窓内`);
+  }
+});
+
+test("ccpmPlan: 余裕ある締切は squeezed=false（通常どおりバッファ確保）", () => {
+  const steps = [{ est: 2 }, { est: 2 }];
+  const r = ccpmPlan({ steps, deadlineIso: "2026-07-10", capH: 8, todayIso: "2026-06-22", personalDueOffset: 2, aggressivePct: 30 });
+  assert.equal(r.squeezed, false);
+  assert.ok(r.workDeadlineIso < r.personalDueIso || r.bufferDays === 0);
+});
+
+test("feverStatus[整合]: overcommitted は無条件赤・squeezed は最低黄", () => {
+  const base = { remainingWorkH: 4, dailyCapH: 8, todayIso: "2026-06-22", personalDueIso: "2026-06-26", bufferDays: 2 };
+  // 通常は緑（4h→1日→投影06-22 < 前倒し06-26）
+  assert.equal(feverStatus(base).tier, "green");
+  // overcommitted → 赤・100%
+  const oc = feverStatus({ ...base, overcommitted: true });
+  assert.equal(oc.tier, "red");
+  assert.equal(oc.consumedPct, 100);
+  // squeezed → 緑相当を黄へ
+  assert.equal(feverStatus({ ...base, squeezed: true }).tier, "yellow");
+  // overcommitted は squeezed より優先（赤）
+  assert.equal(feverStatus({ ...base, squeezed: true, overcommitted: true }).tier, "red");
 });
 
 // ── CCPM 強化: fever（バッファ消費率）──────────────────────────────

@@ -840,6 +840,7 @@ export function ensureStyle() {
   #tf-etabs button.on{background:${C.card};color:${C.fill};box-shadow:0 1px 3px rgba(20,30,50,.13)}
   html[data-theme="dark"] #tf-etabs button.on{background:var(--card)}
   .tf-body{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:0 26px;padding:8px 22px 4px;align-items:start}
+  .tf-body[hidden]{display:none}
   .tf-main{min-width:0}
   /* F5 割り込みゼロサム: 期限が満杯/非稼働日のときの注意（tight=琥珀 / over=赤）。 */
   .tf-due-warn{margin-top:6px;font-size:11.5px;line-height:1.5;display:flex;align-items:flex-start;gap:6px;border-radius:8px;padding:7px 10px}

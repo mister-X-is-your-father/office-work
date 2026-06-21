@@ -251,14 +251,21 @@ export function ccpmPlan({
   bufferPct = 0, todayIso = localTodayIso(), committedByDay = null, taskIsImportant = false,
   personalDueOffset = 0, aggressivePct = 0, projectBufferDaysOverride = null,
 } = {}) {
-  const empty = { dueByIndex: new Map(), unplaced: (steps || []).length, personalDueIso: "", workDeadlineIso: "", bufferDays: 0, bufferH: 0, removedSlackH: 0, chainWorkH: 0 };
+  const empty = { dueByIndex: new Map(), unplaced: (steps || []).length, personalDueIso: "", workDeadlineIso: "", bufferDays: 0, bufferH: 0, removedSlackH: 0, chainWorkH: 0, squeezed: false };
   if (!deadlineIso || deadlineIso.startsWith("0001")) return empty;
   const dl = deadlineIso.slice(0, 10);
   const wopts = { holidaysSet, unavailRanges };
   const personalDueIso = businessDaysBefore(dl, personalDueOffset, wopts);
   const { steps: compressed, removedSlackH } = compressSteps(steps, aggressivePct);
   const { bufferDays, bufferH } = projectBufferDays(removedSlackH, capH, projectBufferDaysOverride);
-  const workDeadlineIso = businessDaysBefore(personalDueIso, bufferDays, wopts);
+  // 前倒し締切＋バッファを引いた作業締切。これが今日より前＝確保する余地が無い「squeezed」状態。
+  //   その場合は手順を空配置にせず本締切(dl)まで使って配置し、squeezed フラグで「バッファ/前倒しを確保できない」と警告する。
+  const workDeadlineRaw = businessDaysBefore(personalDueIso, bufferDays, wopts);
+  let workDeadlineIso = workDeadlineRaw, squeezed = false;
+  if (workDeadlineRaw < todayIso) {
+    squeezed = true;
+    workDeadlineIso = dl >= todayIso ? dl : todayIso; // 本締切まで戻す（本締切も過去なら今日＝backcastがunplacedで返す）
+  }
   const { dueByIndex, unplaced } = backcast({
     steps: compressed, deadlineIso: workDeadlineIso, capH, windows, holidaysSet, unavailRanges,
     bufferPct, todayIso, committedByDay, taskIsImportant,
@@ -268,7 +275,7 @@ export function ccpmPlan({
     const isWait = st && st.kind && st.kind !== "自作業";
     return s + (isWait ? 0 : (estHours(st && st.est) || 0));
   }, 0));
-  return { dueByIndex, unplaced, personalDueIso, workDeadlineIso, bufferDays, bufferH, removedSlackH, chainWorkH };
+  return { dueByIndex, unplaced, personalDueIso, workDeadlineIso, bufferDays, bufferH, removedSlackH, chainWorkH, squeezed };
 }
 
 // slice（骨格＝walking skeleton）を配置上「先頭」へ寄せる。backcast は逆順に詰める
@@ -293,10 +300,18 @@ export function orderStepsForBackcast(steps) {
 export function feverStatus({
   remainingWorkH, dailyCapH = 8, todayIso = localTodayIso(), personalDueIso = "",
   bufferDays = 0, holidaysSet = null, unavailRanges = [], alertGreen = 50, alertRed = 75,
+  overcommitted = false, squeezed = false,
 } = {}) {
+  // 配置結果との整合: 入り切らない(overcommitted)なら無条件で赤、バッファ確保不可(squeezed)なら最低でも黄。
+  //   ＝「赤い過剰コミット警告の真上で fever が緑」のような嘘をつかせない。
+  const adjust = (res) => {
+    if (overcommitted) { res.tier = "red"; if (res.consumedPct < 100) res.consumedPct = 100; }
+    else if (squeezed && res.tier === "green") { res.tier = "yellow"; }
+    return res;
+  };
   const wopts = { holidaysSet, unavailRanges };
   const remH = Math.max(0, Number(remainingWorkH) || 0);
-  if (remH <= 1e-9) return { consumedDays: 0, consumedPct: 0, tier: "green", projectedFinishIso: todayIso };
+  if (remH <= 1e-9) return adjust({ consumedDays: 0, consumedPct: 0, tier: "green", projectedFinishIso: todayIso });
   const cap = dailyCapH > 0 ? dailyCapH : 8;
   const workDaysNeeded = Math.ceil(remH / cap);
   const projectedFinishIso = nthWorkDayFrom(todayIso, workDaysNeeded, wopts);
@@ -308,5 +323,5 @@ export function feverStatus({
     ? Math.round((consumedDays / bufferDays) * 100)
     : (consumedDays > 0 ? 100 : 0);
   const tier = consumedPct > alertRed ? "red" : (consumedPct > alertGreen ? "yellow" : "green");
-  return { consumedDays, consumedPct, tier, projectedFinishIso };
+  return adjust({ consumedDays, consumedPct, tier, projectedFinishIso });
 }
