@@ -1,5 +1,7 @@
 # ハンドオフ — Capacity Board
 
+> 🔖 **最新の継続バトン → [HANDOFF-2026-06-21.md](HANDOFF-2026-06-21.md)**（実行サポート完成＋アクティビティ/ふりかえり＋実行準備フレームワーク深化の着手。次の一手=波2）。実行サポートSoT=[docs/exec-support-handoff-20260620.md](docs/exec-support-handoff-20260620.md)／深化カタログ=[docs/exec-prep-catalog.md](docs/exec-prep-catalog.md)。本書は全体runbook。
+>
 > status: **稼働中**（2026-06-10）。モック72案 → TaskStationフォークで時間管理をDB実装（本番） → 実データSPA（中核＋予実ガント） → **基盤固め完了**（#1-#4,#7,#9）→ **定期/会議＋祝日＋休暇→月次空き完了**（ADR-011）→ **UI全面TaskStationブランド化**（新ロゴ/favicon）→ **本日の稼働予定(円時計)＋リスケ＋レビュー依頼/キュー**（ADR-012 種別2軸）→ **切り口別ビュー群**（一覧/残容量/週日別/アウトライン/依存グラフ）→ **時刻カレンダー**（ADR-013 `start_minute`・ドラッグ配置）→ **種別タブ＋定期入力UI**（タスク/MTG/定例MTG/定期タスク・**持ち回り=recurrences.rotation**）→ **繰り返しUI再設計＋この回だけ変更**（Googleカレンダー型「N単位ごと」・**例外=recurrences.overrides**）→ **予定の基礎データ管理ビュー**（定期/祝日/休暇の登録・編集・削除UI＝seed/API 依存を解消）。本番イメージ **`leo-taskstation:0.24.6-fix9`**。
 > 次の人がコンテキスト無しで読む前提。まず本書 → 要件 [`docs/06-requirements.md`](docs/06-requirements.md) → ADR [`docs/01-decisions.md`](docs/01-decisions.md)（**ADR-006〜013 が現行設計**。012=種別kind×時間属性flagsの2軸／013=plan.start_minuteで時刻配置）→ `docs/00,05`。
 > **確定（2026-06-10）**: 容量は当面 **全員 8h/平日 固定で十分**（時刻帯の空き・半日休暇・人別可変キャパ＝時短 は保留。詳細は §8）。
