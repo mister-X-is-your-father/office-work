@@ -1431,6 +1431,111 @@ const PLUGINS = [
     },
     score(data) { return nonEmpty(data.actual) && nonEmpty(data.nextTime) ? 6 : 0; },
   },
+
+  // Q. 再現手順（Runbook）max=10（新規・波4・既定OFF）
+  {
+    id: "runbook",
+    icon: "file",
+    label: "再現手順",
+    max: 10,
+    symptoms: ["忘却", "割り込み"],
+    defaults: () => ({ items: [] }),
+    render(data) {
+      ensureRowIds(data.items || (data.items = []));
+      const rows = data.items.map((it) => `
+        <div class="es-row es-wrap" data-id="${it.__id}">
+          <input class="es-in es-grow" data-k="command" type="text" placeholder="実行内容/コマンド" value="${esc(it.command || "")}">
+          <input class="es-in es-grow" data-k="expected" type="text" placeholder="期待結果（例: テスト緑）" value="${esc(it.expected || "")}">
+          <input class="es-in es-w120" data-k="env" type="text" placeholder="前提環境" value="${esc(it.env || "")}">
+          <button type="button" class="es-rowx" data-act="del" aria-label="削除">${icon("x", { size: 14 })}</button>
+        </div>`).join("");
+      return `
+        <div class="es-field">
+          <div class="es-hint">誰がいつ動かしても同じ結果になるよう、前提環境・実行内容・期待出力を明記。再開・引き継ぎの立ち上がりコストをゼロに。</div>
+          <div class="es-rows">${rows}</div>
+          <button type="button" class="es-add" data-act="add">${icon("arrowUp", { size: 13, cls: "es-add-ic" })}手順を追加</button>
+        </div>`;
+    },
+    wire(root, data, ctx, save) {
+      const rerender = () => { root.querySelector(".es-field").outerHTML = this.render(data); this.wire(root, data, ctx, save); };
+      root.querySelectorAll(".es-row").forEach((rowEl) => {
+        const it = data.items.find((x) => x.__id === rowEl.dataset.id);
+        if (!it) return;
+        ["command", "expected", "env"].forEach((k) => rowEl.querySelector(`[data-k="${k}"]`).addEventListener("input", (e) => { it[k] = e.target.value; save(); }));
+        rowEl.querySelector('[data-act="del"]').addEventListener("click", () => {
+          const i = data.items.findIndex((x) => x.__id === it.__id);
+          if (i >= 0) data.items.splice(i, 1);
+          save(); rerender();
+        });
+      });
+      root.querySelector('[data-act="add"]').addEventListener("click", () => {
+        data.items.push({ __id: uid(), command: "", expected: "", env: "" });
+        save(); rerender();
+        const inputs = root.querySelectorAll('.es-row [data-k="command"]');
+        if (inputs.length) inputs[inputs.length - 1].focus();
+      });
+    },
+    score(data) { return (data.items || []).some((x) => nonEmpty(x.command) && nonEmpty(x.expected)) ? 10 : 0; },
+  },
+
+  // R. 予行（ドライラン）max=8（新規・波4・既定OFF・単一）
+  {
+    id: "rehearsal",
+    icon: "repeatPlay",
+    label: "予行（ドライラン）",
+    max: 8,
+    symptoms: ["準備不足", "着手の壁"],
+    defaults: () => ({ walkthroughDone: false, friction: "", firstMoveTried: false }),
+    render(data) {
+      return `
+        <div class="es-field">
+          <div class="es-hint">本番前に手順を声出し/紙上で一度通し走行し、詰まる箇所・所要時間・抜けを実地で洗い出して見積りを較正。</div>
+          <label class="es-check"><input type="checkbox" data-k="walkthroughDone"${data.walkthroughDone ? " checked" : ""}><span>手順を一度通した（口頭/紙）</span></label>
+          <label class="es-check"><input type="checkbox" data-k="firstMoveTried"${data.firstMoveTried ? " checked" : ""}><span>最初の一手を1分だけ実際に試した</span></label>
+          <input class="es-in" data-k="friction" type="text" autocomplete="off" placeholder="通しで詰まった箇所" value="${esc(data.friction || "")}">
+        </div>`;
+    },
+    wire(root, data, ctx, save) {
+      const wd = root.querySelector('[data-k="walkthroughDone"]');
+      if (wd) wd.addEventListener("change", () => { data.walkthroughDone = wd.checked; save(); });
+      const fm = root.querySelector('[data-k="firstMoveTried"]');
+      if (fm) fm.addEventListener("change", () => { data.firstMoveTried = fm.checked; save(); });
+      const fr = root.querySelector('[data-k="friction"]');
+      if (fr) fr.addEventListener("input", () => { data.friction = fr.value; save(); });
+    },
+    score(data) { return (data.walkthroughDone || data.firstMoveTried) ? 8 : 0; },
+  },
+
+  // S. 進行中を1つに絞る＋持続ペース max=8（新規・波4・既定OFF・単一）
+  {
+    id: "wip_pace",
+    icon: "hourglass",
+    label: "WIP＋持続ペース",
+    max: 8,
+    symptoms: ["割り込み", "燃え尽き"],
+    defaults: () => ({ wipLimit: "1", dailyCapH: "", restEvery: "", noWeekend: false }),
+    render(data) {
+      return `
+        <div class="es-field">
+          <div class="es-hint">同時着手を絞り1件ずつ完遂。1日上限負荷・休憩リズムで容量超過と燃え尽きを着手前に止める。</div>
+          <div class="es-pair">
+            <label class="es-sd-f">同時着手上限 <input class="es-in es-w64" data-k="wipLimit" type="text" inputmode="numeric" value="${esc(data.wipLimit || "1")}"></label>
+            <label class="es-sd-f">1日上限 <input class="es-in es-w64" data-k="dailyCapH" type="text" inputmode="decimal" placeholder="h" value="${esc(data.dailyCapH || "")}"></label>
+            <label class="es-sd-f">休憩間隔 <input class="es-in es-w64" data-k="restEvery" type="text" inputmode="numeric" placeholder="分" value="${esc(data.restEvery || "")}"></label>
+          </div>
+          <label class="es-check"><input type="checkbox" data-k="noWeekend"${data.noWeekend ? " checked" : ""}><span>週末は入れない</span></label>
+        </div>`;
+    },
+    wire(root, data, ctx, save) {
+      ["wipLimit", "dailyCapH", "restEvery"].forEach((k) => {
+        const el = root.querySelector(`[data-k="${k}"]`);
+        if (el) el.addEventListener("input", () => { data[k] = el.value; save(); });
+      });
+      const nw = root.querySelector('[data-k="noWeekend"]');
+      if (nw) nw.addEventListener("change", () => { data.noWeekend = nw.checked; save(); });
+    },
+    score(data) { return (nonEmpty(data.dailyCapH) || data.noWeekend || nonEmpty(data.restEvery)) ? 8 : 0; },
+  },
 ];
 
 // 緊急×重要 → 推奨アクション文言（render/wire 共用）。
