@@ -1283,6 +1283,154 @@ const PLUGINS = [
     },
     score(data) { return (data.items || []).some((x) => nonEmpty(x.audience) && nonEmpty(x.content)) ? 10 : 0; },
   },
+
+  // M. 撤退・方針転換（Plan-B）max=12（新規・波4・既定OFF）
+  {
+    id: "kill_pivot",
+    icon: "redo",
+    label: "撤退・方針転換",
+    max: 12,
+    symptoms: ["不確実性", "燃え尽き"],
+    defaults: () => ({ items: [] }),
+    render(data) {
+      ensureRowIds(data.items || (data.items = []));
+      const KIND = [["shrink", "縮小"], ["delegate", "委譲"], ["alt", "代替"], ["abort", "撤退"]];
+      const kOpts = (cur) => KIND.map(([v, l]) => `<option value="${v}"${(cur || "shrink") === v ? " selected" : ""}>${l}</option>`).join("");
+      const rows = data.items.map((it) => `
+        <div class="es-row es-wrap" data-id="${it.__id}">
+          <input class="es-in es-grow" data-k="trigger" type="text" placeholder="発火条件（例: 6/25に結合テスト通らない）" value="${esc(it.trigger || "")}">
+          <input class="es-in es-w120" data-k="checkDate" type="text" placeholder="判定日" value="${esc(it.checkDate ? dueLabel(it.checkDate) : "")}">
+          <input class="es-in es-grow" data-k="fallback" type="text" placeholder="代替/縮小案" value="${esc(it.fallback || "")}">
+          <select class="es-in es-w120" data-k="kind" aria-label="種別">${kOpts(it.kind)}</select>
+          <button type="button" class="es-rowx" data-act="del" aria-label="削除">${icon("x", { size: 14 })}</button>
+        </div>`).join("");
+      return `
+        <div class="es-field">
+          <div class="es-hint">「この条件・期日に達したら別手段に切替/縮小して締切死守」を着手前に固定。サンクコストで沈むのを防ぐ安全弁。</div>
+          <div class="es-rows">${rows}</div>
+          <button type="button" class="es-add" data-act="add">${icon("arrowUp", { size: 13, cls: "es-add-ic" })}撤退条件を追加</button>
+        </div>`;
+    },
+    wire(root, data, ctx, save) {
+      const rerender = () => { root.querySelector(".es-field").outerHTML = this.render(data); this.wire(root, data, ctx, save); };
+      root.querySelectorAll(".es-row").forEach((rowEl) => {
+        const it = data.items.find((x) => x.__id === rowEl.dataset.id);
+        if (!it) return;
+        ["trigger", "fallback"].forEach((k) => rowEl.querySelector(`[data-k="${k}"]`).addEventListener("input", (e) => { it[k] = e.target.value; save(); }));
+        rowEl.querySelector('[data-k="kind"]').addEventListener("change", (e) => { it.kind = e.target.value; save(); });
+        const cd = rowEl.querySelector('[data-k="checkDate"]');
+        cd.addEventListener("change", () => { const iso = smartToIso(cd.value); it.checkDate = iso; cd.value = iso ? dueLabel(iso) : ""; save(); });
+        rowEl.querySelector('[data-act="del"]').addEventListener("click", () => {
+          const i = data.items.findIndex((x) => x.__id === it.__id);
+          if (i >= 0) data.items.splice(i, 1);
+          save(); rerender();
+        });
+      });
+      root.querySelector('[data-act="add"]').addEventListener("click", () => {
+        data.items.push({ __id: uid(), trigger: "", checkDate: "", fallback: "", kind: "shrink" });
+        save(); rerender();
+        const inputs = root.querySelectorAll('.es-row [data-k="trigger"]');
+        if (inputs.length) inputs[inputs.length - 1].focus();
+      });
+    },
+    score(data) { return (data.items || []).some((x) => nonEmpty(x.trigger) && nonEmpty(x.fallback)) ? 12 : 0; },
+  },
+
+  // N. 退路を断つ（約束化）max=10（新規・波4・既定OFF・単一）
+  {
+    id: "commitment",
+    icon: "lock",
+    label: "退路を断つ",
+    max: 10,
+    symptoms: ["先延ばし", "忘却"],
+    defaults: () => ({ publicPromise: "", partnerName: "", remindLead: "1日前", checkinDate: "", stakeNote: "" }),
+    render(data) {
+      return `
+        <div class="es-field">
+          <div class="es-hint">締切や宣言を破ると痛い形にして自分に約束させる（公開宣言・監視者・期限前通知）。現在バイアスの逆を作る。</div>
+          <input class="es-in" data-k="publicPromise" type="text" autocomplete="off" placeholder="誰に何を宣言したか（例: 課長に金曜提出と言った）" value="${esc(data.publicPromise || "")}">
+          <div class="es-pair">
+            <input class="es-in es-grow" data-k="partnerName" type="text" placeholder="進捗を報告する相手（任意）" value="${esc(data.partnerName || "")}">
+            <input class="es-in es-w120" data-k="remindLead" type="text" placeholder="通知（例: 1日前）" value="${esc(data.remindLead || "")}">
+          </div>
+          <input class="es-in" data-k="stakeNote" type="text" autocomplete="off" placeholder="破った時の代償（任意）" value="${esc(data.stakeNote || "")}">
+        </div>`;
+    },
+    wire(root, data, ctx, save) {
+      ["publicPromise", "partnerName", "remindLead", "stakeNote"].forEach((k) => {
+        const el = root.querySelector(`[data-k="${k}"]`);
+        if (el) el.addEventListener("input", () => { data[k] = el.value; save(); });
+      });
+    },
+    score(data) { return nonEmpty(data.publicPromise) ? (nonEmpty(data.remindLead) ? 10 : 5) : 0; },
+  },
+
+  // O. 探りスパイク max=8（新規・波4・既定OFF・単一）
+  {
+    id: "spike",
+    icon: "flame",
+    label: "探りスパイク",
+    max: 8,
+    symptoms: ["不確実性", "先延ばし"],
+    defaults: () => ({ question: "", box: "2", startWhen: "", finding: "", decision: "continue" }),
+    render(data) {
+      const DEC = [["continue", "続行"], ["pivot", "方針変更"], ["stop", "中止"]];
+      const decOpts = DEC.map(([v, l]) => `<option value="${v}"${(data.decision || "continue") === v ? " selected" : ""}>${l}</option>`).join("");
+      return `
+        <div class="es-field">
+          <div class="es-hint">本実装前に「判断に必要な答え」だけを得る使い捨て小実験を時間箱固定で。終了時に学びを記録して打ち切る（沼を物理的に止める）。</div>
+          <input class="es-in" data-k="question" type="text" autocomplete="off" placeholder="答えたい問い（例: この量をこのライブラリで捌けるか）" value="${esc(data.question || "")}">
+          <div class="es-pair">
+            <input class="es-in es-w64" data-k="box" type="text" inputmode="decimal" placeholder="時間箱h" value="${esc(data.box || "")}">
+            <input class="es-in es-grow" data-k="startWhen" type="text" placeholder="いつやる" value="${esc(data.startWhen || "")}">
+            <select class="es-in es-w120" data-k="decision" aria-label="結論">${decOpts}</select>
+          </div>
+          <input class="es-in" data-k="finding" type="text" autocomplete="off" placeholder="学び/結論（終了後に記入）" value="${esc(data.finding || "")}">
+        </div>`;
+    },
+    wire(root, data, ctx, save) {
+      ["question", "box", "startWhen", "finding"].forEach((k) => {
+        const el = root.querySelector(`[data-k="${k}"]`);
+        if (el) el.addEventListener("input", () => { data[k] = el.value; save(); });
+      });
+      const dec = root.querySelector('[data-k="decision"]');
+      if (dec) dec.addEventListener("change", () => { data.decision = dec.value; save(); });
+    },
+    score(data) { return nonEmpty(data.question) ? 8 : 0; },
+  },
+
+  // P. 事後ふりかえり（AAR）max=6（新規・波4・既定OFF・単一）
+  {
+    id: "aar",
+    icon: "bookmark",
+    label: "事後ふりかえり",
+    max: 6,
+    symptoms: ["不確実性", "曖昧"],
+    defaults: () => ({ intended: "", actual: "", variance: "underest", nextTime: "" }),
+    render(data) {
+      const VAR = [["underest", "見積り過小"], ["interrupt", "割り込み"], ["dep", "依存遅延"], ["other", "その他"]];
+      const vOpts = VAR.map(([v, l]) => `<option value="${v}"${(data.variance || "underest") === v ? " selected" : ""}>${l}</option>`).join("");
+      return `
+        <div class="es-field">
+          <div class="es-hint">完了直後に 狙い/実際/差分理由/次回改善 を短く検死し、見積り精度と手法の効きを次タスクへ累積学習。</div>
+          <input class="es-in" data-k="intended" type="text" autocomplete="off" placeholder="狙い通りだった点" value="${esc(data.intended || "")}">
+          <input class="es-in" data-k="actual" type="text" autocomplete="off" placeholder="実際どうだったか" value="${esc(data.actual || "")}">
+          <div class="es-pair">
+            <label class="es-sd-f">差分理由 <select class="es-in es-w120" data-k="variance" aria-label="差分理由">${vOpts}</select></label>
+          </div>
+          <input class="es-in" data-k="nextTime" type="text" autocomplete="off" placeholder="次回への具体改善" value="${esc(data.nextTime || "")}">
+        </div>`;
+    },
+    wire(root, data, ctx, save) {
+      ["intended", "actual", "nextTime"].forEach((k) => {
+        const el = root.querySelector(`[data-k="${k}"]`);
+        if (el) el.addEventListener("input", () => { data[k] = el.value; save(); });
+      });
+      const v = root.querySelector('[data-k="variance"]');
+      if (v) v.addEventListener("change", () => { data.variance = v.value; save(); });
+    },
+    score(data) { return nonEmpty(data.actual) && nonEmpty(data.nextTime) ? 6 : 0; },
+  },
 ];
 
 // 緊急×重要 → 推奨アクション文言（render/wire 共用）。
