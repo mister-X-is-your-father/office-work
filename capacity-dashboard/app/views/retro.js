@@ -4,9 +4,9 @@
 //   - まだ着手していない（今日やる予定）: 未着手タスクの拾い上げ（行クリックで編集）。
 //   - 今週の勢い（過去14日）: 日別の実働h横バー＋完了数バッジ（今日強調・土日薄め）。
 // 純関数（lib/execmetrics.js）は呼ぶだけ。exec/API 失敗は握って空で続行＝画面を壊さない。
-import { stepDigestion, taskEngagement, dailyExecSeries } from "../lib/execmetrics.js";
+import { stepDigestion, taskEngagement, dailyExecSeries, stalledTasks } from "../lib/execmetrics.js";
 import { load } from "../lib/store.js";
-import { getPrepScores } from "../lib/exec.js";
+import { getPrepScores, getActivity } from "../lib/exec.js";
 import { getTimes } from "../lib/api.js";
 import { C, esc, fmtH, todayISO } from "../lib/ui.js";
 import { dateOnly } from "../lib/capacity.js";
@@ -72,6 +72,12 @@ export async function render(root) {
   // 未着手（今日やる予定）の拾い上げ。eng.items の engaged=false のみ。
   const notEngaged = (eng.items || []).filter((it) => !it.engaged);
 
+  // 停滞検知: 進捗ログ（exec）を取得し、N日以上 動きの無い未完了タスクを炙り出す。
+  // getActivity 失敗は握って空＝停滞は created/started/time だけで算出継続。
+  let activityLog = [];
+  try { activityLog = (await getActivity())?.activity || []; } catch { activityLog = []; }
+  const stalled = stalledTasks(tasks, timeEntries, activityLog, today, { thresholdDays: 7 });
+
   // 週バーの正規化最大値（実働h）。0除算/空回避で必ず >0。
   const maxWorkedH = Math.max(1, ...series.map((d) => d.workedH || 0));
   const dowLabel = ["日", "月", "火", "水", "木", "金", "土"];
@@ -97,6 +103,25 @@ export async function render(root) {
         : `<div class="rt-empty">今日の対象はすべて着手済み 👍</div>`}
     </section>`;
 
+  // 停滞セクション（7日以上 動きなし）。多すぎ防止で先頭 MAX_STALE 件＋「他N件」。
+  const MAX_STALE = 12;
+  const staleShown = stalled.slice(0, MAX_STALE);
+  const staleMore = stalled.length - staleShown.length;
+  const stalledHtml = `
+    <section class="rt-sec">
+      <div class="rt-sec-h">${icon("alertTriangle", { size: 14 }) || ""}<span>止まっているタスク（7日以上 動きなし）</span><span class="rt-sec-n">${stalled.length}</span></div>
+      ${stalled.length
+        ? `<div class="rt-rows">${staleShown.map((s) => `
+            <button type="button" class="rt-row${s.overdue ? " rt-row-over" : ""}" data-id="${s.id}">
+              <span class="rt-row-t">${esc(s.title)}</span>
+              <span class="rt-row-m">
+                ${s.overdue ? `<span class="rt-tag rt-tag-due">期日超過</span>` : ""}
+                <span class="rt-tag rt-stale-d">停滞${s.days}日</span>
+              </span>
+            </button>`).join("")}</div>${staleMore > 0 ? `<div class="rt-empty">他 ${staleMore} 件</div>` : ""}`
+        : `<div class="rt-empty">7日以上止まっているタスクはありません 👍</div>`}
+    </section>`;
+
   const weekHtml = `
     <section class="rt-sec">
       <div class="rt-sec-h">${icon("trendingUp", { size: 14 }) || ""}<span>今週の勢い（過去14日）</span></div>
@@ -120,6 +145,7 @@ export async function render(root) {
     <h1 class="vtitle">ふりかえり <small>${today}</small></h1>
     ${cardsHtml}
     ${unstartedHtml}
+    ${stalledHtml}
     ${weekHtml}
     <style>
       .rt-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}
@@ -157,6 +183,8 @@ export async function render(root) {
       .rt-row-m{flex:none;display:flex;align-items:center;gap:6px}
       .rt-tag{font-size:10.5px;font-weight:700;line-height:1;border-radius:999px;padding:2px 8px;color:${C.muted};background:${C.track}}
       .rt-tag-due{color:${C.over};background:rgba(229,72,77,.12)}
+      .rt-stale-d{color:${C.amber};background:rgba(230,160,30,.13)}
+      .rt-row-over{border-color:rgba(229,72,77,.45)}
       /* 週バー（1日=横行: 日付ラベル＋実働h横バー＋完了数バッジ） */
       .rt-week{display:flex;flex-direction:column;gap:3px}
       .rt-wd{display:flex;align-items:center;gap:10px;padding:3px 4px;border-radius:7px}

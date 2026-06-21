@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { stepDigestion, taskEngagement, dailyExecSeries } from "./execmetrics.js";
+import { stepDigestion, taskEngagement, dailyExecSeries, stalledTasks } from "./execmetrics.js";
 
 const TODAY = "2026-06-21";
 
@@ -64,4 +64,30 @@ test("dailyExecSeries: 日別の完了数・実働h・触れたタスク数", ()
   const d19 = s.find((d) => d.day === "2026-06-19");
   assert.equal(d19.workedH, 2);
   assert.equal(d19.touched, 1);
+});
+
+test("stalledTasks: N日以上動きの無い未完了の計画タスクを停滞日数降順で", () => {
+  const tasks = [
+    // 計画あり(期日)・作成は古いが最近 time entry あり → 動いている＝停滞でない
+    { id: 1, title: "動いてる", done: false, due_date: "2026-06-30T00:00:00Z", created: "2026-06-01T00:00:00Z" },
+    // 計画あり(見積り)・作成6/10・以後動き無し → 停滞11日
+    { id: 2, title: "止まってる(見積)", done: false, time_estimate: 3600, created: "2026-06-10T00:00:00Z" },
+    // 期日あり・期日超過・作成6/05・動き無し → 停滞16日・overdue
+    { id: 3, title: "止まってる(期日超過)", done: false, due_date: "2026-06-18T00:00:00Z", created: "2026-06-05T00:00:00Z" },
+    // 計画の意思なし(期日/開始/見積り/着手すべて無) → 古くても対象外
+    { id: 4, title: "未整理backlog", done: false, created: "2026-06-01T00:00:00Z" },
+    // 完了 → 対象外
+    { id: 5, title: "完了", done: true, due_date: "2026-06-08T00:00:00Z", created: "2026-06-01T00:00:00Z" },
+    // 進捗ログが最近 → 停滞でない（着手痕跡 percent>0 も committed）
+    { id: 6, title: "最近進捗", done: false, percent_done: 30, created: "2026-06-01T00:00:00Z" },
+  ];
+  const timeEntries = [{ day: "2026-06-20", taskId: 1, seconds: 3600 }]; // id1 は昨日動いた
+  const activityLog = [{ task_id: 6, at: "2026-06-19T05:00:00Z" }]; // id6 は2日前に進捗
+  const r = stalledTasks(tasks, timeEntries, activityLog, TODAY, { thresholdDays: 7 });
+  assert.deepEqual(r.map((x) => x.id), [3, 2]); // 停滞日数降順: id3(16日) > id2(11日)
+  assert.equal(r[0].days, 16);
+  assert.equal(r[0].overdue, true);
+  assert.equal(r[1].days, 11);
+  assert.equal(r[1].overdue, false);
+  // id1(最近動いた)/id4(計画意思なし)/id5(完了)/id6(最近進捗) は含まれない
 });

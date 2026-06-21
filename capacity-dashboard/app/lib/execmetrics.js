@@ -4,7 +4,7 @@
 //   - taskEngagement: 今日やるべきタスク（今日期日 or 今日plan・未完了）の着手率（＝踏み込めたか）。
 //   - dailyExecSeries: 過去 N 日の日別実行量（完了数・実働h・触れたタスク数）＝勢いのトレンド。
 // ※ 過去日の「やると決めた母数」はスナップショットしていないため、率は“今日”が対象。週はトレンド（記述）として見る。
-import { toH, dateOnly, hasDate, hasStarted, shiftISO } from "./capacity.js";
+import { toH, dateOnly, hasDate, hasStarted, shiftISO, daysUntil } from "./capacity.js";
 
 const round1 = (x) => Math.round(x * 100) / 100;
 const pctOf = (num, den) => (den > 0 ? Math.round((num / den) * 100) : 0);
@@ -66,4 +66,43 @@ export function dailyExecSeries(tasks, timeEntries, todayISO, nDays = 14) {
     const r = idx.get(d);
     return { day: d, completed: r.completed, workedH: round1(r.workedH), touched: r._touched.size };
   });
+}
+
+// 停滞タスク: 未完了 かつ「計画の意思あり」かつ thresholdDays 以上 何の動きも無いもの（＝レーダーから消えた設計済み未実行）。
+//   「動き」= 実績(timeEntries.day) / 進捗ログ(activityLog.at) / 着手(started_at) / 作成(created＝基準) の最新日。
+//   「計画の意思」= 期日 or 開始日 or 見積り>0 or 着手痕跡(started_at/percent>0) のいずれか（純未整理backlogは除外）。
+//   timeEntries=[{day:"YYYY-MM-DD",taskId}]、activityLog=[{task_id,at}]。返り値は停滞日数の降順。
+export function stalledTasks(tasks, timeEntries, activityLog, todayISO, { thresholdDays = 7 } = {}) {
+  const last = new Map(); // taskId -> 最新活動日 "YYYY-MM-DD"
+  const bump = (id, raw) => {
+    if (id == null) return;
+    const d = dateOnly(raw);
+    if (!d || d.startsWith("0001")) return;
+    const cur = last.get(id);
+    if (!cur || d > cur) last.set(id, d);
+  };
+  for (const t of tasks || []) {
+    bump(t.id, t.created);                    // 作成＝活動の基準（何もしなければ作成日が最終活動）
+    if (hasDate(t.started_at)) bump(t.id, t.started_at);
+  }
+  for (const e of timeEntries || []) bump(e.taskId, e.day);
+  for (const a of activityLog || []) bump(a.task_id, a.at);
+
+  const out = [];
+  for (const t of tasks || []) {
+    if (t.done) continue;
+    const committed = hasDate(t.due_date) || hasDate(t.start_date) || (t.time_estimate || 0) > 0 || hasStarted(t);
+    if (!committed) continue;
+    const lastISO = last.get(t.id) || null;
+    if (!lastISO) continue;
+    const days = daysUntil(lastISO, todayISO);
+    if (days < thresholdDays) continue;
+    out.push({
+      id: t.id, title: t.title, days, lastISO,
+      due: hasDate(t.due_date) ? dateOnly(t.due_date) : null,
+      overdue: hasDate(t.due_date) && dateOnly(t.due_date) < todayISO,
+    });
+  }
+  out.sort((a, b) => b.days - a.days || a.id - b.id);
+  return out;
 }
