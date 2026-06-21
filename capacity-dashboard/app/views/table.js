@@ -510,6 +510,12 @@ export async function render(root) {
       // ここで manualMode をガード（チップ/進捗/チェックより後＝マイソート中もそれらは生きる）。
       // マイソート中はグリッド選択も行クリック編集も無効（原典どおり）。タップ＝編集は wireDrag が担う。
       if (V.manualMode) return;
+      // 余白（セルの padding 等＝td 自身が直接のクリック対象）クリックで編集を開く（要望）。
+      // チップ/タイトル文字など「内容」のクリックは e.target が子要素になるため、ここを素通りして従来の挙動へ。
+      if (e.target.tagName === "TD") {
+        const trEdit = e.target.closest("tr[data-id]");
+        if (trEdit) { openTaskForm({ taskId: +trEdit.dataset.id, onSaved: () => render(root) }); return; }
+      }
       if ((el = e.target.closest(".tb-gc"))) { gridSelectFromEl(el, root); return; }
       const tr = e.target.closest("tr[data-id]"); if (tr) openTaskForm({ taskId: +tr.dataset.id, onSaved: () => render(root) });
     };
@@ -1937,7 +1943,7 @@ function rowHtml(r, members, i, manual) {
   // 列ごとの <td> をマップで持ち、cols() の順序（表示/非表示・並べ替え反映）で出力する。
   const cellOf = {
     proj: `<td class="tb-proj tb-gc" data-col="proj"><button class="tb-cell tb-projbtn" data-proj="${id}" title="クリックでプロジェクト（親タスク）を変更">${r.parent ? esc(r.parent.title) : "—"}<span class="tb-cell-car">▾</span></button></td>`,
-    title: `<td class="tb-title tb-gc" data-col="title">${esc(r.title)}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">${icon("flag", { size: 12 })}</span>` : ""}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">${icon("play", { size: 11 })}</button>` : ""}</td>`,
+    title: `<td class="tb-title tb-gc" data-col="title"><span class="tb-tle">${esc(r.title)}</span>${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">${icon("flag", { size: 12 })}</span>` : ""}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">${icon("play", { size: 11 })}</button>` : ""}</td>`,
     who: `<td class="tb-gc" data-col="who">${whoBtn}</td>`,
     kind: `<td>${kind}</td>`,
     cat: `<td class="tb-gc" data-col="cat">${catBtn}</td>`,
@@ -2208,7 +2214,7 @@ function css() {
   /* カーソル追従の浮きカード（ゴースト） */
   .tb-ghost{filter:drop-shadow(0 10px 24px rgba(20,30,50,.22));transform:scale(1.01);opacity:.45}
   .tb-ghost-tbl{border-collapse:collapse;table-layout:fixed;background:#fff;border:1px solid ${C.line};border-radius:9px;overflow:hidden}
-  .tb-ghost-tbl td{padding:10px 12px;border-bottom:0;font-size:13px;vertical-align:middle}
+  .tb-ghost-tbl td{padding:15px 12px;border-bottom:0;font-size:13px;vertical-align:middle}
   .tb-ghost-tbl tr + tr td{border-top:1px solid ${C.line}}
   .tb-ctx{position:fixed;z-index:10000;min-width:170px;max-height:340px;overflow-y:auto;background:#fff;border:1px solid ${C.line};border-radius:10px;box-shadow:0 12px 34px rgba(20,30,50,.22);padding:5px;display:flex;flex-direction:column}
   .tb-ctx-inp{font:inherit;font-size:13px;display:flex;align-items:center;gap:8px;justify-content:space-between;padding:7px 12px;color:${C.ink}}
@@ -2253,7 +2259,7 @@ function css() {
   .tb th{font-size:11px;color:${C.muted};font-weight:600;text-align:left;padding:10px 12px;border-bottom:1px solid ${C.line};white-space:nowrap;background:#fafbfc}
   .tb th.sortable{cursor:pointer;user-select:none}.tb th.sortable:hover{color:${C.ink}}
   .tb-thord{font-size:9.5px;color:${C.fill};font-weight:700;background:#eaf2ff;border-radius:5px;padding:0 4px;vertical-align:1px}
-  .tb td{padding:10px 12px;border-bottom:1px solid ${C.line};vertical-align:middle}
+  .tb td{padding:15px 12px;border-bottom:1px solid ${C.line};vertical-align:middle}
   .tb th:last-child,.tb td:last-child{padding-right:20px}
   .tb tbody tr:hover{background:#f7fbff}
   .tb-title{font-weight:600;min-width:180px}
