@@ -107,9 +107,9 @@ export async function openTaskForm({ taskId = null, onSaved, tab = null } = {}) 
         <button type="button" data-tab="rmtg">定例MTG</button>
         <button type="button" data-tab="rtask">定期タスク</button>
       </div>` : `
-      <div class="tf-tabs" id="tf-etabs">
-        <button type="button" data-etab="base" class="on">基本</button>
-        <button type="button" data-etab="prep">実行準備</button>
+      <div class="tf-tabs tf-etabs" id="tf-etabs" role="tablist">
+        <button type="button" data-etab="base" class="on" role="tab" aria-selected="true">${icon("file", { size: 14 }) || ""}基本</button>
+        <button type="button" data-etab="prep" role="tab" aria-selected="false">${icon("play", { size: 14 }) || ""}実行準備</button>
       </div>`}
       <div class="tf-body">
         <div class="tf-main">
@@ -282,7 +282,7 @@ export async function openTaskForm({ taskId = null, onSaved, tab = null } = {}) 
     let prepMounted = false;
     etabs.querySelectorAll("button").forEach((b) => {
       b.onclick = async () => {
-        etabs.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+        etabs.querySelectorAll("button").forEach((x) => { const on = x === b; x.classList.toggle("on", on); x.setAttribute("aria-selected", on ? "true" : "false"); });
         const isPrep = b.dataset.etab === "prep";
         paneBase.hidden = isPrep;
         panePrep.hidden = !isPrep;
@@ -832,6 +832,13 @@ export function ensureStyle() {
   .tf-fable-run:disabled{opacity:.5}
   .tf-x{border:0;background:transparent;color:${C.muted};font-size:20px;line-height:1;padding:4px 9px;border-radius:8px;cursor:pointer}
   .tf-x:hover{background:#f1f4f8;color:${C.ink}}
+  /* 編集タブ [基本/実行準備]: スタイリッシュなセグメントコントロール（ピル型・id指定でアンダーライン基底を上書き）。 */
+  #tf-etabs{display:inline-flex;gap:3px;margin:8px 22px 4px;padding:3px;background:${C.track};border:1px solid ${C.line};border-radius:11px}
+  #tf-etabs button{display:inline-flex;align-items:center;gap:6px;border:0;border-bottom:0;margin:0;background:transparent;font:inherit;font-size:13px;font-weight:700;color:${C.muted};padding:7px 16px;border-radius:8px;cursor:pointer;transition:background .15s,color .15s,box-shadow .15s}
+  #tf-etabs button .ic{color:currentColor;opacity:.9}
+  #tf-etabs button:hover:not(.on){color:${C.ink}}
+  #tf-etabs button.on{background:${C.card};color:${C.fill};box-shadow:0 1px 3px rgba(20,30,50,.13)}
+  html[data-theme="dark"] #tf-etabs button.on{background:var(--card)}
   .tf-body{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:0 26px;padding:8px 22px 4px;align-items:start}
   .tf-main{min-width:0}
   /* F5 割り込みゼロサム: 期限が満杯/非稼働日のときの注意（tight=琥珀 / over=赤）。 */
