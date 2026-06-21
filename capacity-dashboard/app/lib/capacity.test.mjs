@@ -147,13 +147,16 @@ test("applyBarDrag: start/end の伸縮と最小1日クランプ", () => {
     { start: "2026-06-09", end: "2026-06-09" });
 });
 
-test("loadByMember: capacityFor で週末は容量0='off'、負荷ありは'over'", () => {
+test("loadByMember: capacityFor で週末は容量0='off'、負荷ありは'offplan'（過負荷'over'と区別）", () => {
   const SAT = "2026-06-13";
   const capacityFor = (m, day) => isBusinessDay(day) ? 8 : 0;
-  // 週末に due のタスク（due は全量載る）→ 容量0なので over
+  // 週末に due のタスク（due は全量載る）→ 容量0なので「非稼働日に予定」=offplan
   const tasks = [{ id: 1, title: "x", assignees: [{ id: 1 }], time_estimate: 7200, due_date: due(SAT) }];
   const rows = loadByMember(tasks, members, SAT, 8, null, { capacityFor });
-  assert.equal(rows.find((r) => r.id === 1).status, "over");
+  const r1 = rows.find((r) => r.id === 1);
+  assert.equal(r1.status, "offplan");
+  assert.equal(r1.overH, 0); // 非稼働日の予定は「要再配分(超過)」量に混ぜない（解決は稼働日へ移動）
+  assert.equal(r1.assignedH, 2); // 移動を促すための負荷量は assignedH に残る
   assert.equal(rows.find((r) => r.id === 2).status, "off"); // 負荷なし・容量0
 });
 

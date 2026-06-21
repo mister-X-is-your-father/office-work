@@ -143,8 +143,8 @@ export async function render(root) {
     ? empty("メンバーがいません")
     : `<div class="st-mgrid">${memberRows.map((r) => {
         const pct = r.capH > 0 ? Math.min(100, Math.round((r.assignedH / r.capH) * 100)) : (r.assignedH > 0 ? 100 : 0);
-        const stCls = r.status === "over" ? "over" : (r.status === "off" ? "off" : (r.status === "full" ? "full" : "free"));
-        const stLbl = r.status === "over" ? "過負荷" : (r.status === "off" ? "休み" : (r.status === "full" ? "ちょうど" : (r.assignedH > 1e-6 ? "稼働中" : "空き")));
+        const stCls = r.status === "over" ? "over" : (r.status === "offplan" ? "offplan" : (r.status === "off" ? "off" : (r.status === "full" ? "full" : "free")));
+        const stLbl = r.status === "over" ? "過負荷" : (r.status === "offplan" ? "非稼働日に予定" : (r.status === "off" ? "休み" : (r.status === "full" ? "ちょうど" : (r.assignedH > 1e-6 ? "稼働中" : "空き"))));
         return `<div class="st-mcard">
           <div class="st-mtop">
             <span class="st-ava" style="background:${member_color(r.id)}" title="${esc(r.name)}">${esc((r.name[0] || "?").toUpperCase())}</span>
@@ -354,12 +354,14 @@ function css() {
   .st-mname{font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
   .st-badge{font-size:10px;font-weight:700;border-radius:999px;padding:1px 8px;flex:none}
   .st-badge.over{color:#fff;background:${C.over}}
+  .st-badge.offplan{color:#fff;background:${C.amber}}
   .st-badge.full{color:#fff;background:${C.full}}
   .st-badge.free{color:${C.free};background:transparent;border:1px solid ${C.free}}
   .st-badge.off{color:${C.muted};background:${C.track}}
   .st-mbar{position:relative;height:8px;background:${C.track};border-radius:5px;overflow:hidden}
   .st-mbar i{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:${C.fill}}
   .st-mbar i.over{background:${C.over}}
+  .st-mbar i.offplan{background:${C.amber}}
   .st-mbar i.full{background:${C.full}}
   .st-mbar i.free{background:${C.free}}
   .st-mbar i.off{background:${C.muted};opacity:.4}

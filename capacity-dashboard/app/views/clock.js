@@ -58,9 +58,11 @@ function clockSVG(m) {
   const isDark = document.documentElement.getAttribute("data-theme") === "dark";
   const inkCol = isDark ? "#e7eaef" : "#1d2430";   // 中央大数字の通常色（テーマ追従）
   const subCol = isDark ? "#9aa3af" : "#6b7480";   // サブ行（空き/超過）テキスト
-  const bigcol = m.overH > 0 ? "#e5484d" : (m.usedH > 1e-6 ? inkCol : "#9aa3af");
-  const sub = m.overH > 0 ? `超過 +${fmtH(m.overH)}`
-    : (m.status === "off" ? "休（非稼働日）" : (m.freeH > 0 ? `空き ${fmtH(m.freeH)}` : "満稼働"));
+  const offplan = m.status === "offplan";
+  const bigcol = offplan ? "#d98324" : (m.overH > 0 ? "#e5484d" : (m.usedH > 1e-6 ? inkCol : "#9aa3af"));
+  const sub = offplan ? `非稼働日に予定 +${fmtH(m.usedH)}`
+    : (m.overH > 0 ? `超過 +${fmtH(m.overH)}`
+    : (m.status === "off" ? "休（非稼働日）" : (m.freeH > 0 ? `空き ${fmtH(m.freeH)}` : "満稼働")));
   return `<svg class="ck-dial" width="200" height="200" viewBox="0 0 200 200" role="img" aria-label="${esc(m.member.name || "")} 予定${big} ${sub}">
     ${out.join("\n    ")}
     <text x="${CX}" y="${CY - 1}" text-anchor="middle" class="ck-cn" fill="${bigcol}" style="font-variant-numeric:tabular-nums">${big}</text>
@@ -72,8 +74,9 @@ function clockSVG(m) {
 function cardHTML(m, idx) {
   const nm = m.member.name || m.member.username || `#${m.member.id}`;
   const off = m.status === "off";
-  const stateCls = m.overH > 0 ? "over" : (off ? "just" : (m.freeH > 0 ? "free" : "just"));
-  const stateTxt = m.overH > 0 ? `超過 +${fmtH(m.overH)}` : (off ? "休（非稼働日）" : (m.freeH > 0 ? `空き ${fmtH(m.freeH)}` : "ちょうど"));
+  const offplan = m.status === "offplan";
+  const stateCls = offplan ? "offplan" : (m.overH > 0 ? "over" : (off ? "just" : (m.freeH > 0 ? "free" : "just")));
+  const stateTxt = offplan ? `非稼働日に予定 +${fmtH(m.usedH)}` : (m.overH > 0 ? `超過 +${fmtH(m.overH)}` : (off ? "休（非稼働日）" : (m.freeH > 0 ? `空き ${fmtH(m.freeH)}` : "ちょうど")));
   let sections = "";
   for (const kind of KIND_ORDER) {
     const items = m.items.filter((it) => it.kind === kind);
@@ -94,7 +97,7 @@ function cardHTML(m, idx) {
   if (m.freeH > 0) sections += `<div class="ck-row free"><i class="ck-dot ck-freedot" style="background:${FREECOL}"></i><span class="ck-tn">空き工数</span><span class="ck-th">${fmtH(m.freeH)}</span></div>`;
   if (!m.items.length) sections = `<div class="ck-empty">今日の予定なし</div>` + sections;
 
-  return `<div class="ck-card ${m.overH > 0 ? "is-over" : ""}">
+  return `<div class="ck-card ${offplan ? "is-offplan" : (m.overH > 0 ? "is-over" : "")}">
     <div class="ck-h"><span class="ck-av" style="background:${member_color(idx)}">${esc((nm)[0] || "?")}</span><span class="ck-nm">${esc(nm)}</span><span class="ck-badge ${stateCls}">${stateTxt}</span></div>
     ${clockSVG(m)}
     <div class="ck-list">${sections}</div>
@@ -335,11 +338,13 @@ function css() {
   .ck-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(252px,1fr));gap:18px}
   .ck-card{background:#fff;border:1px solid ${C.line};border-radius:16px;padding:18px 16px 16px;box-shadow:0 1px 3px rgba(20,30,50,.05);position:relative}
   .ck-card.is-over{border-color:#f3c9cb}
+  .ck-card.is-offplan{border-color:#f0cf9e}
   .ck-h{display:flex;align-items:center;gap:10px;margin-bottom:2px}
   .ck-av{width:30px;height:30px;border-radius:50%;flex:none;display:grid;place-items:center;color:#fff;font-size:13px;font-weight:700}
   .ck-nm{font-size:15px;font-weight:600}
   .ck-badge{margin-left:auto;font-size:11px;font-weight:600;border-radius:999px;padding:3px 9px}
   .ck-badge.free{color:#2fa66b;background:#eaf7ef}.ck-badge.over{color:#e5484d;background:#fdecec}.ck-badge.just{color:#8a93a0;background:#f0f1f4}
+  .ck-badge.offplan{color:#d98324;background:#fbf0dd}
   .ck-dial{display:block;margin:6px auto 4px}
   .ck-cn{font-size:23px;font-weight:700}.ck-cl{font-size:10.5px}
   .ck-list{margin-top:8px;border-top:1px solid ${C.line};padding-top:8px}
@@ -394,9 +399,11 @@ function css() {
   html[data-theme="dark"] .ck-badge.free{background:rgba(47,166,107,.20);color:#63cf95}
   html[data-theme="dark"] .ck-badge.over{background:rgba(229,72,77,.20);color:#f08a8d}
   html[data-theme="dark"] .ck-badge.just{background:rgba(255,255,255,.08);color:var(--muted)}
+  html[data-theme="dark"] .ck-badge.offplan{background:rgba(217,131,36,.20);color:#e6a557}
   html[data-theme="dark"] .ck-row.free .ck-tn{color:#63cf95}
   /* 超過カード枠の淡ピンク → 半透明赤 */
   html[data-theme="dark"] .ck-card.is-over{border-color:rgba(229,72,77,.45)}
+  html[data-theme="dark"] .ck-card.is-offplan{border-color:rgba(217,131,36,.45)}
   /* タグ枠線の淡色 → 半透明アクセント */
   html[data-theme="dark"] .ck-tag{border-color:rgba(245,135,46,.45)}
   html[data-theme="dark"] .ck-tag.adhoc{border-color:rgba(58,134,255,.5)}

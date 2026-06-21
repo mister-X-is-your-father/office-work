@@ -104,7 +104,7 @@ test("capacityOn: 週末/祝日/休暇=0、平日=capH", () => {
   assert.equal(capacityOn(A, "2026-06-25", opt), 8);   // 休暇範囲外
 });
 
-test("freeByMemberDay: 合算・status・祝日衝突=over", () => {
+test("freeByMemberDay: 合算・status・祝日に予定=offplan（非稼働日に予定）", () => {
   const members = [{ id: 1 }, { id: 2 }];
   const isoDays = ["2026-06-08", "2026-06-09", "2026-06-13", "2026-06-15"]; // 月/火/土/月(祝日)
   // occurrence: 毎週月の会議1h(A,B)。タスク由来: 火に A 3h。
@@ -117,7 +117,7 @@ test("freeByMemberDay: 合算・status・祝日衝突=over", () => {
   assert.deepEqual(a.get("2026-06-08"), { capH: 8, loadH: 1, freeH: 7, status: "free" });  // 月: 会議1h
   assert.deepEqual(a.get("2026-06-09"), { capH: 8, loadH: 3, freeH: 5, status: "free" });  // 火: タスク3h
   assert.equal(a.get("2026-06-13").status, "off");                                          // 土: 予定なし
-  assert.equal(a.get("2026-06-15").status, "over");                                         // 祝日に会議1h=衝突
+  assert.equal(a.get("2026-06-15").status, "offplan");                                      // 祝日(capH=0)に会議1h=非稼働日に予定
   assert.equal(b.get("2026-06-09").loadH, 0);                                               // B は火に予定なし
 });
 

@@ -61,12 +61,14 @@ export function todayItemsByMember(data, isoDay, capH = 8) {
     r.items.sort((a, b) => (kindRank(a.kind) - kindRank(b.kind)) || ((b.prio || 0) - (a.prio || 0)));
     r.usedH = round1(r.usedH);
     const memCap = capacityOn(r.member, isoDay, { holidays: holidaysSet, unavailabilityByMember, capH });
+    // capH=0（週末/祝日/休暇）に負荷がある＝「非稼働日に予定」(offplan)。平日の過負荷('over')と区別し、
+    // overH(=要再配分量)には混ぜない。解決は「稼働日へ移す」＝量は usedH を参照。
+    const offplan = memCap <= 1e-6 && r.usedH > 1e-6;
     r.freeH = round1(Math.max(0, memCap - r.usedH));
-    r.overH = round1(Math.max(0, r.usedH - memCap));
+    r.overH = offplan ? 0 : round1(Math.max(0, r.usedH - memCap));
     r.capH = memCap;
-    // capH=0（週末/祝日/休暇）: 負荷ありは衝突='over'、無ければ'off'。
     r.status = memCap <= 1e-6
-      ? (r.usedH > 1e-6 ? "over" : "off")
+      ? (offplan ? "offplan" : "off")
       : (r.usedH > memCap + 1e-6 ? "over" : (Math.abs(r.usedH - memCap) < 1e-6 ? "full" : "free"));
   }
   return map;
@@ -106,7 +108,7 @@ export function suggestDays(data, memberId, fromISO, toISO, neededH, capH = 8) {
   const out = [];
   for (const day of days) {
     const cell = dm.get(day);
-    if (!cell || cell.status === "off" || cell.status === "over" || cell.freeH <= 0) continue;
+    if (!cell || cell.status === "off" || cell.status === "offplan" || cell.status === "over" || cell.freeH <= 0) continue;
     out.push({ day, freeH: cell.freeH, fits: cell.freeH >= neededH - 1e-6 });
   }
   out.sort((a, b) => (b.fits - a.fits) || (b.freeH - a.freeH) || (a.day < b.day ? -1 : 1));

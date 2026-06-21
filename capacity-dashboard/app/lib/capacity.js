@@ -108,16 +108,21 @@ export function loadByMember(tasks, members, isoDay, capH = 8, plansByTask = nul
       row.tasks.push({ id: t.id, title: t.title, h: round1(h) });
     }
   }
-  return [...map.values()].map((r) => ({
-    ...r,
-    assignedH: round1(r.assignedH),
-    freeH: round1(Math.max(0, r.capH - r.assignedH)),
-    overH: round1(Math.max(0, r.assignedH - r.capH)),
-    // capH=0（週末/祝日/休暇）: 負荷ありは衝突='over'、無ければ'off'。
-    status: r.capH <= 1e-6
-      ? (r.assignedH > 1e-6 ? "over" : "off")
-      : (r.assignedH > r.capH + 1e-6 ? "over" : (Math.abs(r.assignedH - r.capH) < 1e-6 ? "full" : "free")),
-  }));
+  return [...map.values()].map((r) => {
+    // capH=0（週末/祝日/休暇）に負荷がある＝「非稼働日に予定」(offplan)。平日の過負荷('over')とは
+    // 別状態として扱う＝解決策が「減らす(再配分)」でなく「稼働日へ移す」なので、overH(=要再配分量)には
+    // 混ぜない（overH=0）。移動を促すための負荷量は assignedH を見れば分かる。
+    const offplan = r.capH <= 1e-6 && r.assignedH > 1e-6;
+    return {
+      ...r,
+      assignedH: round1(r.assignedH),
+      freeH: round1(Math.max(0, r.capH - r.assignedH)),
+      overH: offplan ? 0 : round1(Math.max(0, r.assignedH - r.capH)),
+      status: r.capH <= 1e-6
+        ? (offplan ? "offplan" : "off")
+        : (r.assignedH > r.capH + 1e-6 ? "over" : (Math.abs(r.assignedH - r.capH) < 1e-6 ? "full" : "free")),
+    };
+  });
 }
 
 // 【F1 横断逆算の実空き源】指定メンバーが各日に既にコミット済みの予定負荷(h) を

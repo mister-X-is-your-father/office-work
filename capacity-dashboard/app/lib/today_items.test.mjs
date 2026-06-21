@@ -85,6 +85,20 @@ test("todayItemsByMember: 超過判定", () => {
   assert.equal(r.status, "over");
 });
 
+test("todayItemsByMember: 非稼働日(週末/祝日)に予定=offplan・overHに混ぜない", () => {
+  const SAT = "2026-06-13"; // 土曜
+  const wk = {
+    members: [{ id: 1, name: "A" }],
+    recurrences: [],
+    tasks: [{ id: 1, title: "週末作業", priority: 3, assignees: [{ id: 1 }], due_date: "2026-06-13T00:00:00Z", created: "2026-06-01T00:00:00Z", time_estimate: 7200 }], // 2h
+    plansByTask: new Map(),
+  };
+  const r = todayItemsByMember(wk, SAT, 8).get(1);
+  assert.equal(r.usedH, 2);
+  assert.equal(r.status, "offplan"); // 過負荷'over'ではなく「非稼働日に予定」
+  assert.equal(r.overH, 0);          // 要再配分(超過)量には混ぜない（解決は稼働日へ移動）
+});
+
 test("todayItemsByMember: 担当のないメンバーは空", () => {
   const r = todayItemsByMember(data, DAY, 8).get(2);
   assert.equal(r.items.length, 0);

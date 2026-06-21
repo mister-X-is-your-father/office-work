@@ -114,9 +114,10 @@ export function freeByMemberDay(members, isoDays, loadSources, availability = {}
       const capH = capacityOn(m, day, availability);
       const loadH = round1((load.get(m.id) && load.get(m.id).get(day)) || 0);
       const freeH = round1(capH - loadH);
-      // capH=0(週末/祝日/休暇): 予定が重なれば衝突='over'、無ければ'off'。
+      // capH=0(週末/祝日/休暇)に予定がある＝「非稼働日に予定」(offplan)。平日の過負荷('over')と区別する
+      // （解決は再配分でなく稼働日へ移動）。
       const status = capH === 0
-        ? (loadH > 1e-6 ? "over" : "off")
+        ? (loadH > 1e-6 ? "offplan" : "off")
         : (loadH > capH + 1e-6 ? "over" : (freeH <= 1e-6 ? "full" : "free"));
       dm.set(day, { capH, loadH, freeH, status });
     }

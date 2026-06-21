@@ -243,8 +243,8 @@ function colHtml(r, i, g) {
     inner += `<div class="t54-overbadge" style="bottom:${FOOT_H + total * pxPerH + 8}px">超過 +${fmtH(over)}</div>`;
   }
   // フッター
-  const cls = r.status === "over" ? "over" : (r.status === "full" ? "full" : (r.status === "off" ? "off" : "free"));
-  const txt = r.status === "over" ? "超過 +" + fmtH(over) : (r.status === "full" ? "満稼働" : (r.status === "off" ? "休 (非稼働日)" : "空き " + fmtH(free)));
+  const cls = r.status === "over" ? "over" : (r.status === "offplan" ? "offplan" : (r.status === "full" ? "full" : (r.status === "off" ? "off" : "free")));
+  const txt = r.status === "over" ? "超過 +" + fmtH(over) : (r.status === "offplan" ? "非稼働日に予定 +" + fmtH(total) : (r.status === "full" ? "満稼働" : (r.status === "off" ? "休 (非稼働日)" : "空き " + fmtH(free))));
   const dot = memberColor(r.id); // members の安定 index 由来（全画面で色一致）。行 index i ではなく member id で引く
   inner += `<div class="t54-foot">
       <div class="t54-nm"><span class="t54-dot" style="background:${dot}"></span>${esc(r.name)}</div>
@@ -303,7 +303,7 @@ function css() {
   .t54-nm{font-size:14.5px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:6px}
   .t54-dot{width:9px;height:9px;border-radius:50%;display:inline-block}
   .t54-status{font-size:11.5px;margin-top:3px;font-weight:700}
-  .t54-status.free{color:${C.free}}.t54-status.over{color:${C.over}}.t54-status.full{color:${C.full}}.t54-status.off{color:${C.muted}}
+  .t54-status.free{color:${C.free}}.t54-status.over{color:${C.over}}.t54-status.offplan{color:${C.amber}}.t54-status.full{color:${C.full}}.t54-status.off{color:${C.muted}}
   .t54-total{font-size:10.5px;color:${C.muted};margin-top:2px}
   .t54-legend{display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin:18px 2px 0;font-size:11.5px;color:${C.muted}}
   .t54-legend .item{display:flex;align-items:center;gap:6px}
