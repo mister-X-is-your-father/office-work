@@ -685,6 +685,77 @@ const PLUGINS = [
     },
     score(data) { return nonEmpty(data.myUnderstanding) ? 8 : 0; },
   },
+
+  // E. 未知を先に潰す max=18（新規・波2・既定OFF）
+  //   onApply（impact=high未解消→steps「[先行検証]」自動挿入＋前方配置）は後追い（波1同様データ取得版）。
+  {
+    id: "unknowns_register",
+    icon: "search",
+    label: "未知を先に潰す",
+    max: 18,
+    symptoms: ["不確実性", "依存"],
+    defaults: () => ({ items: [] }),
+    render(data) {
+      ensureRowIds(data.items || (data.items = []));
+      const imp = (v) => (v === "high" || v === "low") ? v : "med";
+      const opt = (cur) => ["high", "med", "low"]
+        .map((v) => `<option value="${v}"${imp(cur) === v ? " selected" : ""}>${v === "high" ? "高" : v === "med" ? "中" : "低"}</option>`).join("");
+      const rows = data.items.map((it) => `
+        <div class="es-unk${imp(it.impact) === "high" && !it.resolved ? " es-unk-hot" : ""}${it.resolved ? " done" : ""}" data-id="${it.__id}">
+          <div class="es-unk-l1">
+            <input type="checkbox" class="es-unk-res" data-k="resolved"${it.resolved ? " checked" : ""} aria-label="解消済み" title="解消済みにする">
+            <input class="es-in es-grow" data-k="unknown" type="text" placeholder="まだ分からないこと・崩れたら致命的な前提" value="${esc(it.unknown || "")}">
+            <select class="es-in es-w64" data-k="impact" aria-label="影響度">${opt(it.impact)}</select>
+            <button type="button" class="es-rowx" data-act="del" aria-label="この未知を削除">${icon("x", { size: 14 })}</button>
+          </div>
+          <div class="es-unk-l2">
+            <input class="es-in es-grow" data-k="resolveBy" type="text" placeholder="解消方法（例: 試しに1件APIを叩く）" value="${esc(it.resolveBy || "")}">
+            <input class="es-in es-grow" data-k="evidence" type="text" placeholder="解消の証拠（例: 200が返る）" value="${esc(it.evidence || "")}">
+            <input class="es-in es-w120" data-k="due" type="text" placeholder="解消期日" value="${esc(it.due ? dueLabel(it.due) : "")}">
+          </div>
+        </div>`).join("");
+      return `
+        <div class="es-field">
+          <div class="es-hint">未知・崩れたら致命的な前提を、解消方法・証拠・期日付きで列挙。怖いところを先に潰す（高影響は赤・解消でチェック）。</div>
+          <div class="es-rows">${rows}</div>
+          <button type="button" class="es-add" data-act="add">${icon("arrowUp", { size: 13, cls: "es-add-ic" })}未知を追加</button>
+        </div>`;
+    },
+    wire(root, data, ctx, save) {
+      const rerender = () => { root.querySelector(".es-field").outerHTML = this.render(data); this.wire(root, data, ctx, save); };
+      root.querySelectorAll(".es-unk").forEach((rowEl) => {
+        const it = data.items.find((x) => x.__id === rowEl.dataset.id);
+        if (!it) return;
+        rowEl.querySelector('[data-k="unknown"]').addEventListener("input", (e) => { it.unknown = e.target.value; save(); });
+        rowEl.querySelector('[data-k="resolveBy"]').addEventListener("input", (e) => { it.resolveBy = e.target.value; save(); });
+        rowEl.querySelector('[data-k="evidence"]').addEventListener("input", (e) => { it.evidence = e.target.value; save(); });
+        const dueEl = rowEl.querySelector('[data-k="due"]');
+        dueEl.addEventListener("change", () => { const iso = smartToIso(dueEl.value); it.due = iso; dueEl.value = iso ? dueLabel(iso) : ""; save(); });
+        rowEl.querySelector('[data-k="impact"]').addEventListener("change", (e) => { it.impact = e.target.value; save(); rerender(); });
+        const res = rowEl.querySelector('[data-k="resolved"]');
+        res.addEventListener("change", () => { it.resolved = res.checked; save(); rerender(); });
+        rowEl.querySelector('[data-act="del"]').addEventListener("click", () => {
+          const i = data.items.findIndex((x) => x.__id === it.__id);
+          if (i >= 0) data.items.splice(i, 1);
+          save(); rerender();
+        });
+      });
+      root.querySelector('[data-act="add"]').addEventListener("click", () => {
+        data.items.push({ __id: uid(), unknown: "", impact: "med", resolveBy: "", evidence: "", due: "", resolved: false });
+        save(); rerender();
+        const inputs = root.querySelectorAll('.es-unk [data-k="unknown"]');
+        if (inputs.length) inputs[inputs.length - 1].focus();
+      });
+    },
+    score(data) {
+      const items = (data.items || []).filter((x) => nonEmpty(x.unknown));
+      if (!items.length) return 0;
+      const w = (im) => im === "high" ? 3 : im === "low" ? 1 : 2;
+      let got = 0, max = 0;
+      for (const it of items) { const wt = w(it.impact); max += wt; if (it.resolved) got += wt; }
+      return max > 0 ? Math.round(18 * got / max) : 0;
+    },
+  },
 ];
 
 // 緊急×重要 → 推奨アクション文言（render/wire 共用）。
@@ -920,6 +991,14 @@ export function ensureStyle() {
   .es-fever[data-tier="red"] .es-fever-fill{background:#e5484d}
   .es-fever-note{font-size:10.5px;color:var(--muted);line-height:1.45}
   .es-fever[data-tier="red"] .es-fever-note{color:var(--over,#e5484d);font-weight:600}
+  .es-unk{display:flex;flex-direction:column;gap:6px;border:1px solid var(--line);border-radius:9px;padding:8px 9px;background:var(--card)}
+  .es-unk-hot{border-color:var(--over,#e5484d)}
+  .es-unk.done{opacity:.6}
+  .es-unk.done [data-k="unknown"]{text-decoration:line-through;color:var(--muted)}
+  .es-unk-l1{display:flex;align-items:center;gap:7px}
+  .es-unk-l2{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding-left:24px}
+  .es-unk .es-unk-res{flex:none;margin:0;cursor:pointer}
+  .es-unk-l2 .es-w120{width:120px;flex:none}
   .es-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding-top:2px}
   .es-foot-score{font-size:11.5px;color:var(--muted)}
   .es-foot-score b{color:var(--ink);font-variant-numeric:tabular-nums}
