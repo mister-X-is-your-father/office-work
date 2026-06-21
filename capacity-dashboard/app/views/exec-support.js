@@ -238,6 +238,7 @@ const PLUGINS = [
   // 1. 次の一歩（最小着手）max=20
   {
     id: "next_step",
+    defaultOn: true,
     label: "次の一歩",
     icon: "play",
     max: 20,
@@ -261,6 +262,7 @@ const PLUGINS = [
   // 2. 段取り（手順化）max=15
   {
     id: "steps",
+    defaultOn: true,
     label: "段取り",
     icon: "listChecks",
     max: 15,
@@ -344,6 +346,7 @@ const PLUGINS = [
   // 3. 予定化・スケジュール max=15（due 変更時は updateTask で本体期日にも反映）
   {
     id: "schedule",
+    defaultOn: true,
     label: "予定化",
     icon: "calendar",
     max: 15,
@@ -456,6 +459,7 @@ const PLUGINS = [
   // 4. if-then トリガー max=15（両方=15 / 片方=7 / 無し=0）
   {
     id: "if_then",
+    defaultOn: true,
     label: "if-then トリガー",
     icon: "repeat",
     max: 15,
@@ -486,6 +490,7 @@ const PLUGINS = [
   // 5. 必要なもの max=15（全✓=15 / partial=floor(15*done率) / 空=0）
   {
     id: "prereqs",
+    defaultOn: true,
     label: "必要なもの",
     icon: "paperclip",
     max: 15,
@@ -539,6 +544,7 @@ const PLUGINS = [
   // 6. 想定する壁＋対策（WOOP）max=10（obstacle と plan 両方ある行が1つ以上=10）
   {
     id: "obstacles",
+    defaultOn: true,
     label: "想定する壁＋対策",
     icon: "alertTriangle",
     max: 10,
@@ -587,6 +593,7 @@ const PLUGINS = [
   // 7. 完了の定義（DoD）max=10（非空=10）
   {
     id: "dod",
+    defaultOn: true,
     label: "完了の定義",
     icon: "flag",
     max: 10,
@@ -606,7 +613,162 @@ const PLUGINS = [
     },
     score(data) { return nonEmpty(data.text) ? 10 : 0; },
   },
+
+  // ── 実行準備フレームワーク 波1（新規・既定OFF＝セット/手動でONにすると meter に乗る） ──
+
+  // A. 指揮官の意図 max=15（北極星: 上位目的＋終末状態を固定）
+  {
+    id: "commanders_intent",
+    icon: "flag",
+    label: "指揮官の意図",
+    max: 15,
+    symptoms: ["曖昧", "不確実性"],
+    defaults: () => ({ purpose: "", endState: "", mustHold: "", acceptableLoss: "" }),
+    render(data) {
+      return `
+        <div class="es-field">
+          <div class="es-hint">計画が崩れても見失わない“北極星”。上位目的・終末状態・絶対外さない条件を固定。</div>
+          <input class="es-in" data-k="purpose" type="text" autocomplete="off"
+            placeholder="上位目的＝なぜやるか" value="${esc(data.purpose || "")}">
+          <input class="es-in" data-k="endState" type="text" autocomplete="off"
+            placeholder="終末状態＝終わったとき何がどうなっているか" value="${esc(data.endState || "")}">
+          <input class="es-in" data-k="mustHold" type="text" autocomplete="off"
+            placeholder="絶対外さない必須条件（1〜3個・読点区切り可）" value="${esc(data.mustHold || "")}">
+          <input class="es-in" data-k="acceptableLoss" type="text" autocomplete="off"
+            placeholder="間に合わなければ削ってよい要素（任意）" value="${esc(data.acceptableLoss || "")}">
+        </div>`;
+    },
+    wire(root, data, ctx, save) {
+      root.querySelector('[data-k="purpose"]').addEventListener("input", (e) => { data.purpose = e.target.value; save(); });
+      root.querySelector('[data-k="endState"]').addEventListener("input", (e) => { data.endState = e.target.value; save(); });
+      root.querySelector('[data-k="mustHold"]').addEventListener("input", (e) => { data.mustHold = e.target.value; save(); });
+      root.querySelector('[data-k="acceptableLoss"]').addEventListener("input", (e) => { data.acceptableLoss = e.target.value; save(); });
+    },
+    score(data) {
+      return nonEmpty(data.purpose) && nonEmpty(data.endState) ? 15 : ((nonEmpty(data.purpose) || nonEmpty(data.endState)) ? 7 : 0);
+    },
+  },
+
+  // B. 今日のカエル max=15（今日これだけは絶対の1件を朝イチ枠に）
+  {
+    id: "mit_today",
+    icon: "alarm",
+    label: "今日のカエル",
+    max: 15,
+    symptoms: ["先延ばし", "曖昧"],
+    defaults: () => ({ isFrog: false, slotStart: "09:00", estMin: "" }),
+    render(data) {
+      return `
+        <div class="es-field">
+          <div class="es-hint">今日これだけは絶対の1件を、意志力最大の朝イチ枠に置く。</div>
+          <label class="es-check">
+            <input type="checkbox" data-k="isFrog"${data.isFrog ? " checked" : ""}>
+            <span>このタスクを今日のカエルにする</span>
+          </label>
+          <div class="es-pair">
+            <input class="es-in es-w120" data-k="slotStart" type="time" value="${esc(data.slotStart || "09:00")}" aria-label="開始時刻">
+            <input class="es-in es-w120" data-k="estMin" type="text" inputmode="numeric"
+              placeholder="確保分（既定60）" value="${esc(data.estMin || "")}">
+          </div>
+        </div>`;
+    },
+    wire(root, data, ctx, save) {
+      // TODO(2026-06-21): 枠確保アクション(logPlan)は actions パスで
+      const frog = root.querySelector('[data-k="isFrog"]');
+      frog.addEventListener("change", () => { data.isFrog = frog.checked; save(); });
+      const slot = root.querySelector('[data-k="slotStart"]');
+      slot.addEventListener("change", () => { data.slotStart = slot.value; save(); });
+      slot.addEventListener("input", () => { data.slotStart = slot.value; save(); });
+      const est = root.querySelector('[data-k="estMin"]');
+      est.addEventListener("input", () => { data.estMin = est.value; save(); });
+      est.addEventListener("change", () => { data.estMin = est.value; save(); });
+    },
+    score(data) { return data.isFrog ? 15 : 0; },
+  },
+
+  // C. 緊急×重要 max=10（Do/予定化/委譲/やめる を機械的に確定）
+  {
+    id: "eisenhower",
+    icon: "grid",
+    label: "緊急×重要",
+    max: 10,
+    symptoms: ["曖昧", "割り込み"],
+    defaults: () => ({ important: false, urgent: false, decided: false }),
+    render(data, ctx) {
+      // 未確定なら締切から緊急を自動推定（due が今日以前/3日以内なら true）。
+      if (!data.decided) {
+        const due = (ctx && ctx.task && ctx.task.due_date) || "";
+        const dueIso = due && !due.startsWith("0001") ? due.slice(0, 10) : "";
+        if (dueIso) {
+          const soon = shiftISO(localTodayIso(), 3);
+          data.urgent = dueIso <= soon;
+        }
+      }
+      const label = eisenhowerActionLabel(data);
+      return `
+        <div class="es-field">
+          <div class="es-hint">重要×緊急で Do/予定化/委譲/やめる を機械的に確定。</div>
+          <label class="es-check">
+            <input type="checkbox" data-k="important"${data.important ? " checked" : ""}>
+            <span>重要</span>
+          </label>
+          <label class="es-check">
+            <input type="checkbox" data-k="urgent"${data.urgent ? " checked" : ""}>
+            <span>緊急</span>
+          </label>
+          <div class="es-hint" data-act-label>${esc(label)}</div>
+        </div>`;
+    },
+    wire(root, data, ctx, save) {
+      const refresh = () => {
+        const el = root.querySelector("[data-act-label]");
+        if (el) el.textContent = eisenhowerActionLabel(data);
+      };
+      const imp = root.querySelector('[data-k="important"]');
+      imp.addEventListener("change", () => { data.important = imp.checked; data.decided = true; save(); refresh(); });
+      const urg = root.querySelector('[data-k="urgent"]');
+      urg.addEventListener("change", () => { data.urgent = urg.checked; data.decided = true; save(); refresh(); });
+    },
+    score(data) { return data.decided ? 10 : 0; },
+  },
+
+  // D. 復唱確認 max=8（依頼を自分の言葉で要約しズレを着手前に炙り出す）
+  {
+    id: "backbrief",
+    icon: "message",
+    label: "復唱確認",
+    max: 8,
+    symptoms: ["曖昧", "依存"],
+    defaults: () => ({ myUnderstanding: "", firstThreeMoves: "", successTest: "" }),
+    render(data) {
+      return `
+        <div class="es-field">
+          <div class="es-hint">依頼を自分の言葉で要約し直し、理解のズレ・前提の抜けを着手前に炙り出す。</div>
+          <textarea class="es-in es-ta" data-k="myUnderstanding" rows="2"
+            placeholder="この依頼を自分はこう理解した">${esc(data.myUnderstanding || "")}</textarea>
+          <input class="es-in" data-k="firstThreeMoves" type="text" autocomplete="off"
+            placeholder="最初の3手を自分の言葉で" value="${esc(data.firstThreeMoves || "")}">
+          <input class="es-in" data-k="successTest" type="text" autocomplete="off"
+            placeholder="成功と言える判定（DoDと矛盾しないか）" value="${esc(data.successTest || "")}">
+        </div>`;
+    },
+    wire(root, data, ctx, save) {
+      // ※ openQuestions→確認子タスク生成は次パス。
+      root.querySelector('[data-k="myUnderstanding"]').addEventListener("input", (e) => { data.myUnderstanding = e.target.value; save(); });
+      root.querySelector('[data-k="firstThreeMoves"]').addEventListener("input", (e) => { data.firstThreeMoves = e.target.value; save(); });
+      root.querySelector('[data-k="successTest"]').addEventListener("input", (e) => { data.successTest = e.target.value; save(); });
+    },
+    score(data) { return nonEmpty(data.myUnderstanding) ? 8 : 0; },
+  },
 ];
+
+// 緊急×重要 → 推奨アクション文言（render/wire 共用）。
+function eisenhowerActionLabel(data) {
+  if (data.important && data.urgent) return "→ 今すぐ着手";
+  if (data.important && !data.urgent) return "→ 予定化する";
+  if (!data.important && data.urgent) return "→ 委譲する";
+  return "→ やめる/後回し";
+}
 
 const PLUGIN_BY_ID = Object.fromEntries(PLUGINS.map((p) => [p.id, p]));
 
@@ -638,7 +800,8 @@ function loadEnabled() {
       return loadOrder().filter((id) => set.has(id));
     }
   } catch { /* noop */ }
-  return loadOrder().slice(); // 既定 = 全部 ON（表示順）
+  // 既定 = defaultOn の手法のみ ON（新規手法はセット/手動で有効化＝既定では meter を膨らませない）。
+  return loadOrder().filter((id) => PLUGIN_BY_ID[id] && PLUGIN_BY_ID[id].defaultOn);
 }
 function saveEnabled(ids) {
   try { localStorage.setItem(ENABLED_KEY, JSON.stringify(ids)); } catch { /* noop */ }
