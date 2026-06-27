@@ -88,13 +88,18 @@ async function _loadImpl() {
   // テンプレートWS（雛形置き場）＋習慣WS（習慣トラッカー）＋設定で除外されたWSは通常タスクから分離
   // — 負荷・空き・一覧に混ぜない
   const templateProject = (projects || []).find((p) => p.title === TEMPLATE_WS) || null;
-  const habitProject = (projects || []).find((p) => p.title === HABIT_WS) || null;
+  // 「習慣」WSは過去のrace（追加時に habitProject=null を掴むと createProject で重複WSを量産）で
+  // 複数できている可能性があるため、同名WSを全て拾う。habitProject は再利用先の正典(先頭)、
+  // habitTasks は全「習慣」WSのタスクを統合＝既存の重複WSでも習慣が隠れない（見かけのデータ消失を回収）。
+  const habitProjects = (projects || []).filter((p) => p.title === HABIT_WS);
+  const habitProject = habitProjects[0] || null;
+  const habitProjectIds = new Set(habitProjects.map((p) => p.id));
   const excluded = new Set(settings.excludedWs);
   if (templateProject) excluded.add(templateProject.id);
-  if (habitProject) excluded.add(habitProject.id);
+  for (const hp of habitProjects) excluded.add(hp.id);
   const tasks = (tasksAll || []).filter((t) => !excluded.has(t.project_id));
   const templates = templateProject ? (tasksAll || []).filter((t) => t.project_id === templateProject.id) : [];
-  const habitTasks = habitProject ? (tasksAll || []).filter((t) => t.project_id === habitProject.id && !t.done) : [];
+  const habitTasks = habitProjects.length ? (tasksAll || []).filter((t) => habitProjectIds.has(t.project_id) && !t.done) : [];
   // ID→ユーザー名の名簿（全ワークスペースの projectusers ∪）。assignees に出ない人の名前解決用（P2 #5）。
   const dir = new Map();
   // 同時実行数を 8 に制限（実WSのみ・project_id は既に一意なので重複 fetch は無い）。

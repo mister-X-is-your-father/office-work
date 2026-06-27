@@ -52,7 +52,10 @@ export async function render(root) {
     input.disabled = true;
     clearErr();
     try {
-      const ws = habitProject || await createProject(HABIT_WS);
+      // race/stale closure 対策: 作成直前に強制リフレッシュで最新の「習慣」WSを再解決し、
+      // 既存があれば必ず再利用（無いときだけ新規作成）＝重複WS量産と "project does not exist" を防ぐ。
+      const fresh = await load(true);
+      const ws = fresh.habitProject || await createProject(HABIT_WS);
       const t = await createTaskInProject(ws.id, { title: name });
       await addAssignee(t.id, me.id);
       invalidate(); await load(); render(root);
