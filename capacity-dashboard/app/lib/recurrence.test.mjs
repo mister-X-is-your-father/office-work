@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { rrulestr } from "./vendor/rrule.mjs";
+import { rrulestr } from "../vendor/rrule.mjs";
 import { expandRecurrences, occurrenceLoadEntries, capacityOn, freeByMemberDay, holidayDataStatus } from "./recurrence.js";
 
 const rec = (o) => ({ dtstart: "2026-06-01T00:00:00Z", duration_seconds: 3600, assignee_ids: [1], ...o });

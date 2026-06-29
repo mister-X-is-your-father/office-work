@@ -1,6 +1,6 @@
 // 定期タスク/会議(RRULE) の展開＋可用性（祝日/休暇/週末）→ 空き計算（#4 多源マージ）。
 // 展開は rrule.js（自前計算しない）。occurrence は仮想（実タスク非生成）。日付は "YYYY-MM-DD" UTC統一。
-import { rrulestr } from "./vendor/rrule.mjs";
+import { rrulestr } from "../vendor/rrule.mjs";
 
 const toH = (s) => (s || 0) / 3600;
 const round1 = (x) => Math.round(x * 100) / 100; // 時間表示=小数2桁
