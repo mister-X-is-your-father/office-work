@@ -164,6 +164,31 @@ function skinThumb(skin, ac) {
   }
 }
 
+// タスク検索結果のHTML。語=タスク名の部分一致・大小無視（空なら全件）。
+// グルーピング=「WS名 / プロジェクト(親タスク)名」。mineを含むグループを上、以降グループ名昇順、各グループ内タスク名昇順。
+// 見出しにWS/プロジェクト名は出すが、選択・記録・表示に使うのはタスク名(data-title)だけ。
+function taskResHtml(cands, q) {
+  const needle = (q || "").trim().toLowerCase();
+  const hits = (cands || []).filter((c) => !needle || c.title.toLowerCase().includes(needle));
+  if (!hits.length) return `<div class="pm-res-none">該当なし</div>`;
+  const groups = new Map(); // key="ws / parent" -> { hasMine, items[] }
+  for (const c of hits) {
+    const key = `${c.wsTitle} / ${c.parentTitle}`;
+    let g = groups.get(key);
+    if (!g) { g = { hasMine: false, items: [] }; groups.set(key, g); }
+    if (c.mine) g.hasMine = true;
+    g.items.push(c);
+  }
+  const byTitle = (a, b) => a.title.localeCompare(b.title, "ja");
+  const order = [...groups.entries()].sort((a, b) =>
+    a[1].hasMine !== b[1].hasMine ? (a[1].hasMine ? -1 : 1) : a[0].localeCompare(b[0], "ja"));
+  return order.map(([key, g]) => {
+    const items = g.items.slice().sort(byTitle).map((c) =>
+      `<button type="button" class="pm-res-i" data-id="${c.id}" data-title="${esc(c.title)}">${esc(c.title)}</button>`).join("");
+    return `<div class="pm-res-h">${esc(key)}</div>${items}`;
+  }).join("");
+}
+
 function notifyDone(title, body) {
   if (typeof Notification !== "undefined" && Notification.permission === "granted") {
     try { new Notification(title, { body, tag: "pomo" }); return; } catch { /* fallthrough */ }
@@ -328,18 +353,20 @@ export function mountPomodoro(topbar) {
     document.body.appendChild(card);
     restorePos(card);  // 前回ドラッグした位置を復元
     wireDrag(card);    // ヘッダをドラッグで移動（card は再描画をまたいで永続＝1回配線でOK）
-    // 候補=未完了の全タスク（自分の担当を先頭グループに。担当未設定のタスクも選べる）
-    let mine = [], others = [];
+    // 候補=未完了の全タスク。各候補に「WS名/プロジェクト(親タスク)名/自分の担当か」を注釈付与し
+    // 検索＋階層グループのドリルダウンUIで選ばせる（記録/表示はタスク名だけ＝大分類/中分類は出さない）。
+    let cands = [];
     try {
-      const { tasks, me } = await load();
+      const { tasks, projects, me } = await load();
+      const wsName = new Map((projects || []).map((p) => [p.id, p.title]));
       for (const t of (tasks || []).filter((x) => !x.done)) {
-        ((t.assignees || []).some((a) => a.id === (me && me.id)) ? mine : others).push(t);
+        const mine = (t.assignees || []).some((a) => a.id === (me && me.id));
+        const wsTitle = wsName.get(t.project_id) || "WS";
+        const parentTitle = t.related_tasks?.parenttask?.[0]?.title || "(直下)";
+        cands.push({ id: t.id, title: t.title, wsTitle, parentTitle, mine });
       }
-      const byTitle = (a, b) => a.title.localeCompare(b.title, "ja");
-      mine.sort(byTitle); others.sort(byTitle);
     } catch { /* 未ログイン等 */ }
-    card._mine = mine;
-    card._others = others;
+    card._cands = cands;
     card._mode = "focus"; // アイドル画面のモード選択
     paint();
     timer = setInterval(loop, 1000);
@@ -412,11 +439,8 @@ export function mountPomodoro(topbar) {
       card._running = false; // 次に開始したとき実行シェルを作り直す
       if (card._idle) return; // アイドル表示は毎秒再描画しない（select の選択を守る）
       card._idle = true;
-      const og = (label, list) => list.length
-        ? `<optgroup label="${label}">${list.map((t) => `<option value="${t.id}">${esc(t.title)}</option>`).join("")}</optgroup>` : "";
-      const opts = `<option value="">タスクを選択（実績の記録先）</option>` +
-        og("自分の担当", card._mine || []) + og("その他のタスク", card._others || []);
       const m = card._mode;
+      const selTitle = card._taskTitle || ""; // 選択中タスク名（検索欄に反映・WS/親名は出さない）
       card.innerHTML = `
         <div class="pm-h">${modeIcon(m === "focus" ? "focus" : m)} 集中タイマー <span class="pm-cnt">今日 ${countToday()} 回</span><button class="pm-x" id="pm-x">×</button></div>
         <div class="pm-tabs">
@@ -424,7 +448,11 @@ export function mountPomodoro(topbar) {
           <button data-m="countdown" class="${m === "countdown" ? "on" : ""}">${icon("alarm", { size: 12 })} ダウン</button>
           <button data-m="countup" class="${m === "countup" ? "on" : ""}">${icon("stopwatch", { size: 12 })} アップ</button>
         </div>
-        <select id="pm-task" class="pm-in">${opts}</select>
+        <div class="pm-task-sel">
+          <input id="pm-task-q" class="pm-in" type="text" placeholder="タスクを検索（実績の記録先）" autocomplete="off" value="${esc(selTitle)}">
+          <button class="pm-task-clr" id="pm-task-clr" title="選択を解除"${selTitle ? "" : " hidden"}>×</button>
+          <div class="pm-res" id="pm-task-res" hidden></div>
+        </div>
         <div class="pm-modebox">
         ${m === "focus" ? `<div class="pm-row">
           <label>集中 <select id="pm-focus" class="pm-in">${[5, 10, 15, 25, 45, 50, 60].map((n) => `<option value="${n}"${n === 25 ? " selected" : ""}>${n}分</option>`).join("")}</select></label>
@@ -440,18 +468,42 @@ export function mountPomodoro(topbar) {
       card.querySelector("#pm-x").onclick = open;
       card.querySelectorAll(".pm-tabs button").forEach((b) => {
         b.onclick = () => {
-          const sel = card.querySelector("#pm-task").value; // モード切替でも選択タスクは維持
+          // 選択は card._taskId/_taskTitle に持つので、モード切替で再paintしても保持される
           card._mode = b.dataset.m;
           card._idle = false;
           paint();
-          if (sel) card.querySelector("#pm-task").value = sel;
         };
       });
+      // ── タスク検索ドロップダウン（カード全体は再paintせず結果リストだけ更新＝入力フォーカス維持）──
+      const qIn = card.querySelector("#pm-task-q");
+      const res = card.querySelector("#pm-task-res");
+      const clr = card.querySelector("#pm-task-clr");
+      const renderRes = () => { res.innerHTML = taskResHtml(card._cands || [], qIn.value); };
+      const openRes = () => { renderRes(); res.hidden = false; };
+      const closeRes = () => { res.hidden = true; };
+      qIn.oninput = openRes;
+      qIn.onfocus = openRes;
+      qIn.onblur = () => setTimeout(closeRes, 150); // 行クリック(mousedown)を拾えるよう遅延
+      // mousedown で選択（blur より先に発火＝行クリックが確実に効く）
+      res.onmousedown = (e) => {
+        const it = e.target.closest(".pm-res-i");
+        if (!it) return;
+        e.preventDefault(); // 入力のフォーカスを奪わない
+        card._taskId = +it.dataset.id;
+        card._taskTitle = it.dataset.title || "";
+        qIn.value = card._taskTitle;
+        clr.hidden = !card._taskTitle;
+        closeRes();
+      };
+      clr.onclick = () => {
+        card._taskId = null; card._taskTitle = "";
+        qIn.value = ""; clr.hidden = true;
+        qIn.focus(); renderRes(); res.hidden = false;
+      };
       card.querySelector("#pm-go").onclick = () => {
-        const sel = card.querySelector("#pm-task");
         const base = {
-          taskId: sel.value ? +sel.value : null,
-          taskTitle: sel.value ? sel.options[sel.selectedIndex].text : "",
+          taskId: card._taskId ?? null,
+          taskTitle: card._taskTitle || "",
           paused: false,
         };
         if (card._mode === "focus") {
@@ -623,12 +675,34 @@ function ensureStyle() {
   .pm-task.none{opacity:.6}
   .pm-hint{font-size:10.5px;color:var(--muted);margin-top:8px;line-height:1.5}
 
+  /* ── タスク検索＋階層グループのドリルダウン ── */
+  .pm-task-sel{position:relative}
+  .pm-task-clr{position:absolute;top:5px;right:6px;width:20px;height:20px;border:0;background:transparent;
+    color:var(--muted);font-size:15px;line-height:1;cursor:pointer;padding:0}
+  .pm-task-clr:hover{color:var(--ink)}
+  .pm-task-clr[hidden]{display:none}
+  .pm-res{position:absolute;left:0;right:0;top:32px;z-index:5;max-height:190px;overflow:auto;
+    background:#fff;border:1px solid var(--line);border-radius:9px;box-shadow:0 10px 26px rgba(10,18,35,.18);padding:4px 0}
+  .pm-res[hidden]{display:none}
+  .pm-res-h{position:sticky;top:0;background:#fff;font-size:10px;font-weight:700;color:var(--muted);
+    letter-spacing:.02em;padding:5px 10px 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pm-res-i{display:block;width:100%;box-sizing:border-box;text-align:left;font:inherit;font-size:12.5px;
+    color:var(--ink);padding:6px 10px 6px 16px;border:0;background:transparent;cursor:pointer;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pm-res-i:hover{background:#f3f8ff}
+  .pm-res-none{font-size:12px;color:var(--muted);padding:8px 10px}
+
   /* ===== ダークモード上書き（lightは不変。<button>はglobalのinput/select規則の対象外＝明示が必要） ===== */
   /* カード面: background はJS(applyCardStyle)がテーマ判定でinline上書きするので、ここでは枠/影のみ */
   html[data-theme="dark"] .pm-card{border-color:var(--line);box-shadow:0 18px 50px rgba(0,0,0,.5)}
   html[data-theme="dark"] .pm-tabs button{background:var(--card);border-color:var(--line);color:var(--muted)}
   html[data-theme="dark"] .pm-tabs button.on{border-color:var(--fill);color:#8db8ff;background:rgba(58,134,255,.16)}
   html[data-theme="dark"] .pm-in{background:var(--card);color:var(--ink);border-color:var(--line)}
+  html[data-theme="dark"] .pm-res{background:var(--card);border-color:var(--line);box-shadow:0 10px 26px rgba(0,0,0,.5)}
+  html[data-theme="dark"] .pm-res-h{background:var(--card)}
+  html[data-theme="dark"] .pm-res-i{color:var(--ink)}
+  html[data-theme="dark"] .pm-res-i:hover{background:rgba(58,134,255,.16)}
+  html[data-theme="dark"] .pm-task-clr:hover{color:var(--ink)}
   html[data-theme="dark"] .pm-go.sub{background:var(--card);color:#8db8ff}
   html[data-theme="dark"] .pm-go.sub.stop{background:var(--card);border-color:rgba(229,72,77,.45);color:#ff9b96}
   html[data-theme="dark"] .pm-pip{background:var(--card);border-color:var(--line);color:var(--muted)}
