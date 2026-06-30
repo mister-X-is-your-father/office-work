@@ -300,7 +300,7 @@ export async function render(root) {
   const recBand = recurrenceBandHtml(recurrences, members);
 
   const subtitle = isOutline
-    ? "階層表示（プロジェクト＞タスク）・チェックで完了、＋でサブタスク追加"
+    ? "階層表示（プロジェクト＞タスクグループ＞タスク）・チェックで完了、＋で子タスク追加"
     : (manual ? "・ 行をどこでもドラッグして自分用に並べ替え" : `・ ソート条件を重ねて並べ替え（列ヘッダ: クリック=第1条件 / Shift+クリック=条件を追加・最大${MAX_SORTS}）`);
   // vtitle の件数内訳サマリ（表示中の集合に対して）: 件数・期限切れ（未完了で期限が今日より前）・見積合計h。
   // B21: listSummaryText（純関数）に集約＝patchRow が再fetchなしで同じ式で更新できる。
@@ -1973,6 +1973,10 @@ function olCountChildren(forest) {
 function olRowHtml(node, depth, counts) {
   const t = node.task;
   const has = node.children.length > 0;
+  // 3層運用の見分け: 子を持つ親だけにバッジ。depth0の親=プロジェクト / 中間の親=タスクグループ / 葉=バッジ無し。
+  const olKind = has ? (depth === 0 ? "proj" : "group") : "";
+  const kindBadge = olKind === "proj" ? `<span class="ol-kind ol-kind-proj">プロジェクト</span>`
+    : olKind === "group" ? `<span class="ol-kind ol-kind-group">タスクグループ</span>` : "";
   const open = !olCollapsed.has(t.id);
   const st = statusOf(t);
   const who = (t.assignees || [])[0];
@@ -1987,9 +1991,10 @@ function olRowHtml(node, depth, counts) {
     ${tw}
     <span class="ol-cb ${st}" data-id="${t.id}" data-done="${t.done ? 1 : 0}" title="クリックで完了を切替"></span>
     <span class="ol-name ${t.done ? "done" : ""}">${esc(t.title)}</span>
+    ${kindBadge}
     ${childInfo}
     <span class="ol-meta">
-      <button type="button" class="ol-addsub" data-pid="${t.id}" data-proj="${t.project_id || 0}" title="サブタスクを追加">＋</button>
+      <button type="button" class="ol-addsub" data-pid="${t.id}" data-proj="${t.project_id || 0}" title="子タスクを追加">＋</button>
       ${who ? `<span class="ol-ava" style="background:${member_color(who.id)}">${esc((wn[0] || "?"))}</span>` : ""}
       ${due ? `<span class="ol-due">${due}</span>` : ""}
       <span class="ol-st ${st}">${STATUS[st].label}</span>
@@ -2006,7 +2011,7 @@ function openInlineSubtask(btn, parentId, projId, root) {
   closeRowMenu();
   const box = document.createElement("div");
   box.className = "tb-ctx ol-addbox";
-  box.innerHTML = `<textarea class="ol-addinp" rows="2" placeholder="サブタスク名を入力（Enterで追加）"></textarea>
+  box.innerHTML = `<textarea class="ol-addinp" rows="2" placeholder="子タスク名を入力（Enterで追加）"></textarea>
     <div class="ol-addbtns"><button class="ol-addok">追加</button><button class="ol-addng">キャンセル</button><span class="ol-adderr"></span></div>`;
   document.body.appendChild(box);
   _olInlineEl = box;
@@ -2341,6 +2346,9 @@ function css() {
   .ol-row:hover .ol-addsub{opacity:1}
   .ol-addsub:hover{border-color:${C.fill};color:${C.fill};background:#eef4ff}
   @media (hover:none){.ol-addsub{opacity:.55}}
+  .ol-kind{font-size:10px;font-weight:700;padding:1px 6px;border-radius:6px;margin-left:6px;vertical-align:middle;white-space:nowrap;display:inline-block}
+  .ol-kind-proj{background:rgba(58,134,255,.13);color:#2f6fd6;border:1px solid rgba(58,134,255,.32)}
+  .ol-kind-group{background:${C.track};color:${C.muted};border:1px solid ${C.line}}
   .ol-addbox{padding:8px;min-width:240px;gap:7px}
   .ol-addinp{font:inherit;font-size:13px;width:100%;box-sizing:border-box;border:1px solid ${C.line};border-radius:7px;padding:6px 8px;resize:vertical;color:${C.ink};background:#fff}
   .ol-addinp:focus{outline:none;border-color:${C.fill}}
