@@ -226,6 +226,13 @@ function cardHtml(t, memberIdx, byId) {
   const projBadge = parent
     ? `<span class="kb-proj" style="border-color:${projColor(parent.id)};color:${projColor(parent.id)}" title="案件: ${esc(parent.title)}">${esc(parent.title)}</span>`
     : "";
+  // 中間グループ（直近親）が最上位プロジェクトと異なるときだけ、グループ名チップを出す。
+  const _imm = (((t.related_tasks || {}).parenttask) || [])[0];
+  const _immParent = _imm ? (byId.get(_imm.id) || _imm) : null;
+  const group = (_immParent && parent && _immParent.id !== parent.id) ? _immParent : null;
+  const groupChip = group
+    ? `<span class="kb-group" title="タスクグループ: ${esc(group.title)}">${esc(group.title)}</span>`
+    : "";
 
   // 期限バッジ（SVG＋文字。絵文字は使わない）。期限なしは無印。
   const dueBadge = due
@@ -247,7 +254,7 @@ function cardHtml(t, memberIdx, byId) {
   return `<div class="kb-card${t.done ? " done" : ""}${heat ? " h-" + heat : ""}" draggable="true" data-id="${t.id}" tabindex="0" role="button" aria-label="${esc(t.title)} を編集（Enterで編集 / Ctrl+左右で列移動）">
     <button type="button" class="kb-move" data-move aria-haspopup="menu" aria-expanded="false" title="移動（タップで移動先を選ぶ）" aria-label="「${esc(t.title)}」を移動">${icon("chevronRight", { size: 14 })}</button>
     <div class="kb-ct"><i class="kb-prio" style="background:${pb ? PRIO[pb].c : "#c6cdd6"}"></i>${esc(t.title)}</div>
-    ${projBadge ? `<div class="kb-cr">${projBadge}</div>` : ""}
+    ${(projBadge || groupChip) ? `<div class="kb-cr">${projBadge}${groupChip}</div>` : ""}
     <div class="kb-cm">
       ${ava}
       ${dueBadge}
@@ -763,6 +770,7 @@ function css() {
   .kb-prio{width:8px;height:8px;border-radius:50%;flex:none;display:inline-block;transform:translateY(-1px)}
   .kb-cr{margin-top:6px}
   .kb-proj{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px;font-weight:600;border:1px solid;border-radius:7px;padding:0 6px;vertical-align:middle}
+  .kb-group{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:600;padding:1px 7px;border-radius:7px;background:${C.track};color:${C.muted};white-space:nowrap;max-width:140px;overflow:hidden;text-overflow:ellipsis}
   .kb-cm{display:flex;gap:7px;align-items:center;margin-top:8px;min-height:18px;flex-wrap:wrap}
   .kb-due{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:${C.muted};font-weight:600;font-variant-numeric:tabular-nums;border-radius:7px;padding:0 6px}
   .kb-due.heat-overdue{color:#fff;background:${C.over}}
