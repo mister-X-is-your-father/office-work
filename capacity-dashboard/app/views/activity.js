@@ -8,16 +8,13 @@ import { load, isAiUser } from "../lib/store.js";
 import { getActivity } from "../lib/exec.js";
 import { getTimes } from "../lib/api.js";
 import { C, esc, fmtH, todayISO, member_color } from "../lib/ui.js";
-import { dateOnly } from "../lib/capacity.js";
+import { dateOnly, shiftISO } from "../lib/capacity.js";
+import { DOW_JA } from "../lib/form.js";
 import { openTaskForm } from "./taskform.js";
 import { icon } from "../lib/icons.js";
 
 const SCOPE_KEY = "ts.activity.scope"; // "me" | "team"（既定 "team"）
-const DOW = ["日", "月", "火", "水", "木", "金", "土"];
 const MAX_PER_DAY = 60; // 1 日あたりの表示上限（多すぎ防止）
-
-// ISO日付("YYYY-MM-DD")を n 日ずらす（UTC基準）。
-const shiftISO = (iso, n) => { const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 
 // 有効な日付文字列か（""/"0001"始まり/未設定 は無効）。
 const validDate = (d) => !!d && typeof d === "string" && !d.startsWith("0001") && !d.startsWith("0000");
@@ -176,7 +173,7 @@ export async function render(root) {
   const dayHead = (day) => {
     const d = new Date(day + "T00:00:00Z");
     const md = `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
-    const dow = DOW[d.getUTCDay()];
+    const dow = DOW_JA[d.getUTCDay()];
     const isToday = day === today ? "今日 " : "";
     return `${isToday}${md}（${dow}）`;
   };

@@ -2,8 +2,10 @@
 // URL を渡せば誰でもチームの現況を把握できる、中立的な状況サマリー。
 // 状況把握に効く順で 1 枚に集約: KPI / 遅延 / 今日のメンバー状況 / 今週の締切 / 直近の完了。
 // データは load() の共有キャッシュから算出（追加 fetch なし）。ロジックは home/report/capacity から再利用。
-import { load, invalidate, isAiUser } from "../lib/store.js";
-import { loadByMember, triage } from "../lib/capacity.js";
+import { load, invalidate } from "../lib/store.js";
+import { loadByMember, triage, shiftISO } from "../lib/capacity.js";
+import { firstHuman } from "../lib/users.js";
+import { DOW_JA } from "../lib/form.js";
 import { capacityOn } from "../lib/recurrence.js";
 import { statusOf } from "../lib/kinds.js";
 import { C, esc, fmtH, todayISO, member_color, announce } from "../lib/ui.js";
@@ -16,8 +18,6 @@ const fmtClock = (d) => `${String(d.getHours()).padStart(2, "0")}:${String(d.get
 // このビューが画面に出ている間だけ有効な visibilitychange ハンドラの参照（多重登録防止用）。
 let _visHandler = null;
 
-// today から n 日後の YYYY-MM-DD（home/report と同じ式）。
-const shiftISO = (iso, n) => { const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const dowOf = (iso) => new Date(iso + "T00:00:00Z").getUTCDay();
 // 今週末（今日を含む週の終端）。report.js の weekEndISO と同じ計算で整合。
 // weekStart 指定時はその開始曜日の 6 日後が週末、未指定時は日曜(0)終わり。
@@ -30,14 +30,11 @@ function weekEndISO(day, weekStart) {
 const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(0, 10) : "");
 // 完了日 ISO（done_at、ゼロ日付/未設定は null）。report.js と同義。
 const doneAtISO = (t) => (t.done_at && !t.done_at.startsWith("0001") ? t.done_at.slice(0, 10) : null);
-// 人間担当（AI担当 fable は担当とみなさない＝未アサイン扱い）。home.js humanAssignees と同義。
-const humanAssignees = (t) => (t.assignees || []).filter((a) => !isAiUser(a));
 // 未完了 = done でない（連絡待ち/進行中は含む）。home.js isOpen と同義。
 const isOpen = (t) => statusOf(t) !== "done";
 // 期限昇順→ID（home.js byDue と同義）。
 const byDue = (a, b) => (dueISO(a) || "9999").localeCompare(dueISO(b) || "9999") || a.id - b.id;
 const mdOf = (iso) => { const [, m, d] = iso.split("-"); return `${+m}/${+d}`; };
-const DOW = ["日", "月", "火", "水", "木", "金", "土"];
 
 const MAX_ROWS = 8; // 各リストの先頭表示件数。超過分は「他N件」。
 
@@ -50,7 +47,7 @@ function avatar(who) {
 
 // 1タスク行（クリックで編集モーダル）。meta はビュー側が右側に添える HTML。
 function taskRow(t, meta) {
-  const who = humanAssignees(t)[0] || null;
+  const who = firstHuman(t);
   return `<button type="button" class="st-row" data-id="${t.id}">
     <span class="st-row-t">${esc(t.title)}</span>
     <span class="st-row-m">${avatar(who)}${meta || ""}</span>
@@ -131,7 +128,7 @@ export async function render(root) {
   const stepsSection = todaySteps.length === 0
     ? empty("着手準備の今日やる手順なし")
     : `<div class="st-rows">${todaySteps.slice(0, MAX_ROWS).map((it) => {
-        const who = humanAssignees(it.task)[0] || null;
+        const who = firstHuman(it.task);
         const lateBadge = it.late ? `<span class="st-late">遅れ</span>` : "";
         return `<button type="button" class="st-row" data-id="${it.task.id}">
           <span class="st-row-t">${esc(it.stepTitle)} <span class="st-step-task">${esc(it.task.title)}</span></span>
@@ -160,7 +157,7 @@ export async function render(root) {
     ? empty("今週の締切なし")
     : `<div class="st-rows">${thisWeek.slice(0, MAX_ROWS).map((t) => {
         const d = dueISO(t);
-        const meta = `<span class="st-due${d === day ? " today" : ""}">${mdOf(d)}（${DOW[dowOf(d)]}）</span>`;
+        const meta = `<span class="st-due${d === day ? " today" : ""}">${mdOf(d)}（${DOW_JA[dowOf(d)]}）</span>`;
         return taskRow(t, meta);
       }).join("")}</div>${moreLine(thisWeek.length, Math.min(MAX_ROWS, thisWeek.length))}`;
 

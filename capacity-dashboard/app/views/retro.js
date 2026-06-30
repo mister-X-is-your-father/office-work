@@ -12,6 +12,7 @@ import { C, esc, fmtH, todayISO } from "../lib/ui.js";
 import { dateOnly } from "../lib/capacity.js";
 import { openTaskForm } from "./taskform.js";
 import { icon } from "../lib/icons.js";
+import { DOW_JA } from "../lib/form.js";
 
 // 率カード（大数字＋進捗バー）。対象0件は「対象なし」を薄く（0%表示にしない）。
 //   pct 低=注意(over) / 中=進行(amber) / 高=好調(free)。
@@ -80,7 +81,6 @@ export async function render(root) {
 
   // 週バーの正規化最大値（実働h）。0除算/空回避で必ず >0。
   const maxWorkedH = Math.max(1, ...series.map((d) => d.workedH || 0));
-  const dowLabel = ["日", "月", "火", "水", "木", "金", "土"];
   const md = (iso) => iso.slice(5).replace("-", "/");
   const dowOf = (iso) => new Date(iso + "T00:00:00Z").getUTCDay();
 
@@ -132,7 +132,7 @@ export async function render(root) {
           const weekend = dow === 0 || dow === 6;
           const w = Math.round(((d.workedH || 0) / maxWorkedH) * 100);
           return `<div class="rt-wd${isToday ? " today" : ""}${weekend ? " weekend" : ""}">
-            <span class="rt-wd-lbl">${md(d.day)}<small>${dowLabel[dow]}</small></span>
+            <span class="rt-wd-lbl">${md(d.day)}<small>${DOW_JA[dow]}</small></span>
             <span class="rt-wd-bar"><i style="width:${w}%"></i></span>
             <span class="rt-wd-h">${d.workedH ? fmtH(d.workedH) : "—"}</span>
             ${d.completed > 0 ? `<span class="rt-wd-done">${icon("check", { size: 10 }) || ""}${d.completed}</span>` : `<span class="rt-wd-done rt-wd-done-0">0</span>`}

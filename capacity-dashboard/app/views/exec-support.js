@@ -15,7 +15,7 @@ import { backcast, localTodayIso, ccpmPlan, feverStatus, orderStepsForBackcast }
 import { upsertIntentBlock, eisenhowerPriority, hhmmToMinutes, unknownsToSteps, stepsToPlanSpecs, PLAN_NOTE_PREFIX } from "../lib/onapply.js";
 import { esc } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
-import { fmtDisplayDow, parseSmartDate } from "../lib/form.js";
+import { fmtDisplayDow, parseSmartDate, DOW_JA } from "../lib/form.js";
 
 // ── ユーティリティ ────────────────────────────────────────────────
 const nonEmpty = (s) => !!(s != null && String(s).trim());
@@ -1938,7 +1938,6 @@ function makeSaver(taskId, getPrepObj, getEnabled, onChange) {
 // ── 保護時間帯エディタ（exec の team 設定・prep とは別系統） ─────────
 // トラブル想定枠（バッファ/ブロック）の編集 UI。逆算スケジュールがこの枠を尊重する。
 // 書き込みは管理者のみ（can_edit=false なら閲覧専用）。exec ダウン時は優しく失敗を握る。
-const DOW_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
 const PW_KINDS = [
   { v: "buffer", label: "バッファ（緩衝）" },
   { v: "block", label: "ブロック（固定）" },
@@ -1969,7 +1968,7 @@ function mountProtectedEditor(host) {
   };
 
   const rowHtml = (w, dis) => {
-    const dows = DOW_LABELS.map((lab, d) =>
+    const dows = DOW_JA.map((lab, d) =>
       `<button type="button" class="es-pw-dow${w.days.includes(d) ? " on" : ""}" data-dow="${d}"
         aria-label="${esc(lab)}曜" aria-pressed="${w.days.includes(d) ? "true" : "false"}"${dis ? " disabled" : ""}>${esc(lab)}</button>`
     ).join("");

@@ -9,7 +9,7 @@ import { PRIO, NEUTRAL, KINDS } from "../lib/kinds.js";
 import { dateOnly, shiftISO } from "../lib/capacity.js";
 import { deletePlan, logPlan, updateRecurrence } from "../lib/api.js";
 import { C, fmtH, esc, member_color, todayISO, announce, openOverlay } from "../lib/ui.js";
-import { splitMeta } from "../lib/form.js"; // note の "[資料] URL" 行を抽出
+import { splitMeta, DOW_JA } from "../lib/form.js"; // note の "[資料] URL" 行を抽出
 import { icon } from "../lib/icons.js";
 
 let H0 = 8, H1 = 20;                      // 営業時間（設定で上書き）
@@ -218,9 +218,8 @@ function paint() {
 
 // 表示日ラベル: 今日/明日/昨日は注記を添える（それ以外は曜日付き）。
 function dayLabel(iso) {
-  const W = ["日", "月", "火", "水", "木", "金", "土"];
   const d = new Date(iso + "T00:00:00Z");
-  const wd = W[d.getUTCDay()];
+  const wd = DOW_JA[d.getUTCDay()];
   const t = todayISO();
   const rel = iso === t ? "（今日）" : iso === shiftISO(t, 1) ? "（明日）" : iso === shiftISO(t, -1) ? "（昨日）" : "";
   return `${iso}（${wd}）${rel}`;

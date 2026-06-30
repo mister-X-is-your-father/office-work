@@ -5,7 +5,7 @@
 // 階層: ワークスペース(=API project) ＞ プロジェクト(=親タスク) ＞ タスク。
 import { load, invalidate, TEMPLATE_WS, ensureInbox } from "../lib/store.js";
 import { getTask, createTaskInProject, createProject, updateTask, addAssignee, removeAssignee, addRelation, removeRelation, createLabel, addTaskLabel, removeTaskLabel, getAttachments, uploadAttachments, deleteAttachment, fetchAttachmentBlob, setTaskWaiting, getComments, createComment } from "../lib/api.js";
-import { categoryLabels, REVIEW_LABEL, WAITING_LABEL, statusOf, STATUS } from "../lib/kinds.js";
+import { categoryLabels, REVIEW_LABEL, WAITING_LABEL, statusOf, STATUS, PRIO_OPTS } from "../lib/kinds.js";
 import { loadByMember } from "../lib/capacity.js";
 import { capacityOn } from "../lib/recurrence.js";
 import { C, esc, fmtH, trapFocus } from "../lib/ui.js";
@@ -18,8 +18,7 @@ export { parseSmartDate, fmtDisplay, splitMeta, joinMeta };
 
 const ZERO_DATE = "0001-01-01T00:00:00Z"; // Vikunja の「未設定」センチネル
 // インボックスWS取得は lib/store.js の ensureInbox（プロミスメモ化＝重複作成防止）に集約。
-// Vikunja priority(0–5)。0=なし。4=MUST までを提示。
-const PRIO_OPTS = [[0, "なし"], [1, "低"], [2, "中"], [3, "高"], [4, "MUST"]];
+// 重要度の選択肢 PRIO_OPTS は kinds.js（PRIO_LEVELS 由来の SSoT）から import。
 
 // task の日付フィールド（due_date/start_date/end_date）を YYYY/MM/DD 表示に（未設定=空）
 const fieldDisplay = (t, f) => (t && t[f] && !t[f].startsWith("0001") ? fmtDisplayDow(t[f].slice(0, 10)) : "");

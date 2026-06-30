@@ -7,6 +7,7 @@ import { dateOnly, hasDate, shiftISO } from "../lib/capacity.js";
 import { deletePlan, logPlan, updateTask, requestReview } from "../lib/api.js";
 import { invalidate } from "../lib/store.js";
 import { icon } from "../lib/icons.js";
+import { DOW_JA } from "../lib/form.js";
 
 let CAP = 8; // 設定（容量 h/日）で上書き
 const FREECOL = "#e7ebf0";   // 空き=薄グレー
@@ -170,8 +171,7 @@ export function renderClock(container, data, day, rerender) {
 }
 
 /* ---------- 別日へ移す / 今日から外す ---------- */
-const WDOW = ["日", "月", "火", "水", "木", "金", "土"];
-const mdw = (iso) => { const d = new Date(iso + "T00:00:00Z"); return `${d.getUTCMonth() + 1}/${d.getUTCDate()}(${WDOW[d.getUTCDay()]})`; };
+const mdw = (iso) => { const d = new Date(iso + "T00:00:00Z"); return `${d.getUTCMonth() + 1}/${d.getUTCDate()}(${DOW_JA[d.getUTCDay()]})`; };
 const plansOf = (data, taskId) => (data.plansByTask && data.plansByTask.get ? data.plansByTask.get(taskId) : null) || [];
 // このメンバーの今日負荷に効くplan: 自分指定 or 未指定 or「担当外user_id＝全担当へ配分」。
 const todayPlans = (data, taskId, memberId, day, aids = []) =>

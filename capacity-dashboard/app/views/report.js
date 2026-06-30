@@ -9,7 +9,9 @@
 //   その他  : 未完了 かつ（期限が今週末より先 or 期限なし）＝「以降/期限なし」
 //
 // UI のアイコンは icon()（絵文字非使用）。コピペテキスト内の ✅⚠ 等は「データ」なので許可。
-import { load, isAiUser } from "../lib/store.js";
+import { load } from "../lib/store.js";
+import { humanAssignees } from "../lib/users.js";
+import { shiftISO } from "../lib/capacity.js";
 import { statusOf } from "../lib/kinds.js";
 import { C, esc, fmtH, todayISO } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
@@ -18,10 +20,6 @@ import { getPrepScores } from "../lib/exec.js";
 
 // 期限 ISO（未設定/ゼロ日付＝空）。home.js / 一覧 / quad と同じ判定。
 const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(0, 10) : "");
-// 人間担当（AI担当 fable は担当とみなさない＝table.js / home.js の humanAssignees と同義）。
-const humanAssignees = (t) => (t.assignees || []).filter((a) => !isAiUser(a));
-// today から n 日後の YYYY-MM-DD（UTC 固定で DST 非依存）。
-const shiftISO = (iso, n) => { const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 // ISO の曜日（0=日..6=土）。
 const dowOf = (iso) => new Date(iso + "T00:00:00Z").getUTCDay();
 // M/D 表示（先頭ゼロ無し）。

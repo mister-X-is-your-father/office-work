@@ -1,7 +1,8 @@
 // 総合ホーム（実データ）。縦積み: KPI / やること / 今日の稼働予定 / 稼働プラン / 月間ガント。
 // 各セクションは折りたたみヘッダ付き。開閉状態は本人ごと localStorage に保存・復元。
-import { load, isAiUser } from "../lib/store.js";
-import { loadByMember, estimateVsActual, triage, weekLoadByMember, dateOnly } from "../lib/capacity.js";
+import { load } from "../lib/store.js";
+import { loadByMember, estimateVsActual, triage, weekLoadByMember, dateOnly, shiftISO } from "../lib/capacity.js";
+import { humanAssignees, firstHuman } from "../lib/users.js";
 import { capacityOn } from "../lib/recurrence.js";
 import { statusOf } from "../lib/kinds.js";
 import { C, esc, fmtH, todayISO, member_color } from "../lib/ui.js";
@@ -21,10 +22,6 @@ const DEFAULT_FOLD = { todo: false, today: false, plan: false, gantt: false };
 
 // 期限 ISO（未設定/ゼロ日付＝空）。一覧/quad と同じ判定。
 const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(0, 10) : "");
-// today から n 日後の YYYY-MM-DD。
-const shiftISO = (iso, n) => { const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
-// 人間担当（AI担当 fable は担当とみなさない＝未アサイン扱い。table.js の humanAssignees と同義）。
-const humanAssignees = (t) => (t.assignees || []).filter((a) => !isAiUser(a));
 // 未完了 = done でない（statusOf が "done" 以外）。連絡待ち/進行中は含む。
 const isOpen = (t) => statusOf(t) !== "done";
 
@@ -67,7 +64,7 @@ function prepBadge(t, scores, urgent) {
 
 // 1タスク行（タイトル＋軽いメタ: 担当アバター/期限/プロジェクト名＋準備メーター）。
 function todoRow(t, projects, day, scores) {
-  const who = humanAssignees(t)[0] || null;
+  const who = firstHuman(t);
   const wn = who ? (who.name || who.username) : "";
   const due = dueISO(t);
   const late = due && due < day;

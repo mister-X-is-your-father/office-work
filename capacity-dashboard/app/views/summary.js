@@ -8,8 +8,7 @@ import { dailyThroughput, projectTotals, labelTotals, overallStats } from "../li
 import { estimateVsActual, shiftISO, dateOnly, hasDate } from "../lib/capacity.js";
 import { categoryColor } from "../lib/kinds.js";
 import { C, esc, fmtH, avatar, todayISO } from "../lib/ui.js";
-
-const DOW = ["日", "月", "火", "水", "木", "金", "土"];
+import { DOW_JA } from "../lib/form.js";
 
 const PERIODS = [14, 30, 90];
 const SORTS = [
@@ -196,7 +195,7 @@ function throughputChart(tp) {
     return `<div class="sm-bcol${wd === 0 || wd === 6 ? " wknd" : ""}">
       <div class="sm-bwrap" style="height:${H}px">${addBar}${doneBar}</div>
       <div class="sm-bx">${+d.day.slice(8)}</div>
-      <div class="sm-bw">${DOW[wd]}</div>
+      <div class="sm-bw">${DOW_JA[wd]}</div>
     </div>`;
   }).join("");
   return `<div class="sm-chart">${bars}</div>`;
