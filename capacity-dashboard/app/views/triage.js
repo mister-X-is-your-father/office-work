@@ -1,6 +1,6 @@
 // 優先度・トリアージ（mock 46 相当・実データ）
 import { load, invalidate, isAiUser } from "../lib/store.js";
-import { triage, shiftISO } from "../lib/capacity.js";
+import { triage, shiftISO, projectAncestor } from "../lib/capacity.js";
 import { updateTask } from "../lib/api.js";
 import { C, fmtH, esc, todayISO, avatar, announce } from "../lib/ui.js";
 import { categoryLabels, categoryColor } from "../lib/kinds.js";
@@ -30,11 +30,12 @@ function patchForColumn(col, today) {
 
 // triage() の返り値は slim（assignee/project/labels を持たない）ので、生タスクから id→補足情報を引けるようにする。
 //   担当=人間アサイニ先頭（AIユーザー除外）、プロジェクト=親タスク（related_tasks.parenttask）、分類=categoryLabels（レビュー/連絡待ち除外）。
-function buildMeta(tasks) {
+function buildMeta(tasks, byId) {
   const meta = new Map();
   for (const t of tasks || []) {
     const who = (t.assignees || []).find((a) => !isAiUser(a)) || null;
-    const parent = (((t.related_tasks || {}).parenttask) || [])[0] || null;
+    // プロジェクト=祖先解決（4層以上でも最上位プロジェクトへ集約。3層では直近親と一致）。
+    const parent = projectAncestor(t, byId);
     meta.set(t.id, { who, parent, cats: categoryLabels(t) });
   }
   return meta;
@@ -48,7 +49,9 @@ export async function render(root) {
   // 担当者フィルタ（自分/全員/各人）。triage() は assignees を持たない slim なので、生タスクで先に絞ってから分類する。
   let rows = tasks || [];
   if (FILTER.who) rows = rows.filter((t) => (t.assignees || []).some((a) => String(a.id) === String(FILTER.who)));
-  const meta = buildMeta(rows);
+  // 祖先解決には全タスクの id→task が要る（フィルタ後 rows ではなく tasks 全体から構築）。
+  const byId = new Map((tasks || []).map((t) => [t.id, t]));
+  const meta = buildMeta(rows, byId);
   const items = triage(rows, today)
     .sort((a, b) => (b.priority - a.priority) || ((a.slack ?? 99) - (b.slack ?? 99)));
   // ドロップ時に元の値へ戻せるよう id→生タスクを引けるようにする。

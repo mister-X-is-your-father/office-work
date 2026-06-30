@@ -5,7 +5,7 @@ import { load, invalidate, isAiUser, ensureInbox } from "../lib/store.js";
 import { updateTask, getTask, setTaskWaiting, createTaskInProject, createProject, addRelation, removeRelation } from "../lib/api.js";
 import { PRIO, prioBucket, STATUS, statusOf } from "../lib/kinds.js";
 import { C, fmtH, esc, todayISO, announce, avatar } from "../lib/ui.js";
-import { shiftISO } from "../lib/capacity.js";
+import { shiftISO, projectAncestor } from "../lib/capacity.js";
 import { taskMatches, next7End } from "../lib/smartlist.js";
 import { icon } from "../lib/icons.js";
 import { startFocusFor } from "./pomodoro.js";
@@ -79,11 +79,15 @@ export async function render(root) {
   };
   const visible = filtered.filter(doneVisible);
 
+  // 祖先解決（projectAncestor）用に全タスクの id→task インデックスを作る（4層以上でも最上位プロジェクトへ集約）。
+  // 直近親[0]ではなく親鎖を遡るため、visible ではなくロード済み全タスクから引く必要がある。
+  const byId = new Map((tasks || []).map((t) => [t.id, t]));
+
   root.innerHTML = `
     <style>${css()}</style>
     <h1 class="vtitle">かんばん <small>状況が一目でわかる ・ ドラッグ／Ctrl+左右で列移動 ・ クリックで編集</small></h1>
     ${toolbarHtml(preset, swim, who, members, me)}
-    <div class="kb-wrap">${swim ? swimHtml(visible, memberIdx) : boardHtml(visible, memberIdx)}</div>`;
+    <div class="kb-wrap">${swim ? swimHtml(visible, memberIdx, byId) : boardHtml(visible, memberIdx, byId)}</div>`;
 
   wireToolbar(root);
   wireCards(root, tasks, memberIdx);
@@ -135,21 +139,21 @@ function wireToolbar(root) {
 }
 
 // ── 通常ボード（ステータス列のみ）──
-function boardHtml(tasks, memberIdx) {
+function boardHtml(tasks, memberIdx, byId) {
   const cols = STATUS_ORDER.map((key) => {
     const list = sortByDue(tasks.filter((t) => statusOf(t) === key));
-    return columnHtml(key, list, memberIdx, null);
+    return columnHtml(key, list, memberIdx, byId, null);
   });
   return `<div class="kb-board">${cols.join("")}</div>`;
 }
 
 // ── 案件スイムレーン（2軸グリッド: 行=親タスク × 列=ステータス）──
 // 親なしは「その他」行。各セルは期限昇順。行は「ヤバい度」（期限切れ/今日を含む行を上）で並べる。
-function swimHtml(tasks, memberIdx) {
-  // 親（案件）でグルーピング。親 = related_tasks.parenttask[0]（title/id を持つ）。
+function swimHtml(tasks, memberIdx, byId) {
+  // 案件（プロジェクト）でグルーピング。親鎖を遡った最上位プロジェクト = projectAncestor（4層以上でも集約）。
   const lanes = new Map(); // key(parentId|"_none") -> { id, title, tasks:[] }
   for (const t of tasks) {
-    const p = (((t.related_tasks || {}).parenttask) || [])[0] || null;
+    const p = projectAncestor(t, byId);
     const key = p ? String(p.id) : "_none";
     if (!lanes.has(key)) lanes.set(key, { id: p ? p.id : 0, title: p ? p.title : "その他（案件なし）", tasks: [] });
     lanes.get(key).tasks.push(t);
@@ -171,7 +175,7 @@ function swimHtml(tasks, memberIdx) {
   const laneRows = rows.map((lane) => {
     const cells = STATUS_ORDER.map((key) => {
       const list = sortByDue(lane.tasks.filter((t) => statusOf(t) === key));
-      const cards = list.map((t) => cardHtml(t, memberIdx)).join("");
+      const cards = list.map((t) => cardHtml(t, memberIdx, byId)).join("");
       return `<div class="kb-scell kb-cards" data-status="${key}" data-lane="${lane.id}">${cards}</div>`;
     }).join("");
     const cnt = lane.tasks.filter((t) => !t.done).length;
@@ -188,11 +192,11 @@ function swimHtml(tasks, memberIdx) {
 }
 
 // ── 1ステータス列（通常ボード用。ヘッダにキャパ集計＋WIP警告、フッタに＋追加）──
-function columnHtml(key, list, memberIdx, _laneId) {
+function columnHtml(key, list, memberIdx, byId, _laneId) {
   const undone = list.filter((t) => !t.done);
   const totH = undone.reduce((s, t) => s + (t.time_estimate || 0) / 3600, 0);
   const warn = key === "doing" && (undone.length > WIP_COUNT || totH > WIP_HOURS);
-  const cards = list.map((t) => cardHtml(t, memberIdx)).join("");
+  const cards = list.map((t) => cardHtml(t, memberIdx, byId)).join("");
   return `<div class="kb-col" data-status="${key}">
     <div class="kb-colh${warn ? " warn" : ""}">
       <span class="kb-colt">${esc(STATUS[key].label)}</span>
@@ -208,7 +212,7 @@ function columnHtml(key, list, memberIdx, _laneId) {
 }
 
 // ── カード（本機能の肝: 期限ヒート / 停滞 / 案件 / 担当 / 見積）──
-function cardHtml(t, memberIdx) {
+function cardHtml(t, memberIdx, byId) {
   const due = dueOf(t);
   const heat = heatOf(due, t.done);          // overdue|today|week|""
   const pb = prioBucket(t.priority);
@@ -216,7 +220,7 @@ function cardHtml(t, memberIdx) {
   const who = (t.assignees || []).find((a) => !isAiUser(a)) || null;
   // 共有 avatar() に置換（色は従来どおり members 配列内 index 基準＝colorIndex で固定。サイズ18px据え置き）。
   const ava = who ? avatar({ ...who, colorIndex: memberIdx.get(who.id) ?? 0 }, { size: 18 }) : "";
-  const parent = (((t.related_tasks || {}).parenttask) || [])[0] || null;
+  const parent = projectAncestor(t, byId);
   const projBadge = parent
     ? `<span class="kb-proj" style="border-color:${projColor(parent.id)};color:${projColor(parent.id)}" title="案件: ${esc(parent.title)}">${esc(parent.title)}</span>`
     : "";
@@ -500,8 +504,10 @@ async function optimisticStatusMove(card, targetCol, t, target) {
       // 該当タスクのみ反映: 最新タスクでカードを差し替え（全再取得しない）。
       if (res.fresh && memberIdx) {
         Object.assign(t, res.fresh); // ローカルの tasks 配列の参照も更新（次の操作の整合のため）
+        // 差し替えカードのプロジェクトバッジも祖先解決させるため、カード保持の tasks から byId を再構築。
+        const byId = new Map((card._tasks || []).map((x) => [x.id, x]));
         const tmp = document.createElement("div");
-        tmp.innerHTML = cardHtml(res.fresh, memberIdx);
+        tmp.innerHTML = cardHtml(res.fresh, memberIdx, byId);
         const fresh = tmp.firstElementChild;
         fresh._tasks = card._tasks; // tasks 参照を引き継ぐ（差し替え後もキーボード移動が効くように）
         card.replaceWith(fresh);

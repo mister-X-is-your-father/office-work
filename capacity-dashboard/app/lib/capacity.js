@@ -301,6 +301,26 @@ export function buildTaskTree(tasks) {
   return list.filter((t) => !childIds.has(t.id)).map(node);
 }
 
+// タスクの「プロジェクト」= parenttask 鎖を遡った最上位の祖先（ルート親タスク）。
+// 3層運用(WS > プロジェクト > タスク)では parenttask[0] と完全一致するが、誤って4層以上に
+// ネストしても最上位プロジェクトへ集約される（中間タスクが「プロジェクト」に化けるのを防ぐ）。
+// byId = Map<id, task>（load().tasks 由来の完全タスク）。これが無いと直近親までしか辿れない。
+// 親を持たないタスク（=それ自身が最上位）は null（プロジェクト無し＝従来挙動）。循環は guard で打ち切り。
+export function projectAncestor(task, byId) {
+  if (!task) return null;
+  const imm = (((task.related_tasks || {}).parenttask) || [])[0];
+  if (!imm) return null; // 親なし＝最上位、プロジェクト無し
+  const seen = new Set([task.id]);
+  let root = (byId && byId.get(imm.id)) || imm;
+  while (!seen.has(root.id)) {
+    seen.add(root.id);
+    const up = (((root.related_tasks || {}).parenttask) || [])[0];
+    if (!up) break; // これ以上親がいない＝最上位プロジェクト
+    root = (byId && byId.get(up.id)) || up;
+  }
+  return root; // {id, title, ...}（byId 解決済みなら完全タスク）
+}
+
 // 依存グラフの段組み（level=最長の前段数）＋クリティカルパス（最長ノード鎖）。
 // ids: ノードID配列, edges: [{from,to}]（前→後）。返り値: {level:Map, critical:Set, order:[]}。
 export function depLayers(ids, edges) {
