@@ -16,9 +16,10 @@ CSV を読み、全タスクを生成してから relation(parenttask / precedes
      relation/assignee の重複追加で重複(400/409)が返っても「(既存)」として握りつぶすが、
      5xx 等の本物のエラーは失敗として表示する。
      ※ マーカー形式は SPA 版(app/views/keikaku.js)と完全一致させること。
-     ※ 再投入時、本体(title/description/日付/見積)は get→merge→post で更新するが、依存・
-       親子・担当の【削除】は反映しない（reconcile 未対応）。差分削除が要るときは SPA の
-       計画ウィザード(app/views/keikaku.js)を使うこと。
+     ※ --plan-id 再投入時は本体(title/description/日付/見積)を get→merge→post で更新し、
+       計画から外した見積/期日も明示クリア(time_estimate=0 / 日付="0001-01-01T00:00:00Z")
+       して反映する。ただし依存/親子/担当の【削除】reconcile は未対応。差分削除が要るときは
+       SPA の計画ウィザード(app/views/keikaku.js)を使うこと。
 
 assignee 解決（実HTTPモードのみ。dry-run では名前のまま表示しオフライン維持）:
   - 空                              → なし
@@ -73,8 +74,13 @@ import urllib.request
 
 API = "http://leo:7005/api/v1"
 
-# SPA(app/views/keikaku.js)の MARKER_RE と完全一致。description からマーカーを抽出する。
-MARKER_RE = re.compile(r"<!--keikaku:plan=(.*?);id=(.*?)-->")
+# SPA(app/views/keikaku.js:186 markerRe)と完全一致。description からマーカーを抽出する。
+# plan は sanitize 済み(";" 除去)なので [^;]*? で安全に拾える。id 境界は "-->" 込み。
+MARKER_RE = re.compile(r"<!--keikaku:plan=([^;]*?);id=(.*?)-->")
+
+# SPA(keikaku.js:198 EMPTY_DATE)と同値。capacity.js hasDate が "0001" 始まりを空判定＝クリア用。
+# 冪等更新(for_update)で計画から外した日付フィールドを明示クリアするのに使う。
+EMPTY_DATE = "0001-01-01T00:00:00Z"
 
 
 def make_req(token):
@@ -217,11 +223,18 @@ def back_business_days(end_str, days, holidays_set):
     return start.isoformat()
 
 
-def task_payload(row, cap_hours, holidays_set, plan_id=None):
-    """createTaskInProject に渡す body を作る（必要なものだけ）。
+def task_payload(row, cap_hours, holidays_set, plan_id=None, for_update=False):
+    """createTaskInProject / updateTask に渡す body を作る（必要なものだけ）。
 
     plan_id 指定時は description 末尾に冪等マーカーを付与する。
     due と est_hours(>0) が揃えば start_date/end_date/due_date を期間として付与する。
+
+    for_update=True（--plan-id 再投入の更新経路）では、計画から外した見積/期日を明示クリア
+    する（SPA app/views/keikaku.js:204 taskBody の forUpdate と同一意味論。改修E）:
+      - 見積なし          → time_estimate=0
+      - due なし          → due_date/start_date/end_date を EMPTY_DATE
+      - due あり見積なし  → start_date/end_date のみ EMPTY_DATE（due 点は残す）
+    新規作成（for_update=False）は従来どおりキーを省略する（クリア不要）。
     """
     body = {"title": row["task"]}
 
@@ -235,17 +248,27 @@ def task_payload(row, cap_hours, holidays_set, plan_id=None):
     due = row.get("due")
     est = to_hours(row.get("est_hours"))
 
-    if due:
-        body["due_date"] = dt(due)
+    # 見積: est>0 のみ time_estimate を送る。更新で外したら 0 でクリア。
     if est is not None:
         body["time_estimate"] = int(round(est * 3600))
+    elif for_update:
+        body["time_estimate"] = 0
 
-    if due and est is not None:
-        days = max(1, math.ceil(est / cap_hours))
-        start = back_business_days(due, days, holidays_set)
-        body["start_date"] = dt(start)
-        body["end_date"] = dt(due)
+    # 期日/期間: due+est で期間バー。更新で外した分は EMPTY_DATE でクリア（Q26: due_date は一度だけ代入）。
+    if due:
         body["due_date"] = dt(due)
+        if est is not None:
+            days = max(1, math.ceil(est / cap_hours))
+            start = back_business_days(due, days, holidays_set)
+            body["start_date"] = dt(start)
+            body["end_date"] = dt(due)
+        elif for_update:
+            body["start_date"] = EMPTY_DATE
+            body["end_date"] = EMPTY_DATE
+    elif for_update:
+        body["due_date"] = EMPTY_DATE
+        body["start_date"] = EMPTY_DATE
+        body["end_date"] = EMPTY_DATE
 
     return body
 
@@ -341,24 +364,31 @@ def run(args):
         # フィルタは不要。
         if plan_id:
             tasks, err = fetch_all_project_tasks(token, args.project)
+            # B3: 既存取得に失敗したら fail-closed＝1件も作らず中断（重複作成より中断が安全）。
+            #     SPA(keikaku.js:668 改修B)のフェーズ0と同方針。--plan-id 無し経路は来ない。
             if tasks is None:
-                print(f"⚠ 警告: 既存タスク取得失敗 {err}（既存検索スキップ＝全て新規扱い）。")
-            else:
-                by_lid = {}  # localId -> [task_id, ...]（重複検出用）
-                for t in tasks:
-                    if not isinstance(t, dict):
-                        continue
-                    m = MARKER_RE.search(t.get("description") or "")
-                    if not m or m.group(1) != plan_id:
-                        continue
-                    by_lid.setdefault(m.group(2), []).append(t.get("id"))
-                for lid, tids in by_lid.items():
-                    existing[lid] = tids[0]
-                    if len(tids) > 1:
-                        print(f"⚠ 警告: localId '{lid}' が plan='{plan_id}' で {len(tids)} 件重複 "
-                              f"{tids} → 先頭 #{tids[0]} を更新対象にします。")
-                print(f"--- フェーズ0: 既存検出 {len(existing)} 件 "
-                      f"{json.dumps(existing, ensure_ascii=False)}（取得 {len(tasks)} タスク）")
+                print(f"⚠ 既存取得失敗のため冪等投入を中断(重複作成を避ける): {err}")
+                return 1
+            by_lid = {}  # localId -> [task_id, ...]（出現順＝API応答順。重複検出用）
+            for t in tasks:
+                if not isinstance(t, dict):
+                    continue
+                # B9: SPA(keikaku.js:189 lastMarker)と一致＝末尾の最後の一致を採用し、その plan で判定。
+                ms = list(MARKER_RE.finditer(t.get("description") or ""))
+                if not ms:
+                    continue
+                m = ms[-1]
+                if m.group(1) != plan_id:
+                    continue
+                by_lid.setdefault(m.group(2), []).append(t.get("id"))
+            for lid, tids in by_lid.items():
+                # B9: 同一 localId が複数タスクに付くときは後勝ち(tids[-1])＝SPA の existing.set 後勝ちと一致。
+                existing[lid] = tids[-1]
+                if len(tids) > 1:
+                    print(f"⚠ 警告: localId '{lid}' が plan='{plan_id}' で {len(tids)} 件重複 "
+                          f"{tids} → 末尾 #{tids[-1]} を更新対象にします（他は孤児化）。")
+            print(f"--- フェーズ0: 既存検出 {len(existing)} 件 "
+                  f"{json.dumps(existing, ensure_ascii=False)}（取得 {len(tasks)} タスク）")
     else:
         suffix = f" / plan={plan_id}" if plan_id else ""
         print(f"=== DRY-RUN（HTTP は叩きません） / 投入先ワークスペース #{args.project}"
@@ -375,8 +405,11 @@ def run(args):
     # ---- フェーズA: 全タスク生成（冪等モードは既存を更新）----
     print("\n--- フェーズA: タスク生成 ---")
     for r in rows:
-        body = task_payload(r, cap_hours, holidays_set, plan_id)
         lid = r["id"]
+        # 更新経路か（dry-run は existing 空＝常に新規扱い＝オフライン維持）。
+        # B4: 更新時は for_update=True を渡し、計画から外した見積/期日を明示クリアさせる。
+        is_update = bool(plan_id and lid in existing)
+        body = task_payload(r, cap_hours, holidays_set, plan_id, for_update=is_update)
         if dry:
             placeholder = f"<id:{lid}>"
             idmap[lid] = placeholder
@@ -386,11 +419,16 @@ def run(args):
                 period = f"  [期間 {body['start_date'][:10]}→{body['end_date'][:10]}]"
             print(f"PUT /projects/{args.project}/tasks {json.dumps(body, ensure_ascii=False)}"
                   f"  -> {placeholder} (type={r['type']}){period}")
-        elif plan_id and lid in existing:
+        elif is_update:
             # 既存タスク更新: get→merge→post（POST はスカラ全置換のため既存を取得しマージして安全に上書き）
             eid = existing[lid]
             gcode, cur = req(f"/tasks/{eid}")
-            merged = dict(cur) if isinstance(cur, dict) else {}
+            # B1: GET 失敗時に空 merged で POST すると既存スカラ(priority/percent_done/done 等)が
+            #     全消去される。取得失敗(非dict or >=300)なら更新せずスキップする。
+            if not isinstance(cur, dict) or gcode >= 300:
+                print(f"⚠ 警告: 既存タスク#{eid} 取得失敗 [{gcode}] {cur} → 更新スキップ（既存値の消去を回避）。")
+                continue
+            merged = dict(cur)
             merged.update(body)
             code, resp = req(f"/tasks/{eid}", "POST", merged)
             idmap[lid] = eid
@@ -432,6 +470,8 @@ def run(args):
         if not r["parent"]:
             continue
         child = idmap.get(r["id"])
+        if child is None:  # B8: 生成失敗/更新スキップで自タスクIDが無い → relation を張らない
+            continue
         parent = idmap.get(r["parent"])
         if parent is None:
             continue
@@ -450,6 +490,8 @@ def run(args):
     dep_rel_count = 0
     for r in rows:
         t = idmap.get(r["id"])  # 依存する側（後続）
+        if t is None:  # B8: 自タスクIDが無い（生成失敗/更新スキップ）→ 依存を張らない
+            continue
         for dep in r["depends_on"]:
             d = idmap.get(dep)  # 依存される側（先行）
             if d is None:
@@ -472,6 +514,8 @@ def run(args):
         if not a:
             continue
         t = idmap.get(r["id"])
+        if t is None:  # B8: 自タスクIDが無い（生成失敗/更新スキップ）→ 担当を張らない（dry-run は placeholder で None にならない）
+            continue
         if dry:
             # オフライン維持: 名前解決せずそのまま表示（スキップ判定もしない）
             assignee_count += 1

@@ -7,6 +7,9 @@ export const HOUR = 3600;
 export const toH = (s) => (s || 0) / HOUR;
 export const dateOnly = (d) => (d && typeof d === "string") ? d.slice(0, 10) : "";
 export const hasDate = (d) => !!d && typeof d === "string" && !d.startsWith("0001");
+// アプリ全体の「今日」の SSoT。ローカル暦日の "YYYY-MM-DD"。
+// （new Date().toISOString() は UTC なので JST 早朝に前日へズレる＝使わない）
+export const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 // 着手済み判定（=進行中）。started_at（着手時刻・BE実カラム）が立っていれば進行中。
 // percent_done>0 も OR で拾う（外部クライアント編集や旧データで進捗だけ入っているケースの保険）。
 export const hasStarted = (t) => hasDate(t.started_at) || (t.percent_done || 0) > 0;

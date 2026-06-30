@@ -13,7 +13,7 @@ export const member_color = (i)=> ["#e5772d","#3a86ff","#2fa66b","#b657d6","#0ea
 // 時間表示は小数2桁まで（15分=0.25 を 0.3 に潰さない）。末尾の0は省く（1.50→1.5 / 4→4）。
 export const fmtH = (h)=> { const r = Math.round(h*100)/100; return (Number.isInteger(r) ? r : +r.toFixed(2)) + "h"; };
 export const esc = (s)=> (s==null?"":String(s)).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-export const todayISO = ()=> new Date().toISOString().slice(0,10);
+export { todayISO } from "./capacity.js"; // 「今日」の SSoT は capacity.js（ローカル暦日。UTC だと JST 早朝に前日ズレ）
 
 // 最小 hyperscript
 export function h(tag, attrs, ...kids){

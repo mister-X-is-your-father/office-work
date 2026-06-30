@@ -7,7 +7,7 @@
 //   - F1 横断逆算: committedByDay（他タスクの当日予定）を実空きから差し引く。
 //   - E4 再逆算 床止め: todayIso より前（過去日）には絶対に手順を置かない。
 //   - F6 ディープワーク枠: taskIsImportant（priority>=4）なら deep 枠を実空きに含める（避けない）。
-import { shiftISO } from "./capacity.js";
+import { shiftISO, todayISO } from "./capacity.js";
 
 // 見積り(h) を数値化。空・不正は null（＝「1日1件」扱いの目印）。
 export function estHours(v) {
@@ -55,14 +55,8 @@ export function isWorkDay(iso, holidaysSet, unavailRanges) {
   return true;
 }
 
-// ローカル今日の "YYYY-MM-DD"（床止め用）。iso 比較は文字列の辞書順で行えるよう zero-pad。
-export function localTodayIso() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
+// ローカル今日の "YYYY-MM-DD"（床止め用）。SSoT は capacity.todayISO（ローカル暦日）。後方互換で名前を残す。
+export const localTodayIso = todayISO;
 
 // ── 逆算スケジュール（純関数・TDD対象） ─────────────────────────────
 // 締切日から後ろ向きに営業日（土日/祝日/担当の休暇を除外）を辿り、

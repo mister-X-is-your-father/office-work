@@ -9,7 +9,7 @@
 //   (A) 全タスク生成して CSVローカルID→実ID マップ作成
 //   (B) parenttask 関連（child を taskId 側）  addRelation(child.id, parent.id, "parenttask")
 //   (C) follows 関連（T が follows 側）        addRelation(T.id, D.id, "follows")  ※T が D に依存
-//   (D) assignee（数値=addAssignee / 名前=resolveAssignee で user_id 解決 / 未解決はスキップ＋警告）
+//   (D) assignee（数値=addAssignee / 名前=resolveAssigneeInfo で user_id 解決 / 未解決はスキップ＋警告）
 //
 // 改修（v2）:
 //   1. 担当の名前解決（"自分"/"森田" 等 → searchUsers で user_id 化）。
@@ -20,6 +20,7 @@ import { load, invalidate } from "../lib/store.js";
 import * as vik from "../lib/api.js";
 import { C, esc, fmtH } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
+import { isBusinessDay, shiftISO } from "../lib/capacity.js";
 
 const SAMPLE_CSV = `id,parent,task,type,assignee,est_hours,depends_on,due,done_criteria
 P,,新人オンボーディング資料の整備,project,自分,,,2026-07-20,新人1名が資料だけで自走できた
@@ -90,15 +91,24 @@ function parsePlanRows(text) {
   return { rows, headerError, warnings };
 }
 
+// B7: 冪等マーカー <!--keikaku:plan=..;id=..--> を壊す文字（区切りの ";" / 終端の "-->"）を含むか。
+//   これらが localId / planId に入るとマーカーが誤パースされ「更新」でなく「重複作成」になるため投入を止める。
+const breaksMarker = (s) => { const v = s == null ? "" : String(s); return v.includes("-->") || v.includes(";"); };
+
 // 編集後の行配列を検証（構造のみ。担当の未解決警告は別途 asgInfo から積む）。
+//   planId は冪等モードの計画ID（マーカー破壊チェック用。空なら非冪等モード）。
 //   戻り: { errors, warnings }。errors があれば投入不可。
-function validateRows(rows) {
+function validateRows(rows, planId = "") {
   const errors = [], warnings = [];
   if (!rows.length) { errors.push("データ行がありません。"); return { errors, warnings }; }
+  // B7: 計画ID自体がマーカーを壊す文字を含む場合（";" は sanitize 済みのため主に "-->" を弾く）。
+  if (breaksMarker(planId)) errors.push(`計画ID「${planId}」に使えない文字（";" または "-->"）が含まれています。除いてから投入してください。`);
   const ids = new Set(rows.map((r) => r.localId));
   const seen = new Set();
   for (const r of rows) {
     if (!r.task || !r.task.trim()) errors.push(`id「${r.localId}」: タスク名が空です。`);
+    // B7: localId がマーカーの区切り/終端を壊すと冪等再投入で重複作成になる。
+    if (breaksMarker(r.localId)) errors.push(`id「${r.localId}」に使えない文字（";" または "-->"）が含まれています（冪等マーカーを壊すため変更してください）。`);
     if (seen.has(r.localId)) errors.push(`id「${r.localId}」が重複しています（一意にしてください）。`);
     seen.add(r.localId);
     if (r.parent && !ids.has(r.parent)) warnings.push(`id「${r.localId}」の親「${r.parent}」が表内に存在しません。`);
@@ -142,32 +152,24 @@ async function resolveAssigneeInfo(raw, me) {
     return { id: null, status: "unresolved", label: `${s}(未解決)` };
   }
 }
-// 仕様準拠の薄いラッパ（解決できた user_id か null を返す）。
-async function resolveAssignee(raw, me) { return (await resolveAssigneeInfo(raw, me)).id; }
 
-// ── 改修2: 営業日逆算（UTCベース。タイムゾーンずれ防止に Date.UTC を使う）─────────────
-const ymdToUTC = (ymd) => { const [y, m, d] = ymd.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d)); };
-const utcToYmd = (dt) => dt.toISOString().slice(0, 10);
-const addDaysUTC = (dt, n) => { const r = new Date(dt.getTime()); r.setUTCDate(r.getUTCDate() + n); return r; };
+// ── 改修2: 営業日逆算（Q12: capacity.js の isBusinessDay/shiftISO を再利用し ISO文字列空間で計算）─────
+//   営業日判定・日付加減算は capacity.js（lib/capacity.js）に単一実装があるのでそれを使う。
+//   capacity.js のシグネチャ: isBusinessDay(iso, holidays=null) / shiftISO(iso, days)。holidays は Set<"YYYY-MM-DD">。
 const isValidYmd = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || "");
-function isBusinessDay(dt, holidaysSet) {
-  const wd = dt.getUTCDay();
-  if (wd === 0 || wd === 6) return false;              // 日(0)・土(6)
-  if (holidaysSet && holidaysSet.has(utcToYmd(dt))) return false;
-  return true;
-}
 // end（YYYY-MM-DD）から手前へ営業日を days 個カウントし、days 個目の営業日（=開始日）を返す。
 //   end が非営業日でもそこから手前に向かってカウント（end 含めて days 個の営業日を確保）。
+//   ※自前 Date 実装からの移植。振る舞いは厳密に不変（旧実装と全期間で一致を確認済み）。
 function computeStartBusinessDay(endYmd, days, holidaysSet) {
-  let cur = ymdToUTC(endYmd);
+  let cur = endYmd;
   let count = 0, guard = 0;
   let start = cur;
   while (count < days && guard < 4000) {
     if (isBusinessDay(cur, holidaysSet)) { count++; if (count === days) { start = cur; break; } }
-    cur = addDaysUTC(cur, -1);
+    cur = shiftISO(cur, -1);
     guard++;
   }
-  return utcToYmd(start);
+  return start;
 }
 // 行の期間プレビュー（est_hours>0 かつ due があるときのみ）。戻り: { start, end, days } or null。
 function periodInfo(r, capH, holidaysSet) {
@@ -221,11 +223,11 @@ function taskBody(r, capH, holidaysSet, markerInfo, forUpdate = false) {
 
   if (isValidYmd(r.due)) {
     body.due_date = r.due + "T00:00:00Z";
-    if (estPositive) {
-      const days = Math.max(1, Math.ceil(est / (capH || 8)));
-      const start = computeStartBusinessDay(r.due, days, holidaysSet);
-      body.start_date = start + "T00:00:00Z";   // ガントが source:"dates" で期間バー表示
-      body.end_date = r.due + "T00:00:00Z";
+    // Q28: 期間逆算は periodInfo に一本化（est>0 かつ due 妥当のとき非nullを返す＝estPositive と同条件）。
+    const pi = periodInfo(r, capH, holidaysSet);
+    if (pi) {
+      body.start_date = pi.start + "T00:00:00Z"; // ガントが source:"dates" で期間バー表示
+      body.end_date = pi.end + "T00:00:00Z";     // pi.end === r.due
     } else if (forUpdate) {
       // 改修E: due はあるが見積なし＝期間バーの根拠が無い → start/end をクリア（due 点は残す）。
       body.start_date = EMPTY_DATE;
@@ -344,13 +346,23 @@ export async function render(root) {
     resolveAllAssignees().then(() => { if (state.loaded) { refreshAllAsgCells(); updateDerived(); } });
   };
 
+  // B6: localId ごとの解決世代トークン。最新の解決だけが asgInfo に書ける（stale write スキップ）。
+  //   resolveAllAssignees（一括）と reResolveRow（単行）が同じ localId を並行解決したとき、
+  //   古い解決の await 完了が新しい結果を踏み潰すのを防ぐ。単調増加なので reset 不要（再読込後も安全）。
+  const asgGen = new Map();
+  const bumpAsgGen = (lid) => { const n = (asgGen.get(lid) || 0) + 1; asgGen.set(lid, n); return n; };
+
   // 全行の担当を解決して asgInfo を更新（改修L）。
   //   await 前に行参照をキャプチャし、await 後に state.rows を再 map しない（行追加/削除と競合させない）。
-  //   結果は localId 単位でマージ反映し、await 中に消えた行のエントリは枝刈りする（pending 残留で投入が永久ブロックされるのを防ぐ）。
+  //   B6: 各行は解決開始時にトークンを発行し、書き戻し直前に最新トークンと一致する時のみ反映（stale write スキップ）。
+  //   await 中に消えた行のエントリは枝刈りする（pending 残留で投入が永久ブロックされるのを防ぐ）。
   async function resolveAllAssignees() {
     const captured = state.rows.slice();
-    const infos = await Promise.all(captured.map((r) => resolveAssigneeInfo(r.assignee, me)));
-    for (let i = 0; i < captured.length; i++) state.asgInfo.set(captured[i].localId, infos[i]);
+    await Promise.all(captured.map(async (r) => {
+      const lid = r.localId, tok = bumpAsgGen(lid);
+      const info = await resolveAssigneeInfo(r.assignee, me);
+      if (asgGen.get(lid) === tok) state.asgInfo.set(lid, info); // 最新の解決だけが勝つ
+    }));
     const live = new Set(state.rows.map((r) => r.localId));
     for (const k of [...state.asgInfo.keys()]) if (!live.has(k)) state.asgInfo.delete(k);
   }
@@ -407,7 +419,7 @@ export async function render(root) {
       <td><select class="k-in k-parent" data-idx="${idx}" data-field="parent">${parentOptionsHtml(r)}</select></td>
       <td><input class="k-in k-task" data-idx="${idx}" data-field="task" value="${esc(r.task)}" placeholder="タスク名"></td>
       <td><input class="k-in k-asg-in" data-idx="${idx}" data-field="assignee" value="${esc(r.assignee)}" placeholder="自分 / 森田 / 7">
-        <div class="k-asg-st" data-asg="${idx}" data-asg-lid="${esc(r.localId)}">${asgStatusHtml(info)}</div></td>
+        <div class="k-asg-st" data-asg-lid="${esc(r.localId)}">${asgStatusHtml(info)}</div></td>
       <td><input class="k-in k-est" type="number" min="0" step="0.25" data-idx="${idx}" data-field="est_hours" value="${esc(r.est_hours)}"></td>
       <td><input class="k-in k-due" type="date" data-idx="${idx}" data-field="due" value="${esc(r.due)}"></td>
       <td class="k-period-td" data-period="${idx}">${periodCellHtml(r)}</td>
@@ -469,7 +481,7 @@ export async function render(root) {
   function updateDerived() {
     if (!state.loaded) return;
     const planId = currentPlanId();
-    const val = validateRows(state.rows);
+    const val = validateRows(state.rows, planId);
     const asgWarn = [];
     for (const r of state.rows) {
       const info = state.asgInfo.get(r.localId);
@@ -495,8 +507,9 @@ export async function render(root) {
   //   await 中に行が削除されてもセルがズレない。raw/localId は await 前に確定させる。
   async function reResolveRow(r) {
     if (!r) return;
-    const lid = r.localId, raw = r.assignee;
+    const lid = r.localId, raw = r.assignee, tok = bumpAsgGen(lid); // B6: 解決開始時にトークン発行
     const info = await resolveAssigneeInfo(raw, me);
+    if (asgGen.get(lid) !== tok) return; // 後発の解決に追い越された＝stale なので破棄
     state.asgInfo.set(lid, info);
     const cell = asgCellByLid(lid);
     if (cell) cell.innerHTML = asgStatusHtml(info);
@@ -606,7 +619,7 @@ export async function render(root) {
 
     if (typeof window !== "undefined" && window.confirm) {
       const msg = planId
-        ? `「${wsName()}」に計画ID「${planId}」で投入します。\n同じIDの既存タスクは更新し、不要になった依存/担当も同期（削除）します。よろしいですか？`
+        ? `「${wsName()}」に計画ID「${planId}」で投入します。\n同じIDの既存タスクは更新し、表から外した依存/担当/親子は同期（削除）します。\n表から行ごと削除したタスク本体は安全のため自動削除せず残します（それへの関連は除去・本体が要らなければ手動削除）。よろしいですか？`
         : `「${wsName()}」に ${state.rows.length} 件のタスクを新規作成します。\n再実行は重複作成になります。投入してよろしいですか？`;
       if (!window.confirm(msg)) return;
     }
@@ -660,6 +673,7 @@ export async function render(root) {
     // ── フェーズ0: 冪等モードの既存検出（WS内・done込み・全ページ）。改修A/B/H ──
     //   localId → 既存タスクオブジェクト（related_tasks/assignees 入り＝reconcile に使う）。
     const existing = new Map();
+    const orphanPlanIds = new Set(); // B2: 計画から外した（現rowsに無い）既存タスクの実ID。関連除去のため計画管理IDに含める。
     if (planId) {
       let all;
       try {
@@ -682,6 +696,16 @@ export async function render(root) {
         const uniq = [...new Set(dupLids)];
         notes.push(`計画ID「${esc(planId)}」で同一マーカーを持つ既存タスクが重複している localId: ${uniq.map(esc).join("、")}（最後の1件のみ更新対象。他は孤児化するので手動で整理してください）。`);
       }
+      // B2: 既存マーカー付きタスクのうち、現在の表（rows）に無い localId ＝ 計画から外したタスク。
+      //   本体は破壊回避で自動削除しないが、その実IDを計画管理ID集合に含め（後段 planIds へ）、
+      //   他行から削除タスクへ向く依存/親子の stale リンクを除去ループで掃除させる。
+      //   （孤児本体の担当は phase D が rows しか回さないため触らない＝本体と共に残る。）
+      const rowLids = new Set(rows.map((r) => r.localId));
+      for (const [lid, t] of existing) {
+        if (!rowLids.has(lid) && t && t.id != null) orphanPlanIds.add(t.id);
+      }
+      if (orphanPlanIds.size)
+        notes.push(`計画から外したタスク ${orphanPlanIds.size} 件が「${esc(wsName())}」に残存しています（他タスクからそれらへ向いていた依存/親子は同期削除しましたが、タスク本体は安全のため自動削除していません。不要なら手動で削除してください）。`);
     }
 
     const parentOps = rows.filter((r) => r.parent).length;
@@ -720,7 +744,10 @@ export async function render(root) {
       }
 
       // 既存リンク削除は「この計画が管理する実ID」内に限定＝外部で手動付与した関連を巻き込まない（安全策）。
+      // B2: create/update した実ID ＋ 計画から外した孤児タスクの実ID。孤児を含めることで、
+      //   削除行へ向く stale な依存/親子が下の除去ループの planIds ガードを通過し、確実に掃除される。
       const planIds = new Set(idmap.values());
+      for (const id of orphanPlanIds) planIds.add(id);
       const relIds = (obj, kind) => new Set((((obj && obj.related_tasks) || {})[kind] || []).map((x) => x && x.id).filter((id) => id != null));
 
       // ── フェーズB: parenttask（child を taskId 側）。冪等モードは差分同期（改修D）──

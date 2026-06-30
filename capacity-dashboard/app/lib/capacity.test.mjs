@@ -4,8 +4,16 @@ import {
   toH, dateOnly, hasDate, isActiveOn, taskHoursOn, isBusinessDay, businessDays,
   loadByMember, weekLoadByMember, estimateVsActual, triage, sumByMemberDay,
   shiftISO, taskRanges, dependencyEdges, dayScale, toMemberDayEntries, taskPlannedHoursByMemberOn,
-  buildTaskTree, depLayers, applyBarDrag, committedHoursByDayInRange,
+  buildTaskTree, depLayers, applyBarDrag, committedHoursByDayInRange, todayISO,
 } from "./capacity.js";
+
+test("todayISO: ローカル暦日 YYYY-MM-DD（UTCのtoISOSliceではなくローカルの年月日）", () => {
+  const iso = todayISO();
+  assert.match(iso, /^\d{4}-\d{2}-\d{2}$/);
+  const d = new Date();
+  const expected = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  assert.equal(iso, expected); // ローカル暦日と一致（toISOString().slice(0,10) のUTC版ではない）
+});
 
 test("committedHoursByDayInRange: plans を日別に集計（範囲外・除外・done を弾く）", () => {
   const tasks = [

@@ -5,6 +5,7 @@
 // - 資料リンクのチップ入力（Enter/blurで追加・×で除去・httpはリンク）
 // UI部品のスタイル（.tf-step/.tf-chips 等）は taskform の ensureStyle が注入する前提（同一モーダル内で使用）。
 import { esc } from "./ui.js";
+import { todayISO } from "./capacity.js";
 
 // ── スマート日付 ──────────────────────────────────────────────
 //   2桁 "62"→6月2日 / 3桁 "612"→6月12日 / 4桁 "1112"→11月12日 / 8桁 "20261112"
@@ -136,7 +137,7 @@ export function attachDatePicker(input, { holidaysByDate = null } = {}) {
   wrap.appendChild(pop);
 
   let view = null; // {y, m}（表示中の月）
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = todayISO(); // 「今日」の SSoT（ローカル暦日。UTC だと JST 早朝に前日ズレ）
   const holName = (iso) => (holidaysByDate && (holidaysByDate.get ? holidaysByDate.get(iso) : holidaysByDate[iso])) || null;
   // ISO "YYYY-MM-DD" を日/月単位でずらす（UTC基準でparse/表示と一致）。
   const shiftIso = (iso, { days = 0, months = 0 } = {}) => {
