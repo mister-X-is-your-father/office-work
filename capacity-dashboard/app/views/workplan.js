@@ -3,14 +3,14 @@
 // 期間で粒度自動切替（≤14日=日別 / それ超=週別集計）。容量線は列ごと（=capH×営業日数）。
 // 集計は capacity.js を変更せず weekLoadByMember を重要度バケット×メンバーで呼んで再利用。重要度色は kinds.PRIO(SSoT)。
 import { load, invalidate } from "../lib/store.js";
-import { weekLoadByMember, taskPlannedHoursByMemberOn, shiftISO, isBusinessDay, daysUntil } from "../lib/capacity.js";
+import { weekLoadByMember, taskPlannedHoursByMemberOn, shiftISO, isBusinessDay, daysUntil, todayISO } from "../lib/capacity.js";
 import { capacityOn } from "../lib/recurrence.js";
 import { PRIO, prioBucket } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color } from "../lib/ui.js";
+import { DOW_JA } from "../lib/form.js";
 import { openTaskForm } from "./taskform.js";
 
 const WHO_KEY = "ts.workplan.who", PRESET_KEY = "ts.workplan.preset", FROM_KEY = "ts.workplan.from", TO_KEY = "ts.workplan.to", GRAIN_KEY = "ts.workplan.grain";
-const WD = ["日", "月", "火", "水", "木", "金", "土"];
 const BUCKETS = [4, 3, 2, 1, 0]; // 積む順（column-reverse で下から MUST→なし）
 const MAX_SPAN = 92;             // 最長3ヶ月
 const DAY_GRAIN_MAX = 14;        // この日数以下は日別、超は週別集計
@@ -112,7 +112,7 @@ function colsForMember(member, bdays, granularity, tasks, plans, holidays, unava
       const segs = perBucketDaily.map((pb) => ({ b: pb.b, h: pb.days[di].h })).filter((s) => s.h > 0);
       const total = round1(segs.reduce((s, x) => s + x.h, 0));
       const cap = round1(capacityOn(member, day, availOpt));
-      return { label: day.slice(5).replace("-", "/"), sub: WD[dowOf(day)], segs, total, cap, free: round1(Math.max(0, cap - total)), over: total > cap + 1e-6, contrib: foldContrib([di]) };
+      return { label: day.slice(5).replace("-", "/"), sub: DOW_JA[dowOf(day)], segs, total, cap, free: round1(Math.max(0, cap - total)), over: total > cap + 1e-6, contrib: foldContrib([di]) };
     });
   }
   const groups = new Map(); // weekStart -> [dayIndex]
@@ -147,7 +147,7 @@ async function renderState(root, state, rerender, view = {}) {
   CAP = settings.capH;
 
   // 期間: プリセット(今日からの相対)を既定とし、custom のときだけ日付指定を使う。
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayISO();
   const presetDef = PRESETS.find((p) => p.key === state.PRESET);
   if (presetDef) { state.FROM = today; state.TO = shiftISO(today, presetDef.days - 1); }
   else {
