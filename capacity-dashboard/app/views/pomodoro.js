@@ -514,19 +514,36 @@ export function mountPomodoro(topbar) {
       return;
     }
     try {
-      // ring/bloom も収まるサイズ。スキンは選択中のものを反映。
-      pip = await window.documentPictureInPicture.requestWindow({ width: 248, height: 210 });
+      // 時間＋タスク名＋細い進捗下線だけの極小レイアウト。スキンは使わない。
+      // ※ Chrome は Document PiP に最小サイズを課す場合があり、指定より大きくクランプされ得る。
+      pip = await window.documentPictureInPicture.requestWindow({ width: 168, height: 68 });
     } catch (e) {
       notifyDone("最前面表示を開けません", e.message || "");
       return;
     }
-    pip.document.body.style.cssText = "margin:0;font-family:system-ui,sans-serif;background:#1d2430;color:#fff;display:flex;flex-direction:column;align-items:stretch;justify-content:center;height:100vh;gap:6px;padding:10px 14px;box-sizing:border-box;user-select:none";
+    // inline では :hover が書けないので <style> を1つ注入する。
+    const ppStyle = pip.document.createElement("style");
+    ppStyle.textContent = `
+      body{margin:0;background:#1d2430;color:#fff;font-family:system-ui,sans-serif;height:100vh;
+        display:flex;flex-direction:column;align-items:center;justify-content:center;
+        padding:6px 10px;box-sizing:border-box;user-select:none;position:relative;overflow:hidden}
+      .pp-time{font-variant-numeric:tabular-nums;font-weight:800;line-height:1;font-size:26px;letter-spacing:.5px;color:#fff;text-align:center}
+      .pp-task{font-size:10px;opacity:.6;margin-top:3px;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}
+      .pp-bar{margin-top:5px;width:100%;height:2px;border-radius:2px;background:rgba(255,255,255,.16);overflow:hidden}
+      .pp-bar>i{display:block;height:100%;border-radius:2px;transition:width .5s}
+      .pp-ctrl{opacity:0;pointer-events:none;position:absolute;top:3px;right:4px;display:flex;gap:5px;transition:opacity .12s}
+      body:hover .pp-ctrl{opacity:1;pointer-events:auto}
+      .pp-ctrl button{font:inherit;font-size:10px;line-height:1;border:1px solid #5b6470;border-radius:6px;background:rgba(29,36,48,.9);color:#fff;padding:3px 7px;cursor:pointer}
+      .pp-ctrl button#pp-stop{border-color:#8a5054;color:#ff9b9b}`;
+    pip.document.head.appendChild(ppStyle);
     pip.document.body.innerHTML = `
-      <div id="pp-disp"></div>
-      <div style="display:flex;gap:8px;margin-top:2px;justify-content:center">
-        <button id="pp-pause" style="font:inherit;font-size:11px;border:1px solid #5b6470;border-radius:7px;background:transparent;color:#fff;padding:4px 14px;cursor:pointer">${icon("pause", { size: 13 })}</button>
-        <button id="pp-stop" style="font:inherit;font-size:11px;border:1px solid #8a5054;border-radius:7px;background:transparent;color:#ff9b9b;padding:4px 14px;cursor:pointer">■</button>
-      </div>`;
+      <div class="pp-ctrl">
+        <button id="pp-pause">${icon("pause", { size: 12 })}</button>
+        <button id="pp-stop">■</button>
+      </div>
+      <div class="pp-time" id="pp-time">--:--</div>
+      <div class="pp-task" id="pp-task"></div>
+      <div class="pp-bar"><i id="pp-fill"></i></div>`;
     pip.document.getElementById("pp-pause").onclick = doPause;
     pip.document.getElementById("pp-stop").onclick = doStop;
     pip.addEventListener("pagehide", () => { pip = null; });
@@ -537,10 +554,14 @@ export function mountPomodoro(topbar) {
     const s = st.get();
     if (!s) { closePip(); return; }
     const d = pip.document, cfg = dispCfg();
-    const label = modeLabel(s.mode, s.paused ? "（一時停止）" : "");
-    const disp = d.getElementById("pp-disp");
-    if (disp) disp.innerHTML = renderDisplay(cfg.skin, { timeText: mmss(dispMs(s)), label, taskTitle: s.taskTitle, progress: progressOf(s), accent: cfg.accent });
-    d.getElementById("pp-pause").innerHTML = s.paused ? icon("play", { size: 13 }) : icon("pause", { size: 13 });
+    const timeEl = d.getElementById("pp-time");
+    if (timeEl) { timeEl.textContent = mmss(dispMs(s)); timeEl.style.opacity = s.paused ? ".55" : "1"; }
+    const taskEl = d.getElementById("pp-task");
+    if (taskEl) taskEl.textContent = s.taskTitle || ""; // textContent で安全に（XSS 防止）
+    const fill = d.getElementById("pp-fill");
+    if (fill) { fill.style.width = (progressOf(s) * 100).toFixed(1) + "%"; fill.style.background = cfg.accent; }
+    const pb = d.getElementById("pp-pause");
+    if (pb) pb.innerHTML = s.paused ? icon("play", { size: 12 }) : icon("pause", { size: 12 });
   }
   function closePip() { if (pip) { try { pip.close(); } catch { /* noop */ } pip = null; } }
 
