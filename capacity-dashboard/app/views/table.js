@@ -587,7 +587,12 @@ export async function render(root) {
       }
       // 3. ＋ でインライン入力を開きサブタスク追加。
       const add = e.target.closest(".ol-addsub");
-      if (add) { openInlineSubtask(add, +add.dataset.pid, +add.dataset.proj, root); return; }
+      if (add) {
+        const depth = +(add.dataset.depth || 0);
+        if (depth === 0) openAddKindMenu(add, +add.dataset.pid, +add.dataset.proj, root);
+        else openInlineSubtask(add, +add.dataset.pid, +add.dataset.proj, root, "task");
+        return;
+      }
       // 4. 行クリックで編集。
       const row = e.target.closest(".ol-row");
       if (row) openTaskForm({ taskId: +row.dataset.id, onSaved: () => render(root) });
@@ -1994,7 +1999,7 @@ function olRowHtml(node, depth, counts) {
     ${kindBadge}
     ${childInfo}
     <span class="ol-meta">
-      <button type="button" class="ol-addsub" data-pid="${t.id}" data-proj="${t.project_id || 0}" title="子タスクを追加">＋</button>
+      <button type="button" class="ol-addsub" data-pid="${t.id}" data-proj="${t.project_id || 0}" data-depth="${depth}" title="子タスクを追加">＋</button>
       ${who ? `<span class="ol-ava" style="background:${member_color(who.id)}">${esc((wn[0] || "?"))}</span>` : ""}
       ${due ? `<span class="ol-due">${due}</span>` : ""}
       <span class="ol-st ${st}">${STATUS[st].label}</span>
@@ -2006,12 +2011,36 @@ function olRowHtml(node, depth, counts) {
 // 親と同じ project_id に作り、addRelation(parentId, childId, "subtask") で関連付け（buildTaskTree と整合）。
 let _olInlineEl = null;
 function closeInlineSubtask() { if (_olInlineEl) { _olInlineEl.remove(); _olInlineEl = null; } }
-function openInlineSubtask(btn, parentId, projId, root) {
+// depth0(プロジェクト)の＋は「タスクグループ／タスク」の2択メニューを出す。選ぶと openInlineSubtask へ。
+function openAddKindMenu(btn, parentId, projId, root) {
+  closeInlineSubtask();
+  closeRowMenu();
+  const box = document.createElement("div");
+  box.className = "tb-ctx ol-kindmenu";
+  box.innerHTML = `<button type="button" class="ol-kindbtn" data-kind="group">＋ タスクグループ</button>`
+    + `<button type="button" class="ol-kindbtn" data-kind="task">＋ タスク</button>`;
+  document.body.appendChild(box);
+  _olInlineEl = box; // closeInlineSubtask が片付けられるよう同じホルダを使う
+  const r = btn.getBoundingClientRect();
+  const bw = box.offsetWidth;
+  box.style.left = Math.max(6, Math.min(r.left, window.innerWidth - bw - 8)) + "px";
+  box.style.top = Math.min(r.bottom + 4, window.innerHeight - box.offsetHeight - 8) + "px";
+  box.querySelectorAll(".ol-kindbtn").forEach((b) => {
+    b.onclick = (e) => { e.stopPropagation(); openInlineSubtask(btn, parentId, projId, root, b.dataset.kind); };
+  });
+  box.addEventListener("pointerdown", (e) => e.stopPropagation());
+  setTimeout(() => {
+    const onDown = (ev) => { if (!box.contains(ev.target)) { closeInlineSubtask(); document.removeEventListener("pointerdown", onDown, true); } };
+    document.addEventListener("pointerdown", onDown, true);
+  }, 0);
+}
+function openInlineSubtask(btn, parentId, projId, root, kind = "task") {
   closeInlineSubtask();
   closeRowMenu();
   const box = document.createElement("div");
   box.className = "tb-ctx ol-addbox";
-  box.innerHTML = `<textarea class="ol-addinp" rows="2" placeholder="子タスク名を入力（Enterで追加）"></textarea>
+  const ph = kind === "group" ? "タスクグループ名を入力（Enterで追加・あとで中にタスクを足す）" : "タスク名を入力（Enterで追加）";
+  box.innerHTML = `<textarea class="ol-addinp" rows="2" placeholder="${ph}"></textarea>
     <div class="ol-addbtns"><button class="ol-addok">追加</button><button class="ol-addng">キャンセル</button><span class="ol-adderr"></span></div>`;
   document.body.appendChild(box);
   _olInlineEl = box;
@@ -2349,6 +2378,9 @@ function css() {
   .ol-kind{font-size:10px;font-weight:700;padding:1px 6px;border-radius:6px;margin-left:6px;vertical-align:middle;white-space:nowrap;display:inline-block}
   .ol-kind-proj{background:rgba(58,134,255,.13);color:#2f6fd6;border:1px solid rgba(58,134,255,.32)}
   .ol-kind-group{background:${C.track};color:${C.muted};border:1px solid ${C.line}}
+  .ol-kindmenu{display:flex;flex-direction:column;gap:2px;padding:4px;min-width:160px}
+  .ol-kindbtn{font:inherit;font-size:13px;text-align:left;padding:7px 10px;border:none;border-radius:7px;background:transparent;color:${C.ink};cursor:pointer}
+  .ol-kindbtn:hover{background:${C.track}}
   .ol-addbox{padding:8px;min-width:240px;gap:7px}
   .ol-addinp{font:inherit;font-size:13px;width:100%;box-sizing:border-box;border:1px solid ${C.line};border-radius:7px;padding:6px 8px;resize:vertical;color:${C.ink};background:#fff}
   .ol-addinp:focus{outline:none;border-color:${C.fill}}
