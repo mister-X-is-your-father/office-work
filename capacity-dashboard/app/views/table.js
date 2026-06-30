@@ -13,6 +13,8 @@ import { hourInputHtml, wireHourInput, parseSmartDate } from "../lib/form.js";
 import { taskMatches, next7End, EMPTY_FILTER, BUILTIN_VIEWS } from "../lib/smartlist.js";
 import { icon } from "../lib/icons.js";
 import { startFocusFor } from "./pomodoro.js";
+import { statePatchFor } from "../lib/taskstate.js";
+import { humanAssignees } from "../lib/users.js";
 import * as history from "../lib/history.js";
 
 history.initHistoryHotkeys(); // Ctrl/Cmd+Z=取消・Ctrl+Y/Ctrl+Shift+Z=やり直し（入力中/モーダル内は無視）
@@ -215,7 +217,6 @@ export async function render(root) {
   else if (V.doneMode === "today") rows = rows.filter((r) => !r.done || doneToday(r.t));
   if (V.cat) rows = rows.filter((r) => (r.cat ? r.cat.title : "") === V.cat);
   // クイック絞り込み（担当＝自分/担当なし/自分＋担当なし、期限＝今日＋期限なし/1週間以内/1ヶ月以内）。本人ごとに保存。
-  const humanAssignees = (t) => (t.assignees || []).filter((a) => !isAiUser(a));
   if (V.qaWho === "me") rows = rows.filter((r) => humanAssignees(r.t).some((a) => a.id === UID));
   else if (V.qaWho === "none") rows = rows.filter((r) => humanAssignees(r.t).length === 0);
   else if (V.qaWho === "me_none") rows = rows.filter((r) => { const h = humanAssignees(r.t); return h.length === 0 || h.some((a) => a.id === UID); });
@@ -803,10 +804,7 @@ function openStatusMenu(chipEl, id, tasks, root) {
   // status キーに応じたフィールド差分（scalar patch）＋連絡待ちラベルの on/off を組み立てる。
   const stateOf = (key) => {
     if (key === "waiting") return { patch: { done: false, percent_done: t.percent_done || 0, started_at: t.started_at || null }, waiting: true };
-    const keepPct = (t.done || t.percent_done >= 100) ? 0 : (t.percent_done || 0);
-    const patch = key === "done" ? { done: true, percent_done: 100 }
-      : key === "doing" ? { done: false, percent_done: keepPct, started_at: new Date().toISOString() }
-      : { done: false, percent_done: 0, started_at: null };
+    const patch = statePatchFor(key, t);
     return { patch, waiting: false };
   };
   // before/after（{done,percent_done,started_at,waiting}）を実際に適用する。undo/redo で同じ経路。
@@ -1241,10 +1239,7 @@ async function gRawSet(col, id, value) {
   if (col === "state") {
     const t = findGTask(id) || {};
     if (value === "waiting") { await updateTask(id, { done: false }); await setTaskWaiting(t, true); return; }
-    const keepPct = (t.done || (t.percent_done || 0) >= 100) ? 0 : (t.percent_done || 0);
-    const patch = value === "done" ? { done: true, percent_done: 100 }
-      : value === "doing" ? { done: false, percent_done: keepPct, started_at: new Date().toISOString() }
-      : { done: false, percent_done: 0, started_at: null };
+    const patch = statePatchFor(value, t);
     await updateTask(id, patch); await setTaskWaiting(t, false);
     return;
   }
@@ -1637,9 +1632,9 @@ function wireBulk(root, rows, tasks, members, today, labels) {
           break;
         case "status":
           openMenu(r.left, r.bottom + 4, [
-            { label: "未着手", on: () => runAllH("ステータス変更", (id) => Promise.all([updateTask(id, { done: false, percent_done: 0, started_at: null }), setTaskWaiting(taskOf(id), false)])) },
-            { label: "進行中", on: () => runAllH("ステータス変更", (id) => { const t = taskOf(id); const keepPct = (t && (t.done || t.percent_done >= 100)) ? 0 : ((t && t.percent_done) || 0); return Promise.all([updateTask(id, { done: false, percent_done: keepPct, started_at: new Date().toISOString() }), setTaskWaiting(t, false)]); }) },
-            { label: "完了", on: () => runAllH("ステータス変更", (id) => Promise.all([updateTask(id, { done: true, percent_done: 100 }), setTaskWaiting(taskOf(id), false)])) },
+            { label: "未着手", on: () => runAllH("ステータス変更", (id) => Promise.all([updateTask(id, statePatchFor("todo", taskOf(id))), setTaskWaiting(taskOf(id), false)])) },
+            { label: "進行中", on: () => runAllH("ステータス変更", (id) => { const t = taskOf(id); return Promise.all([updateTask(id, statePatchFor("doing", t)), setTaskWaiting(t, false)]); }) },
+            { label: "完了", on: () => runAllH("ステータス変更", (id) => Promise.all([updateTask(id, statePatchFor("done", taskOf(id))), setTaskWaiting(taskOf(id), false)])) },
           ]);
           break;
         case "prio":

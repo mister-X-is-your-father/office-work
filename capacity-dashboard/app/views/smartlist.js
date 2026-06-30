@@ -11,8 +11,9 @@ import { openTaskForm } from "./taskform.js";
 import { C, esc, fmtH, todayISO, emptyState } from "../lib/ui.js";
 import { push as histPush, initHistoryHotkeys } from "../lib/history.js";
 import { icon } from "../lib/icons.js";
+import { statePatchFor } from "../lib/taskstate.js";
+import { DOW_JA } from "../lib/form.js";
 
-const DOW_JA = ["日", "月", "火", "水", "木", "金", "土"];
 const ICON_X = icon("x", { size: 13 });
 
 const SEL_KEY = (uid) => `ts.smartlist.sel.${uid ?? "anon"}`;
@@ -504,10 +505,10 @@ function wireBulk(root, data, ctx, rerender) {
         }
         case "status":
           openSlMenu(r.left, r.bottom + 4, [
-            { label: "未着手", on: () => runAllH("ステータス変更", (id) => Promise.all([updateTask(id, { done: false, percent_done: 0, started_at: null }), setTaskWaiting(taskOf(id), false)])) },
-            { label: "進行中", on: () => runAllH("ステータス変更", (id) => { const t = taskOf(id); const keepPct = (t && (t.done || t.percent_done >= 100)) ? 0 : ((t && t.percent_done) || 0); return Promise.all([updateTask(id, { done: false, percent_done: keepPct, started_at: new Date().toISOString() }), setTaskWaiting(t, false)]); }) },
+            { label: "未着手", on: () => runAllH("ステータス変更", (id) => Promise.all([updateTask(id, statePatchFor("todo", taskOf(id))), setTaskWaiting(taskOf(id), false)])) },
+            { label: "進行中", on: () => runAllH("ステータス変更", (id) => { const t = taskOf(id); return Promise.all([updateTask(id, statePatchFor("doing", t)), setTaskWaiting(t, false)]); }) },
             { label: "連絡待ち", on: () => runAllH("ステータス変更", (id) => setTaskWaiting(taskOf(id), true)) },
-            { label: "完了", on: () => runAllH("ステータス変更", (id) => Promise.all([updateTask(id, { done: true, percent_done: 100 }), setTaskWaiting(taskOf(id), false)])) },
+            { label: "完了", on: () => runAllH("ステータス変更", (id) => Promise.all([updateTask(id, statePatchFor("done", taskOf(id))), setTaskWaiting(taskOf(id), false)])) },
           ]);
           break;
         case "flag":

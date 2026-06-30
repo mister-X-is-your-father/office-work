@@ -8,6 +8,8 @@ import { C, fmtH, esc, todayISO, announce, avatar } from "../lib/ui.js";
 import { shiftISO, projectAncestor } from "../lib/capacity.js";
 import { taskMatches, next7End } from "../lib/smartlist.js";
 import { icon } from "../lib/icons.js";
+import { statePatchFor } from "../lib/taskstate.js";
+import { DOW_JA } from "../lib/form.js";
 import { startFocusFor } from "./pomodoro.js";
 import { openTaskForm } from "./taskform.js";
 import * as history from "../lib/history.js";
@@ -594,10 +596,7 @@ function stateFor(t, key) {
   if (key === "waiting") {
     return { done: false, percent_done: t.percent_done || 0, started_at: t.started_at || null, waiting: true };
   }
-  const keepPct = (t.done || (t.percent_done || 0) >= 100) ? 0 : (t.percent_done || 0);
-  if (key === "done") return { done: true, percent_done: 100, started_at: t.started_at || null, waiting: false };
-  if (key === "doing") return { done: false, percent_done: keepPct, started_at: new Date().toISOString(), waiting: false };
-  return { done: false, percent_done: 0, started_at: null, waiting: false }; // todo
+  return { ...statePatchFor(key, t, { keepStartedOnDone: true }), waiting: false };
 }
 
 function rerender() { invalidate(); if (_root && _root.isConnected) render(_root); }
@@ -662,7 +661,7 @@ function dueLabel(due) {
   if (due === _today) return "今日";
   if (due === shiftISO(_today, 1)) return "明日";
   const diff = daysBetween(_today, due);
-  if (diff <= 6) return ["日", "月", "火", "水", "木", "金", "土"][new Date(due + "T00:00:00Z").getUTCDay()] + "曜";
+  if (diff <= 6) return DOW_JA[new Date(due + "T00:00:00Z").getUTCDay()] + "曜";
   return due.slice(5).replace("-", "/");
 }
 function daysBetween(a, b) { return Math.round((Date.parse(b + "T00:00:00Z") - Date.parse(a + "T00:00:00Z")) / 86400000); }
