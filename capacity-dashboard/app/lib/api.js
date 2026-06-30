@@ -17,7 +17,7 @@ async function req(path, { method = "GET", body, auth = true } = {}) {
   if (r.status === 401 && auth) { clearToken(); throw new AuthError("セッション切れ"); }
   const txt = await r.text();
   const data = txt ? JSON.parse(txt) : null;
-  if (!r.ok) throw new Error((data && data.message) || `HTTP ${r.status}`);
+  if (!r.ok) { const err = new Error((data && data.message) || `HTTP ${r.status}`); err.status = r.status; throw err; }
   return data;
 }
 
@@ -36,9 +36,23 @@ export async function register(username, email, password) {
 // 全タスク（time_estimate / time_spent / assignees / 日付 / priority / done 等を含む）
 export async function getTasks() { return req("/tasks/all?per_page=250"); }
 export async function getTask(id) { return req(`/tasks/${id}`); }
+// 投入先WS内の全タスクを done 込みで全ページ取得する（サーバの per_page 既定は 50 で頭打ちのためページ送り）。
+// keikaku 冪等投入の既存検出に使う。/tasks/all は全WS横断＋50件窓で取りこぼすため WS スコープのこちらを使う。
+export async function getProjectTasksAll(projectId, perPage = 50) {
+  const out = [];
+  for (let page = 1; page <= 200; page++) { // 200ページ=最大1万件のフェイルセーフ
+    const batch = await req(`/projects/${projectId}/tasks?per_page=${perPage}&page=${page}`);
+    if (!Array.isArray(batch) || batch.length === 0) break;
+    out.push(...batch);
+    if (batch.length < perPage) break; // 最終ページ（満杯でない）
+  }
+  return out;
+}
 export async function getProjects() { return req("/projects"); }
 export async function createProject(title) { return req("/projects", { method: "PUT", body: { title } }); }
 export async function getProjectMembers(projectId) { return req(`/projects/${projectId}/projectusers`); }
+// ユーザー名（username）検索。s が空だと API は null を返すので呼び出し側で空ガードする。keikaku の担当名→user_id 解決に使う。
+export async function searchUsers(query) { return req(`/users?s=${encodeURIComponent(query)}`); }
 // かんばん（0.24 のプロジェクトビュー＋バケット構造）
 export async function getProjectDetail(id) { return req(`/projects/${id}`); }                       // views[] を含む
 export async function getViewTasks(pid, vid) { return req(`/projects/${pid}/views/${vid}/tasks`); } // kanban=バケット配列(tasks入り)
