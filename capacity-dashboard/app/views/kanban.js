@@ -8,6 +8,7 @@ import { C, fmtH, esc, todayISO, announce, avatar } from "../lib/ui.js";
 import { shiftISO } from "../lib/capacity.js";
 import { taskMatches, next7End } from "../lib/smartlist.js";
 import { icon } from "../lib/icons.js";
+import { startFocusFor } from "./pomodoro.js";
 import { openTaskForm } from "./taskform.js";
 import * as history from "../lib/history.js";
 
@@ -247,6 +248,7 @@ function cardHtml(t, memberIdx) {
       ${staleBadge}
       ${est ? `<span class="kb-est">${icon("timer", { size: 11 })}${est}</span>` : ""}
       ${t.done ? `<span class="kb-donetag">${icon("check", { size: 11 })}完了</span>` : ""}
+      <button type="button" class="kb-timer" data-timer title="このタスクでタイマー開始" aria-label="このタスクでタイマー開始">${icon("timer", { size: 13 })}</button>
     </div>
   </div>`;
 }
@@ -283,6 +285,24 @@ function wireOneCard(card, memberIdx) {
     // mousedown/touchstart も止めてカードの dragstart / click 編集を誘発しない。
     moveBtn.addEventListener("mousedown", (e) => e.stopPropagation());
     moveBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
+  }
+  // 「タイマー起動」: このカードのタスクで即・集中タイマー開始。カードの編集/ドラッグと競合させない。
+  const timerBtn = card.querySelector(".kb-timer");
+  if (timerBtn) {
+    timerBtn.draggable = false;
+    timerBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const t = taskOf();
+      if (!t) return;
+      const ok = startFocusFor(t.id, t.title);
+      if (ok === false) { // 既に別タスクで稼働中＝上書きしない。title で簡易フィードバック。
+        timerBtn.classList.add("busy"); timerBtn.title = "別のタスクでタイマー稼働中です";
+        setTimeout(() => { timerBtn.classList.remove("busy"); timerBtn.title = "このタスクでタイマー開始"; }, 1600);
+      }
+    });
+    timerBtn.addEventListener("mousedown", (e) => e.stopPropagation());
+    timerBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
   }
   card.addEventListener("keydown", (e) => {
     if (e.target !== card) return;
@@ -747,6 +767,13 @@ function css() {
   .kb-stale{display:inline-flex;align-items:center;gap:3px;font-size:10.5px;font-weight:700;color:${C.over};border:1px solid ${C.over};border-radius:7px;padding:0 5px}
   .kb-stale.wait{color:${C.amber};border-color:${C.amber}}
   .kb-est{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:${C.muted};margin-left:auto;font-variant-numeric:tabular-nums}
+  .kb-timer{margin-left:auto;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;padding:0;border:1px solid ${C.line};border-radius:7px;background:var(--card);color:${C.muted};cursor:pointer;opacity:0;transition:opacity .12s}
+  .kb-est ~ .kb-timer,.kb-donetag ~ .kb-timer{margin-left:6px}
+  .kb-timer:hover{color:${C.fill};border-color:${C.fill}}
+  .kb-timer:focus-visible{outline:2px solid ${C.fill};outline-offset:1px;opacity:1}
+  .kb-timer.busy{color:${C.over};border-color:${C.over};opacity:1}
+  .kb-card:hover .kb-timer,.kb-card:focus-within .kb-timer{opacity:1}
+  @media (hover:none),(pointer:coarse){ .kb-timer{opacity:1} }
   .kb-donetag{display:inline-flex;align-items:center;gap:3px;font-size:10px;color:${C.free};border:1px solid ${C.free};border-radius:8px;padding:0 6px}
 
   /* ── 案件スイムレーン（2軸グリッド: 行=案件 × 列=ステータス）── */

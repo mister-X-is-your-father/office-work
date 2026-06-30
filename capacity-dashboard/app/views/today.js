@@ -5,6 +5,8 @@ import { KINDS } from "../lib/kinds.js";
 import { projectName } from "../lib/store.js";
 import { C, fmtH, esc, todayISO, member_color } from "../lib/ui.js";
 import { renderClock, openRescheduleMenu } from "./clock.js";
+import { icon } from "../lib/icons.js";
+import { startFocusFor } from "./pomodoro.js";
 
 let CAP = 8; // 設定（容量 h/日）で上書き
 const PJPAL = ["#3a86ff", "#2fa66b", "#b657d6", "#e5772d", "#0ea5e9", "#f5a623", "#ef476f", "#14b8a6"];
@@ -187,6 +189,20 @@ function renderStacked(body, data, day, rerender, opts = {}) {
       };
     });
   }
+
+  // タスクタイル隅の「タイマー起動」: canEdit に関係なく動く（タイマー開始はAPI書込でない）。
+  // 親 .t54-seg の再スケジュールクリックと競合しないよう stopPropagation。
+  body.querySelectorAll(".t54-timer").forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const ok = startFocusFor(+b.dataset.tid, b.dataset.title);
+      if (ok === false) { // 既に別タスクで稼働中＝上書きしない。title で簡易フィードバック。
+        b.classList.add("busy"); b.title = "別のタスクでタイマー稼働中です";
+        setTimeout(() => { b.classList.remove("busy"); b.title = "このタスクでタイマー開始"; }, 1600);
+      }
+    };
+  });
 }
 
 function chartHtml(rows, g) {
@@ -229,8 +245,10 @@ function colHtml(r, i, g) {
     // タスク(!isOcc)かつ canEdit のときだけ、再スケジュール用の data 属性＋クリック可クラスを付ける。
     // occurrence(会議/定例)や非canEdit は従来どおり（data 属性なし・クリック不可）。
     const act = (!isOcc && g.canEdit) ? ` t54-seg-act" data-task="${t.taskId}" data-member="${r.id}" data-h="${t.h}" data-title="${esc(t.title)}` : "";
+    // タスク(occurrence 以外)には「タイマー起動」ボタンを隅に。会議/定例(taskId 無し)には付けない。
+    const timerBtn = !isOcc ? `<button type="button" class="t54-timer" data-tid="${t.taskId}" data-title="${esc(t.title)}" title="このタスクでタイマー開始" aria-label="このタスクでタイマー開始">${icon("timer", { size: 13 })}</button>` : "";
     segs += `<div class="t54-seg${small}${act}" style="height:${hpx}px;background:${col}" title="${kindLabel}${esc(t.title)} ・ ${fmtH(t.h)}">
-        <div class="t54-tname">${esc(t.title)}</div><div class="t54-thrs"><b>${fmtH(t.h)}</b></div></div>`;
+        <div class="t54-tname">${esc(t.title)}</div><div class="t54-thrs"><b>${fmtH(t.h)}</b></div>${timerBtn}</div>`;
   }
   if (!r.tasks.length) {
     inner += `<div class="t54-none" style="bottom:${FOOT_H}px">今日の予定なし</div>`;
@@ -294,6 +312,12 @@ function css() {
   .t54-tname{font-size:12px;font-weight:600;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;position:relative;z-index:1}
   .t54-thrs{font-size:10.5px;line-height:1.2;margin-top:2px;opacity:.92;position:relative;z-index:1}
   .t54-seg.small{justify-content:center}.t54-seg.small .t54-thrs{display:none}.t54-seg.small .t54-tname{font-size:11px}
+  .t54-timer{position:absolute;top:3px;right:3px;z-index:2;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;padding:0;border:0;border-radius:6px;background:rgba(255,255,255,.22);color:#fff;cursor:pointer;opacity:0;transition:opacity .12s}
+  .t54-seg:hover .t54-timer{opacity:1}
+  .t54-timer:hover{background:rgba(255,255,255,.42)}
+  .t54-timer:focus-visible{outline:2px solid #fff;outline-offset:1px;opacity:1}
+  .t54-timer.busy{background:${C.over};opacity:1}
+  @media (hover:none),(pointer:coarse){ .t54-timer{opacity:1} }
   .t54-overlay{position:absolute;left:0;right:0;z-index:5;pointer-events:none;background:rgba(229,72,77,.20);border-radius:9px 9px 0 0;border-top:2px solid ${C.over};box-shadow:inset 0 1px 0 rgba(255,255,255,.25)}
   .t54-overbadge{position:absolute;left:50%;transform:translateX(-50%);background:${C.over};color:#fff;font-size:10.5px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap;box-shadow:0 3px 8px rgba(229,72,77,.35);z-index:9}
   .t54-freezone{position:absolute;left:0;right:0;z-index:3;pointer-events:none;border:1.5px dashed #c4d6c9;border-radius:9px;display:flex;align-items:center;justify-content:center}

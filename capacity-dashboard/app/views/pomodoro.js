@@ -283,6 +283,70 @@ export function mountPomodoro(topbar) {
     paint();
   };
 
+  // タスク選択の一元化（idle・実行中カード・PiP からの選択は必ずここを通す）。
+  const selectTask = (id, title) => {
+    if (!card) return;
+    card._taskId = id;
+    card._taskTitle = title || "";
+    const cur = st.get();
+    if (cur) { // タイマー実行中＝実行中状態を差し替え、カード表示と PiP を即更新
+      st.set({ ...cur, taskId: id, taskTitle: title || "" });
+      const nm = card.querySelector("#pm-rtask-name");
+      if (nm) nm.textContent = title || "（未選択）";
+      paint();     // 表示エリア内のタスク名も即反映
+      paintPip();  // 最前面ミニ窓も即反映
+    }
+  };
+
+  // タスク検索ピッカーの配線（idle と実行中カードで共通）。scope 内の
+  // #pm-task-q / #pm-task-res / #pm-task-clr を使い、行選択は onSelect(id,title) へ流す。
+  function wireTaskPicker(scope, onSelect) {
+    const qIn = scope.querySelector("#pm-task-q");
+    const res = scope.querySelector("#pm-task-res");
+    const clr = scope.querySelector("#pm-task-clr");
+    if (!qIn || !res) return null;
+    const renderRes = () => { res.innerHTML = taskResHtml((card && card._cands) || [], qIn.value); };
+    const openRes = () => { renderRes(); res.hidden = false; };
+    const closeRes = () => { res.hidden = true; };
+    qIn.oninput = openRes;
+    qIn.onfocus = openRes;
+    qIn.onblur = () => setTimeout(closeRes, 150); // 行クリック(mousedown)を拾えるよう遅延
+    // mousedown で選択（blur より先に発火＝行クリックが確実に効く）
+    res.onmousedown = (e) => {
+      const it = e.target.closest(".pm-res-i");
+      if (!it) return;
+      e.preventDefault(); // 入力のフォーカスを奪わない
+      const title = it.dataset.title || "";
+      qIn.value = title;
+      if (clr) clr.hidden = !title;
+      closeRes();
+      onSelect(+it.dataset.id, title);
+    };
+    if (clr) clr.onclick = () => {
+      qIn.value = ""; clr.hidden = true;
+      qIn.focus(); renderRes(); res.hidden = false;
+      onSelect(null, "");
+    };
+    return { qIn, res, openRes, closeRes };
+  }
+
+  // PiP のタスク名タップ等から呼ぶ: 実行中カードを前面化し、タスク変更ピッカーを開く。
+  async function revealRunningTaskPicker() {
+    const cur = st.get();
+    if (!cur) return;
+    if (!card) await open(); else { card._idle = false; loop(); }
+    if (!card) return;
+    const rsel = card.querySelector("#pm-rtask-sel");
+    const rpick = card._rpick;
+    if (rsel && rpick) {
+      rsel.hidden = false;
+      rpick.qIn.value = card._taskTitle || cur.taskTitle || "";
+      const c = card.querySelector("#pm-task-clr"); if (c) c.hidden = !rpick.qIn.value;
+      rpick.qIn.focus();
+      rpick.openRes();
+    }
+  }
+
   const tickTitle = () => {
     const s = st.get();
     document.title = s && !s.paused ? `(${mmss(dispMs(s))}) ${MODE_TITLE_EMOJI[s.mode]} ${BASE_TITLE}` : BASE_TITLE;
@@ -474,32 +538,8 @@ export function mountPomodoro(topbar) {
           paint();
         };
       });
-      // ── タスク検索ドロップダウン（カード全体は再paintせず結果リストだけ更新＝入力フォーカス維持）──
-      const qIn = card.querySelector("#pm-task-q");
-      const res = card.querySelector("#pm-task-res");
-      const clr = card.querySelector("#pm-task-clr");
-      const renderRes = () => { res.innerHTML = taskResHtml(card._cands || [], qIn.value); };
-      const openRes = () => { renderRes(); res.hidden = false; };
-      const closeRes = () => { res.hidden = true; };
-      qIn.oninput = openRes;
-      qIn.onfocus = openRes;
-      qIn.onblur = () => setTimeout(closeRes, 150); // 行クリック(mousedown)を拾えるよう遅延
-      // mousedown で選択（blur より先に発火＝行クリックが確実に効く）
-      res.onmousedown = (e) => {
-        const it = e.target.closest(".pm-res-i");
-        if (!it) return;
-        e.preventDefault(); // 入力のフォーカスを奪わない
-        card._taskId = +it.dataset.id;
-        card._taskTitle = it.dataset.title || "";
-        qIn.value = card._taskTitle;
-        clr.hidden = !card._taskTitle;
-        closeRes();
-      };
-      clr.onclick = () => {
-        card._taskId = null; card._taskTitle = "";
-        qIn.value = ""; clr.hidden = true;
-        qIn.focus(); renderRes(); res.hidden = false;
-      };
+      // ── タスク検索ドロップダウン（共通ピッカー配線・選択は selectTask に一元化）──
+      wireTaskPicker(card, selectTask);
       card.querySelector("#pm-go").onclick = () => {
         const base = {
           taskId: card._taskId ?? null,
@@ -531,6 +571,14 @@ export function mountPomodoro(topbar) {
           <button class="pm-gear" id="pm-gear" title="表示をカスタム">${icon("palette", { size: 14 })}</button>
           <button class="pm-x" id="pm-x">×</button></div>
         <div class="pm-disp" id="pm-disp"></div>
+        <div class="pm-rtask"><span class="pm-rtask-lbl">タスク</span>
+          <span class="pm-rtask-name" id="pm-rtask-name"></span>
+          <button class="pm-rtask-edit" id="pm-rtask-edit">変更</button></div>
+        <div class="pm-task-sel" id="pm-rtask-sel" hidden>
+          <input id="pm-task-q" class="pm-in" type="text" placeholder="タスクを検索（実績の記録先）" autocomplete="off">
+          <button class="pm-task-clr" id="pm-task-clr" title="選択を解除" hidden>×</button>
+          <div class="pm-res" id="pm-task-res" hidden></div>
+        </div>
         <div class="pm-row">
           <button class="pm-go sub" id="pm-pause"></button>
           <button class="pm-go sub stop" id="pm-stop">■ ${s.mode === "break" ? "休憩を終わる" : "停止"}</button>
@@ -546,6 +594,23 @@ export function mountPomodoro(topbar) {
         p.hidden = !p.hidden;
         if (!p.hidden) buildPicker(p);
       };
+      // 実行中のタスク変更導線: タスク行＋[変更]で idle と同じ検索ピッカーをその場に開く。
+      const rname = card.querySelector("#pm-rtask-name");
+      if (rname) rname.textContent = s.taskTitle || "（未選択）";
+      const rsel = card.querySelector("#pm-rtask-sel");
+      const redit = card.querySelector("#pm-rtask-edit");
+      const rpick = wireTaskPicker(card, (id, title) => { selectTask(id, title); if (rsel) rsel.hidden = true; });
+      card._rpick = rpick;
+      if (redit && rsel && rpick) {
+        redit.onclick = () => {
+          rsel.hidden = !rsel.hidden;
+          if (!rsel.hidden) {
+            rpick.qIn.value = card._taskTitle || s.taskTitle || "";
+            const c = card.querySelector("#pm-task-clr"); if (c) c.hidden = !rpick.qIn.value;
+            rpick.qIn.focus(); rpick.openRes();
+          }
+        };
+      }
       applyCardStyle(card, dispCfg());
     }
     // 毎秒: 表示エリア＋一時停止ラベルだけ更新
@@ -598,6 +663,13 @@ export function mountPomodoro(topbar) {
       <div class="pp-bar"><i id="pp-fill"></i></div>`;
     pip.document.getElementById("pp-pause").onclick = doPause;
     pip.document.getElementById("pp-stop").onclick = doStop;
+    // タスク名タップ → メインウィンドウ前面化＋実行中カードのタスク変更ピッカーを開く。
+    const ppTask = pip.document.getElementById("pp-task");
+    if (ppTask) {
+      ppTask.style.cursor = "pointer";
+      ppTask.title = "クリックでタスクを選択";
+      ppTask.onclick = () => { try { window.focus(); } catch { /* noop */ } revealRunningTaskPicker(); };
+    }
     pip.addEventListener("pagehide", () => { pip = null; });
     paintPip();
   }
@@ -609,7 +681,10 @@ export function mountPomodoro(topbar) {
     const timeEl = d.getElementById("pp-time");
     if (timeEl) { timeEl.textContent = mmss(dispMs(s)); timeEl.style.opacity = s.paused ? ".55" : "1"; }
     const taskEl = d.getElementById("pp-task");
-    if (taskEl) taskEl.textContent = s.taskTitle || ""; // textContent で安全に（XSS 防止）
+    if (taskEl) { // textContent で安全に（XSS 防止）。未選択時はタップ導線の薄字を出す
+      if (s.taskTitle) { taskEl.textContent = s.taskTitle; taskEl.style.fontStyle = ""; taskEl.style.opacity = ""; }
+      else { taskEl.textContent = "＋ タスクを選択"; taskEl.style.fontStyle = "italic"; taskEl.style.opacity = ".5"; }
+    }
     const fill = d.getElementById("pp-fill");
     if (fill) { fill.style.width = (progressOf(s) * 100).toFixed(1) + "%"; fill.style.background = cfg.accent; }
     const pb = d.getElementById("pp-pause");
@@ -646,6 +721,11 @@ function ensureStyle() {
   .pm-pip{width:100%;margin-top:8px;font:inherit;font-size:11.5px;padding:6px 0;border-radius:8px;border:1px dashed var(--line);background:#fff;color:var(--muted);cursor:pointer}
   .pm-pip:hover{color:var(--fill);border-color:#b9d4ff}
   .pm-disp{margin:4px 0 2px}
+  .pm-rtask{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);margin:2px 0 6px;min-width:0}
+  .pm-rtask-lbl{flex:none;opacity:.8}
+  .pm-rtask-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+  .pm-rtask-edit{flex:none;font:inherit;font-size:11px;padding:2px 8px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--fill);cursor:pointer}
+  .pm-rtask-edit:hover{border-color:#b9d4ff}
   .pm-gear{border:0;background:transparent;font-size:13px;cursor:pointer;padding:0 2px;line-height:1;opacity:.7}
   .pm-gear:hover{opacity:1}
   .pm-picker{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
@@ -713,6 +793,9 @@ function ensureStyle() {
   html[data-theme="dark"] .pm-pk-card.on{border-color:var(--pm-accent,var(--fill));background:rgba(58,134,255,.16)}
   html[data-theme="dark"] .pm-pk-swatch{border-color:var(--card)}
   html[data-theme="dark"] .pm-time{color:var(--ink)}
-  html[data-theme="dark"] .pm-time.brk{color:#7fd6a6}`;
+  html[data-theme="dark"] .pm-time.brk{color:#7fd6a6}
+  html[data-theme="dark"] .pm-rtask-name{color:var(--ink)}
+  html[data-theme="dark"] .pm-rtask-edit{background:var(--card);border-color:var(--line);color:#8db8ff}
+  html[data-theme="dark"] .pm-rtask-edit:hover{border-color:rgba(58,134,255,.45)}`;
   document.head.appendChild(s);
 }

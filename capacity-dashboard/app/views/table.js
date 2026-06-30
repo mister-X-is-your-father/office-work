@@ -12,6 +12,7 @@ import { summarizeRecurrence, openRecurrenceForm } from "./recurrenceform.js";
 import { hourInputHtml, wireHourInput, parseSmartDate } from "../lib/form.js";
 import { taskMatches, next7End, EMPTY_FILTER, BUILTIN_VIEWS } from "../lib/smartlist.js";
 import { icon } from "../lib/icons.js";
+import { startFocusFor } from "./pomodoro.js";
 import * as history from "../lib/history.js";
 
 history.initHistoryHotkeys(); // Ctrl/Cmd+Z=取消・Ctrl+Y/Ctrl+Shift+Z=やり直し（入力中/モーダル内は無視）
@@ -491,6 +492,16 @@ export async function render(root) {
       if ((el = e.target.closest(".tb-priobtn")))  { openPrioMenu(el, +el.dataset.prio, tasks, root); return; }
       if ((el = e.target.closest(".tb-duebtn")))   { openDueMenu(el, +el.dataset.due, tasks, root, today); return; }
       if ((el = e.target.closest(".tb-estbtn")))   { openEstMenu(el, +el.dataset.est, tasks, root); return; }
+      if ((el = e.target.closest(".tb-timer"))) {
+        // タスク行から即・集中タイマー開始。行クリック編集と競合しないよう順序return（実質 stopPropagation）。
+        e.preventDefault();
+        const ok = startFocusFor(+el.dataset.timer, el.dataset.title);
+        if (ok === false) { // 既に別タスクで稼働中＝上書きしない。タイトル属性で簡易フィードバック。
+          el.classList.add("busy"); el.title = "別のタスクでタイマー稼働中です";
+          setTimeout(() => { el.classList.remove("busy"); el.title = "このタスクでタイマー開始"; }, 1600);
+        }
+        return;
+      }
       if ((el = e.target.closest(".tb-fable"))) {
         // 旧 fable: ボタン disabled/innerHTML 書換ありの async 経路（el を b として使う）。
         const b = el; b.disabled = true;
@@ -522,7 +533,7 @@ export async function render(root) {
     // ダブルクリック（bubble）: グリッド編集／行ダブルクリック編集。
     tbody.ondblclick = (e) => {
       const gc = e.target.closest(".tb-gc"); if (gc) { gridEditFromEl(gc, root); return; }
-      if (e.target.closest(".tb-fable, .tb-rowck, .tb-pctbar")) return; // 行編集フォームを誤起動させない
+      if (e.target.closest(".tb-fable, .tb-timer, .tb-rowck, .tb-pctbar")) return; // 行編集フォームを誤起動させない
       const tr = e.target.closest("tr[data-id]"); if (tr) openTaskForm({ taskId: +tr.dataset.id, onSaved: () => render(root) });
     };
     // 右クリック（bubble）: 行メニュー。
@@ -1943,7 +1954,7 @@ function rowHtml(r, members, i, manual) {
   // 列ごとの <td> をマップで持ち、cols() の順序（表示/非表示・並べ替え反映）で出力する。
   const cellOf = {
     proj: `<td class="tb-proj tb-gc" data-col="proj"><button class="tb-cell tb-projbtn" data-proj="${id}" title="クリックでプロジェクト（親タスク）を変更">${r.parent ? esc(r.parent.title) : "—"}<span class="tb-cell-car">▾</span></button></td>`,
-    title: `<td class="tb-title tb-gc" data-col="title"><span class="tb-tle">${esc(r.title)}</span>${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">${icon("flag", { size: 12 })}</span>` : ""}${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">${icon("play", { size: 11 })}</button>` : ""}</td>`,
+    title: `<td class="tb-title tb-gc" data-col="title"><span class="tb-tle">${esc(r.title)}</span>${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">${icon("flag", { size: 12 })}</span>` : ""} <button type="button" class="tb-timer" data-timer="${id}" data-title="${esc(r.title)}" title="このタスクでタイマー開始" aria-label="このタスクでタイマー開始">${icon("timer", { size: 13 })}</button>${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">${icon("play", { size: 11 })}</button>` : ""}</td>`,
     who: `<td class="tb-gc" data-col="who">${whoBtn}</td>`,
     kind: `<td>${kind}</td>`,
     cat: `<td class="tb-gc" data-col="cat">${catBtn}</td>`,
@@ -2256,6 +2267,10 @@ function css() {
   .tb-fav{font-size:11px;vertical-align:1px}
   .tb-fable{width:22px;height:22px;border-radius:50%;border:1px solid ${C.fill};background:#fff;color:${C.fill};cursor:pointer;font-size:9px;padding:0;vertical-align:1px;margin-left:4px}
   .tb-fable:hover{background:${C.fill};color:#fff}.tb-fable:disabled{opacity:.5;cursor:default}
+  .tb-timer{width:22px;height:22px;border-radius:50%;border:1px solid ${C.line};background:#fff;color:${C.muted};cursor:pointer;padding:0;vertical-align:1px;display:inline-flex;align-items:center;justify-content:center;opacity:.55}
+  .tb tbody tr:hover .tb-timer{opacity:1}
+  .tb-timer:hover{background:${C.fill};color:#fff;border-color:${C.fill}}
+  .tb-timer.busy{color:${C.over};border-color:${C.over};opacity:1}
   .tb th{font-size:11px;color:${C.muted};font-weight:600;text-align:left;padding:10px 12px;border-bottom:1px solid ${C.line};white-space:nowrap;background:#fafbfc}
   .tb th.sortable{cursor:pointer;user-select:none}.tb th.sortable:hover{color:${C.ink}}
   .tb-thord{font-size:9.5px;color:${C.fill};font-weight:700;background:#eaf2ff;border-radius:5px;padding:0 4px;vertical-align:1px}
