@@ -5,11 +5,11 @@ import { createRecurrence, updateRecurrence } from "../lib/api.js";
 import { invalidate } from "../lib/store.js";
 import { C, esc } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
-import { parseSmartDate, fmtDisplay, fmtDisplayDow, joinMeta, splitMeta, hourInputHtml, wireHourInput, docChipsHtml, wireDocChips, attachDatePicker } from "../lib/form.js";
+import { parseSmartDate, fmtDisplay, fmtDisplayDow, joinMeta, splitMeta, hourInputHtml, wireHourInput, docChipsHtml, wireDocChips, attachDatePicker, DOW_JA } from "../lib/form.js";
 import { expandRecurrences } from "../lib/recurrence.js"; // 展開は lib に委譲（rrule.js 経由・自前計算しない）
+import { todayISO as currentTodayISO } from "../lib/capacity.js"; // 「今日」はローカル暦日 SSoT
 
 const BYDAY = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"]; // getUTCDay() の並び
-const DOW_JA = ["日", "月", "火", "水", "木", "金", "土"];
 
 // RRULE 組み立て（Googleカレンダー型: 「N 単位ごと」×単位別の詳細）。
 //   unit: "weekly"|"monthly"|"daily" ＋ interval(1..99)
@@ -111,7 +111,7 @@ export function renderRecurrencePanel(el, mode, { members, onSaved, close, holid
   const isTask = mode === "rtask";
   const kind = isTask ? "task" : "meeting";
   const isEdit = !!existing;
-  const todayISO = new Date().toISOString().slice(0, 10);
+  const todayISO = currentTodayISO(); // ローカル暦日（UTCだとJST早朝に前日へズレる＝B5と一貫）
   // 編集時のプレフィル元
   const exMeta = existing ? splitMeta(existing.note) : null;
   const exState = existing ? parseRRuleToState(existing.rrule) : null;

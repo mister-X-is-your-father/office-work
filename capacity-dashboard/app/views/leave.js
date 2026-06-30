@@ -6,6 +6,7 @@ import { load, invalidate } from "../lib/store.js";
 import { getUnavailability, createUnavailability, deleteUnavailability } from "../lib/api.js";
 import { parseSmartDate, fmtDisplayDow, attachDatePicker } from "../lib/form.js";
 import { C, esc } from "../lib/ui.js";
+import { todayISO as currentTodayISO } from "../lib/capacity.js";
 
 const fmtDate = (iso) => fmtDisplayDow(iso);
 
@@ -71,7 +72,7 @@ function findOverlapOrAdjacent(records, uid, s, e2, editId) {
 // ===== 個人休暇 =====
 function renderUnavailability(el, unavailability, memberName, { members, holidaysByDate, holidaysSet, me, reload }) {
   const records = [...(unavailability || [])];
-  const todayISO = new Date().toISOString().slice(0, 10);
+  const todayISO = currentTodayISO();
   const meId = me && me.id;
   const memOpts = (members || []).map((m) => `<option value="${m.id}"${m.id === meId ? " selected" : ""}>${esc(m.name || m.username)}</option>`).join("");
   const chips = REASON_CHIPS.map((r) => `<button type="button" class="una-chip" data-chip="${esc(r)}">${esc(r)}</button>`).join("");

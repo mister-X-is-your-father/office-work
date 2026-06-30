@@ -12,6 +12,7 @@ import { notifyPrefs, saveNotifyPrefs } from "../lib/notify.js";
 import { C, esc } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
 import { ROUTES, ORDER, ALWAYS_VISIBLE } from "../lib/routes.js";
+import { todayISO as currentTodayISO } from "../lib/capacity.js";
 
 // ── 外観・起動の個人設定（この端末のみ・localStorage）───────────────
 // テーマ: モードを ts.thememode（light/dark/system）に保存。index.html / app.js の従来トグルは
@@ -390,7 +391,7 @@ function wireHolidays(root, holidays, holidaysByDate) {
   const qEl = root.querySelector("#hol-q");
   const yearEl = root.querySelector("#hol-year");
   const hidePastEl = root.querySelector("#hol-hidepast");
-  const todayISO = new Date().toISOString().slice(0, 10);
+  const todayISO = currentTodayISO();
 
   const renderList = () => {
     const q = (qEl.value || "").trim().toLowerCase();
