@@ -10,6 +10,10 @@ export const hasDate = (d) => !!d && typeof d === "string" && !d.startsWith("000
 // アプリ全体の「今日」の SSoT。ローカル暦日の "YYYY-MM-DD"。
 // （new Date().toISOString() は UTC なので JST 早朝に前日へズレる＝使わない）
 export const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+// 空日付センチネル（hasDate が false を返す値）。各所のリテラル "0001-01-01T00:00:00Z" の SSoT。
+export const EMPTY_DATE = "0001-01-01T00:00:00Z";
+// 曜日番号（0=日..6=土、UTC統一）。各 lib/view の自前 new Date(iso).getUTCDay() を集約。
+export const dowOf = (isoDay) => new Date(isoDay + "T00:00:00Z").getUTCDay();
 // 着手済み判定（=進行中）。started_at（着手時刻・BE実カラム）が立っていれば進行中。
 // percent_done>0 も OR で拾う（外部クライアント編集や旧データで進捗だけ入っているケースの保険）。
 export const hasStarted = (t) => hasDate(t.started_at) || (t.percent_done || 0) > 0;
@@ -389,4 +393,4 @@ export function toMemberDayEntries(taskPairs, kind) {
   return out;
 }
 
-function round1(x) { return Math.round(x * 100) / 100; } // 時間表示=小数2桁（15分=0.25を保持）
+export function round1(x) { return Math.round(x * 100) / 100; } // 時間表示=小数2桁（15分=0.25を保持）。SSoT（各lib/viewはこれを使う）

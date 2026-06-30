@@ -2,6 +2,9 @@
 // JWT は Authorization ヘッダ。
 // オリジン適応: HTTPS（PWA・tailscale serve で /api を同一オリジンに同居）では相対 /api/v1 を使い、
 // mixed content と CORS を回避。平文 HTTP（http://leo:7010）では従来どおり 7005 を直叩き。
+import { REVIEW_LABEL, WAITING_LABEL } from "./kinds.js"; // 予約ラベルの SSoT は kinds.js（旧 api.js 重複定義を解消・Q13）
+export { REVIEW_LABEL, WAITING_LABEL }; // settings.js が api.js 経由で取得するため re-export（後方互換）
+
 export const API = location.protocol === "https:" ? location.origin + "/api/v1" : "http://leo:7005/api/v1";
 const TKEY = "taskstation_token";
 
@@ -192,8 +195,7 @@ export async function removeRelation(taskId, kind, otherTaskId) { return req(`/t
 export async function getComments(taskId) { return req(`/tasks/${taskId}/comments`); }
 export async function createComment(taskId, comment) { return req(`/tasks/${taskId}/comments`, { method: "PUT", body: { comment } }); }
 
-// 連絡待ち（GTD Waiting For）= 予約ラベル。付け外しでステータスを切り替える。
-export const WAITING_LABEL = "連絡待ち";
+// 連絡待ち（GTD Waiting For）= 予約ラベル。付け外しでステータスを切り替える。WAITING_LABEL の SSoT は kinds.js。
 let _waitingLabelId = null;
 export async function ensureWaitingLabel() {
   if (_waitingLabelId) return _waitingLabelId;
@@ -209,7 +211,7 @@ export async function setTaskWaiting(task, on) {
   else if (!on && cur) { await removeTaskLabel(task.id, cur.id); }
 }
 
-export const REVIEW_LABEL = "レビュー";
+// REVIEW_LABEL の SSoT は kinds.js（上で import + re-export 済み）。
 let _reviewLabelId = null;
 export async function ensureReviewLabel() {
   if (_reviewLabelId) return _reviewLabelId;

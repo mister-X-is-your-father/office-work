@@ -7,7 +7,7 @@
 //   - F1 横断逆算: committedByDay（他タスクの当日予定）を実空きから差し引く。
 //   - E4 再逆算 床止め: todayIso より前（過去日）には絶対に手順を置かない。
 //   - F6 ディープワーク枠: taskIsImportant（priority>=4）なら deep 枠を実空きに含める（避けない）。
-import { shiftISO, todayISO } from "./capacity.js";
+import { shiftISO, todayISO, isBusinessDay } from "./capacity.js";
 
 // 見積り(h) を数値化。空・不正は null（＝「1日1件」扱いの目印）。
 export function estHours(v) {
@@ -48,11 +48,8 @@ export function isUnavailable(iso, unavailRanges) {
 
 // その日に作業できるか（営業日＝土日除外・祝日除外・休暇除外）。
 export function isWorkDay(iso, holidaysSet, unavailRanges) {
-  const dow = new Date(iso + "T00:00:00Z").getUTCDay();
-  if (dow === 0 || dow === 6) return false;
-  if (holidaysSet && holidaysSet.has && holidaysSet.has(iso)) return false;
-  if (isUnavailable(iso, unavailRanges)) return false;
-  return true;
+  // 営業日(土日/祝日)判定は capacity.isBusinessDay に集約。休暇(unavail)だけ ccpm 側で重ねる（Q6）。
+  return isBusinessDay(iso, holidaysSet) && !isUnavailable(iso, unavailRanges);
 }
 
 // ローカル今日の "YYYY-MM-DD"（床止め用）。SSoT は capacity.todayISO（ローカル暦日）。後方互換で名前を残す。
