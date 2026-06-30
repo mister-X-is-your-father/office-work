@@ -15,6 +15,7 @@ import { icon } from "../lib/icons.js";
 import { startFocusFor } from "./pomodoro.js";
 import { statePatchFor } from "../lib/taskstate.js";
 import { humanAssignees } from "../lib/users.js";
+import { snapshotTask, restoreTask } from "../lib/tasksnapshot.js";
 import * as history from "../lib/history.js";
 
 history.initHistoryHotkeys(); // Ctrl/Cmd+Z=取消・Ctrl+Y/Ctrl+Shift+Z=やり直し（入力中/モーダル内は無視）
@@ -1519,33 +1520,15 @@ function wireBulk(root, rows, tasks, members, today, labels) {
   // 一括操作も1アクションとして履歴へ。適用前に対象全件のスナップショット（編集対象になり得る
   // スカラ＋連絡待ち＋担当/分類の集合）を取り、undo で全件をその状態へ戻す（redo は同じ fn を再実行）。
   const ZERO = "0001-01-01T00:00:00Z";
-  const snapshot = (t) => ({
-    id: t.id, done: !!t.done, percent_done: t.percent_done || 0, started_at: t.started_at || null,
-    priority: t.priority || 0, is_favorite: !!t.is_favorite,
-    due_date: (t.due_date && !t.due_date.startsWith("0001")) ? t.due_date : ZERO,
-    waiting: (t.labels || []).some((l) => (l.title || "") === WAITING_LABEL),
-    assignees: (t.assignees || []).map((a) => a.id), labels: (t.labels || []).map((l) => l.id),
-  });
-  // スナップショットへ復元（現在 API 状態から差分適用）。担当/分類は add/remove で集合一致させる。
-  const restoreSnap = async (s) => {
-    let cur = null; try { cur = await getTask(s.id); } catch { /* 既存 tasks で代替 */ cur = taskOf(s.id); }
-    await updateTask(s.id, { done: s.done, percent_done: s.percent_done, started_at: s.started_at, priority: s.priority, due_date: s.due_date, is_favorite: s.is_favorite }).catch(() => {});
-    await setTaskWaiting(cur || { id: s.id, labels: [] }, s.waiting).catch(() => {});
-    const curAs = ((cur && cur.assignees) || []).map((a) => a.id), tAs = new Set(s.assignees);
-    for (const a of curAs) if (!tAs.has(a)) await removeAssignee(s.id, a).catch(() => {});
-    for (const a of s.assignees) if (!curAs.includes(a)) await addAssignee(s.id, a).catch(() => {});
-    const curLb = ((cur && cur.labels) || []).filter((l) => (l.title || "") !== WAITING_LABEL).map((l) => l.id), tLb = new Set(s.labels);
-    for (const l of curLb) if (!tLb.has(l)) await removeTaskLabel(s.id, l).catch(() => {});
-    for (const l of s.labels) if (!curLb.includes(l)) await addTaskLabel(s.id, l).catch(() => {});
-  };
+  // ↑ snapshot/restoreSnap は ../lib/tasksnapshot.js（snapshotTask/restoreTask）へ集約済み（横断監査 Q4）。
   // runAll のラッパ: 適用前に全件スナップショット→適用→履歴 push（undo=全件復元・redo=fn 再実行）。
   const runAllH = async (label, fn) => {
     const ids = targetIds(); if (!ids.length) return;
-    const snaps = ids.map((id) => taskOf(id)).filter(Boolean).map(snapshot);
+    const snaps = ids.map((id) => taskOf(id)).filter(Boolean).map(snapshotTask);
     await runAll(label, fn);
     history.push({
       label: `${label}（${ids.length}件）`,
-      undo: async () => { for (const s of snaps) await restoreSnap(s); historyRerender(); },
+      undo: async () => { for (const s of snaps) await restoreTask(s, taskOf); historyRerender(); },
       redo: async () => { for (const id of ids) await fn(id).catch(() => {}); historyRerender(); },
     });
   };

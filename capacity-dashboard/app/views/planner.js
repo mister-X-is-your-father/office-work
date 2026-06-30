@@ -5,7 +5,7 @@
 // B16: store.plansByTask を流用（重複fetch廃止）。追加成功時は invalidate→再描画で局所反映。
 import { load, invalidate } from "../lib/store.js";
 import * as vik from "../lib/api.js";
-import { sumByMemberDay, toH, dateOnly } from "../lib/capacity.js";
+import { sumByMemberDay, toMemberDayEntries, toH, dateOnly } from "../lib/capacity.js";
 import { capacityOn } from "../lib/recurrence.js";
 import { C, fmtH, esc, todayISO } from "../lib/ui.js";
 
@@ -17,24 +17,6 @@ function weekDates(iso) {
   const dow = (d.getUTCDay() + 6) % 7;
   const mon = new Date(d); mon.setUTCDate(d.getUTCDate() - dow);
   return [0, 1, 2, 3, 4].map(i => { const x = new Date(mon); x.setUTCDate(mon.getUTCDate() + i); return x.toISOString().slice(0, 10); });
-}
-
-// plansByTask（Map: taskId -> [{id,plan_date,seconds,user_id,...}]）から予定エントリを収集。
-// task 担当に帰属（対象者 user_id が信頼できればその1人、無ければ担当者全員にフル＝按分しない・#4）。
-function collectPlannedEntries(tasks, plansByTask) {
-  const out = [];
-  for (const t of tasks) {
-    const plans = (plansByTask && (plansByTask.get ? plansByTask.get(t.id) : plansByTask[t.id])) || null;
-    if (!plans || !plans.length) continue;
-    const aids = (t.assignees || []).map(a => a.id);
-    for (const p of plans) {
-      const day = dateOnly(p.plan_date); if (!day) continue;
-      const h = toH(p.seconds), uid = p.user_id;
-      if (uid && (aids.length === 0 || aids.includes(uid))) out.push({ memberId: uid, day, h });
-      else for (const aid of aids) out.push({ memberId: aid, day, h });
-    }
-  }
-  return out;
 }
 
 export async function render(root) {
@@ -50,16 +32,9 @@ export async function render(root) {
   const timesArr = await Promise.all(
     actualTasks.map(t => vik.getTimes(t.id).then(p => [t, p]).catch(() => [t, []]))
   );
-  const actualEntries = [];
-  const attribute = (t, entry, dateKey, sink) => {
-    const aids = (t.assignees || []).map(a => a.id);
-    const day = dateOnly(entry[dateKey]); if (!day) return;
-    const h = toH(entry.seconds), uid = entry.user_id;
-    if (uid && (aids.length === 0 || aids.includes(uid))) sink.push({ memberId: uid, day, h });
-    else for (const aid of aids) sink.push({ memberId: aid, day, h });
-  };
-  for (const [t, times] of timesArr) for (const e of times || []) attribute(t, e, "logged_on", actualEntries);
-  const planned = sumByMemberDay(collectPlannedEntries(tasks, plansByTask));
+  const actualEntries = toMemberDayEntries(timesArr, "actual");
+  const plannedPairs = tasks.map((t) => [t, (plansByTask && (plansByTask.get ? plansByTask.get(t.id) : plansByTask[t.id])) || null]);
+  const planned = sumByMemberDay(toMemberDayEntries(plannedPairs, "plan"));
   const actual = sumByMemberDay(actualEntries);
 
   // B14: 人別×日の容量（週末/祝日/休暇=0）。休暇/祝日/週末はセルを薄塗り＋容量0表示。

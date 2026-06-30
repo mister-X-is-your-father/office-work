@@ -13,6 +13,7 @@ import { push as histPush, initHistoryHotkeys } from "../lib/history.js";
 import { icon } from "../lib/icons.js";
 import { statePatchFor } from "../lib/taskstate.js";
 import { DOW_JA } from "../lib/form.js";
+import { snapshotTask, restoreTask } from "../lib/tasksnapshot.js";
 
 const ICON_X = icon("x", { size: 13 });
 
@@ -452,31 +453,13 @@ function wireBulk(root, data, ctx, rerender) {
 
   // 一括操作を1アクションとして履歴へ（適用前に全件スナップショット→undo で復元、redo は fn 再実行）。
   const ZERO = "0001-01-01T00:00:00Z";
-  const snapshot = (t) => ({
-    id: t.id, done: !!t.done, percent_done: t.percent_done || 0, started_at: t.started_at || null,
-    priority: t.priority || 0, is_favorite: !!t.is_favorite,
-    due_date: (t.due_date && !t.due_date.startsWith("0001")) ? t.due_date : ZERO,
-    waiting: (t.labels || []).some((l) => (l.title || "") === WAITING_LABEL),
-    assignees: (t.assignees || []).map((a) => a.id), labels: (t.labels || []).map((l) => l.id),
-  });
-  const restoreSnap = async (s) => {
-    let cur = null; try { cur = await getTask(s.id); } catch { cur = taskOf(s.id); }
-    await updateTask(s.id, { done: s.done, percent_done: s.percent_done, started_at: s.started_at, priority: s.priority, due_date: s.due_date, is_favorite: s.is_favorite }).catch(() => {});
-    await setTaskWaiting(cur || { id: s.id, labels: [] }, s.waiting).catch(() => {});
-    const curAs = ((cur && cur.assignees) || []).map((a) => a.id), tAs = new Set(s.assignees);
-    for (const a of curAs) if (!tAs.has(a)) await removeAssignee(s.id, a).catch(() => {});
-    for (const a of s.assignees) if (!curAs.includes(a)) await addAssignee(s.id, a).catch(() => {});
-    const curLb = ((cur && cur.labels) || []).filter((l) => (l.title || "") !== WAITING_LABEL).map((l) => l.id), tLb = new Set(s.labels);
-    for (const l of curLb) if (!tLb.has(l)) await removeTaskLabel(s.id, l).catch(() => {});
-    for (const l of s.labels) if (!curLb.includes(l)) await addTaskLabel(s.id, l).catch(() => {});
-  };
   const runAllH = async (label, fn) => {
     const ids = targetIds(); if (!ids.length) return;
-    const snaps = ids.map((id) => taskOf(id)).filter(Boolean).map(snapshot);
+    const snaps = ids.map((id) => taskOf(id)).filter(Boolean).map(snapshotTask);
     await runAll(label, fn);
     histPush({
       label: `${label}（${ids.length}件）`,
-      undo: async () => { for (const s of snaps) await restoreSnap(s); invalidate(); render(root); },
+      undo: async () => { for (const s of snaps) await restoreTask(s, taskOf); invalidate(); render(root); },
       redo: async () => { for (const id of ids) await fn(id).catch(() => {}); invalidate(); render(root); },
     });
   };
