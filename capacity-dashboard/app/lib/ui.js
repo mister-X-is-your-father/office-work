@@ -29,17 +29,6 @@ export function h(tag, attrs, ...kids){
 }
 export const clear = (el)=>{ el.innerHTML=""; return el; };
 
-// 容量バー（assignedH / capH, 超過は赤）
-export function capacityBar(assignedH, capH, scaleMaxH){
-  const max = scaleMaxH || Math.max(capH*1.3, assignedH);
-  const inCap = Math.min(assignedH, capH), over = Math.max(0, assignedH-capH);
-  return `<div style="position:relative;height:24px;background:${C.track};border-radius:7px;overflow:hidden">
-    <div style="position:absolute;left:${capH/max*100}%;top:0;bottom:0;width:2px;background:${C.capline}"></div>
-    <div style="position:absolute;left:0;top:0;bottom:0;width:${inCap/max*100}%;background:${C.fill};border-radius:7px 0 0 7px"></div>
-    ${over>0?`<div style="position:absolute;left:${capH/max*100}%;top:0;bottom:0;width:${over/max*100}%;background:${C.over}"></div>`:""}
-  </div>`;
-}
-
 // ── 共通UI部品（HTML文字列を返す純関数。announce のみ DOM 操作） ───────────
 // CSS は index.html のグローバル <style>（.ui-empty / .ui-error / .ui-skel / .ui-ava 等）側に置く。
 
@@ -83,16 +72,6 @@ export function errorState(message, opts = {}) {
     ${message ? `<div class="ui-error-msg">${esc(message)}</div>` : ""}
     ${retry}
   </div>`;
-}
-
-// スケルトン（読み込み中のプレースホルダ行。shimmer は CSS 側）。
-//   opts: { rows = 5 }
-export function skeleton(opts = {}) {
-  const rows = Math.max(1, opts.rows || 5);
-  let out = `<div class="ui-skel" aria-hidden="true">`;
-  for (let i = 0; i < rows; i++) out += `<div class="ui-skel-row"></div>`;
-  out += `</div>`;
-  return out;
 }
 
 // ── 再取得オーバーレイ／フォーカストラップ ───────────────────────────────

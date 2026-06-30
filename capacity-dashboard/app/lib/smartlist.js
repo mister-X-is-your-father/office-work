@@ -1,16 +1,14 @@
 // スマートリスト（TickTick の Smart List 相当・ブラッシュアップ）。純関数＋組み込みビュー定義。
 // フィルタはローカル保存（localStorage・スキーマ変更なし）。タスク判定は taskMatches。
-import { shiftISO, dateOnly, hasDate, hasStarted } from "./capacity.js";
+import { shiftISO, hasStarted, dueISO } from "./capacity.js";
+import { isAiUser } from "./users.js";
 
 // フィルタの既定（空＝条件なし）
 // assignee: "" = 指定なし（すべて） / "none" = 担当者なし / "<id>" = その人間担当（AI=fable は対象外）
 export const EMPTY_FILTER = { text: "", due: "", prio: "", ws: 0, status: "undone", flag: false, unsorted: false, assignee: "" };
 
-// AI（fable）担当の判定。lib/store.js の isAiUser と同義だが、循環 import を避けるため
-// ここに最小実装をインライン（AI_USERNAMES=["fable"] と同一基準。増えたら両方更新）。
-const isAiAssignee = (u) => !!u && (u.username === "fable");
-// 人間担当が1人でもいるか（AI=fable は段取り済み扱いしない）。
-const hasHumanAssignee = (t) => (t.assignees || []).some((a) => !isAiAssignee(a));
+// 人間担当が1人でもいるか（AI=fable は段取り済み扱いしない）。AI判定は users.js の SSoT を使う。
+const hasHumanAssignee = (t) => (t.assignees || []).some((a) => !isAiUser(a));
 
 // 組み込みビュー: TickTick の左レール相当。preset は taskMatches に渡すフィルタ。
 // desc は各ビューの1行説明（views/smartlist.js がタイトル直下に表示する）。
@@ -43,7 +41,7 @@ export const next7End = (todayISO) => shiftISO(todayISO, 6);
 // タスクが filter に一致するか（category は呼び出し側で別途・kinds 依存を避ける）。
 // ctx: { today, next7 }（next7=next7End(today)）
 export function taskMatches(t, f, ctx) {
-  const due = hasDate(t.due_date) ? dateOnly(t.due_date) : "";
+  const due = dueISO(t.due_date);
   const done = !!t.done, started = hasStarted(t), prio = t.priority || 0;
   // 連絡待ち（GTD Waiting For）= 予約ラベル。kinds 非依存方針なので文字列はここでインライン判定。
   const waiting = (t.labels || []).some((l) => (l.title || "") === "連絡待ち");

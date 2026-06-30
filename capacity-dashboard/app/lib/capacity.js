@@ -7,6 +7,8 @@ export const HOUR = 3600;
 export const toH = (s) => (s || 0) / HOUR;
 export const dateOnly = (d) => (d && typeof d === "string") ? d.slice(0, 10) : "";
 export const hasDate = (d) => !!d && typeof d === "string" && !d.startsWith("0001");
+// 期限などの "YYYY-MM-DD"。未設定/空日付センチネルは ""。各所の hasDate(due)?dateOnly(due):"" の SSoT。
+export const dueISO = (d) => hasDate(d) ? dateOnly(d) : "";
 // アプリ全体の「今日」の SSoT。ローカル暦日の "YYYY-MM-DD"。
 // （new Date().toISOString() は UTC なので JST 早朝に前日へズレる＝使わない）
 export const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
@@ -42,17 +44,6 @@ export function daysUntil(isoFrom, isoTo) {
 }
 export function assigneeIds(task) { return (task.assignees || []).map((a) => a.id); }
 
-// タスクが isoDay にアクティブか（未完了 かつ due==day もしくは start<=day<=end）
-export function isActiveOn(task, isoDay) {
-  if (task.done) return false;
-  if (hasDate(task.due_date) && dateOnly(task.due_date) === isoDay) return true;
-  if (hasDate(task.start_date) && hasDate(task.end_date)) {
-    const st = dateOnly(task.start_date), en = dateOnly(task.end_date);
-    if (st <= isoDay && isoDay <= en) return true;
-  }
-  return false;
-}
-
 // isoDay にこのタスクが要する見積り時間(h)。期間タスクは**営業日割り**（土日祝に負荷を載せず、
 // 平日のみで等分＝週末に負荷が漏れない）。holidays(Set) を渡すと祝日も休みとして除外。
 // 全期間が休日の特殊ケースのみ暦日割りにフォールバック（0除算回避）。
@@ -73,7 +64,7 @@ export function taskHoursOn(task, isoDay, { holidays = null } = {}) {
 }
 
 // plansByTask（Map or obj: taskId -> plan entries）から該当タスクの plan 配列を引く。
-function planEntriesFor(plansByTask, taskId) {
+export function planEntriesFor(plansByTask, taskId) {
   if (!plansByTask) return null;
   return (plansByTask.get ? plansByTask.get(taskId) : plansByTask[taskId]) || null;
 }
@@ -98,6 +89,16 @@ export function taskPlannedHoursByMemberOn(task, isoDay, planEntries, { holidays
     if (h > 0) for (const aid of aids) add(aid, h); // 多担当=全員にフル
   }
   return out;
+}
+
+// 人別の負荷ステータス判定の SSoT（loadH/capH/offplan → "off"|"offplan"|"over"|"full"|"free"）。
+// loadByMember と today_items（todayItemsByMember）が同一基準を使う。
+// ※ recurrence.js の full は round1 後の freeH<=1e-6 を見るため基準が異なる＝別物として独立維持（統合しない）。
+export function capStatus(loadH, capH, offplan) {
+  if (capH <= 1e-6) return offplan ? "offplan" : "off";
+  if (loadH > capH + 1e-6) return "over";
+  if (Math.abs(loadH - capH) < 1e-6) return "full";
+  return "free";
 }
 
 // 指定日の人別負荷。plansByTask を渡すと plans 優先（無いタスクは見積り営業日割り）。
@@ -125,9 +126,7 @@ export function loadByMember(tasks, members, isoDay, capH = 8, plansByTask = nul
       assignedH: round1(r.assignedH),
       freeH: round1(Math.max(0, r.capH - r.assignedH)),
       overH: offplan ? 0 : round1(Math.max(0, r.assignedH - r.capH)),
-      status: r.capH <= 1e-6
-        ? (offplan ? "offplan" : "off")
-        : (r.assignedH > r.capH + 1e-6 ? "over" : (Math.abs(r.assignedH - r.capH) < 1e-6 ? "full" : "free")),
+      status: capStatus(r.assignedH, r.capH, offplan),
     };
   });
 }

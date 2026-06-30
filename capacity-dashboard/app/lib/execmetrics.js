@@ -4,7 +4,7 @@
 //   - taskEngagement: 今日やるべきタスク（今日期日 or 今日plan・未完了）の着手率（＝踏み込めたか）。
 //   - dailyExecSeries: 過去 N 日の日別実行量（完了数・実働h・触れたタスク数）＝勢いのトレンド。
 // ※ 過去日の「やると決めた母数」はスナップショットしていないため、率は“今日”が対象。週はトレンド（記述）として見る。
-import { toH, dateOnly, hasDate, hasStarted, shiftISO, daysUntil } from "./capacity.js";
+import { toH, dateOnly, hasDate, hasStarted, shiftISO, daysUntil, dueISO } from "./capacity.js";
 
 const round1 = (x) => Math.round(x * 100) / 100;
 const pctOf = (num, den) => (den > 0 ? Math.round((num / den) * 100) : 0);
@@ -99,7 +99,7 @@ export function stalledTasks(tasks, timeEntries, activityLog, todayISO, { thresh
     if (days < thresholdDays) continue;
     out.push({
       id: t.id, title: t.title, days, lastISO,
-      due: hasDate(t.due_date) ? dateOnly(t.due_date) : null,
+      due: dueISO(t.due_date) || null,
       overdue: hasDate(t.due_date) && dateOnly(t.due_date) < todayISO,
     });
   }

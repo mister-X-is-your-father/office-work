@@ -2,7 +2,7 @@
 // タスク(予定/見積り日割り)＋会議/定例(RRULE展開)を統合し、メンバー別に WorkItem として列挙。
 // WorkItem は「種別(kind) × 時間属性(flags: adhoc/advanced)」の2軸（ADR-012）。色/模様はビュー側。
 // 並び: 会議 → 定例 → レビュー → タスク(重要度 MUST→低)。
-import { toH, dateOnly, hasDate, taskPlannedHoursByMemberOn, assigneeIds, shiftISO } from "./capacity.js";
+import { toH, dateOnly, hasDate, taskPlannedHoursByMemberOn, assigneeIds, shiftISO, planEntriesFor, capStatus } from "./capacity.js";
 import { expandRecurrences, occurrenceLoadEntries, freeByMemberDay, capacityOn } from "./recurrence.js";
 import { kindOf, kindRank, prioBucket, isReviewTask } from "./kinds.js";
 
@@ -10,8 +10,6 @@ import { kindOf, kindRank, prioBucket, isReviewTask } from "./kinds.js";
 export { prioBucket, isReviewTask };
 
 const round1 = (x) => Math.round(x * 100) / 100; // 時間表示=小数2桁
-const planEntriesFor = (plansByTask, id) =>
-  plansByTask ? ((plansByTask.get ? plansByTask.get(id) : plansByTask[id]) || null) : null;
 
 // 前倒し: 今日に予定(plan)があり、かつ期限が今日より先。
 function isAdvanced(task, planEntries, isoDay) {
@@ -67,9 +65,7 @@ export function todayItemsByMember(data, isoDay, capH = 8) {
     r.freeH = round1(Math.max(0, memCap - r.usedH));
     r.overH = offplan ? 0 : round1(Math.max(0, r.usedH - memCap));
     r.capH = memCap;
-    r.status = memCap <= 1e-6
-      ? (offplan ? "offplan" : "off")
-      : (r.usedH > memCap + 1e-6 ? "over" : (Math.abs(r.usedH - memCap) < 1e-6 ? "full" : "free"));
+    r.status = capStatus(r.usedH, memCap, offplan);
   }
   return map;
 }

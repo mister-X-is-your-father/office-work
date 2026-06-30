@@ -9,6 +9,8 @@
 // - URL と [タイトル](URL) は位置不問で抽出して links へ（説明の [資料] 行に格納する想定）。
 // - AI担当(fable)の割当はここでは扱わない（taskform の隠しコマンド経由のみ＝仕様）。
 
+import { shiftISO, todayISO } from "./capacity.js";
+
 const pad2 = (n) => String(n).padStart(2, "0");
 const DOW = { "日": 0, "月": 1, "火": 2, "水": 3, "木": 4, "金": 5, "土": 6 };
 
@@ -20,18 +22,12 @@ function normalize(s) {
     .replace(/　/g, " ");
 }
 
-const addDays = (iso, n) => {
-  const d = new Date(iso + "T00:00:00Z");
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-};
-
 // 曜日指定の解決。bare=直近のその曜日（今日を含む）/ 来週=翌週のその曜日。
 function resolveWeekday(todayISO, target, nextWeek) {
   const dow = new Date(todayISO + "T00:00:00Z").getUTCDay();
-  if (!nextWeek) return addDays(todayISO, (target - dow + 7) % 7);
+  if (!nextWeek) return shiftISO(todayISO, (target - dow + 7) % 7);
   const toNextMonday = ((1 - dow + 7) % 7) || 7;
-  return addDays(todayISO, toNextMonday + ((target - 1 + 7) % 7));
+  return shiftISO(todayISO, toNextMonday + ((target - 1 + 7) % 7));
 }
 
 function mkDate(todayISO, mo, da) {
@@ -74,11 +70,11 @@ function classifyToken(tok, today) {
   if ((m = tok.match(/^(今日|明日|明後日|あさって|あした)(?:(\d{1,2})(?::(\d{2})|時(半)?))?$/))) {
     const t = m[2] != null ? parseTime(m[2], m[3], m[4]) : null;
     if (m[2] == null || t != null) {
-      const iso = addDays(today, DATE_WORDS[m[1]]);
+      const iso = shiftISO(today, DATE_WORDS[m[1]]);
       return { kind: "date", apply: (o) => { o.dateISO = iso; if (t != null) o.startMinute = t; } };
     }
   }
-  if ((m = tok.match(/^(\d+)日後$/))) { const iso = addDays(today, +m[1]); return { kind: "date", apply: (o) => { o.dateISO = iso; } }; }
+  if ((m = tok.match(/^(\d+)日後$/))) { const iso = shiftISO(today, +m[1]); return { kind: "date", apply: (o) => { o.dateISO = iso; } }; }
   if ((m = tok.match(/^(来週)?([日月火水木金土])曜日?$/))) { const iso = resolveWeekday(today, DOW[m[2]], !!m[1]); return { kind: "date", apply: (o) => { o.dateISO = iso; } }; }
   if ((m = tok.match(/^(\d{1,2})\/(\d{1,2})$/)) || (m = tok.match(/^(\d{1,2})月(\d{1,2})日$/))) {
     const iso = mkDate(today, +m[1], +m[2]);
@@ -123,7 +119,7 @@ function tokenLabel(kind, scratch) {
 // ignore: テキスト扱いにする生トークン文字列の Set（同一なら全出現を無視）。
 // 戻り値に out.tokens（認識トークンのメタ列）を付与する以外、既存の戻り値・挙動は不変。
 export function parseQuickAdd(raw, { today, ignore } = {}) {
-  if (!today) today = new Date().toISOString().slice(0, 10);
+  if (!today) today = todayISO(); // 未指定時の「今日」はローカル暦日（UTCだとJST早朝に前日ズレ）
   const ignoreSet = ignore instanceof Set ? ignore : new Set(ignore || []);
   let s = normalize(raw);
   const out = { title: "", dateISO: null, startMinute: null, priority: 0, estimateH: 0, labels: [], links: [], ws: null, assignee: null, tokens: [] };

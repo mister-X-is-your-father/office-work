@@ -2,21 +2,17 @@
 // データはスキーマ変更なし: 習慣=「習慣」WS のタスク（担当=本人）、チェック=実績エントリ(logged_on の日付)。
 // ここは日付集合に対する計算のみ（テスト対象）。CRUD は views/habits.js。
 
-export const HABIT_WS = "習慣";
+import { shiftISO } from "./capacity.js";
 
-const addDays = (iso, n) => {
-  const d = new Date(iso + "T00:00:00Z");
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-};
+export const HABIT_WS = "習慣";
 
 // 連続日数: today から遡って連続チェックを数える。today 未チェックでも昨日まで続いていれば
 // ストリーク継続中（今日まだやってないだけ）として昨日起点で数える。
 export function habitStreak(dates, todayISO) {
   const has = (iso) => dates.has(iso);
-  let cur = has(todayISO) ? todayISO : (has(addDays(todayISO, -1)) ? addDays(todayISO, -1) : null);
+  let cur = has(todayISO) ? todayISO : (has(shiftISO(todayISO, -1)) ? shiftISO(todayISO, -1) : null);
   let n = 0;
-  while (cur && has(cur)) { n++; cur = addDays(cur, -1); }
+  while (cur && has(cur)) { n++; cur = shiftISO(cur, -1); }
   return n;
 }
 
@@ -24,7 +20,7 @@ export function habitStreak(dates, todayISO) {
 export function lastDays(dates, todayISO, n = 7) {
   const out = [];
   for (let i = n - 1; i >= 0; i--) {
-    const iso = addDays(todayISO, -i);
+    const iso = shiftISO(todayISO, -i);
     out.push({ iso, done: dates.has(iso) });
   }
   return out;
@@ -103,7 +99,7 @@ export function setGoalMeta(desc, goal) {
 export function weekToDate(todayISO) {
   const back = dow(todayISO); // 日曜起点。0..6
   const out = [];
-  for (let i = back; i >= 0; i--) out.push(addDays(todayISO, -i));
+  for (let i = back; i >= 0; i--) out.push(shiftISO(todayISO, -i));
   return out;
 }
 

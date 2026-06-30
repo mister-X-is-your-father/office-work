@@ -1,11 +1,36 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  toH, dateOnly, hasDate, isActiveOn, taskHoursOn, isBusinessDay, businessDays,
+  toH, dateOnly, hasDate, taskHoursOn, isBusinessDay, businessDays,
   loadByMember, weekLoadByMember, estimateVsActual, triage, sumByMemberDay,
   shiftISO, taskRanges, dependencyEdges, dayScale, toMemberDayEntries, taskPlannedHoursByMemberOn,
   buildTaskTree, depLayers, applyBarDrag, committedHoursByDayInRange, todayISO,
+  dueISO, capStatus, planEntriesFor,
 } from "./capacity.js";
+
+test("dueISO: 期限の YYYY-MM-DD、未設定/空日付センチネルは空文字", () => {
+  assert.equal(dueISO("2026-06-30T12:00:00Z"), "2026-06-30");
+  assert.equal(dueISO("0001-01-01T00:00:00Z"), "");
+  assert.equal(dueISO(""), "");
+  assert.equal(dueISO(null), "");
+});
+
+test("capStatus: off/offplan/over/full/free の境界", () => {
+  assert.equal(capStatus(0, 0, false), "off");        // cap=0 & 負荷なし
+  assert.equal(capStatus(2, 0, true), "offplan");     // cap=0 だが負荷あり
+  assert.equal(capStatus(9, 8, false), "over");       // 超過
+  assert.equal(capStatus(8, 8, false), "full");       // ちょうど
+  assert.equal(capStatus(3, 8, false), "free");       // 余裕
+});
+
+test("planEntriesFor: Map/obj どちらからも引け、無ければ null", () => {
+  assert.deepEqual(planEntriesFor(new Map([[7, [{ x: 1 }]]]), 7), [{ x: 1 }]);
+  assert.deepEqual(planEntriesFor({ 7: [{ x: 1 }] }, 7), [{ x: 1 }]);
+  assert.equal(planEntriesFor(new Map(), 7), null);
+  assert.equal(planEntriesFor(null, 7), null);
+});
+
+
 
 test("todayISO: ローカル暦日 YYYY-MM-DD（UTCのtoISOSliceではなくローカルの年月日）", () => {
   const iso = todayISO();
@@ -91,13 +116,6 @@ test("helpers", () => {
   assert.equal(dateOnly("2026-06-10T09:00:00Z"), "2026-06-10");
   assert.equal(hasDate("0001-01-01T00:00:00Z"), false);
   assert.equal(hasDate("2026-06-10T00:00:00Z"), true);
-});
-
-test("isActiveOn", () => {
-  assert.equal(isActiveOn({ due_date: due(TODAY) }, TODAY), true);
-  assert.equal(isActiveOn({ due_date: due(TODAY), done: true }, TODAY), false);
-  assert.equal(isActiveOn({ start_date: due("2026-06-09"), end_date: due("2026-06-11") }, TODAY), true);
-  assert.equal(isActiveOn({ due_date: due("2026-06-12") }, TODAY), false);
 });
 
 test("taskHoursOn: 期間は営業日割り / due は全量", () => {

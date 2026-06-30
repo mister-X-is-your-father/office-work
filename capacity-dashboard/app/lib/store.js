@@ -30,10 +30,10 @@ export function ensureInbox() {
   return _inboxPromise;
 }
 
-// AI 担当アカウント（副担当として選択可）。人間のキャパ計算・メンバー列からは除外する。
-// 実行系: taskstation-fable systemd タイマーが fable 担当タスクを巡回し Claude Code(MAXプラン) で提案コメント。
-export const AI_USERNAMES = new Set(["fable"]);
-export const isAiUser = (u) => !!u && AI_USERNAMES.has(u.username);
+// AI 担当判定の SSoT は lib/users.js（葉モジュール）。ここは内部利用＋後方互換の再export
+// （多くの view が store.js から import 済み）。
+import { AI_USERNAMES, isAiUser } from "./users.js";
+export { AI_USERNAMES, isAiUser };
 
 let cache = null;
 

@@ -1,6 +1,6 @@
 // 概要/統計ダッシュボードの集計（純関数・TDD対象）。store のタスク（time_estimate/time_spent/
 // done/done_at/created/project_id/labels）だけで計算＝N+1なし。
-import { shiftISO, dateOnly, hasDate, toH } from "./capacity.js";
+import { shiftISO, dateOnly, hasDate, toH, dueISO } from "./capacity.js";
 
 // 日別スループット（追加 vs 完了）。todayISO を末尾に days 日ぶん。
 // 返り値: [{ day, added, done }]（古い→新しい）
@@ -54,7 +54,7 @@ export function overallStats(tasks, todayISO) {
       if (hasDate(t.done_at) && dateOnly(t.done_at) >= wkStart) doneThisWeek++;
     } else {
       open++;
-      const due = hasDate(t.due_date) ? dateOnly(t.due_date) : "";
+      const due = dueISO(t.due_date);
       if (due && due < todayISO) overdue++;
       if (t.is_favorite) flagged++;
       if ((t.priority || 0) >= 3) important++;
