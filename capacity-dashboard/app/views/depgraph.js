@@ -31,11 +31,18 @@ export async function render(root) {
   }
 
   const { level, critical } = depLayers(nodeIds, edges);
-  // クリティカルパスを「実際の鎖（連続辺）」として復元する。depLayers と同じ最長経路アルゴ
-  // （トポロジカル順 → 各ノードの最長距離 dist と直前ノード back）をここでも回し、終端から
-  // back を辿って得た連続辺だけを Set 化する。これで赤線が必ず一本の連続した経路になる
-  // （旧実装は critical ノード同士が level 差1なら塗っていたため、鎖外の辺まで赤くなる不具合があった）。
-  const { critEdges, critIds } = criticalChain(nodeIds, edges);
+  // クリティカルパスを「実際の鎖（連続辺）」として復元する。depLayers は終端から back ポインタを
+  // 辿って add した順序付き Set として critical（=[終端, 前駆, …, 始点]）を返す。Set は挿入順を
+  // 保持するので、隣接要素 (a=終端寄り, b=その前駆) から辺 b->a を起こせば最長経路の連続辺が得られる。
+  // これで赤線が必ず一本の連続した経路になる（旧実装は critical ノード同士が level 差1なら塗っていた
+  // ため、鎖外の辺まで赤くなる不具合があった）。
+  // Q21(perf): 以前はローカル criticalChain() が同じ最長経路計算（topo+dist+back）を丸ごと再実装し、
+  // 同一グラフに対し二重計算していた。depLayers の critical（=同一の end/back 鎖を同一手順で構築）を
+  // 再利用して重複を解消。critIds は critical と同集合、critEdges は同じ back 鎖から起こすため出力は不変。
+  const critIds = critical;
+  const critArr = [...critical];
+  const critEdges = new Set();
+  for (let i = 0; i + 1 < critArr.length; i++) critEdges.add(`${critArr[i + 1]}->${critArr[i]}`);
   const critEstH = [...critIds].reduce((s, id) => s + toH((byId.get(id) || {}).time_estimate), 0);
 
   // B36/B37 用の隣接リスト（描画される辺だけ＝両端ノードが存在するもの）。
@@ -240,43 +247,6 @@ export async function render(root) {
     el.onmouseenter = () => applyHover(+el.dataset.id);
     el.onmouseleave = clearHover;
   });
-}
-
-// クリティカルパス＝最長経路の「連続辺」を復元する。depLayers と同じ longest-path 計算を
-// ここでも行い、back ポインタを終端から辿って一本の鎖（連続した辺の列）を取り出す。
-// 返り値: { critEdges:Set<"from->to">, critIds:Set<id> }。空グラフ/単独ノードなら空。
-function criticalChain(ids, edges) {
-  const idset = new Set(ids);
-  const adj = new Map(ids.map((id) => [id, []]));
-  const indeg = new Map(ids.map((id) => [id, 0]));
-  for (const e of edges || []) {
-    if (!idset.has(e.from) || !idset.has(e.to) || e.from === e.to) continue;
-    adj.get(e.from).push(e.to);
-    indeg.set(e.to, indeg.get(e.to) + 1);
-  }
-  const ind = new Map(indeg);
-  const q = ids.filter((id) => ind.get(id) === 0);
-  const order = [];
-  while (q.length) {
-    const n = q.shift();
-    order.push(n);
-    for (const m of adj.get(n)) { ind.set(m, ind.get(m) - 1); if (ind.get(m) === 0) q.push(m); }
-  }
-  const dist = new Map(ids.map((id) => [id, 1])); // ノード数ベースの最長距離（depLayers と一致）
-  const back = new Map();
-  for (const n of order) for (const m of adj.get(n)) {
-    if (dist.get(n) + 1 > dist.get(m)) { dist.set(m, dist.get(n) + 1); back.set(m, n); }
-  }
-  let end = ids[0], best = -1;
-  for (const id of ids) if (dist.get(id) > best) { best = dist.get(id); end = id; }
-  const critEdges = new Set();
-  const critIds = new Set();
-  for (let cur = end; cur != null; cur = back.get(cur)) {
-    critIds.add(cur);
-    const prev = back.get(cur);
-    if (prev != null) critEdges.add(`${prev}->${cur}`);
-  }
-  return { critEdges, critIds };
 }
 
 function nodeHtml(t, p, crit, rdy) {

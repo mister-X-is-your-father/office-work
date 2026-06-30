@@ -1,7 +1,8 @@
 // 月カレンダー（TickTickのカレンダービュー相当）。月グリッドに 期限タスク＋会議/定例 を俯瞰表示。
 // タスクチップをドラッグで別日に落とすと期限を移動（updateTask #9非破壊）。クリックで編集モーダル。
 // 会議/定例は recurrences の展開（override 適用済み・時刻表示）＝動かせない（例外編集は時刻カレンダーで）。
-import { load, invalidate, isAiUser } from "../lib/store.js";
+import { load, invalidate } from "../lib/store.js";
+import { firstHuman } from "../lib/users.js";
 import { updateTask } from "../lib/api.js";
 import { expandRecurrences } from "../lib/recurrence.js";
 import { monthMatrix, DOW_JA } from "../lib/form.js";
@@ -62,7 +63,7 @@ export async function render(root) {
     const due = dueISO(t);
     if (!due || due < firstISO || due > lastISO) continue;
     if (FILTER.who && !(t.assignees || []).some((a) => String(a.id) === FILTER.who)) continue;
-    const who = (t.assignees || []).find((a) => !isAiUser(a)) || null;
+    const who = firstHuman(t);
     const overdue = !t.done && due < today; // 未完了かつ期限切れ
     add(due, { kind: "task", t, title: t.title, who, done: !!t.done, prio: +t.priority || 0, overdue, sort: 10000 + (t.priority ? -t.priority : 0) });
   }

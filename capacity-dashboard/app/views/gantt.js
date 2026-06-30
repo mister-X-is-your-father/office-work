@@ -1,18 +1,18 @@
 // 予実ガント（フェーズ3）。予定バー×実績バーを時間軸に重ね、依存矢印・今日線・進捗・超過を描く。
 // タスク行モード(mock29型) / 人別レーンモード(mock30型) をトグル切替。取得はフロントN+1（planner.js踏襲）。
-import { load, invalidate, isAiUser } from "../lib/store.js";
+import { load, invalidate } from "../lib/store.js";
+import { humanAssignees } from "../lib/users.js";
 import { icon } from "../lib/icons.js";
 import * as vik from "../lib/api.js";
 import { taskRanges, dependencyEdges, depLayers, dayScale, toMemberDayEntries, sumByMemberDay, shiftISO, applyBarDrag, dateOnly, hasDate } from "../lib/capacity.js";
 import { capacityOn } from "../lib/recurrence.js";
-import { fmtDisplayDow } from "../lib/form.js";
+import { fmtDisplayDow, DOW_JA } from "../lib/form.js";
 import { openTaskForm } from "./taskform.js";
 import { C, member_color, fmtH, esc, todayISO, announce } from "../lib/ui.js";
 
 let COL_W = 40, WINDOW_DAYS = 21;   // 表示範囲プリセットで render ごとに上書き
 let COL_W_MIN = 9;                  // プリセット由来の最小列幅（fitColumns で実幅へ伸ばす起点）
 const LABEL_W_P = 320, ROW_H = 58, GRP_H = 64;
-const DOW = ["日", "月", "火", "水", "木", "金", "土"];
 
 // 表示単位ごとのスパン。days=表示日数 / back=今日より前に含める日数 / colW=1日の列幅(px)。
 // 日表示=列を広く日付を1日ずつ／週表示=列を詰めて週(開始曜日)ごとの罫線・ラベルに。
@@ -49,8 +49,7 @@ async function fetchPlansTimes(tasks) {
 
 const projColor = (id) => ["#3a86ff", "#2fa66b", "#b657d6", "#e5772d", "#0ea5e9", "#f5a623"][((id || 0) % 6 + 6) % 6];
 const initial = (name) => (name ? String(name).trim().slice(0, 1) : "?");
-// 人間担当（AI担当 fable は担当とみなさない＝未アサイン扱い。store.js の isAiUser を踏襲）。
-const humanAssignees = (t) => (t.assignees || []).filter((a) => !isAiUser(a));
+// 人間担当（AI担当 fable は担当とみなさない＝未アサイン扱い）は lib/users.js の humanAssignees を共用（SSoT）。
 
 // 再描画（編集後の reload 等）をまたいで保持する表示状態。日表示/週表示・スパン・週開始曜日は
 // localStorage に記憶（再読込後も維持）。既定はプロジェクト別 / 週表示 3ヶ月 / 週開始=月。
@@ -176,7 +175,7 @@ async function mount(root, opts) {
   }
 
   // ヘッダは2段（月バンド＋日付）。日表示=毎日 dom+曜日 / 週表示=週開始日だけ dom。
-  function gridHead(labelW) {
+  function gridHead() {
     // 月バンド: 連続する同月をまとめて span
     const months = [];
     for (let i = 0; i < scale.axis.length;) {
@@ -193,7 +192,7 @@ async function mount(root, opts) {
       const dom = a.iso.slice(8);
       const showNum = tier === "day" || a.dow === weekStart;   // 週表示は週開始日だけ日付
       const numHtml = showNum ? `<div class="dom">${+dom}</div>` : "";
-      const dowHtml = tier === "day" ? `<div class="dow">${DOW[a.dow]}</div>` : "";
+      const dowHtml = tier === "day" ? `<div class="dow">${DOW_JA[a.dow]}</div>` : "";
       return `<div class="gh-day${cls}${tier !== "day" ? " sparse" : ""}${a.dow === weekStart ? " wk" : ""}">${numHtml}${dowHtml}</div>`;
     }).join("");
     return monthRow + dayRow;
@@ -362,7 +361,7 @@ async function mount(root, opts) {
 
   function paintMemberMode() {
     ganttEl.style.setProperty("--label-w", LABEL_W_P + "px");
-    head.innerHTML = gridHead(LABEL_W_P);
+    head.innerHTML = gridHead();
     collapsibleKeys = new Set();
     let html = "", rowOffset = 0;
     const rowYById = new Map();   // B39: タスクid→バー行中央y(px)。依存矢印の端点に使う。
@@ -370,9 +369,12 @@ async function mount(root, opts) {
       const sa = rangeByTask.get(a.id).planned.start || "9999", sb = rangeByTask.get(b.id).planned.start || "9999";
       return sa < sb ? -1 : sa > sb ? 1 : a.id - b.id;
     };
+    // Q37: visibleTasks() は m に依存しない＝この paint 内で結果不変。メンバー毎の全件再フィルタを
+    // 避けるため1回だけ評価してメモ化（出力＝各メンバーの mtasks 集合・順序は従来と同一）。
+    const allVisible = visibleTasks();
     for (const m of members.filter((m) => state.members.has(m.id))) {
       const idx = memberIdx.get(m.id);
-      const mtasks = visibleTasks().filter((t) => (t.assignees || []).some((a) => a.id === m.id));
+      const mtasks = allVisible.filter((t) => (t.assignees || []).some((a) => a.id === m.id));
       const dayMap = planByMember[m.id] || {};
       // 日別の正確な容量（週末/祝日/休暇=0、平日=capH）。窓内容量は日別の合計。
       const capOf = (iso) => capacityOn(m, iso, { holidays: holidaysSet, unavailabilityByMember, capH });
@@ -524,7 +526,7 @@ async function mount(root, opts) {
   // プロジェクト見出し＋配下に子タスク（日付順）。親に属さない単独タスクは「プロジェクトなし」へ。折りたたみ可。
   function paintProjectMode() {
     ganttEl.style.setProperty("--label-w", LABEL_W_P + "px");
-    head.innerHTML = gridHead(LABEL_W_P);
+    head.innerHTML = gridHead();
     collapsibleKeys = new Set();
     // ベースフィルタ（WS/担当/完了）。予定の有無は問わない＝プロジェクト構造を見せる。
     const passBase = (t) => {
@@ -955,7 +957,7 @@ async function mount(root, opts) {
     const entries = (plansById.get(taskId) || []).filter((p) => dateOnly(p.plan_date) === dayISO);
     const curH = entries.reduce((s, p) => s + (p.seconds || 0), 0) / 3600;
     const asg = (t.assignees || []);
-    const dow = DOW[(scale.axis.find((a) => a.iso === dayISO) || {}).dow ?? 0];
+    const dow = DOW_JA[(scale.axis.find((a) => a.iso === dayISO) || {}).dow ?? 0];
     const memCtl = asg.length > 1
       ? `<label class="dp-l">担当 <select id="dp-mem">${asg.map((a, i) => `<option value="${a.id}"${i === 0 ? " selected" : ""}>${esc(a.name || a.username)}</option>`).join("")}</select></label>`
       : `<input type="hidden" id="dp-mem" value="${asg[0] ? asg[0].id : ""}">`;
@@ -1066,7 +1068,7 @@ function shell(members, memberIdx, mode, embedded = false, maxHeight) {
       <div class="tbg"><span class="tbl">表示</span>
         <div class="seg">${["day", "week"].map((u) => `<button data-unit="${u}"${gview.unit === u ? ' class="on"' : ""}>${u === "day" ? "日" : "週"}</button>`).join("")}</div>
         <div class="seg">${SPANS[gview.unit].map((p) => { const cur = gview.unit === "day" ? gview.spanDay : gview.spanWeek; return `<button data-span="${p.key}"${p.key === cur ? ' class="on"' : ""}>${p.label}</button>`; }).join("")}</div>
-        ${gview.unit === "week" ? `<select class="gv-wsel" id="gv-weekstart" title="週の開始曜日">${DOW.map((d, i) => `<option value="${i}"${i === gview.weekStart ? " selected" : ""}>${d}曜始まり</option>`).join("")}</select>` : ""}
+        ${gview.unit === "week" ? `<select class="gv-wsel" id="gv-weekstart" title="週の開始曜日">${DOW_JA.map((d, i) => `<option value="${i}"${i === gview.weekStart ? " selected" : ""}>${d}曜始まり</option>`).join("")}</select>` : ""}
       </div>
       <div class="tbg"><span class="tbl">担当者</span><div class="chips">${memChips}</div></div>
       <label class="tbg chk"><input type="checkbox" id="gv-hidedone"> 完了を非表示</label>

@@ -1,5 +1,6 @@
 // 優先度・トリアージ（mock 46 相当・実データ）
-import { load, invalidate, isAiUser } from "../lib/store.js";
+import { load, invalidate } from "../lib/store.js";
+import { firstHuman } from "../lib/users.js";
 import { triage, shiftISO, projectAncestor } from "../lib/capacity.js";
 import { updateTask } from "../lib/api.js";
 import { C, fmtH, esc, todayISO, avatar, announce } from "../lib/ui.js";
@@ -33,7 +34,7 @@ function patchForColumn(col, today) {
 function buildMeta(tasks, byId) {
   const meta = new Map();
   for (const t of tasks || []) {
-    const who = (t.assignees || []).find((a) => !isAiUser(a)) || null;
+    const who = firstHuman(t);
     // プロジェクト=祖先解決（4層以上でも最上位プロジェクトへ集約。3層では直近親と一致）。
     const parent = projectAncestor(t, byId);
     meta.set(t.id, { who, parent, cats: categoryLabels(t) });
