@@ -8,7 +8,7 @@ import { taskMatches, next7End, EMPTY_FILTER, BUILTIN_VIEWS } from "../lib/smart
 import { shiftISO } from "../lib/capacity.js";
 import { PRIO, categoryLabels, categoryColor, REVIEW_LABEL, WAITING_LABEL } from "../lib/kinds.js";
 import { openTaskForm } from "./taskform.js";
-import { C, esc, fmtH, todayISO, emptyState } from "../lib/ui.js";
+import { C, esc, fmtH, todayISO, emptyState, announce } from "../lib/ui.js";
 import { push as histPush, initHistoryHotkeys } from "../lib/history.js";
 import { icon } from "../lib/icons.js";
 import { statePatchFor } from "../lib/taskstate.js";
@@ -459,7 +459,12 @@ function wireBulk(root, data, ctx, rerender) {
     await runAll(label, fn);
     histPush({
       label: `${label}（${ids.length}件）`,
-      undo: async () => { for (const s of snaps) await restoreTask(s, taskOf); invalidate(); render(root); },
+      undo: async () => {
+        let failed = 0;
+        for (const s of snaps) { const r = await restoreTask(s, taskOf); if (r && !r.restored) failed++; }
+        if (failed) announce(`取り消しで${failed}件が完全には戻りませんでした`, { assertive: true });
+        invalidate(); render(root);
+      },
       redo: async () => { for (const id of ids) await fn(id).catch(() => {}); invalidate(); render(root); },
     });
   };

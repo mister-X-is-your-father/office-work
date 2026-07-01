@@ -5,7 +5,7 @@ import { load, invalidate, isAiUser, patchTask } from "../lib/store.js";
 import { savePresets } from "../lib/exec.js";
 import { updateTask, deleteTask, addAssignee, removeAssignee, addTaskLabel, removeTaskLabel, createLabel, setTaskWaiting, createTaskInProject, addRelation, removeRelation, getTask } from "../lib/api.js";
 import { PRIO, prioBucket, kindOf, kindRank, isReviewTask, categoryLabels, categoryColor, REVIEW_LABEL, WAITING_LABEL, statusOf, STATUS } from "../lib/kinds.js";
-import { C, fmtH, esc, member_color, todayISO } from "../lib/ui.js";
+import { C, fmtH, esc, member_color, todayISO, announce } from "../lib/ui.js";
 import { shiftISO, buildTaskTree } from "../lib/capacity.js";
 import { openTaskForm, ensureStyle as ensureFormStyle } from "./taskform.js";
 import { summarizeRecurrence, openRecurrenceForm } from "./recurrenceform.js";
@@ -709,7 +709,12 @@ function openRowMenu(x, y, id, tasks, root) {
   const allDone = objs.every((t) => t.done);
   const allFav = objs.every((t) => t.is_favorite);
   const reload = () => { invalidate(); render(root); };
-  const each = async (fn) => { for (const t of objs) { try { await fn(t); } catch (e) { /* 続行 */ } } reload(); };
+  const each = async (fn) => {
+    let failed = 0;
+    for (const t of objs) { try { await fn(t); } catch (e) { failed++; } }
+    if (failed) announce(`${failed}件の操作に失敗しました`, { assertive: true });
+    reload();
+  };
   const items = [
     ...(multi ? [] : [{ label: "編集", on: () => openTaskForm({ taskId: id, onSaved: () => render(root) }) }]),
     { label: allDone ? (multi ? `${n}件を未完了に` : "未完了に戻す") : (multi ? `${n}件を完了` : "完了にする"),
@@ -993,7 +998,7 @@ function openCategoryMenu(chipEl, id, tasks, labels, root) {
       },
     }));
     // 新規ラベル作成だけは即時 createLabel（マスタ生成）。付与はローカル＋onClose差分に合わせる。
-    items.push({ sep: true }, { label: "＋ 新しい分類…", on: async () => { const name = (prompt("新しい分類名") || "").trim(); if (!name) return; try { const lab = await createLabel(name); t.labels = [...t.labels, lab]; dirty = true; } catch (e) { /* noop */ } invalidate(); render(root); } });
+    items.push({ sep: true }, { label: "＋ 新しい分類…", on: async () => { const name = (prompt("新しい分類名") || "").trim(); if (!name) return; try { const lab = await createLabel(name); t.labels = [...t.labels, lab]; dirty = true; } catch (e) { announce("分類の作成に失敗しました", { assertive: true }); } invalidate(); render(root); } });
     return items;
   };
   const r = chipEl.getBoundingClientRect();
@@ -1532,7 +1537,12 @@ function wireBulk(root, rows, tasks, members, today, labels) {
     await runAll(label, fn);
     history.push({
       label: `${label}（${ids.length}件）`,
-      undo: async () => { for (const s of snaps) await restoreTask(s, taskOf); historyRerender(); },
+      undo: async () => {
+        let failed = 0;
+        for (const s of snaps) { const r = await restoreTask(s, taskOf); if (r && !r.restored) failed++; }
+        if (failed) announce(`取り消しで${failed}件が完全には戻りませんでした`, { assertive: true });
+        historyRerender();
+      },
       redo: async () => { for (const id of ids) await fn(id).catch(() => {}); historyRerender(); },
     });
   };
