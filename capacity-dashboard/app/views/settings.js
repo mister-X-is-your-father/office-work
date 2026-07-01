@@ -13,6 +13,7 @@ import { C, esc } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
 import { ROUTES, ORDER, ALWAYS_VISIBLE } from "../lib/routes.js";
 import { todayISO as currentTodayISO, shiftISO } from "../lib/capacity.js";
+import { holidayDataStatus } from "../lib/recurrence.js";
 
 // ── 外観・起動の個人設定（この端末のみ・localStorage）───────────────
 // テーマ: モードを ts.thememode（light/dark/system）に保存。index.html / app.js の従来トグルは
@@ -309,6 +310,13 @@ function wireNotify(root, me) {
 // チーム共有設定の管理者専用 savebar には紐づけず、create/delete API を直接叩く（manage.js と同挙動）。
 function holidaySection(holidays) {
   const sorted = [...(holidays || [])].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  // 祝日データの鮮度: 最終祝日が today+90日 に届かなければ、会社休業日などの追記を促す警告を出す。
+  // （祝日が先まで無いと容量計算で週末/祝日=0 が正しく効かず、空き・負荷・超過の判定がずれるため）
+  const holDates = new Set((holidays || []).map((h) => String(h.date).slice(0, 10)));
+  const holStat = holidayDataStatus(holDates, currentTodayISO());
+  const staleWarn = holStat.stale
+    ? `<div class="sx-hstale">⚠ 祝日データが今後90日ぶん揃っていません（最新: ${holStat.latest || "未登録"}）。会社休業日などを追加すると、空き・負荷・超過の計算がより正確になります。</div>`
+    : "";
   // 年の選択肢（祝日が属する年・降順）。
   const years = [...new Set(sorted.map((h) => String(h.date).slice(0, 4)))].sort((a, b) => b.localeCompare(a));
   const yearOpts = `<option value="">すべての年</option>` +
@@ -321,6 +329,7 @@ function holidaySection(holidays) {
       </header>
       <div class="sx-body">
         <div class="sx-hhint">国民の祝日は自動同期（週1）。会社独自の休業日などはここで手動追加できます。</div>
+        ${staleWarn}
         <div class="sx-hform">
           <input id="hol-date" class="sx-in sx-hdate" inputmode="numeric" autocomplete="off" placeholder="日付（例: 1112）">
           <input id="hol-name" class="sx-in sx-hname" placeholder="名称（例: 創立記念日）">
@@ -990,6 +999,9 @@ function css() {
   /* 祝日・休業日セクション: 追加フォーム＋日付順リスト（過去は淡色） */
   .sx-hcnt{font-size:12px;color:${C.muted};font-weight:600;background:var(--track);border-radius:10px;padding:1px 8px;margin-left:6px}
   .sx-hhint{font-size:11.5px;color:${C.muted};line-height:1.55;padding:14px 0 0}
+  /* 祝日データ鮮度の控えめな警告（今後90日ぶんの祝日が無いとき） */
+  .sx-hstale{margin:10px 0 2px;padding:8px 11px;border-radius:8px;font-size:12px;line-height:1.5;
+    background:rgba(245,166,35,.12);color:#8a5a00;border:1px solid rgba(245,166,35,.35)}
   .sx-hform{display:flex;gap:8px;flex-wrap:wrap;padding:12px 0 0}
   .sx-hdate{flex:0 0 auto;width:150px}
   .sx-hname{flex:1;min-width:140px}
@@ -1092,5 +1104,6 @@ function css() {
   html[data-theme="dark"] .sx-chd{background:var(--track)}
   html[data-theme="dark"] .sx-mvtbl thead th,
   html[data-theme="dark"] .sx-mvcorner{background:var(--card)}
-  html[data-theme="dark"] .sx-mvrh{background:var(--card)}`;
+  html[data-theme="dark"] .sx-mvrh{background:var(--card)}
+  html[data-theme="dark"] .sx-hstale{color:#e6b45a;background:rgba(245,166,35,.10);border-color:rgba(245,166,35,.3)}`;
 }
