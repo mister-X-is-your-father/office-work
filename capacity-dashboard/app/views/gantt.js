@@ -143,6 +143,10 @@ async function mount(root, opts) {
     critical: embedded ? false : gview.critical,
     showUnscheduled: embedded ? false : gview.showUnscheduled,
   };
+  // 持ち上げた純ビルダー（gridHead/barsHTML/aggRange/aggBarHTML/memberTaskRow）へ渡す共有 ctx。
+  // scale/byIdAll/today/tier/weekStart/rangeByTask は mount ローカルで確定済み。mode はモード切替で
+  // paint 単独再実行され変わる（remount しない）ため、paint() 冒頭で毎回 ctx.mode を最新化する。
+  const ctx = { scale, byIdAll, today, tier, weekStart, rangeByTask, mode: state.mode };
   // B40: クリティカルパス（依存グラフの最長鎖）。窓に依存しないので render 単位で一度だけ算出。
   const critById = depLayers(tasks.map((t) => t.id), edges).critical;
   const memberIdx = new Map(members.map((m, i) => [m.id, i]));
@@ -174,64 +178,6 @@ async function mount(root, opts) {
     ganttEl.style.setProperty("--col-w", COL_W + "px");
   }
 
-  // ヘッダは2段（月バンド＋日付）。日表示=毎日 dom+曜日 / 週表示=週開始日だけ dom。
-  function gridHead() {
-    // 月バンド: 連続する同月をまとめて span
-    const months = [];
-    for (let i = 0; i < scale.axis.length;) {
-      const ym = scale.axis[i].iso.slice(0, 7);
-      let j = i; while (j < scale.axis.length && scale.axis[j].iso.slice(0, 7) === ym) j++;
-      months.push({ span: j - i, label: `${+ym.slice(0, 4)}年${+ym.slice(5, 7)}月` });
-      i = j;
-    }
-    const monthRow = `<div class="gh-corner gh-mc"></div>` +
-      months.map((m) => `<div class="gh-month" style="grid-column:span ${m.span}">${m.label}</div>`).join("");
-    const corner = state.mode === "member" ? "人別" : "プロジェクト";
-    const dayRow = `<div class="gh-corner">${corner} / 日付</div>` + scale.axis.map((a) => {
-      const cls = (a.weekend ? " weekend" : "") + (a.iso === today ? " today" : "");
-      const dom = a.iso.slice(8);
-      const showNum = tier === "day" || a.dow === weekStart;   // 週表示は週開始日だけ日付
-      const numHtml = showNum ? `<div class="dom">${+dom}</div>` : "";
-      const dowHtml = tier === "day" ? `<div class="dow">${DOW_JA[a.dow]}</div>` : "";
-      return `<div class="gh-day${cls}${tier !== "day" ? " sparse" : ""}${a.dow === weekStart ? " wk" : ""}">${numHtml}${dowHtml}</div>`;
-    }).join("");
-    return monthRow + dayRow;
-  }
-
-  // タスク1行ぶんのバー領域HTML（予定バー＋実績バー）。taskId を data 属性に載せてドラッグで参照。
-  function barsHTML(r, taskId) {
-    const cells = scale.axis.map((a) => `<div class="cell${a.weekend ? " weekend" : ""}${a.dow === weekStart ? " wk" : ""}"></div>`).join("");
-    const tName = (byIdAll.get(taskId) || {}).title || "";
-    let bars = "";
-    if (r.planned.source) {
-      const pg = scale.range(r.planned.start, r.planned.end);
-      const left = pg.fromIdx * COL_W + 2, w = pg.span * COL_W - 4;
-      const clip = (pg.clippedLeft ? " clipL" : "") + (pg.clippedRight ? " clipR" : "");
-      // dates のみ端リサイズ可。plans/dates/due はすべて移動＋クリックで編集（draggable）。
-      const resizable = r.planned.source === "dates";
-      const handles = resizable ? `<span class="bar-h l"></span><span class="bar-h r"></span>` : "";
-      // タップ端末向けの「移動」アフォーダンス（プログレッシブ拡張）。HTML5/pointerドラッグが効かない
-      // タッチ環境では (hover:none)/(pointer:coarse) で常時可視。マウス環境ではホバー/フォーカス時のみ
-      // 小さく出す控えめなボタン。クリックで日付シフトの小メニューを開く（既存DnDの日付更新を流用）。
-      const shiftBtn = `<button class="bar-shift" type="button" data-task="${taskId}" aria-label="${esc((tName ? tName + " " : "") + "の日程をずらす")}" title="日程をずらす">⋮</button>`;
-      // スクリーンリーダー向け: タスク名＋予定（時間・由来）。視覚的 title はホバー用に従来どおり保持。
-      const planAria = `${tName ? tName + " " : ""}予定 ${fmtH(r.planned.h)}（${srcLabel(r.planned.source)}）`;
-      bars += `<div class="bar plan draggable${clip}" role="img" aria-label="${esc(planAria)}" data-task="${taskId}" data-src="${r.planned.source}" style="left:${left}px;width:${w}px" title="予定 ${fmtH(r.planned.h)}（${srcLabel(r.planned.source)}）・ドラッグで移動${resizable ? "／端で伸縮" : ""}・クリックで編集">${handles}${shiftBtn}</div>`;
-    }
-    if (r.actual.start) {
-      const ag = scale.range(r.actual.start, r.actual.end);
-      const left = ag.fromIdx * COL_W + 2, w = ag.span * COL_W - 4;
-      const pct = Math.min(100, r.percent);
-      const fill = r.over ? C.over : (r.percent >= 100 ? C.free : C.fill);
-      // スクリーンリーダー向け: タスク名＋実績/見積＋進捗%＋超過フラグ。
-      const actAria = `${tName ? tName + " " : ""}実績 ${fmtH(r.actual.h)} / 見積 ${fmtH(r.estH)}・進捗 ${r.percent}%${r.over ? "・超過" : ""}`;
-      bars += `<div class="bar act${r.over ? " over" : ""}" role="img" aria-label="${esc(actAria)}" style="left:${left}px;width:${w}px" title="実績 ${fmtH(r.actual.h)} / 見積 ${fmtH(r.estH)}">
-        <div class="fill" style="width:${pct}%;background:${fill}"></div>
-        <div class="blabel">${r.percent}%</div></div>`;
-    }
-    return `<div class="r-cells">${cells}</div><div class="bar-area">${bars}</div>`;
-  }
-
   function visibleTasks() {
     return tasks.filter((t) => {
       // WSは常に全表示（UIから消したのでWSでのスコープは行わない）
@@ -257,51 +203,6 @@ async function mount(root, opts) {
     });
   }
 
-  // 子タスク群（＋親に予定があれば親も）から「集約バー」用の合成レンジを作る。
-  // start=最早予定開始 / end=最遅予定終了 / h=予定合計。窓と交差する予定だけ集約。
-  function aggRange(tasksForAgg) {
-    let start = null, end = null, h = 0, src = null;
-    for (const t of tasksForAgg) {
-      const r = rangeByTask.get(t.id);
-      if (!r || !r.planned.source) continue;
-      if (!scale.intersects(r.planned.start, r.planned.end)) continue;
-      h += r.planned.h || 0;
-      if (!start || r.planned.start < start) start = r.planned.start;
-      if (!end || r.planned.end > end) end = r.planned.end;
-      src = "agg";
-    }
-    return { start, end, h, src };
-  }
-
-  // 集約バー（読み取り専用の帯。ドラッグ/編集不可＝個別の子タスク行で行う）。
-  function aggBarHTML(ar) {
-    const cells = scale.axis.map((a) => `<div class="cell${a.weekend ? " weekend" : ""}${a.dow === weekStart ? " wk" : ""}"></div>`).join("");
-    let bars = "";
-    if (ar.src && ar.start) {
-      const pg = scale.range(ar.start, ar.end);
-      const left = pg.fromIdx * COL_W + 2, w = pg.span * COL_W - 4;
-      const clip = (pg.clippedLeft ? " clipL" : "") + (pg.clippedRight ? " clipR" : "");
-      bars += `<div class="bar plan agg${clip}" style="left:${left}px;width:${w}px" title="子タスクの予定をまとめた帯 ・ 予定合計 ${fmtH(ar.h)}"></div>`;
-    }
-    return `<div class="r-cells">${cells}</div><div class="bar-area">${bars}</div>`;
-  }
-
-  // 1タスク行（人別/未アサイン共通）。child=trueでプロジェクト配下のネスト見た目。
-  // isLast=最後の子（ツリー縦線をエルボーで止める）／band=親プロジェクト色（ツリー線色）。
-  function memberTaskRow(t, child, isLast, band) {
-    const r = rangeByTask.get(t.id);
-    const treeCls = child ? ` mp-child${isLast ? " last" : ""}` : "";
-    const treeStyle = child && band ? ` style="--pj:${band}"` : "";
-    return `<div class="row${r.over ? " delayed" : ""}${treeCls}" data-task="${t.id}"${treeStyle}>
-      <div class="r-label r-label-sub">
-        <span class="r-text"><span class="r-name" title="${esc(t.title)}">${esc(t.title)}</span>
-          <span class="r-meta"><span>見${fmtH(r.estH)}・実${fmtH(r.spentH)}・予${fmtH(r.planned.h)}</span>
-          ${r.over ? `<span class="r-flag">超過</span>` : ""}</span></span>
-      </div>
-      ${barsHTML(r, t.id)}
-    </div>`;
-  }
-
   // 親プロジェクトのサブグループ見出し（集約バー付き・既定展開）と、展開時の子タスク行。
   // toggleKey はメンバー折りたたみ "m"+id と衝突しない "mp"+m.id+"_"+pid。
   // startY/rowYById を渡すと展開中の子タスク行の中央y(px)を記録（B39 依存矢印の終点用）。
@@ -313,7 +214,7 @@ async function mount(root, opts) {
     // 埋め込みは state.collapsed が毎回新規 Set ＝未登録＝展開で子が見える。
     const collapsed = state.collapsed.has(toggleKey);
     const aggSrc = includeParentInAgg && parent ? [parent, ...children] : children;
-    const ar = aggRange(aggSrc);
+    const ar = aggRange(ctx, aggSrc);
     const totH = children.reduce((s, t) => s + (rangeByTask.get(t.id).planned.h || 0), 0)
                + (includeParentInAgg && parent ? (rangeByTask.get(pid).planned.h || 0) : 0);
     let h = `<div class="grp mp-sub${collapsed ? " collapsed" : ""}">
@@ -326,13 +227,13 @@ async function mount(root, opts) {
           <span class="grp-sub">予${fmtH(totH)}</span>
         </span>
       </div>
-      ${collapsed ? aggBarHTML(ar) : ""}
+      ${collapsed ? aggBarHTML(ctx, ar) : ""}
     </div>`;
     let rows = GRP_H;
     if (!collapsed) {
       const band = projColor(parent ? parent.project_id : 0);
       children.forEach((t, i) => {
-        h += memberTaskRow(t, true, i === children.length - 1, band);
+        h += memberTaskRow(ctx, t, true, i === children.length - 1, band);
         if (rowYById && startY != null) rowYById.set(t.id, startY + rows + ROW_H / 2);
         rows += ROW_H;
       });
@@ -361,7 +262,7 @@ async function mount(root, opts) {
 
   function paintMemberMode() {
     ganttEl.style.setProperty("--label-w", LABEL_W_P + "px");
-    head.innerHTML = gridHead();
+    head.innerHTML = gridHead(ctx);
     collapsibleKeys = new Set();
     let html = "", rowOffset = 0;
     const rowYById = new Map();   // B39: タスクid→バー行中央y(px)。依存矢印の端点に使う。
@@ -412,7 +313,7 @@ async function mount(root, opts) {
         const { direct, childByParent } = groupByParent(mtasks);
         // 親なしタスク（従来どおりメンバー直下の行）
         for (const t of direct.sort(sortByStart)) {
-          html += memberTaskRow(t, false);
+          html += memberTaskRow(ctx, t, false);
           rowYById.set(t.id, rowOffset + ROW_H / 2);   // B39: バー行中央y
           rowOffset += ROW_H;
         }
@@ -449,7 +350,7 @@ async function mount(root, opts) {
             rowOffset += GRP_H;
             if (!usCol) {
               us.forEach((t, i) => {
-                html += memberTaskRow(t, true, i === us.length - 1, C.lineStrong);
+                html += memberTaskRow(ctx, t, true, i === us.length - 1, C.lineStrong);
                 rowOffset += ROW_H;   // 未予定＝バー無しなので依存矢印端点(rowYById)には載せない
               });
             }
@@ -491,7 +392,7 @@ async function mount(root, opts) {
       if (!uCollapsed) {
         const { direct, childByParent } = groupByParent(unassigned);
         for (const t of direct.sort(sortByStart)) {
-          html += memberTaskRow(t, false);
+          html += memberTaskRow(ctx, t, false);
           rowYById.set(t.id, rowOffset + ROW_H / 2);   // B39
           rowOffset += ROW_H;
         }
@@ -526,7 +427,7 @@ async function mount(root, opts) {
   // プロジェクト見出し＋配下に子タスク（日付順）。親に属さない単独タスクは「プロジェクトなし」へ。折りたたみ可。
   function paintProjectMode() {
     ganttEl.style.setProperty("--label-w", LABEL_W_P + "px");
-    head.innerHTML = gridHead();
+    head.innerHTML = gridHead(ctx);
     collapsibleKeys = new Set();
     // ベースフィルタ（WS/担当/完了）。予定の有無は問わない＝プロジェクト構造を見せる。
     const passBase = (t) => {
@@ -604,7 +505,7 @@ async function mount(root, opts) {
                 ${r.over ? `<span class="r-flag">超過</span>` : ""}
                 ${noplan ? `<span class="r-noplan">予定なし</span>` : ""}</span></span>
           </div>
-          ${barsHTML(r, t.id)}
+          ${barsHTML(ctx, r, t.id)}
         </div>`;
         rowYById.set(t.id, rowOffset + ROW_H / 2);   // B39: バー行中央y
         rowOffset += ROW_H;
@@ -663,6 +564,7 @@ async function mount(root, opts) {
   }
 
   function paint() {
+    ctx.mode = state.mode;   // モードはトグルで paint 単独再実行され変わる＝gridHead の corner ラベル用に毎回最新化
     fitColumns();   // 表示幅に合わせ列幅を再算出（モードでラベル幅が変わるので毎回）
     if (state.mode === "member") paintMemberMode();
     else paintProjectMode();   // project（"task"廃止＝既定はプロジェクト別）
@@ -1019,6 +921,112 @@ async function mount(root, opts) {
   if (!embedded) requestAnimationFrame(() => scrollToToday(false));
   // 埋め込みは cleanup 関数を返す（呼び出し側が破棄時に呼ぶ／呼ばなくても MutationObserver が自動解除）。
   return teardown;
+}
+
+// ── 純ビルダー（mount から持ち上げ）。共有状態は ctx で受ける。COL_W/DOW_JA/C/fmtH/esc/srcLabel 等の
+//    module レベル参照はそのまま（mount 外でも見える）。ctx = { scale, byIdAll, today, tier, weekStart, rangeByTask, mode }。
+
+// ヘッダは2段（月バンド＋日付）。日表示=毎日 dom+曜日 / 週表示=週開始日だけ dom。
+function gridHead(ctx) {
+  // 月バンド: 連続する同月をまとめて span
+  const months = [];
+  for (let i = 0; i < ctx.scale.axis.length;) {
+    const ym = ctx.scale.axis[i].iso.slice(0, 7);
+    let j = i; while (j < ctx.scale.axis.length && ctx.scale.axis[j].iso.slice(0, 7) === ym) j++;
+    months.push({ span: j - i, label: `${+ym.slice(0, 4)}年${+ym.slice(5, 7)}月` });
+    i = j;
+  }
+  const monthRow = `<div class="gh-corner gh-mc"></div>` +
+    months.map((m) => `<div class="gh-month" style="grid-column:span ${m.span}">${m.label}</div>`).join("");
+  const corner = ctx.mode === "member" ? "人別" : "プロジェクト";
+  const dayRow = `<div class="gh-corner">${corner} / 日付</div>` + ctx.scale.axis.map((a) => {
+    const cls = (a.weekend ? " weekend" : "") + (a.iso === ctx.today ? " today" : "");
+    const dom = a.iso.slice(8);
+    const showNum = ctx.tier === "day" || a.dow === ctx.weekStart;   // 週表示は週開始日だけ日付
+    const numHtml = showNum ? `<div class="dom">${+dom}</div>` : "";
+    const dowHtml = ctx.tier === "day" ? `<div class="dow">${DOW_JA[a.dow]}</div>` : "";
+    return `<div class="gh-day${cls}${ctx.tier !== "day" ? " sparse" : ""}${a.dow === ctx.weekStart ? " wk" : ""}">${numHtml}${dowHtml}</div>`;
+  }).join("");
+  return monthRow + dayRow;
+}
+
+// タスク1行ぶんのバー領域HTML（予定バー＋実績バー）。taskId を data 属性に載せてドラッグで参照。
+function barsHTML(ctx, r, taskId) {
+  const cells = ctx.scale.axis.map((a) => `<div class="cell${a.weekend ? " weekend" : ""}${a.dow === ctx.weekStart ? " wk" : ""}"></div>`).join("");
+  const tName = (ctx.byIdAll.get(taskId) || {}).title || "";
+  let bars = "";
+  if (r.planned.source) {
+    const pg = ctx.scale.range(r.planned.start, r.planned.end);
+    const left = pg.fromIdx * COL_W + 2, w = pg.span * COL_W - 4;
+    const clip = (pg.clippedLeft ? " clipL" : "") + (pg.clippedRight ? " clipR" : "");
+    // dates のみ端リサイズ可。plans/dates/due はすべて移動＋クリックで編集（draggable）。
+    const resizable = r.planned.source === "dates";
+    const handles = resizable ? `<span class="bar-h l"></span><span class="bar-h r"></span>` : "";
+    // タップ端末向けの「移動」アフォーダンス（プログレッシブ拡張）。HTML5/pointerドラッグが効かない
+    // タッチ環境では (hover:none)/(pointer:coarse) で常時可視。マウス環境ではホバー/フォーカス時のみ
+    // 小さく出す控えめなボタン。クリックで日付シフトの小メニューを開く（既存DnDの日付更新を流用）。
+    const shiftBtn = `<button class="bar-shift" type="button" data-task="${taskId}" aria-label="${esc((tName ? tName + " " : "") + "の日程をずらす")}" title="日程をずらす">⋮</button>`;
+    // スクリーンリーダー向け: タスク名＋予定（時間・由来）。視覚的 title はホバー用に従来どおり保持。
+    const planAria = `${tName ? tName + " " : ""}予定 ${fmtH(r.planned.h)}（${srcLabel(r.planned.source)}）`;
+    bars += `<div class="bar plan draggable${clip}" role="img" aria-label="${esc(planAria)}" data-task="${taskId}" data-src="${r.planned.source}" style="left:${left}px;width:${w}px" title="予定 ${fmtH(r.planned.h)}（${srcLabel(r.planned.source)}）・ドラッグで移動${resizable ? "／端で伸縮" : ""}・クリックで編集">${handles}${shiftBtn}</div>`;
+  }
+  if (r.actual.start) {
+    const ag = ctx.scale.range(r.actual.start, r.actual.end);
+    const left = ag.fromIdx * COL_W + 2, w = ag.span * COL_W - 4;
+    const pct = Math.min(100, r.percent);
+    const fill = r.over ? C.over : (r.percent >= 100 ? C.free : C.fill);
+    // スクリーンリーダー向け: タスク名＋実績/見積＋進捗%＋超過フラグ。
+    const actAria = `${tName ? tName + " " : ""}実績 ${fmtH(r.actual.h)} / 見積 ${fmtH(r.estH)}・進捗 ${r.percent}%${r.over ? "・超過" : ""}`;
+    bars += `<div class="bar act${r.over ? " over" : ""}" role="img" aria-label="${esc(actAria)}" style="left:${left}px;width:${w}px" title="実績 ${fmtH(r.actual.h)} / 見積 ${fmtH(r.estH)}">
+        <div class="fill" style="width:${pct}%;background:${fill}"></div>
+        <div class="blabel">${r.percent}%</div></div>`;
+  }
+  return `<div class="r-cells">${cells}</div><div class="bar-area">${bars}</div>`;
+}
+
+// 子タスク群（＋親に予定があれば親も）から「集約バー」用の合成レンジを作る。
+// start=最早予定開始 / end=最遅予定終了 / h=予定合計。窓と交差する予定だけ集約。
+function aggRange(ctx, tasksForAgg) {
+  let start = null, end = null, h = 0, src = null;
+  for (const t of tasksForAgg) {
+    const r = ctx.rangeByTask.get(t.id);
+    if (!r || !r.planned.source) continue;
+    if (!ctx.scale.intersects(r.planned.start, r.planned.end)) continue;
+    h += r.planned.h || 0;
+    if (!start || r.planned.start < start) start = r.planned.start;
+    if (!end || r.planned.end > end) end = r.planned.end;
+    src = "agg";
+  }
+  return { start, end, h, src };
+}
+
+// 集約バー（読み取り専用の帯。ドラッグ/編集不可＝個別の子タスク行で行う）。
+function aggBarHTML(ctx, ar) {
+  const cells = ctx.scale.axis.map((a) => `<div class="cell${a.weekend ? " weekend" : ""}${a.dow === ctx.weekStart ? " wk" : ""}"></div>`).join("");
+  let bars = "";
+  if (ar.src && ar.start) {
+    const pg = ctx.scale.range(ar.start, ar.end);
+    const left = pg.fromIdx * COL_W + 2, w = pg.span * COL_W - 4;
+    const clip = (pg.clippedLeft ? " clipL" : "") + (pg.clippedRight ? " clipR" : "");
+    bars += `<div class="bar plan agg${clip}" style="left:${left}px;width:${w}px" title="子タスクの予定をまとめた帯 ・ 予定合計 ${fmtH(ar.h)}"></div>`;
+  }
+  return `<div class="r-cells">${cells}</div><div class="bar-area">${bars}</div>`;
+}
+
+// 1タスク行（人別/未アサイン共通）。child=trueでプロジェクト配下のネスト見た目。
+// isLast=最後の子（ツリー縦線をエルボーで止める）／band=親プロジェクト色（ツリー線色）。
+function memberTaskRow(ctx, t, child, isLast, band) {
+  const r = ctx.rangeByTask.get(t.id);
+  const treeCls = child ? ` mp-child${isLast ? " last" : ""}` : "";
+  const treeStyle = child && band ? ` style="--pj:${band}"` : "";
+  return `<div class="row${r.over ? " delayed" : ""}${treeCls}" data-task="${t.id}"${treeStyle}>
+      <div class="r-label r-label-sub">
+        <span class="r-text"><span class="r-name" title="${esc(t.title)}">${esc(t.title)}</span>
+          <span class="r-meta"><span>見${fmtH(r.estH)}・実${fmtH(r.spentH)}・予${fmtH(r.planned.h)}</span>
+          ${r.over ? `<span class="r-flag">超過</span>` : ""}</span></span>
+      </div>
+      ${barsHTML(ctx, r, t.id)}
+    </div>`;
 }
 
 function srcLabel(source) {
