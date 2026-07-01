@@ -6,7 +6,7 @@
 import { load, invalidate, TEMPLATE_WS, ensureInbox } from "../lib/store.js";
 import { getTask, createTaskInProject, createProject, updateTask, addAssignee, removeAssignee, addRelation, removeRelation, createLabel, addTaskLabel, removeTaskLabel, getAttachments, uploadAttachments, deleteAttachment, fetchAttachmentBlob, setTaskWaiting, getComments, createComment } from "../lib/api.js";
 import { categoryLabels, REVIEW_LABEL, WAITING_LABEL, statusOf, STATUS, PRIO_OPTS } from "../lib/kinds.js";
-import { loadByMember } from "../lib/capacity.js";
+import { loadByMember, projectAncestor } from "../lib/capacity.js";
 import { capacityOn } from "../lib/recurrence.js";
 import { C, esc, fmtH, trapFocus } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
@@ -68,14 +68,22 @@ export async function openTaskForm({ taskId = null, onSaved, tab = null } = {}) 
   const candidates = (tasks || []).filter((t) => !task || t.id !== task.id);
   const parentCands = candidates.filter((t) => ((((t.related_tasks || {}).subtask) || []).length > 0));
   const parentIds = new Set(parentCands.map((t) => t.id));
-  const curParentTitle = curParent ? curParent.title : "";
+  // タスクグループ候補 = 親候補のうちさらに自分の親を持つもの（プロジェクト直下ではなく中間層＝グループ）。
+  const groupCands = parentCands.filter((t) => ((((t.related_tasks || {}).parenttask) || []).length > 0));
+  const taskById = new Map((tasks || []).map((t) => [t.id, t]));
+  // 編集時のプロジェクト/タスクグループ欄プリフィル: 直近親(curParent)がさらに親を持てば「グループ」＝
+  // その祖先(projectAncestor)をプロジェクト欄、直近親自身をタスクグループ欄へ。持たなければ直近親=プロジェクト。
+  const curParentFull = curParentId ? (taskById.get(curParentId) || curParent) : null;
+  const curAncestor = curParentFull ? projectAncestor(curParentFull, taskById) : null;
+  const curIsGroup = !!(curAncestor && curParentFull && curAncestor.id !== curParentFull.id);
+  const curProjectTitle = curIsGroup ? curAncestor.title : (curParentFull ? curParentFull.title : "");
+  const curGroupTitle = curIsGroup ? curParentFull.title : "";
   // 分類 = レビュー以外のラベル（単一運用）。レビューは種別(kind)の別軸なので分類とは独立に共存できる。
   const curCat = task ? (categoryLabels(task)[0] || null) : null;
   const curCatTitle = curCat ? curCat.title : "";
   const catChoices = (labels || []).filter((l) => l.title !== REVIEW_LABEL && l.title !== WAITING_LABEL);
   // 先行タスク（依存元）= related_tasks.follows（このタスクが follows する＝その前に完了が必要）
   const curPreds = (task && task.related_tasks && (task.related_tasks.follows || [])) || [];
-  const taskById = new Map((tasks || []).map((t) => [t.id, t]));
   for (const p of curPreds) if (!taskById.has(p.id)) taskById.set(p.id, p);
   const predSet = new Set(curPreds.map((p) => p.id)); // 編集中の作業セット（id）
   // 資料リンク（説明から分離して編集、保存時に再結合）
@@ -122,7 +130,12 @@ export async function openTaskForm({ taskId = null, onSaved, tab = null } = {}) 
           </div>` : ""}
           <label class="tf-l">プロジェクト <span class="tf-hint">（無い名前は新規作成）</span></label>
           <div class="tf-cbx">
-            <input id="tf-parent" class="tf-in" autocomplete="off" value="${esc(curParentTitle)}" placeholder="選択 / 名前を入力">
+            <input id="tf-parent" class="tf-in" autocomplete="off" value="${esc(curProjectTitle)}" placeholder="選択 / 名前を入力">
+            <div class="tf-cbx-dd" hidden></div>
+          </div>
+          <label class="tf-l">タスクグループ <span class="tf-hint">（任意・無い名前は新規作成）</span></label>
+          <div class="tf-cbx">
+            <input id="tf-group" class="tf-in" autocomplete="off" value="${esc(curGroupTitle)}" placeholder="選択 / 名前を入力（任意）">
             <div class="tf-cbx-dd" hidden></div>
           </div>
           <label class="tf-l">タイトル <span class="tf-req">*</span></label>
@@ -237,7 +250,7 @@ export async function openTaskForm({ taskId = null, onSaved, tab = null } = {}) 
   // B65: 未保存破棄警告。開いた時点のフォーム値スナップショットを取り、変更があれば閉じる前にconfirm。
   let saving = false; // 保存成功で閉じる時はsnapshot比較をスキップ
   const formSnapshot = () => JSON.stringify({
-    parent: ($("#tf-parent") || {}).value || "", title: ($("#tf-title") || {}).value || "",
+    parent: ($("#tf-parent") || {}).value || "", group: ($("#tf-group") || {}).value || "", title: ($("#tf-title") || {}).value || "",
     desc: ($("#tf-desc") || {}).value || "", goal: ($("#tf-goal") || {}).value || "",
     asg: ($("#tf-asg") || {}).value || "", prio: ($("#tf-prio") || {}).value || "",
     cat: ($("#tf-cat") || {}).value || "", asg2: ($("#tf-asg2") || {}).value || "",
@@ -646,6 +659,25 @@ export async function openTaskForm({ taskId = null, onSaved, tab = null } = {}) 
     onPick: (item, create) => { parentEl.value = item ? item.title : create; },
   });
 
+  // タスクグループ（任意）: 既存グループ（=親を持つ親タスク）から選択 or 新規作成。
+  // 既存グループを選ぶとプロジェクト欄へその祖先名を自動反映（階層を可視化）。
+  const groupEl = $("#tf-group");
+  attachCombobox(groupEl, {
+    items: (q) => {
+      if (!q) return groupCands;
+      const ql = q.toLowerCase();
+      return groupCands.filter((t) => t.title.toLowerCase().includes(ql));
+    },
+    createText: (q) => `＋ タスクグループ「${q}」を新規作成`,
+    onPick: (item, create) => {
+      groupEl.value = item ? item.title : create;
+      if (item) {
+        const anc = ((item.related_tasks || {}).parenttask || [])[0];
+        if (anc && anc.title) parentEl.value = anc.title;
+      }
+    },
+  });
+
   // 分類: 既存ラベル（レビュー除く）から選択 or 新規作成。空=分類なし。
   const catEl = $("#tf-cat");
   attachCombobox(catEl, {
@@ -687,6 +719,11 @@ export async function openTaskForm({ taskId = null, onSaved, tab = null } = {}) 
     const desc = joinMeta($("#tf-desc").value, $("#tf-goal").value, docLinks, docChecks);
 
     const parentRaw = $("#tf-parent").value.trim();
+    const groupRaw = $("#tf-group").value.trim();
+    if (groupRaw && !parentRaw && !groupCands.some((t) => t.title === groupRaw)) {
+      err.textContent = "新規タスクグループを作成するにはプロジェクトも指定してください。";
+      return;
+    }
 
     const btn = $("#tf-save");
     btn.disabled = true; err.textContent = "";
@@ -740,12 +777,24 @@ export async function openTaskForm({ taskId = null, onSaved, tab = null } = {}) 
       for (const pid2 of predSet) if (pid2 !== childId && !curPredIds.has(pid2)) await addRelation(childId, pid2, "follows");
       for (const pid2 of curPredIds) if (!predSet.has(pid2)) await removeRelation(childId, "follows", pid2);
 
-      // 親タスクの解決（既存タイトル一致=その親 / 新名=同ワークスペースに親を新規作成）と関連 diff。
+      // 親タスクの解決: プロジェクト（既存タイトル一致=その親 / 新名=新規作成）→ タスクグループ（任意・
+      // 既存一致=そのグループ / 新名=作成しプロジェクト配下へ addRelation）の順で解決し、実際の直近親を決める。
       // 親が子を持つ＝親側に subtask 関連を張る（capacity.js buildTaskTree と整合）。
-      let parentId = null;
+      let projectId = null;
       if (parentRaw) {
-        const existing = (tasks || []).find((t) => t.title === parentRaw && t.id !== childId);
-        parentId = existing ? existing.id : (await createTaskInProject(pid, { title: parentRaw })).id;
+        const existingProj = (tasks || []).find((t) => t.title === parentRaw && t.id !== childId);
+        projectId = existingProj ? existingProj.id : (await createTaskInProject(pid, { title: parentRaw })).id;
+      }
+      let parentId = projectId;
+      if (groupRaw) {
+        const existingGroup = groupCands.find((t) => t.title === groupRaw && t.id !== childId);
+        if (existingGroup) {
+          parentId = existingGroup.id;
+        } else if (projectId) {
+          const newGroup = await createTaskInProject(pid, { title: groupRaw });
+          await addRelation(projectId, newGroup.id, "subtask");
+          parentId = newGroup.id;
+        }
       }
       if (parentId !== curParentId) {
         if (curParentId) await removeRelation(curParentId, "subtask", childId);
