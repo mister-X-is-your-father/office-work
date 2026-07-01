@@ -645,7 +645,7 @@ async function place(drag, toMember, startMin) {
 
 function nowMinutes() {
   const n = new Date();
-  if (n.toISOString().slice(0, 10) !== _day) return -1;
+  if (todayISO() !== _day) return -1;
   return n.getHours() * 60 + n.getMinutes();
 }
 

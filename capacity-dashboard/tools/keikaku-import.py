@@ -146,6 +146,17 @@ def dt(d):
     return (d + "T00:00:00Z") if d else ""
 
 
+def valid_date(s):
+    """s が YYYY-MM-DD として解釈できるか。不正な due（2026-13-40 / abc / 2026-02-30 等）で
+    back_business_days の date.fromisoformat が ValueError を投げ、実投入が途中で全体クラッシュ
+    →先行作成タスクが孤児化するのを防ぐためのガード。"""
+    try:
+        datetime.date.fromisoformat(str(s))
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
 def is_int(s):
     try:
         int(s)
@@ -246,6 +257,11 @@ def task_payload(row, cap_hours, holidays_set, plan_id=None, for_update=False):
         body["description"] = desc
 
     due = row.get("due")
+    # 不正な due は「期日なし」扱いにフォールバック（全体クラッシュ・孤児化を防ぐ）。
+    # for_update では due="" が下の elif で due_date/start/end を EMPTY_DATE クリアに回る＝整合。
+    if due and not valid_date(due):
+        sys.stderr.write(f"  ⚠ 不正な due 「{due}」（id={row.get('id')}）→ 期日なし扱いでスキップ\n")
+        due = ""
     est = to_hours(row.get("est_hours"))
 
     # 見積: est>0 のみ time_estimate を送る。更新で外したら 0 でクリア。
