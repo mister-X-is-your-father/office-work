@@ -261,7 +261,7 @@ function colHtml(r, i, g) {
     inner += `<div class="t54-overbadge" style="bottom:${FOOT_H + total * pxPerH + 8}px">超過 +${fmtH(over)}</div>`;
   }
   // フッター
-  const cls = r.status === "over" ? "over" : (r.status === "offplan" ? "offplan" : (r.status === "full" ? "full" : (r.status === "off" ? "off" : "free")));
+  const cls = r.status; // capStatus は {off,offplan,over,full,free} のいずれかを返し、旧4段三項は各値を自身へ写す恒等写像だった
   const txt = r.status === "over" ? "超過 +" + fmtH(over) : (r.status === "offplan" ? "非稼働日に予定 +" + fmtH(total) : (r.status === "full" ? "満稼働" : (r.status === "off" ? "休 (非稼働日)" : "空き " + fmtH(free))));
   const dot = memberColor(r.id); // members の安定 index 由来（全画面で色一致）。行 index i ではなく member id で引く
   inner += `<div class="t54-foot">

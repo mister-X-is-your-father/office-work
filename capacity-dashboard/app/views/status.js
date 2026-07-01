@@ -140,7 +140,7 @@ export async function render(root) {
     ? empty("メンバーがいません")
     : `<div class="st-mgrid">${memberRows.map((r) => {
         const pct = r.capH > 0 ? Math.min(100, Math.round((r.assignedH / r.capH) * 100)) : (r.assignedH > 0 ? 100 : 0);
-        const stCls = r.status === "over" ? "over" : (r.status === "offplan" ? "offplan" : (r.status === "off" ? "off" : (r.status === "full" ? "full" : "free")));
+        const stCls = r.status;
         const stLbl = r.status === "over" ? "過負荷" : (r.status === "offplan" ? "非稼働日に予定" : (r.status === "off" ? "休み" : (r.status === "full" ? "ちょうど" : (r.assignedH > 1e-6 ? "稼働中" : "空き"))));
         return `<div class="st-mcard">
           <div class="st-mtop">
