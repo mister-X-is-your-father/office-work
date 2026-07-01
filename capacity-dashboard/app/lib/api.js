@@ -57,11 +57,8 @@ export async function getProjectMembers(projectId) { return req(`/projects/${pro
 // ユーザー名（username）検索。s が空だと API は null を返すので呼び出し側で空ガードする。keikaku の担当名→user_id 解決に使う。
 export async function searchUsers(query) { return req(`/users?s=${encodeURIComponent(query)}`); }
 // かんばん（0.24 のプロジェクトビュー＋バケット構造）
-export async function getProjectDetail(id) { return req(`/projects/${id}`); }                       // views[] を含む
 export async function getViewTasks(pid, vid) { return req(`/projects/${pid}/views/${vid}/tasks`); } // kanban=バケット配列(tasks入り)
 export async function createBucket(pid, vid, title) { return req(`/projects/${pid}/views/${vid}/buckets`, { method: "PUT", body: { title } }); }
-export async function renameBucket(pid, vid, bid, title) { return req(`/projects/${pid}/views/${vid}/buckets/${bid}`, { method: "POST", body: { title } }); }
-export async function deleteBucket(pid, vid, bid) { return req(`/projects/${pid}/views/${vid}/buckets/${bid}`, { method: "DELETE" }); }
 export async function moveTaskToBucket(pid, vid, bid, taskId) { return req(`/projects/${pid}/views/${vid}/buckets/${bid}/tasks`, { method: "POST", body: { task_id: taskId } }); }
 export async function whoami() { return req("/user"); }
 
@@ -101,9 +98,6 @@ function logProgressChange(taskId, cur, patch) {
       }).catch(() => {});
     }).catch(() => {});
   } catch { /* noop */ }
-}
-export async function setEstimate(taskId, seconds) {
-  return updateTask(taskId, { time_estimate: seconds });
 }
 // タスクを「進行中」に（着手）。started_at に現在時刻をセット＝statusOf が doing 判定（capacity.js hasStarted）。
 // task がオブジェクトで既に着手済み（started_at あり）なら何もしない＝着手時刻を上書きしない（冪等）。

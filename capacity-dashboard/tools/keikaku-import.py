@@ -96,6 +96,10 @@ def make_req(token):
                 return resp.status, (json.loads(t) if t else None)
         except urllib.error.HTTPError as e:
             return e.code, e.read().decode()
+        except urllib.error.URLError as e:
+            # 接続拒否/DNS/タイムアウト等。未捕捉だとフェーズA途中で traceback 落ち→孤児化するため
+            # (0, 理由) を返して呼び出し側の失敗ハンドリング（status!=2xx 判定）に委ねる。
+            return 0, str(e)
     return req
 
 
@@ -124,6 +128,8 @@ def fetch_all_project_tasks(token, project_id):
                 tp = resp.headers.get("X-Pagination-Total-Pages")
         except urllib.error.HTTPError as e:
             return None, f"[{e.code}] {e.read().decode()}"
+        except urllib.error.URLError as e:
+            return None, f"接続失敗: {e}"  # fail-closed（既存取得失敗→1件も作らず中断＝重複/孤児回避）
         if not isinstance(body, list):
             return None, f"想定外の応答(page={page}): {body!r}"
         tasks.extend(body)
@@ -147,9 +153,13 @@ def dt(d):
 
 
 def valid_date(s):
-    """s が YYYY-MM-DD として解釈できるか。不正な due（2026-13-40 / abc / 2026-02-30 等）で
+    """s が厳密に YYYY-MM-DD かつ実在日か。不正な due（2026-13-40 / abc / 2026-02-30 等）で
     back_business_days の date.fromisoformat が ValueError を投げ、実投入が途中で全体クラッシュ
-    →先行作成タスクが孤児化するのを防ぐためのガード。"""
+    →先行作成タスクが孤児化するのを防ぐためのガード。CSV スキーマは YYYY-MM-DD 固定なので、
+    py3.11+ の緩い fromisoformat（"20260630" や時刻付きを受理）で dt() が壊れ値を作らないよう
+    形式も正規表現で固定する。"""
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(s)):
+        return False
     try:
         datetime.date.fromisoformat(str(s))
         return True
@@ -260,7 +270,7 @@ def task_payload(row, cap_hours, holidays_set, plan_id=None, for_update=False):
     # 不正な due は「期日なし」扱いにフォールバック（全体クラッシュ・孤児化を防ぐ）。
     # for_update では due="" が下の elif で due_date/start/end を EMPTY_DATE クリアに回る＝整合。
     if due and not valid_date(due):
-        sys.stderr.write(f"  ⚠ 不正な due 「{due}」（id={row.get('id')}）→ 期日なし扱いでスキップ\n")
+        sys.stderr.write(f"  ⚠ 不正な due 「{due}」（id={row.get('id')}）→ 期日なしとして投入（タスクは作成・due のみ無視）\n")
         due = ""
     est = to_hours(row.get("est_hours"))
 

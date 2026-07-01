@@ -174,6 +174,3 @@ export function dot(color, size = 9) {
   const c = (size / 2).toFixed(2).replace(/\.?0+$/, "");
   return `<svg xmlns="http://www.w3.org/2000/svg" class="ic" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="display:inline-block;vertical-align:middle;flex:none" aria-hidden="true"><circle cx="${c}" cy="${c}" r="${r}" fill="${esc(color)}"/></svg>`;
 }
-
-// 提供する name 一覧（呼び出し側のバリデーション/補完用）。
-export const ICON_NAMES = Object.keys(P);

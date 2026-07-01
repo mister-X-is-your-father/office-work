@@ -26,7 +26,7 @@ export function inclusiveDays(isoA, isoB) {
 }
 // 営業日判定: 土日 と（渡されれば）祝日を除く。holidays は Set<"YYYY-MM-DD"> 想定。
 export function isBusinessDay(iso, holidays = null) {
-  const dow = new Date(iso + "T00:00:00Z").getUTCDay();
+  const dow = dowOf(iso);
   if (dow === 0 || dow === 6) return false;
   if (holidays && holidays.has && holidays.has(iso)) return false;
   return true;
@@ -46,7 +46,7 @@ export function assigneeIds(task) { return (task.assignees || []).map((a) => a.i
 
 // isoDay にこのタスクが要する見積り時間(h)。期間タスクは**営業日割り**（土日祝に負荷を載せず、
 // 平日のみで等分＝週末に負荷が漏れない）。holidays(Set) を渡すと祝日も休みとして除外。
-// 全期間が休日の特殊ケースのみ暦日割りにフォールバック（0除算回避）。
+// isoDay が [start,end] 内の営業日のとき estH を営業日数で等分（isoDay 自身が営業日＝営業日数≥1 で0除算しない）。
 export function taskHoursOn(task, isoDay, { holidays = null } = {}) {
   if (task.done) return 0;
   const estH = toH(task.time_estimate);
@@ -56,7 +56,7 @@ export function taskHoursOn(task, isoDay, { holidays = null } = {}) {
     if (st <= isoDay && isoDay <= en) {
       if (!isBusinessDay(isoDay, holidays)) return 0; // 土日祝には負荷を載せない
       const bd = businessDays(st, en, holidays);
-      return bd > 0 ? estH / bd : estH / inclusiveDays(st, en);
+      return estH / bd; // isoDay が営業日なので bd≥1（旧 bd>0 三項は到達不能な else を持っていた）
     }
   }
   if (hasDate(task.due_date) && dateOnly(task.due_date) === isoDay) return estH;
@@ -126,6 +126,9 @@ export function loadByMember(tasks, members, isoDay, capH = 8, plansByTask = nul
       assignedH: round1(r.assignedH),
       freeH: round1(Math.max(0, r.capH - r.assignedH)),
       overH: offplan ? 0 : round1(Math.max(0, r.assignedH - r.capH)),
+      // status は【生値】assignedH で判定（表示の assignedH/freeH/overH は round1 済）。
+      // 極稀に「割当8/容量8/空き0/超過0 だが生8.004で status=over」の境界表示が出るが、
+      // 微小過負荷を color で拾う意図の設計（丸め後判定にすると境界の色が変わる＝別途要判断）。
       status: capStatus(r.assignedH, r.capH, offplan),
     };
   });
@@ -372,7 +375,7 @@ export function dayScale(startISO, days) {
   const axis = [];
   for (let i = 0; i < days; i++) {
     const iso = shiftISO(startISO, i);
-    const dow = new Date(iso + "T00:00:00Z").getUTCDay();
+    const dow = dowOf(iso);
     axis.push({ iso, dow, weekend: dow === 0 || dow === 6, isToday: (t) => t === iso });
   }
   const indexOf = (iso) => daysUntil(startISO, iso);
