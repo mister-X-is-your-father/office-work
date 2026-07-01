@@ -325,6 +325,32 @@ def run(args):
         print("CSV に行がありません。", file=sys.stderr)
         return 1
 
+    # 空行・必須欠落（id/task）を除外して警告。空タイトルの phantom タスクや idmap[""] 衝突を防ぐ。
+    clean = []
+    for r in rows:
+        rid = (r.get("id") or "").strip()
+        title = (r.get("task") or "").strip()
+        if not rid and not title:
+            continue  # 完全な空行は黙って捨てる
+        if not rid or not title:
+            print(f"⚠ 警告: id/タスク名が欠落した行をスキップ（id='{rid}' task='{title[:20]}'）。", file=sys.stderr)
+            continue
+        clean.append(r)
+    rows = clean
+    if not rows:
+        print("CSV に有効な行がありません（id とタスク名が揃った行が必要）。", file=sys.stderr)
+        return 1
+
+    # localId の重複を検出して警告（1CSV内に同一 id が複数＝後勝ちで先行行が孤児化する）。
+    seen, dup = set(), []
+    for r in rows:
+        if r["id"] in seen and r["id"] not in dup:
+            dup.append(r["id"])
+        seen.add(r["id"])
+    if dup:
+        print(f"⚠ 警告: CSV 内で localId が重複しています: {', '.join(dup)}。"
+              f"同一 id は最後の行が優先され、先行行は孤児化します。id を一意にしてください。", file=sys.stderr)
+
     ids = {r["id"] for r in rows}
     # 参照整合チェック（parent / depends_on が CSV 内に存在するか）
     for r in rows:
