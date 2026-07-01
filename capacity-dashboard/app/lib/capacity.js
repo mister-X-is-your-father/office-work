@@ -126,10 +126,9 @@ export function loadByMember(tasks, members, isoDay, capH = 8, plansByTask = nul
       assignedH: round1(r.assignedH),
       freeH: round1(Math.max(0, r.capH - r.assignedH)),
       overH: offplan ? 0 : round1(Math.max(0, r.assignedH - r.capH)),
-      // status は【生値】assignedH で判定（表示の assignedH/freeH/overH は round1 済）。
-      // 極稀に「割当8/容量8/空き0/超過0 だが生8.004で status=over」の境界表示が出るが、
-      // 微小過負荷を color で拾う意図の設計（丸め後判定にすると境界の色が変わる＝別途要判断）。
-      status: capStatus(r.assignedH, r.capH, offplan),
+      // status は表示と同じ round1 済の値で判定（today_items と一貫）。生値だと「割当8/容量8/
+      // 空き0/超過0 なのに生8.004 で status=over」という説明不能な境界表示が出るため。
+      status: capStatus(round1(r.assignedH), r.capH, offplan),
     };
   });
 }

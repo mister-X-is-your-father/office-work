@@ -204,6 +204,16 @@ test("loadByMember: 空き/超過/満", () => {
   assert.equal(tanaka.status, "free");
 });
 
+test("loadByMember: status は表示(round1)値で判定＝境界で表示と一貫（生8.004→full, 真の8.5→over）", () => {
+  const mk = (h) => [{ id: 1, assignees: [{ id: 1 }], time_estimate: h * 3600, due_date: due(TODAY) }];
+  const st = (h) => { const r = loadByMember(mk(h), members, TODAY, 8)[0]; return { asg: r.assignedH, status: r.status }; };
+  assert.deepEqual(st(8.004), { asg: 8, status: "full" }); // 生8.004→表示8→full（旧: 生値判定で over だった）
+  assert.deepEqual(st(7.996), { asg: 8, status: "full" }); // 生7.996→表示8→full
+  assert.deepEqual(st(8), { asg: 8, status: "full" });
+  assert.deepEqual(st(8.5), { asg: 8.5, status: "over" }); // 真の過負荷は over 維持
+  assert.deepEqual(st(7.5), { asg: 7.5, status: "free" });
+});
+
 test("loadByMember: 超過", () => {
   const tasks = [{ id: 1, title: "big", assignees: [{ id: 1 }], time_estimate: 36000, due_date: due(TODAY) }]; // 10h
   const m = loadByMember(tasks, members, TODAY, 8).find((r) => r.id === 1);
