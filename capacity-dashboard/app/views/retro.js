@@ -9,7 +9,7 @@ import { load } from "../lib/store.js";
 import { getPrepScores, getActivity } from "../lib/exec.js";
 import { getTimes } from "../lib/api.js";
 import { C, esc, fmtH, todayISO } from "../lib/ui.js";
-import { dateOnly } from "../lib/capacity.js";
+import { dateOnly, dowOf } from "../lib/capacity.js";
 import { openTaskForm } from "./taskform.js";
 import { icon } from "../lib/icons.js";
 import { DOW_JA } from "../lib/form.js";
@@ -82,7 +82,6 @@ export async function render(root) {
   // 週バーの正規化最大値（実働h）。0除算/空回避で必ず >0。
   const maxWorkedH = Math.max(1, ...series.map((d) => d.workedH || 0));
   const md = (iso) => iso.slice(5).replace("-", "/");
-  const dowOf = (iso) => new Date(iso + "T00:00:00Z").getUTCDay();
 
   const cardsHtml = `
     <div class="rt-cards">

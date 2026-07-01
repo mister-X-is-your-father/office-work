@@ -3,7 +3,7 @@
 // 状況把握に効く順で 1 枚に集約: KPI / 遅延 / 今日のメンバー状況 / 今週の締切 / 直近の完了。
 // データは load() の共有キャッシュから算出（追加 fetch なし）。ロジックは home/report/capacity から再利用。
 import { load, invalidate } from "../lib/store.js";
-import { loadByMember, triage, shiftISO } from "../lib/capacity.js";
+import { loadByMember, triage, shiftISO, dowOf } from "../lib/capacity.js";
 import { firstHuman } from "../lib/users.js";
 import { DOW_JA } from "../lib/form.js";
 import { capacityOn } from "../lib/recurrence.js";
@@ -18,7 +18,6 @@ const fmtClock = (d) => `${String(d.getHours()).padStart(2, "0")}:${String(d.get
 // このビューが画面に出ている間だけ有効な visibilitychange ハンドラの参照（多重登録防止用）。
 let _visHandler = null;
 
-const dowOf = (iso) => new Date(iso + "T00:00:00Z").getUTCDay();
 // 今週末（今日を含む週の終端）。report.js の weekEndISO と同じ計算で整合。
 // weekStart 指定時はその開始曜日の 6 日後が週末、未指定時は日曜(0)終わり。
 function weekEndISO(day, weekStart) {

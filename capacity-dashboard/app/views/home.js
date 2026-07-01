@@ -1,7 +1,7 @@
 // 総合ホーム（実データ）。縦積み: KPI / やること / 今日の稼働予定 / 稼働プラン / 月間ガント。
 // 各セクションは折りたたみヘッダ付き。開閉状態は本人ごと localStorage に保存・復元。
 import { load } from "../lib/store.js";
-import { loadByMember, estimateVsActual, triage, weekLoadByMember, dateOnly, shiftISO } from "../lib/capacity.js";
+import { loadByMember, estimateVsActual, triage, weekLoadByMember, dateOnly, shiftISO, dowOf } from "../lib/capacity.js";
 import { humanAssignees, firstHuman } from "../lib/users.js";
 import { capacityOn } from "../lib/recurrence.js";
 import { statusOf } from "../lib/kinds.js";
@@ -124,7 +124,6 @@ export async function render(root) {
 
   // F4 キャパ予算: 自分の「今週（今日〜週末）」の稼働容量合計 − 既コミット負荷 = 残高。
   // 容量は capacityFor（週末/祝日/休暇=0）の合計、負荷は weekLoadByMember の weekH。
-  const dowOf = (iso) => new Date(iso + "T00:00:00Z").getUTCDay();
   const endDow = Number.isInteger(settings.weekStart) ? (settings.weekStart + 6) % 7 : 0; // 既定=日曜終わり
   const addToEnd = (endDow - dowOf(day) + 7) % 7;
   const weekDays = []; for (let i = 0; i <= addToEnd; i++) weekDays.push(shiftISO(day, i));

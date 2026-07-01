@@ -3,7 +3,7 @@
 // 期間で粒度自動切替（≤14日=日別 / それ超=週別集計）。容量線は列ごと（=capH×営業日数）。
 // 集計は capacity.js を変更せず weekLoadByMember を重要度バケット×メンバーで呼んで再利用。重要度色は kinds.PRIO(SSoT)。
 import { load, invalidate } from "../lib/store.js";
-import { weekLoadByMember, taskPlannedHoursByMemberOn, shiftISO, isBusinessDay, daysUntil, todayISO } from "../lib/capacity.js";
+import { weekLoadByMember, taskPlannedHoursByMemberOn, shiftISO, isBusinessDay, daysUntil, todayISO, dowOf } from "../lib/capacity.js";
 import { capacityOn } from "../lib/recurrence.js";
 import { PRIO, prioBucket } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color } from "../lib/ui.js";
@@ -59,7 +59,6 @@ function makeLocalState(opts = {}) {
 const GLOBAL = makeGlobalState();
 
 const round1dp = (n) => Math.round(n * 10) / 10;
-const dowOf = (iso) => new Date(iso + "T00:00:00Z").getUTCDay();
 const weekStartOf = (iso) => { const d = dowOf(iso); return shiftISO(iso, d === 0 ? -6 : 1 - d); };
 const mName = (m) => m.name || m.username || "?";
 

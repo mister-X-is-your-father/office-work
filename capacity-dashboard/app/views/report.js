@@ -11,7 +11,7 @@
 // UI のアイコンは icon()（絵文字非使用）。コピペテキスト内の ✅⚠ 等は「データ」なので許可。
 import { load } from "../lib/store.js";
 import { humanAssignees } from "../lib/users.js";
-import { shiftISO } from "../lib/capacity.js";
+import { shiftISO, dowOf } from "../lib/capacity.js";
 import { statusOf } from "../lib/kinds.js";
 import { C, esc, fmtH, todayISO } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
@@ -20,8 +20,6 @@ import { getPrepScores } from "../lib/exec.js";
 
 // 期限 ISO（未設定/ゼロ日付＝空）。home.js / 一覧 / quad と同じ判定。
 const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(0, 10) : "");
-// ISO の曜日（0=日..6=土）。
-const dowOf = (iso) => new Date(iso + "T00:00:00Z").getUTCDay();
 // M/D 表示（先頭ゼロ無し）。
 const mdOf = (iso) => { const [, m, d] = iso.split("-"); return `${+m}/${+d}`; };
 
