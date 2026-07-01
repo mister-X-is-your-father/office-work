@@ -9,6 +9,7 @@ import { load } from "../lib/store.js";
 import { logTime } from "../lib/api.js";
 import { esc } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
+import { todayISO } from "../lib/capacity.js";
 
 const KEY = "ts.pomo";            // 実行中状態（下記 st 形）
 const CNT = "ts.pomo.count.";     // 今日の完了集中回数（日付キー）
@@ -22,9 +23,8 @@ const st = {
   get: () => { try { return JSON.parse(localStorage.getItem(KEY) || "null"); } catch { return null; } },
   set: (v) => v ? localStorage.setItem(KEY, JSON.stringify(v)) : localStorage.removeItem(KEY),
 };
-const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
-const countToday = () => +(localStorage.getItem(CNT + today()) || 0);
-const bumpCount = () => localStorage.setItem(CNT + today(), String(countToday() + 1));
+const countToday = () => +(localStorage.getItem(CNT + todayISO()) || 0);
+const bumpCount = () => localStorage.setItem(CNT + todayISO(), String(countToday() + 1));
 
 const mmss = (ms) => {
   const s = Math.max(0, Math.round(ms / 1000));

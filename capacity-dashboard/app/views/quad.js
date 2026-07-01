@@ -8,6 +8,7 @@ import { updateTask } from "../lib/api.js";
 import { C, esc, fmtH, member_color, todayISO, announce, avatar } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
 import { icon } from "../lib/icons.js";
+import { shiftISO } from "../lib/capacity.js";
 
 const HOUR = 3600;
 const DAYS_KEY = "ts.quad.urgentDays";
@@ -28,18 +29,13 @@ function cmpInQuad(mode) {
   return (a, b) => (dueISO(a) || "9999").localeCompare(dueISO(b) || "9999"); // due（既定）
 }
 
-const addDays = (iso, n) => {
-  const d = new Date(iso + "T00:00:00Z");
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-};
 const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(0, 10) : "");
 
 // 区画判定: q1=重要×緊急 / q2=重要×非緊急 / q3=非重要×緊急 / q4=非重要×非緊急
 function quadOf(t, today, days) {
   const imp = (t.priority || 0) >= 3;
   const due = dueISO(t);
-  const urg = !!due && due <= addDays(today, days);
+  const urg = !!due && due <= shiftISO(today, days);
   return imp ? (urg ? "q1" : "q2") : (urg ? "q3" : "q4");
 }
 
@@ -60,8 +56,8 @@ function moveDiff(t, dst, today, days) {
   const prev = { priority: t.priority || 0, due_date: t.due_date || null };
   const patch = { priority: imp ? Math.max(3, prev.priority || 0) : Math.min(prev.priority || 0, 2) };
   const due = dueISO(t);
-  if (urg) patch.due_date = (due && due <= addDays(today, days)) ? t.due_date : today + "T00:00:00Z";
-  else if (due && due <= addDays(today, days)) patch.due_date = addDays(today, 7) + "T00:00:00Z";
+  if (urg) patch.due_date = (due && due <= shiftISO(today, days)) ? t.due_date : today + "T00:00:00Z";
+  else if (due && due <= shiftISO(today, days)) patch.due_date = shiftISO(today, 7) + "T00:00:00Z";
   return { patch, prev };
 }
 

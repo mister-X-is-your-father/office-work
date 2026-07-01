@@ -1,6 +1,6 @@
 // 見積り vs 実績（mock 23 相当・実データ。fork の time_estimate/time_spent）
 import { load } from "../lib/store.js";
-import { estimateVsActual, dateOnly, hasDate } from "../lib/capacity.js";
+import { estimateVsActual, dateOnly, hasDate, shiftISO } from "../lib/capacity.js";
 import { C, fmtH, esc, todayISO } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
 
@@ -24,11 +24,6 @@ function anchorDay(t) {
   if (hasDate(t.start_date)) return dateOnly(t.start_date);
   return "";
 }
-const addDays = (iso, n) => {
-  const d = new Date(iso + "T00:00:00Z");
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-};
 
 export async function render(root) {
   const { tasks } = await load();
@@ -38,7 +33,7 @@ export async function render(root) {
   // B70: 期間で集計対象を絞る。基準日が直近 N 日以内（today-N 〜 today）なら対象。
   //   基準日の無いタスクは常に対象（期間では隠さない）。
   const today = todayISO();
-  const since = addDays(today, -days);
+  const since = shiftISO(today, -days);
   const inPeriod = (t) => {
     const a = anchorDay(t);
     if (!a) return true;          // 日付なし＝常に対象

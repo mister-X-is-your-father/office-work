@@ -1146,7 +1146,6 @@ let gCtx = null;      // {root, tasks, members, labels, today}
 let _gridBusy = false; // gridApply の並行ガード（連続発火時に await が重ならないよう直列化）
 
 function findGTask(id) { return (gCtx && gCtx.tasks || []).find((x) => x.id === id) || null; }
-function nonAiAssignees(t) { return (t.assignees || []).filter((a) => !isAiUser(a)); }
 function userCats(t) { return (t.labels || []).filter((l) => (l.title || "") !== REVIEW_LABEL && (l.title || "") !== WAITING_LABEL); }
 function orderedIds(root) { return [...root.querySelectorAll("table tr[data-id]")].map((tr) => +tr.dataset.id); }
 // グリッドのナビ対象列＝今 DOM に出ている編集可能列を描画順で取得（列の表示/非表示・並べ替えに自動追従）。
@@ -1163,7 +1162,7 @@ function gCellEl(root, id, col) { return root.querySelector(`tr[data-id="${id}"]
 function gReadVal(col, t) {
   if (col === "proj") return (((t.related_tasks || {}).parenttask) || [])[0]?.id || "";
   if (col === "title") return t.title || "";
-  if (col === "who") return nonAiAssignees(t).map((a) => a.id).sort((a, b) => a - b);
+  if (col === "who") return humanAssignees(t).map((a) => a.id).sort((a, b) => a - b);
   if (col === "cat") return userCats(t).map((l) => l.id).sort((a, b) => a - b);
   if (col === "prio") return t.priority || 0;
   if (col === "due") return dueISO(t);
@@ -1175,7 +1174,7 @@ function gReadVal(col, t) {
 function gValToText(col, t) {
   if (col === "proj") { const p = (((t.related_tasks || {}).parenttask) || [])[0]; return p ? (p.title || "") : ""; }
   if (col === "title") return t.title || "";
-  if (col === "who") return nonAiAssignees(t).map((a) => a.name || a.username).join(", ");
+  if (col === "who") return humanAssignees(t).map((a) => a.name || a.username).join(", ");
   if (col === "cat") return userCats(t).map((l) => l.title).join(", ");
   if (col === "prio") return PRIO_NAME[Math.min(t.priority || 0, 4)] ?? "なし";
   if (col === "due") return dueISO(t);
@@ -1230,7 +1229,7 @@ async function gRawSet(col, id, value) {
   if (col === "est") return updateTask(id, { time_estimate: value });
   if (col === "who") {
     const t = findGTask(id) || { assignees: [] };
-    const cur = nonAiAssignees(t).map((a) => a.id);
+    const cur = humanAssignees(t).map((a) => a.id);
     for (const x of cur) if (!value.includes(x)) await removeAssignee(id, x).catch(() => {});
     for (const x of value) if (!cur.includes(x)) await addAssignee(id, x).catch(() => {});
     return;

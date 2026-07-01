@@ -6,7 +6,7 @@ import { load, invalidate } from "../lib/store.js";
 import { getUnavailability, createUnavailability, deleteUnavailability } from "../lib/api.js";
 import { parseSmartDate, fmtDisplayDow, attachDatePicker } from "../lib/form.js";
 import { C, esc } from "../lib/ui.js";
-import { todayISO as currentTodayISO } from "../lib/capacity.js";
+import { todayISO as currentTodayISO, shiftISO } from "../lib/capacity.js";
 
 const fmtDate = (iso) => fmtDisplayDow(iso);
 
@@ -48,13 +48,6 @@ function businessDays(start, end, holidaysSet) {
 // 理由クイック入力チップの候補。
 const REASON_CHIPS = ["有給", "午前休", "午後休", "夏季", "年末年始"];
 
-// ISO日付に日数を加算（UTC基準）。隣接判定（終了の翌日＝相手の開始 等）に使う。
-function addDaysISO(iso, days) {
-  const d = new Date(iso + "T00:00:00Z");
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
 // 同一ユーザーの他レコードと期間が重複/隣接するかを検出（editId は自分自身を除外）。
 // 重複 = 区間が交差。隣接 = 一方の終了の翌日が他方の開始（＝連続した1期間にまとめられる）。
 function findOverlapOrAdjacent(records, uid, s, e2, editId) {
@@ -64,7 +57,7 @@ function findOverlapOrAdjacent(records, uid, s, e2, editId) {
     if (+u.user_id !== +uid) continue;
     const us = String(u.start_date).slice(0, 10), ue = String(u.end_date).slice(0, 10);
     if (s <= ue && us <= e2) hits.overlap.push(u);           // 区間交差
-    else if (addDaysISO(e2, 1) === us || addDaysISO(ue, 1) === s) hits.adjacent.push(u); // 隙間なく連続
+    else if (shiftISO(e2, 1) === us || shiftISO(ue, 1) === s) hits.adjacent.push(u); // 隙間なく連続
   }
   return hits;
 }

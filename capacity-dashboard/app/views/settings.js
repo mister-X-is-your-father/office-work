@@ -12,7 +12,7 @@ import { notifyPrefs, saveNotifyPrefs } from "../lib/notify.js";
 import { C, esc } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
 import { ROUTES, ORDER, ALWAYS_VISIBLE } from "../lib/routes.js";
-import { todayISO as currentTodayISO } from "../lib/capacity.js";
+import { todayISO as currentTodayISO, shiftISO } from "../lib/capacity.js";
 
 // ── 外観・起動の個人設定（この端末のみ・localStorage）───────────────
 // テーマ: モードを ts.thememode（light/dark/system）に保存。index.html / app.js の従来トグルは
@@ -453,12 +453,6 @@ function wireHolidayBulk(root, existing, holidaysByDate, reload) {
   fromEl.onblur = () => { const iso = parseSmartDate(fromEl.value); if (iso) fromEl.value = fmtDisplayDow(iso); };
   toEl.onblur = () => { const iso = parseSmartDate(toEl.value); if (iso) toEl.value = fmtDisplayDow(iso); };
 
-  // ISO日付(YYYY-MM-DD)を1日進める（UTC基準）。
-  const nextDay = (iso) => {
-    const d = new Date(iso + "T00:00:00Z");
-    d.setUTCDate(d.getUTCDate() + 1);
-    return d.toISOString().slice(0, 10);
-  };
   // 開始(月日)〜終了(月日)を年 y に当てはめて日付配列を作る（終了 < 開始なら翌年へまたぐ）。
   const datesForYear = (fromISO, toISO, y) => {
     const mmddFrom = fromISO.slice(5), mmddTo = toISO.slice(5);
@@ -468,7 +462,7 @@ function wireHolidayBulk(root, existing, holidaysByDate, reload) {
     const out = [];
     let cur = start;
     // 暴走防止のため最大2年分(=約740日)で打ち切り。
-    for (let guard = 0; guard < 740 && cur <= end; guard++) { out.push(cur); cur = nextDay(cur); }
+    for (let guard = 0; guard < 740 && cur <= end; guard++) { out.push(cur); cur = shiftISO(cur, 1); }
     return out;
   };
 
@@ -495,7 +489,7 @@ function wireHolidayBulk(root, existing, holidaysByDate, reload) {
       let end = (toISO < fromISO) ? `${+toISO.slice(0, 4) + 1}-${toISO.slice(5)}` : toISO;
       // 年またぎ防止が効くよう、終了は最低でも開始以上に。
       if (end < fromISO) end = fromISO;
-      for (let guard = 0; guard < 740 && cur <= end; guard++) { set.add(cur); cur = nextDay(cur); }
+      for (let guard = 0; guard < 740 && cur <= end; guard++) { set.add(cur); cur = shiftISO(cur, 1); }
     }
 
     // 既存日付（store の holidaysByDate）はスキップ。日付昇順で直列登録。
