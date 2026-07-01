@@ -58,7 +58,7 @@ function makeLocalState(opts = {}) {
 // この単一の共有インスタンスが全画面 render(root) の状態を保持する（従来の挙動を温存）。
 const GLOBAL = makeGlobalState();
 
-const round1 = (n) => Math.round(n * 10) / 10;
+const round1dp = (n) => Math.round(n * 10) / 10;
 const dowOf = (iso) => new Date(iso + "T00:00:00Z").getUTCDay();
 const weekStartOf = (iso) => { const d = dowOf(iso); return shiftISO(iso, d === 0 ? -6 : 1 - d); };
 const mName = (m) => m.name || m.username || "?";
@@ -85,7 +85,7 @@ function colsForMember(member, bdays, granularity, tasks, plans, holidays, unava
   const perBucketDaily = BUCKETS.map((b) => {
     const ts = (tasks || []).filter((t) => prioBucket(t.priority) === b);
     const wl = weekLoadByMember(ts, [member], bdays, CAP, plans, { holidays });
-    const days = bdays.map((day, di) => ({ day, h: round1((wl[0] && wl[0].days[di].h) || 0) }));
+    const days = bdays.map((day, di) => ({ day, h: round1dp((wl[0] && wl[0].days[di].h) || 0) }));
     return { b, days };
   });
   // day index -> Map<taskId,{id,title,h}>（その日のこのメンバーへの寄与）。B18 ドリルダウン用。
@@ -105,14 +105,14 @@ function colsForMember(member, bdays, granularity, tasks, plans, holidays, unava
       const prev = agg.get(id);
       agg.set(id, { id, title: c.title, h: (prev ? prev.h : 0) + c.h });
     }
-    return [...agg.values()].map((c) => ({ ...c, h: round1(c.h) })).sort((a, b) => b.h - a.h);
+    return [...agg.values()].map((c) => ({ ...c, h: round1dp(c.h) })).sort((a, b) => b.h - a.h);
   };
   if (granularity === "day") {
     return bdays.map((day, di) => {
       const segs = perBucketDaily.map((pb) => ({ b: pb.b, h: pb.days[di].h })).filter((s) => s.h > 0);
-      const total = round1(segs.reduce((s, x) => s + x.h, 0));
-      const cap = round1(capacityOn(member, day, availOpt));
-      return { label: day.slice(5).replace("-", "/"), sub: DOW_JA[dowOf(day)], segs, total, cap, free: round1(Math.max(0, cap - total)), over: total > cap + 1e-6, contrib: foldContrib([di]) };
+      const total = round1dp(segs.reduce((s, x) => s + x.h, 0));
+      const cap = round1dp(capacityOn(member, day, availOpt));
+      return { label: day.slice(5).replace("-", "/"), sub: DOW_JA[dowOf(day)], segs, total, cap, free: round1dp(Math.max(0, cap - total)), over: total > cap + 1e-6, contrib: foldContrib([di]) };
     });
   }
   const groups = new Map(); // weekStart -> [dayIndex]
@@ -120,10 +120,10 @@ function colsForMember(member, bdays, granularity, tasks, plans, holidays, unava
   return [...groups.entries()].map(([ws, idxs]) => {
     const segMap = {};
     for (const di of idxs) for (const pb of perBucketDaily) segMap[pb.b] = (segMap[pb.b] || 0) + pb.days[di].h;
-    const segs = BUCKETS.map((b) => ({ b, h: round1(segMap[b] || 0) })).filter((s) => s.h > 0);
-    const total = round1(segs.reduce((s, x) => s + x.h, 0));
-    const cap = round1(idxs.reduce((s, di) => s + capacityOn(member, bdays[di], availOpt), 0));
-    return { label: ws.slice(5).replace("-", "/") + "週", sub: `${idxs.length}日`, segs, total, cap, free: round1(Math.max(0, cap - total)), over: total > cap + 1e-6, contrib: foldContrib(idxs) };
+    const segs = BUCKETS.map((b) => ({ b, h: round1dp(segMap[b] || 0) })).filter((s) => s.h > 0);
+    const total = round1dp(segs.reduce((s, x) => s + x.h, 0));
+    const cap = round1dp(idxs.reduce((s, di) => s + capacityOn(member, bdays[di], availOpt), 0));
+    return { label: ws.slice(5).replace("-", "/") + "週", sub: `${idxs.length}日`, segs, total, cap, free: round1dp(Math.max(0, cap - total)), over: total > cap + 1e-6, contrib: foldContrib(idxs) };
   });
 }
 
@@ -213,7 +213,7 @@ async function renderState(root, state, rerender, view = {}) {
   let body;
   if (mode === "all") {
     body = `<div class="wp-grid">${perMember.map((x, mi) => {
-      const sum = round1(x.cols.reduce((s, c) => s + c.total, 0));
+      const sum = round1dp(x.cols.reduce((s, c) => s + c.total, 0));
       return `<div class="wp-member">
         <div class="wp-mname"><i class="wp-who-av" style="background:${member_color(x.m.id)}">${esc(mName(x.m)[0])}</i>${esc(mName(x.m))}<small>計 ${fmtH(sum)}</small></div>
         ${chartHtml(x.cols, mi)}
@@ -222,7 +222,7 @@ async function renderState(root, state, rerender, view = {}) {
   } else {
     body = `<div class="card wp-card">${chartHtml(perMember[0] ? perMember[0].cols : [], 0)}</div>`;
   }
-  const sumH = round1(allCols.reduce((s, c) => s + c.total, 0));
+  const sumH = round1dp(allCols.reduce((s, c) => s + c.total, 0));
 
   // 見出し: 全画面は h1.vtitle、埋め込みは控えめな h2（100vh前提にせず自然高）。
   const heading = embedded

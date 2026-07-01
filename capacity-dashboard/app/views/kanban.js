@@ -227,9 +227,9 @@ function cardHtml(t, memberIdx, byId) {
     ? `<span class="kb-proj" style="border-color:${projColor(parent.id)};color:${projColor(parent.id)}" title="案件: ${esc(parent.title)}">${esc(parent.title)}</span>`
     : "";
   // 中間グループ（直近親）が最上位プロジェクトと異なるときだけ、グループ名チップを出す。
-  const _imm = (((t.related_tasks || {}).parenttask) || [])[0];
-  const _immParent = _imm ? (byId.get(_imm.id) || _imm) : null;
-  const group = (_immParent && parent && _immParent.id !== parent.id) ? _immParent : null;
+  const immRel = (((t.related_tasks || {}).parenttask) || [])[0];
+  const immParent = immRel ? (byId.get(immRel.id) || immRel) : null;
+  const group = (immParent && parent && immParent.id !== parent.id) ? immParent : null;
   const groupChip = group
     ? `<span class="kb-group" title="タスクグループ: ${esc(group.title)}">${esc(group.title)}</span>`
     : "";

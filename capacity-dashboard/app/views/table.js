@@ -1957,6 +1957,8 @@ function rowHtml(r, members, i, manual) {
 // 親が除外され子が残る場合、buildTaskTree は「どの subtask にもならないタスク」をルートにするので、
 // フィルタ後集合だけ渡せば残った子は自動的にルート扱いになり表示落ちしない。
 const olDueLabel = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(5, 10).replace("-", "/") : "");
+// アウトライン行のインデント: 基準 padding と深さ1段あたりの増分（px）。
+const OL_INDENT_BASE = 12, OL_INDENT_STEP = 22;
 function buildOutlineHtml(tasks) {
   const forest = buildTaskTree(tasks);
   const counts = olCountChildren(forest);
@@ -1991,7 +1993,7 @@ function olRowHtml(node, depth, counts) {
   const due = olDueLabel(t);
   // 親付け替え用: 現在の親(プロジェクト=親タスク)のID。related_tasks.parenttask の先頭。ルートなら空。
   const parentId = ((((t.related_tasks || {}).parenttask) || [])[0] || {}).id || "";
-  return `<div class="ol-row" data-id="${t.id}" data-parent="${parentId}" draggable="true" style="padding-left:${12 + depth * 22}px">
+  return `<div class="ol-row" data-id="${t.id}" data-parent="${parentId}" draggable="true" style="padding-left:${OL_INDENT_BASE + depth * OL_INDENT_STEP}px">
     ${tw}
     <span class="ol-cb ${st}" data-id="${t.id}" data-done="${t.done ? 1 : 0}" title="クリックで完了を切替"></span>
     <span class="ol-name ${t.done ? "done" : ""}">${esc(t.title)}</span>
@@ -2009,7 +2011,12 @@ function olRowHtml(node, depth, counts) {
 // 階層: ＋ボタン直下にインライン入力を開き、確定で親タスクのサブタスクを新規作成。
 // 親と同じ project_id に作り、addRelation(parentId, childId, "subtask") で関連付け（buildTaskTree と整合）。
 let _olInlineEl = null;
-function closeInlineSubtask() { if (_olInlineEl) { _olInlineEl.remove(); _olInlineEl = null; } }
+// 外側クリック解除リスナ（document capture）は同時に1つだけ。閉じる時にここで必ず外す＝孤児化防止。
+let _olOnDown = null;
+function closeInlineSubtask() {
+  if (_olOnDown) { document.removeEventListener("pointerdown", _olOnDown, true); _olOnDown = null; }
+  if (_olInlineEl) { _olInlineEl.remove(); _olInlineEl = null; }
+}
 // depth0(プロジェクト)の＋は「タスクグループ／タスク」の2択メニューを出す。選ぶと openInlineSubtask へ。
 function openAddKindMenu(btn, parentId, projId, root) {
   closeInlineSubtask();
@@ -2029,8 +2036,8 @@ function openAddKindMenu(btn, parentId, projId, root) {
   });
   box.addEventListener("pointerdown", (e) => e.stopPropagation());
   setTimeout(() => {
-    const onDown = (ev) => { if (!box.contains(ev.target)) { closeInlineSubtask(); document.removeEventListener("pointerdown", onDown, true); } };
-    document.addEventListener("pointerdown", onDown, true);
+    _olOnDown = (ev) => { if (!box.contains(ev.target)) closeInlineSubtask(); };
+    document.addEventListener("pointerdown", _olOnDown, true);
   }, 0);
 }
 function openInlineSubtask(btn, parentId, projId, root, kind = "task") {
@@ -2038,6 +2045,8 @@ function openInlineSubtask(btn, parentId, projId, root, kind = "task") {
   closeRowMenu();
   const box = document.createElement("div");
   box.className = "tb-ctx ol-addbox";
+  // kind は placeholder の文言だけに影響。作成挙動(createTaskInProject＋addRelation)はグループ/タスクとも同一
+  // ＝「タスクグループ＝子を持つ親タスク」の創発モデル（子が付くとバッジが付く）。type/kind フィールドは持たせない。
   const ph = kind === "group" ? "タスクグループ名を入力（Enterで追加・あとで中にタスクを足す）" : "タスク名を入力（Enterで追加）";
   box.innerHTML = `<textarea class="ol-addinp" rows="2" placeholder="${ph}"></textarea>
     <div class="ol-addbtns"><button class="ol-addok">追加</button><button class="ol-addng">キャンセル</button><span class="ol-adderr"></span></div>`;
@@ -2072,8 +2081,8 @@ function openInlineSubtask(btn, parentId, projId, root, kind = "task") {
   };
   box.addEventListener("pointerdown", (e) => e.stopPropagation());
   setTimeout(() => {
-    const onDown = (ev) => { if (!box.contains(ev.target)) { closeInlineSubtask(); document.removeEventListener("pointerdown", onDown, true); } };
-    document.addEventListener("pointerdown", onDown, true);
+    _olOnDown = (ev) => { if (!box.contains(ev.target)) closeInlineSubtask(); };
+    document.addEventListener("pointerdown", _olOnDown, true);
   }, 0);
 }
 
