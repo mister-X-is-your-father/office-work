@@ -6,7 +6,7 @@ import { savePresets } from "../lib/exec.js";
 import { updateTask, deleteTask, addAssignee, removeAssignee, addTaskLabel, removeTaskLabel, createLabel, setTaskWaiting, createTaskInProject, addRelation, removeRelation, getTask } from "../lib/api.js";
 import { PRIO, prioBucket, kindOf, kindRank, isReviewTask, categoryLabels, categoryColor, REVIEW_LABEL, WAITING_LABEL, statusOf, STATUS } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color, todayISO, announce } from "../lib/ui.js";
-import { shiftISO, buildTaskTree } from "../lib/capacity.js";
+import { shiftISO, buildTaskTree, projectAncestor } from "../lib/capacity.js";
 import { openTaskForm, ensureStyle as ensureFormStyle } from "./taskform.js";
 import { summarizeRecurrence, openRecurrenceForm } from "./recurrenceform.js";
 import { hourInputHtml, wireHourInput, parseSmartDate } from "../lib/form.js";
@@ -179,10 +179,14 @@ function presetTabHtml(key, iconHtml, label, count, on) {
 // ── B21: 行派生（純関数）。render の rows 構築と patchRow で共用＝1行だけ作り直せる。 ──
 // ctx = { execOk, meId, today }。式は render 旧インライン（fable の ((me&&me.id)||-1)=meId）と完全一致。
 function deriveRow(t, ctx) {
+  const parent = projectAncestor(t, ctx.byId);
+  const immRel = (((t.related_tasks || {}).parenttask) || [])[0] || null;
+  const immParent = immRel ? ((ctx.byId && ctx.byId.get(immRel.id)) || immRel) : null;
+  const group = (immParent && parent && immParent.id !== parent.id) ? immParent : null;
   return {
     t, title: t.title, who: (t.assignees || []).find((a) => !isAiUser(a)) || null,
     fable: ctx.execOk && !t.done && (t.assignees || []).some((a) => isAiUser(a)) && ((t.created_by || {}).id || 0) === ctx.meId,
-    parent: (((t.related_tasks || {}).parenttask) || [])[0] || null,
+    parent, group,
     review: isReviewTask(t), prio: prioBucket(t.priority), cat: categoryLabels(t)[0] || null,
     due: dueISO(t), est: (t.time_estimate || 0) / HOUR, pct: t.percent_done || 0,
     done: !!t.done, status: statusOf(t),
@@ -211,7 +215,7 @@ export async function render(root) {
   try { const ex = await import("../lib/exec.js"); execOk = !!(await ex.execMe()); } catch { /* noop */ }
   // B21: 行派生は deriveRow（純関数）に集約＝patchRow が1行だけ同じ式で作り直せる。
   // deriveCtx は patchRow 用に最新値をモジュール変数へ退避（下で lastDeriveCtx に保存）。
-  const deriveCtx = { execOk, meId: (me && me.id) || -1, today };
+  const deriveCtx = { execOk, meId: (me && me.id) || -1, today, byId: new Map((tasks || []).map((tt) => [tt.id, tt])) };
   let rows = (tasks || []).map((t) => deriveRow(t, deriveCtx));
   const doneToday = (t) => t.done && t.done_at && !t.done_at.startsWith("0001") && t.done_at.slice(0, 10) === today;
   if (V.doneMode === "hide") rows = rows.filter((r) => !r.done);
@@ -233,6 +237,7 @@ export async function render(root) {
       const parts = [
         r.title,
         r.parent && r.parent.title,
+        r.group && r.group.title,
         r.cat && r.cat.title,
         descText(r.t.description),   // 本文（HTMLタグを除去したテキスト）も検索対象＝smartlist と一致
         ...(r.t.assignees || []).map((a) => a.name || a.username),
@@ -1945,7 +1950,7 @@ function rowHtml(r, members, i, manual) {
   const sel = selectedIds.has(id);
   // 列ごとの <td> をマップで持ち、cols() の順序（表示/非表示・並べ替え反映）で出力する。
   const cellOf = {
-    proj: `<td class="tb-proj tb-gc" data-col="proj"><button class="tb-cell tb-projbtn" data-proj="${id}" title="クリックでプロジェクト（親タスク）を変更">${r.parent ? esc(r.parent.title) : "—"}<span class="tb-cell-car">▾</span></button></td>`,
+    proj: `<td class="tb-proj tb-gc" data-col="proj"><button class="tb-cell tb-projbtn" data-proj="${id}" title="クリックでプロジェクト（親タスク）を変更"><span class="tb-proj-text"><span class="tb-proj-name">${r.parent ? esc(r.parent.title) : "—"}</span>${r.group ? `<span class="tb-proj-group" title="タスクグループ: ${esc(r.group.title)}">${esc(r.group.title)}</span>` : ""}</span><span class="tb-cell-car">▾</span></button></td>`,
     title: `<td class="tb-title tb-gc" data-col="title"><span class="tb-tle">${esc(r.title)}</span>${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">${icon("flag", { size: 12 })}</span>` : ""} <button type="button" class="tb-timer" data-timer="${id}" data-title="${esc(r.title)}" title="このタスクでタイマー開始" aria-label="このタスクでタイマー開始">${icon("timer", { size: 13 })}</button>${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">${icon("play", { size: 11 })}</button>` : ""}</td>`,
     who: `<td class="tb-gc" data-col="who">${whoBtn}</td>`,
     kind: `<td>${kind}</td>`,
@@ -2308,7 +2313,11 @@ function css() {
   .tb th:last-child,.tb td:last-child{padding-right:20px}
   .tb tbody tr:hover{background:#f7fbff}
   .tb-title{font-weight:600;min-width:180px}
-  .tb-proj{color:${C.muted};font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tb-proj{color:${C.muted};font-size:12px;max-width:160px;overflow:hidden}
+  .tb-proj-text{display:flex;flex-direction:column;gap:1px;min-width:0;overflow:hidden}
+  .tb-proj-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tb-proj-group{font-size:9.5px;font-weight:600;color:${C.muted};background:${C.track};border-radius:5px;padding:0 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;align-self:flex-start;max-width:100%}
+  .tb-projbtn{align-items:flex-start}
   .tb-sub{font-size:11px;color:${C.muted};font-weight:400;margin-top:2px}
   .tb-ava{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;color:#fff;font-size:10px;font-weight:700;margin-right:6px;vertical-align:-5px}
   .tb-k{font-size:10.5px;color:${C.muted};border:1px solid ${C.line};border-radius:5px;padding:1px 6px;white-space:nowrap}
