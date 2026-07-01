@@ -329,13 +329,12 @@ def resolve_assignee(req, raw, me_id, self_names, cache, row_id):
     return None
 
 
-def run(args):
-    rows = parse_csv(args.csv)
-    if not rows:
-        print("CSV に行がありません。", file=sys.stderr)
-        return 1
-
-    # 空行・必須欠落（id/task）を除外して警告。空タイトルの phantom タスクや idmap[""] 衝突を防ぐ。
+def validate_and_clean(rows):
+    """投入前の入力バリデーション（副作用=警告出力のみ・純粋なフィルタ）。
+      1. 空行・id/タスク名欠落を除外（空タイトル phantom や idmap[""] 衝突を防ぐ）。
+      2. CSV 内 localId 重複を警告（後勝ちで先行行が孤児化する）。
+      3. parent / depends_on の CSV 内参照切れを警告。
+    返り値: クリーンな rows（有効行が無ければ空リスト）。"""
     clean = []
     for r in rows:
         rid = (r.get("id") or "").strip()
@@ -346,14 +345,11 @@ def run(args):
             print(f"⚠ 警告: id/タスク名が欠落した行をスキップ（id='{rid}' task='{title[:20]}'）。", file=sys.stderr)
             continue
         clean.append(r)
-    rows = clean
-    if not rows:
-        print("CSV に有効な行がありません（id とタスク名が揃った行が必要）。", file=sys.stderr)
-        return 1
+    if not clean:
+        return clean
 
-    # localId の重複を検出して警告（1CSV内に同一 id が複数＝後勝ちで先行行が孤児化する）。
     seen, dup = set(), []
-    for r in rows:
+    for r in clean:
         if r["id"] in seen and r["id"] not in dup:
             dup.append(r["id"])
         seen.add(r["id"])
@@ -361,16 +357,27 @@ def run(args):
         print(f"⚠ 警告: CSV 内で localId が重複しています: {', '.join(dup)}。"
               f"同一 id は最後の行が優先され、先行行は孤児化します。id を一意にしてください。", file=sys.stderr)
 
-    ids = {r["id"] for r in rows}
-    # 参照整合チェック（parent / depends_on が CSV 内に存在するか）
-    for r in rows:
+    ids = {r["id"] for r in clean}
+    for r in clean:
         if r["parent"] and r["parent"] not in ids:
-            print(f"⚠ 警告: 行 <id:{r['id']}> の parent '{r['parent']}' が CSV 内に存在しません。",
-                  file=sys.stderr)
+            print(f"⚠ 警告: 行 <id:{r['id']}> の parent '{r['parent']}' が CSV 内に存在しません。", file=sys.stderr)
         for d in r["depends_on"]:
             if d not in ids:
-                print(f"⚠ 警告: 行 <id:{r['id']}> の depends_on '{d}' が CSV 内に存在しません。",
-                      file=sys.stderr)
+                print(f"⚠ 警告: 行 <id:{r['id']}> の depends_on '{d}' が CSV 内に存在しません。", file=sys.stderr)
+    return clean
+
+
+def run(args):
+    rows = parse_csv(args.csv)
+    if not rows:
+        print("CSV に行がありません。", file=sys.stderr)
+        return 1
+
+    rows = validate_and_clean(rows)
+    if not rows:
+        print("CSV に有効な行がありません（id とタスク名が揃った行が必要）。", file=sys.stderr)
+        return 1
+    ids = {r["id"] for r in rows}
 
     dry = args.dry_run
     cap_hours = args.cap_hours
