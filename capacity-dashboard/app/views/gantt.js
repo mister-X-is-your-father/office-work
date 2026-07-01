@@ -4,7 +4,7 @@ import { load, invalidate } from "../lib/store.js";
 import { humanAssignees } from "../lib/users.js";
 import { icon } from "../lib/icons.js";
 import * as vik from "../lib/api.js";
-import { taskRanges, dependencyEdges, depLayers, dayScale, toMemberDayEntries, sumByMemberDay, shiftISO, applyBarDrag, dateOnly, hasDate } from "../lib/capacity.js";
+import { taskRanges, dependencyEdges, depLayers, dayScale, toMemberDayEntries, sumByMemberDay, shiftISO, applyBarDrag, dateOnly, hasDate, projectAncestor } from "../lib/capacity.js";
 import { capacityOn } from "../lib/recurrence.js";
 import { fmtDisplayDow, DOW_JA } from "../lib/form.js";
 import { openTaskForm } from "./taskform.js";
@@ -128,6 +128,14 @@ async function mount(root, opts) {
       if (byIdAll.has(s.id) && s.id !== t.id) { parentOf.set(s.id, t.id); hasChild.add(t.id); }
     }
   }
+  // pid の実体が「タスクグループ」（＝自身も親を持つ＝トップレベルのプロジェクトではない）かどうかと、
+  // その場合の祖先プロジェクトを返す。
+  function groupInfo(pid) {
+    const t = pid ? byIdAll.get(pid) : null;
+    if (!t) return { isGroup: false, project: null };
+    const anc = projectAncestor(t, byIdAll);
+    return anc ? { isGroup: true, project: anc } : { isGroup: false, project: null };
+  }
   const planByMember = sumByMemberDay(toMemberDayEntries(plansArr, "plan"));
   const actByMember = sumByMemberDay(toMemberDayEntries(timesArr, "time"));
 
@@ -210,6 +218,8 @@ async function mount(root, opts) {
     collapsibleKeys.add(toggleKey);
     const parent = byIdAll.get(pid);
     const title = parent ? parent.title : "（不明なプロジェクト）";
+    const gi = groupInfo(pid);
+    const groupBadge = gi.isGroup ? `<span class="grp-badge" title="タスクグループ（プロジェクト: ${esc(gi.project.title)}）">タスクグループ</span>` : "";
     // サブグループは既定展開＝toggleKey の「存在」が折りたたみフラグ（メンバー/通常グループと同じ向き）。
     // 埋め込みは state.collapsed が毎回新規 Set ＝未登録＝展開で子が見える。
     const collapsed = state.collapsed.has(toggleKey);
@@ -222,7 +232,7 @@ async function mount(root, opts) {
         <span class="caret">▾</span>
         <span class="pj-band" style="background:${projColor(parent ? parent.project_id : 0)}"></span>
         <span class="grp-text">
-          <span class="grp-top"><span class="grp-name" title="${esc(title)}">${esc(title)}</span>
+          <span class="grp-top"><span class="grp-name" title="${esc(title)}">${esc(title)}</span>${groupBadge}
             <span class="grp-sub">${children.length}タスク</span></span>
           <span class="grp-sub">予${fmtH(totH)}</span>
         </span>
@@ -453,7 +463,10 @@ async function mount(root, opts) {
     }
     // 並び: 名前付きプロジェクトをタイトル順 → 「プロジェクトなし」(0) は末尾。
     const groups = [...buckets.entries()]
-      .map(([pid, items]) => ({ pid, title: pid ? ((byIdAll.get(pid) || {}).title || "（不明なプロジェクト）") : "（プロジェクトなし）", ws: pid ? (byIdAll.get(pid) || {}).project_id : null, items }))
+      .map(([pid, items]) => {
+        const gi = pid ? groupInfo(pid) : { isGroup: false, project: null };
+        return { pid, title: pid ? ((byIdAll.get(pid) || {}).title || "（不明なプロジェクト）") : "（プロジェクトなし）", ws: pid ? (byIdAll.get(pid) || {}).project_id : null, items, isGroup: gi.isGroup, ancestorTitle: gi.project ? gi.project.title : null };
+      })
       .sort((a, b) => (a.pid === 0 ? 1 : b.pid === 0 ? -1 : a.title.localeCompare(b.title, "ja")));
 
     let html = "", rowOffset = 0;
@@ -477,7 +490,7 @@ async function mount(root, opts) {
           <span class="caret">▾</span>
           <span class="pj-band" style="background:${band}"></span>
           <span class="grp-text">
-            <span class="grp-top"><span class="grp-name" title="${esc(g.title)}">${esc(g.title)}</span>
+            <span class="grp-top"><span class="grp-name" title="${esc(g.title)}">${esc(g.title)}</span>${g.isGroup ? `<span class="grp-badge" title="タスクグループ（プロジェクト: ${esc(g.ancestorTitle)}）">タスクグループ</span>` : ""}
               <span class="grp-sub">${items.length}タスク</span></span>
             <span class="grp-sub">見${fmtH(agg.est)}・実${fmtH(agg.spent)}・予${fmtH(agg.plan)}</span>
           </span>
@@ -1287,6 +1300,7 @@ function ganttStyles() {
   .gv .row.pj-child .r-label::after{content:"";position:absolute;left:var(--pjrail,33px);top:50%;width:11px;height:2px;background:var(--pj,${C.lineStrong});opacity:.5}
   .gv .grp-top{display:flex;align-items:center;gap:8px;min-width:0}
   .gv .grp-name{font-size:14px;font-weight:700;color:${C.ink};display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;white-space:normal;line-height:1.25;word-break:break-word;min-width:0}
+  .gv .grp-badge{display:inline-flex;align-items:center;font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:6px;background:${C.track};color:${C.muted};white-space:nowrap;flex:none}
   .gv .grp-sub{font-size:10.5px;color:${C.muted};white-space:nowrap}
   .gv .cap-track{width:90px;height:7px;border-radius:5px;background:${C.track};overflow:hidden;position:relative;flex:none}
   .gv .cap-fill{position:absolute;left:0;top:0;bottom:0;border-radius:5px}

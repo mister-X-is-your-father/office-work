@@ -37,7 +37,11 @@ function buildMeta(tasks, byId) {
     const who = firstHuman(t);
     // プロジェクト=祖先解決（4層以上でも最上位プロジェクトへ集約。3層では直近親と一致）。
     const parent = projectAncestor(t, byId);
-    meta.set(t.id, { who, parent, cats: categoryLabels(t) });
+    // 中間グループ（直近親）が最上位プロジェクトと異なるときだけ、グループとして扱う（kanban.js の判定を踏襲）。
+    const immRel = (((t.related_tasks || {}).parenttask) || [])[0];
+    const immParent = immRel ? (byId.get(immRel.id) || immRel) : null;
+    const group = (immParent && parent && immParent.id !== parent.id) ? immParent : null;
+    meta.set(t.id, { who, parent, group, cats: categoryLabels(t) });
   }
   return meta;
 }
@@ -90,6 +94,7 @@ export async function render(root) {
       .tr-card.dragging{opacity:.45}
       .tr-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:5px}
       .tr-proj{font-size:10.5px;color:${C.muted};border:1px solid ${C.line};border-radius:5px;padding:1px 6px;white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis}
+      .tr-group{display:inline-flex;align-items:center;font-size:10.5px;font-weight:600;border-radius:5px;padding:1px 6px;white-space:nowrap;max-width:140px;overflow:hidden;text-overflow:ellipsis;background:${C.track};color:${C.muted}}
       .tr-cat{font-size:10.5px;border:1px solid;border-radius:5px;padding:1px 6px;white-space:nowrap;font-weight:600}
       .tr-who{display:flex;flex-wrap:wrap;gap:5px;margin:0 0 14px}
       .tr-who-b{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:12.5px;padding:5px 11px;border:1px solid ${C.line};border-radius:18px;background:var(--card);color:${C.muted};cursor:pointer;transition:border-color .12s,background .12s,color .12s}
@@ -154,12 +159,14 @@ function cardHtml(t, m) {
   const pr = t.priority >= 4 ? `<span style="color:${C.over};font-weight:700">優先${t.priority}</span>` : `優先${t.priority}`;
   const who = m && m.who;
   const parent = m && m.parent;
+  const group = m && m.group;
   const cats = (m && m.cats) || [];
   const ava = who ? avatar(who, { size: 18 }) : "";
   const projChip = parent ? `<span class="tr-proj" title="プロジェクト: ${esc(parent.title)}">${esc(parent.title)}</span>` : "";
+  const groupChip = group ? `<span class="tr-group" title="タスクグループ: ${esc(group.title)}">${esc(group.title)}</span>` : "";
   const catChips = cats.map((c) => `<span class="tr-cat" style="color:${categoryColor(c)};border-color:${categoryColor(c)}40">${esc(c.title)}</span>`).join("");
-  const metaRow = (ava || projChip || catChips)
-    ? `<div class="tr-meta">${ava}${projChip}${catChips}</div>` : "";
+  const metaRow = (ava || projChip || groupChip || catChips)
+    ? `<div class="tr-meta">${ava}${projChip}${groupChip}${catChips}</div>` : "";
   return `<div class="tr-card" data-id="${t.id}" style="padding:11px 14px;border-bottom:1px solid ${C.line}">
     <div style="font-weight:600;font-size:13.5px">${esc(t.title)}</div>
     <div style="font-size:11.5px;color:${C.muted};margin-top:3px">${pr} ・ ${due} ・ ${fmtH(t.estH)}</div>
