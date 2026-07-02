@@ -261,17 +261,28 @@ async function route() {
   }
 }
 
+// ライブ同期用の静かな再描画: route() と違い「読み込み中…」スピナーを挟まない。
+// 先にデータを取得し切ってから（旧画面を見せたまま）render で一気に差し替える
+// ＝Googleスプレッドシート的な「サクッと更新」の体感。スクロール位置も維持。
+async function quietRerender() {
+  const key = (location.hash.replace(/^#\//, "") || "home");
+  const r = ROUTES[key] || ROUTES.home;
+  if (r.soon || !r.mod) return;
+  const content = document.getElementById("content");
+  if (!content) return;
+  await store.load();                 // 裏で取得（この間も旧画面は表示されたまま）
+  const mod = await import(r.mod);
+  const y = window.scrollY;
+  await mod.render(content);          // スピナー無しの直接差し替え（キャッシュ済＝即描画）
+  window.scrollTo(0, y);
+}
+
 function boot() {
   shell();
   if (!location.hash) location.hash = "#/home";
   route();
-  // ライブ同期: 他者/AI(MCP)の変更を自動反映（差分検知時のみ現在ルートを再描画）。
-  // 再描画でスクロール位置が飛ばないよう保存・復元する（画面遷移の hashchange 経路には影響しない）。
-  startLiveSync(async () => {
-    const y = window.scrollY;
-    await route();
-    window.scrollTo(0, y);
-  });
+  // ライブ同期: 他者/AI(MCP)の変更を自動反映（差分検知時のみ・静かな再描画）。
+  startLiveSync(quietRerender);
 }
 window.addEventListener("hashchange", route);
 

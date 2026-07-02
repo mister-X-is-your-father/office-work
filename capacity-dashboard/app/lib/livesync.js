@@ -31,6 +31,22 @@ function safeToRender() {
   return true;
 }
 
+// 控えめなトースト（右下・自動で消える）。「勝手に画面が変わった」不安を残さないための一言。
+let _toastEl = null, _toastTimer = null;
+function toast(msg) {
+  if (!_toastEl) {
+    _toastEl = document.createElement("div");
+    _toastEl.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:9997;background:rgba(30,41,59,.92);color:#fff;"
+      + "font:600 12px/1.4 system-ui,sans-serif;padding:8px 14px;border-radius:18px;box-shadow:0 6px 18px rgba(0,0,0,.25);"
+      + "opacity:0;transition:opacity .25s;pointer-events:none";
+    document.body.appendChild(_toastEl);
+  }
+  _toastEl.textContent = msg;
+  _toastEl.style.opacity = "1";
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { _toastEl.style.opacity = "0"; }, 2200);
+}
+
 async function tick() {
   if (_busy || document.visibilityState !== "visible") return;
   _busy = true;
@@ -41,6 +57,7 @@ async function tick() {
       if (!safeToRender()) return;        // 編集中＝見送り（差分は残るので次ティックで再試行）
       invalidate();
       if (_onChange) await _onChange();
+      toast("🔄 他の変更を反映しました");
     }
   } catch { /* オフライン・認証前などは静かに見送り（次ティックで再試行） */ }
   finally { _busy = false; }
