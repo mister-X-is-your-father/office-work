@@ -492,8 +492,10 @@ export async function render(root) {
     // ＝旧チップ群の e.stopPropagation() を「順序return」で等価再現。
     tbody.onclick = (e) => {
       let el;
+      if (gSwallowClick) { gSwallowClick = false; return; } // インライン編集を閉じただけのクリック＝何もしない
       if ((el = e.target.closest(".tb-stbtn")))   { openStatusMenu(el, +el.dataset.st, tasks, root); return; }
       if ((el = e.target.closest(".tb-projbtn")))  { openProjectMenu(el, +el.dataset.proj, tasks, root); return; }
+      if ((el = e.target.closest(".tb-grpbtn")))   { openGroupMenu(el, +el.dataset.grp, tasks, root); return; }
       if ((el = e.target.closest(".tb-asbtn")))    { openAssigneeMenu(el, +el.dataset.as, tasks, members, root); return; }
       if ((el = e.target.closest(".tb-catbtn")))   { openCategoryMenu(el, +el.dataset.cat, tasks, labels, root); return; }
       if ((el = e.target.closest(".tb-priobtn")))  { openPrioMenu(el, +el.dataset.prio, tasks, root); return; }
@@ -528,6 +530,11 @@ export async function render(root) {
       // ここで manualMode をガード（チップ/進捗/チェックより後＝マイソート中もそれらは生きる）。
       // マイソート中はグリッド選択も行クリック編集も無効（原典どおり）。タップ＝編集は wireDrag が担う。
       if (V.manualMode) return;
+      // タスク名テキストのワンクリック＝インライン編集（従来はダブルクリック。シングルで直接開く）。
+      if ((el = e.target.closest(".tb-tle"))) {
+        const cell = el.closest("td.tb-gc");
+        if (cell) { gridEditFromEl(cell, root); return; }
+      }
       // 余白（セルの padding 等＝td 自身が直接のクリック対象）クリックで編集を開く（要望）。
       // チップ/タイトル文字など「内容」のクリックは e.target が子要素になるため、ここを素通りして従来の挙動へ。
       if (e.target.tagName === "TD") {
@@ -539,6 +546,7 @@ export async function render(root) {
     };
     // ダブルクリック（bubble）: グリッド編集／行ダブルクリック編集。
     tbody.ondblclick = (e) => {
+      if (gSwallowClick) { gSwallowClick = false; return; } // 編集を閉じたクリックの連打対策
       const gc = e.target.closest(".tb-gc"); if (gc) { gridEditFromEl(gc, root); return; }
       if (e.target.closest(".tb-fable, .tb-timer, .tb-rowck, .tb-pctbar")) return; // 行編集フォームを誤起動させない
       const tr = e.target.closest("tr[data-id]"); if (tr) openTaskForm({ taskId: +tr.dataset.id, onSaved: () => render(root) });
@@ -551,6 +559,9 @@ export async function render(root) {
     // capture mousedown: 列挙セルのボタン押下時にアクティブセルを同期（旧 wireGrid の per-button capture を集約）。
     // capture は addEventListener でのみ指定可。総入替で tbody は毎回新規＝二重化しない。
     tbody.addEventListener("mousedown", (e) => {
+      // インライン編集中の外側 mousedown: blur で編集は閉じるが、その同じクリックで行編集や
+      // メニューが誤発火しないよう、直後の click を1回だけ無効化する（編集入力欄内は除く）。
+      if (gEditing && !e.target.closest(".tb-gedit")) gSwallowClick = true;
       const btn = e.target.closest("td.tb-gc button"); if (!btn) return;
       const cell = btn.closest("td.tb-gc"); const tr = cell && cell.closest("tr[data-id]");
       if (tr) { gAnchor = null; gActive = { id: +tr.dataset.id, col: cell.dataset.col }; }
@@ -743,6 +754,7 @@ function openMenu(x, y, items, opts = {}) {
       if (it.sep) return `<div class="tb-ctx-sep"></div>`;
       if (it.header) return `<div class="tb-ctx-hd">${esc(it.label)}</div>`;
       if (it.input === "date") return `<label class="tb-ctx-inp">${esc(it.label)}<input type="date" data-i="${i}" value="${it.value || ""}"></label>`;
+      if (it.input === "text") return `<label class="tb-ctx-inp tb-ctx-txt">${esc(it.label)}<input type="text" data-i="${i}" placeholder="${esc(it.placeholder || "")}"></label>`;
       if (it.input === "hmgrid") return `<div class="tb-hg">`
         + `<div class="tb-hg-cols">`
         + `<div class="tb-hg-col h"><span class="tb-hg-lbl">時間</span><div class="tb-hg-wrap">${it.hOpts.map((v) => `<button class="tb-hg-b${v === it.h ? " on" : ""}" data-i="${i}" data-hk="${v}">${v}</button>`).join("")}</div></div>`
@@ -760,9 +772,17 @@ function openMenu(x, y, items, opts = {}) {
         else { closeRowMenu(); it.on && it.on(); }
       };
     });
-    m.querySelectorAll(".tb-ctx-inp input").forEach((inp) => {   // 日付指定（type=date）
+    m.querySelectorAll('.tb-ctx-inp input[type="date"]').forEach((inp) => {   // 日付指定（type=date）
       inp.onclick = (e) => e.stopPropagation();
       inp.onchange = () => { const it = its[+inp.dataset.i]; closeRowMenu(); it.on && it.on(inp.value); };
+    });
+    // テキスト入力アイテム（input:"text"）: Enter で確定・クリックは伝播停止（メニューを閉じない）。
+    m.querySelectorAll('.tb-ctx-inp input[type="text"]').forEach((inp) => {
+      inp.onclick = (e) => e.stopPropagation();
+      inp.onkeydown = (e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") { e.preventDefault(); const it = its[+inp.dataset.i]; const v = inp.value; closeRowMenu(); it.on && it.on(v); }
+      };
     });
     // 時間/分グリッド: ボタンをワンタップで選択（メニューは開いたまま・即反映）
     const repaint = () => paint(opts.rebuild ? opts.rebuild() : its);
@@ -1052,6 +1072,43 @@ function openProjectMenu(chipEl, id, tasks, root) {
   openMenu(rc.left, rc.bottom + 4, items);
 }
 
+// タスクグループのワンクリック変更。候補＝同じプロジェクト直下の既存グループ（子を持つ直下タスク）。
+// 適用は「直近親の付け替え」＝ gRawSet("proj") をそのまま再利用（undo/redo も同経路）。
+function openGroupMenu(chipEl, id, tasks, root) {
+  closeRowMenu();
+  const t = (tasks || []).find((x) => x.id === id); if (!t) return;
+  const byId = new Map((tasks || []).map((x) => [x.id, x]));
+  const project = projectAncestor(t, byId); if (!project) return; // プロジェクトなしはグループ不可（ボタン自体出ない）
+  const cur = (((t.related_tasks || {}).parenttask) || [])[0];
+  const curId = cur ? cur.id : null;
+  const inGroup = !!(curId && curId !== project.id); // 直近親がプロジェクト以外＝グループ所属
+  const excluded = descendantIds(tasks, id);          // 自分＋子孫（循環防止）
+  const cands = (tasks || []).filter((x) => {
+    if (excluded.has(x.id)) return false;
+    const p = (((x.related_tasks || {}).parenttask) || [])[0];
+    if (!p || p.id !== project.id) return false;                       // プロジェクト直下の子だけ
+    return ((((x.related_tasks || {}).subtask) || []).length > 0);     // 子を持つ＝グループ
+  });
+  const apply = (newParentId) => {
+    gridApply("タスクグループ変更", [{ id, col: "proj", before: curId || "", after: newParentId || "" }]);
+  };
+  const items = cands
+    .sort((a, b) => (a.title || "").localeCompare(b.title || "", "ja"))
+    .map((g) => ({ label: g.title || "(無題)", check: curId === g.id, on: () => apply(g.id) }));
+  if (items.length) items.push({ sep: true });
+  items.push({ input: "text", label: "＋ 新規グループを作成", placeholder: "グループ名を入力して Enter", on: async (name) => {
+    const nm = (name || "").trim(); if (!nm) return;
+    try {
+      const g = await createTaskInProject(project.project_id, { title: nm }); // グループはプロジェクトと同じWSへ
+      await addRelation(project.id, g.id, "subtask");                          // プロジェクト配下に紐付け
+      apply(g.id);
+    } catch (err) { announce("グループの作成に失敗しました: " + err.message, { assertive: true }); }
+  } });
+  if (inGroup) items.push({ label: "グループから外す（プロジェクト直下へ）", danger: true, on: () => apply(project.id) });
+  const rc = chipEl.getBoundingClientRect();
+  openMenu(rc.left, rc.bottom + 4, items);
+}
+
 // ── 列の表示/非表示・並べ替えメニュー（歯車）。本人ごと（V.colOrder/V.hiddenCols）に保存。 ──
 // チェックで表示/非表示（タスク名は固定＝常に表示）、▲▼で並べ替え。変更ごとに保存＋onApply で再描画。
 function openColumnsMenu(anchorEl, onApply) {
@@ -1150,6 +1207,7 @@ const ZERO_DUE = "0001-01-01T00:00:00Z";
 let gActive = null;   // {id, col} アクティブセル（タスクID＋列キーで保持＝並べ替えに強い）
 let gAnchor = null;   // {id, col} 矩形選択のアンカー（null時はアクティブ＝単一セル）
 let gEditing = false; // インライン編集中か（グリッドのキー操作を止める）
+let gSwallowClick = false; // 編集中の外側クリック＝閉じるだけ（直後の click/dblclick を1回だけ無効化）
 let gClip = null;     // 内部クリップボード {cols:[colKey], rows:[[text,...],...]}
 let gKeyWired = false;
 let gCtx = null;      // {root, tasks, members, labels, today}
@@ -1328,7 +1386,9 @@ function gridEditActive(initial) {
 function gridInline(cell, id, col, initial) {
   const t = findGTask(id); if (!t) return;
   gEditing = true;
-  const prev = cell.innerHTML;
+  // 階段セルのタスク名編集は .tb-st-title 行内だけを置換（プロジェクト/グループ段と padding を保つ＝入力欄が左に飛ばない）
+  const host = (col === "title" && cell.classList.contains("tb-stair")) ? (cell.querySelector(".tb-st-title") || cell) : cell;
+  const prev = host.innerHTML;
   const cur = gValToText(col, t);
   const input = document.createElement("input");
   input.className = "tb-gedit";
@@ -1336,7 +1396,7 @@ function gridInline(cell, id, col, initial) {
   if (col === "est") { input.inputMode = "decimal"; input.placeholder = "時間"; }
   if (col === "due") input.placeholder = "例: 明日 / 6/20";
   cell.classList.add("tb-gc-editing");
-  cell.replaceChildren(input);
+  host.replaceChildren(input);
   input.focus();
   if (initial == null) input.select();
   let done = false;
@@ -1348,7 +1408,7 @@ function gridInline(cell, id, col, initial) {
       if (move === "down") r = Math.min(order.length - 1, r + 1); else if (move === "right") c = Math.min(COLS.length - 1, c + 1); else if (move === "left") c = Math.max(0, c - 1);
       gAnchor = null; gActive = { id: order[r] ?? id, col: COLS[c] }; }
   if (commit && after !== null && !gEqual(after, before)) { await gridApply(GLABEL[col], [{ id, col, before, after }]); return; } // 再描画＋ハイライト済
-    cell.classList.remove("tb-gc-editing"); cell.innerHTML = prev; gridHighlight();
+    cell.classList.remove("tb-gc-editing"); host.innerHTML = prev; gridHighlight();
   };
   input.onkeydown = (e) => {
     e.stopPropagation();
@@ -1960,7 +2020,9 @@ function rowHtml(r, members, i, manual) {
   const sIdx = (k) => stairCols.findIndex((c) => c.k === k);
   const stLines = [];
   if (sIdx("proj") >= 0) stLines.push(`<div class="tb-st-line tb-st-proj" style="padding-left:${sIdx("proj") * STAIR_W}px"><button class="tb-cell tb-projbtn" data-proj="${id}" title="クリックでプロジェクト（親タスク）を変更">${r.parent ? esc(r.parent.title) : "—"}<span class="tb-cell-car">▾</span></button></div>`);
-  if (sIdx("group") >= 0 && r.group) stLines.push(`<div class="tb-st-line tb-st-group" style="padding-left:${sIdx("group") * STAIR_W}px">${esc(r.group.title)}</div>`);
+  // グループ段: プロジェクトがある行は常に表示（未所属は「—」）。クリックでグループ変更メニュー。
+  // プロジェクトなしのタスクはグループを持てないので段自体を出さない（従来どおり）。
+  if (sIdx("group") >= 0 && r.parent) stLines.push(`<div class="tb-st-line tb-st-group" style="padding-left:${sIdx("group") * STAIR_W}px"><button class="tb-cell tb-grpbtn" data-grp="${id}" title="クリックでタスクグループを変更">${r.group ? esc(r.group.title) : "—"}<span class="tb-cell-car">▾</span></button></div>`);
   stLines.push(`<div class="tb-st-line tb-st-title" style="padding-left:${sIdx("title") * STAIR_W}px"><span class="tb-tle">${esc(r.title)}</span>${r.review ? ` <span class="tb-k review">レビュー</span>` : ""}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">${icon("flag", { size: 12 })}</span>` : ""} <button type="button" class="tb-timer" data-timer="${id}" data-title="${esc(r.title)}" title="このタスクでタイマー開始" aria-label="このタスクでタイマー開始">${icon("timer", { size: 13 })}</button>${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">${icon("play", { size: 11 })}</button>` : ""}</div>`);
   const stairTd = `<td class="tb-stair tb-gc" data-col="title" colspan="${stairCols.length}">${stLines.join("")}</td>`;
   // 列ごとの <td> をマップで持ち、cols() の順序（表示/非表示・並べ替え反映）で出力する（階段3列は stairTd に統合済み）。
@@ -2277,6 +2339,8 @@ function css() {
   .tb-ctx{position:fixed;z-index:10000;min-width:170px;max-height:340px;overflow-y:auto;background:#fff;border:1px solid ${C.line};border-radius:10px;box-shadow:0 12px 34px rgba(20,30,50,.22);padding:5px;display:flex;flex-direction:column}
   .tb-ctx-inp{font:inherit;font-size:13px;display:flex;align-items:center;gap:8px;justify-content:space-between;padding:7px 12px;color:${C.ink}}
   .tb-ctx-inp input{font:inherit;font-size:12px;border:1px solid ${C.line};border-radius:6px;padding:3px 6px}
+  .tb-ctx-txt{flex-direction:column;align-items:stretch;gap:4px}
+  .tb-ctx-txt input{width:100%;box-sizing:border-box}
   .tb-ctx-unit{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:${C.muted}}
   .tb-ctx-unit input{width:66px;text-align:right}
   .tb-hg{display:flex;flex-direction:column;gap:8px;padding:8px 9px;min-width:0}
@@ -2329,7 +2393,7 @@ function css() {
   .tb-stair{min-width:300px}
   .tb-st-line{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.5}
   .tb-st-proj .tb-cell{font-size:12px;color:${C.muted};padding-top:1px;padding-bottom:1px}
-  .tb-st-group{font-size:12px;color:${C.muted};padding-top:1px;padding-bottom:1px}
+  .tb-st-group .tb-cell{font-size:12px;color:${C.muted};padding-top:1px;padding-bottom:1px}
   .tb-st-title{font-weight:600}
   .tb-sub{font-size:11px;color:${C.muted};font-weight:400;margin-top:2px}
   .tb-ava{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;color:#fff;font-size:10px;font-weight:700;margin-right:6px;vertical-align:-5px}
