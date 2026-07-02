@@ -4,6 +4,7 @@ import * as store from "./lib/store.js";
 import { icon } from "./lib/icons.js";
 import { errorState, withRefresh } from "./lib/ui.js";
 import { ROUTES, ORDER, ALWAYS_VISIBLE } from "./lib/routes.js";
+import { startLiveSync } from "./lib/livesync.js";
 
 const app = document.getElementById("app");
 
@@ -264,6 +265,13 @@ function boot() {
   shell();
   if (!location.hash) location.hash = "#/home";
   route();
+  // ライブ同期: 他者/AI(MCP)の変更を自動反映（差分検知時のみ現在ルートを再描画）。
+  // 再描画でスクロール位置が飛ばないよう保存・復元する（画面遷移の hashchange 経路には影響しない）。
+  startLiveSync(async () => {
+    const y = window.scrollY;
+    await route();
+    window.scrollTo(0, y);
+  });
 }
 window.addEventListener("hashchange", route);
 
