@@ -4,7 +4,7 @@
 import { load, invalidate, isAiUser, patchTask } from "../lib/store.js";
 import { savePresets } from "../lib/exec.js";
 import { updateTask, deleteTask, addAssignee, removeAssignee, addTaskLabel, removeTaskLabel, createLabel, setTaskWaiting, createTaskInProject, addRelation, removeRelation, getTask } from "../lib/api.js";
-import { PRIO, prioBucket, kindOf, kindRank, isReviewTask, categoryLabels, categoryColor, REVIEW_LABEL, WAITING_LABEL, statusOf, STATUS } from "../lib/kinds.js";
+import { PRIO, prioBucket, isReviewTask, categoryLabels, categoryColor, REVIEW_LABEL, WAITING_LABEL, statusOf, STATUS } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color, todayISO, announce } from "../lib/ui.js";
 import { shiftISO, buildTaskTree, projectAncestor } from "../lib/capacity.js";
 import { openTaskForm, ensureStyle as ensureFormStyle } from "./taskform.js";
@@ -157,7 +157,7 @@ const AXES = {
   cat:     { label: "分類",      cmp: (a, b) => ((a.cat && a.cat.title) || "～").localeCompare((b.cat && b.cat.title) || "～", "ja"), dir: 1 },
   who:     { label: "担当",      cmp: (a, b) => ((a.who && (a.who.name || a.who.username)) || "～").localeCompare((b.who && (b.who.name || b.who.username)) || "～", "ja"), dir: 1 },
   proj:    { label: "プロジェクト", cmp: (a, b) => ((a.parent && a.parent.title) || "～").localeCompare((b.parent && b.parent.title) || "～", "ja"), dir: 1 },
-  kind:    { label: "種別",      cmp: (a, b) => kindRank(kindOf(a.t)) - kindRank(kindOf(b.t)), dir: 1 },
+  group:   { label: "タスクグループ", cmp: (a, b) => ((a.group && a.group.title) || "～").localeCompare((b.group && b.group.title) || "～", "ja"), dir: 1 },
   state:   { label: "ステータス",      cmp: (a, b) => stateRank(a) - stateRank(b), dir: 1 },
   pct:     { label: "進捗",      cmp: (a, b) => a.pct - b.pct, dir: -1 },
   est:     { label: "見積",      cmp: (a, b) => a.est - b.est, dir: -1 },
@@ -1069,8 +1069,8 @@ function openColumnsMenu(anchorEl, onApply) {
         <button class="tb-colck${on ? " on" : ""}${c.fixed ? " fixed" : ""}" data-ck="${esc(k)}" ${c.fixed ? "disabled title=\"タスク名は常に表示\"" : `title="${on ? "クリックで非表示" : "クリックで表示"}"`}>${on ? icon("check", { size: 12 }) : ""}</button>
         <span class="tb-collbl">${esc(c.label)}</span>
         <span class="tb-colmv">
-          <button class="tb-colup" data-up="${esc(k)}" ${i === 0 ? "disabled" : ""} title="上へ">▲</button>
-          <button class="tb-coldn" data-dn="${esc(k)}" ${i === order.length - 1 ? "disabled" : ""} title="下へ">▼</button>
+          <button class="tb-colup" data-up="${esc(k)}" ${i === 0 || STAIR_KEYS.includes(k) ? "disabled" : ""} title="上へ">▲</button>
+          <button class="tb-coldn" data-dn="${esc(k)}" ${i === order.length - 1 || STAIR_KEYS.includes(k) ? "disabled" : ""} title="下へ">▼</button>
         </span>
       </div>`;
     }).join("");
@@ -1855,21 +1855,26 @@ async function reparent(childId, oldParentId, newParentId, rerender) {
 }
 
 // 列マスタ（既定の表示順）。fixed=非表示/移動不可（タスク名は表の主軸なので固定）。
+// stair=「階段」3列（プロジェクト＞タスクグループ＞タスク）。行本文では1つの colspan セルに統合し、
+// 各段を Excel の A/B/C 列位置から右へ突き抜けて表示する（列幅が横に伸びない）。並べ替え不可・先頭固定。
 // 列の表示/非表示・並べ替えは本人ごと（V.colOrder / V.hiddenCols）に localStorage 永続。共有データは変えない。
 const COLDEF = [
-  { k: "proj", label: "プロジェクト" },
-  { k: "title", label: "タスク", fixed: true },
-  { k: "who", label: "担当" }, { k: "kind", label: "種別" },
+  { k: "proj", label: "プロジェクト", stair: true },
+  { k: "group", label: "タスクグループ", stair: true },
+  { k: "title", label: "タスク", fixed: true, stair: true },
+  { k: "who", label: "担当" },
   { k: "cat", label: "分類" }, { k: "prio", label: "重要度" }, { k: "due", label: "期限" },
   { k: "est", label: "見積" }, { k: "pct", label: "進捗" }, { k: "state", label: "ステータス" },
 ];
 const COLDEF_KEYS = COLDEF.map((c) => c.k);
+const STAIR_KEYS = ["proj", "group", "title"]; // 階段3列＝常にこの順で先頭固定（並べ替え対象外）
 const colByKey = (k) => COLDEF.find((c) => c.k === k);
 // V.colOrder（保存済みの並び）を起点に、未知キー除去＋新規列を末尾補完して正規の順序配列を返す。
+// 階段3列は保存済み順に関係なく常に先頭へ固定（段の開始位置＝ヘッダー位置の対応を崩さない）。
 function orderedColKeys(v) {
-  const saved = (v && Array.isArray(v.colOrder) ? v.colOrder : []).filter((k) => COLDEF_KEYS.includes(k));
-  const rest = COLDEF_KEYS.filter((k) => !saved.includes(k));
-  return [...saved, ...rest];
+  const saved = (v && Array.isArray(v.colOrder) ? v.colOrder : []).filter((k) => COLDEF_KEYS.includes(k) && !STAIR_KEYS.includes(k));
+  const rest = COLDEF_KEYS.filter((k) => !saved.includes(k) && !STAIR_KEYS.includes(k));
+  return [...STAIR_KEYS, ...saved, ...rest];
 }
 // 実際に描画する列（順序適用＋非表示除外）。タスク名(fixed)は常に表示。
 const cols = (v = V) => {
@@ -1936,7 +1941,6 @@ function rowHtml(r, members, i, manual) {
   const wn = r.who ? (r.who.name || r.who.username) : "";
   const ava = r.who ? `<span class="tb-ava" style="background:${member_color(r.who.id)}">${esc((wn[0] || "?"))}</span>` : "";
   const whoBtn = `<button class="tb-cell tb-asbtn" data-as="${id}" title="クリックで担当を変更">${ava}${esc(wn || "未設定")}<span class="tb-cell-car">▾</span></button>`;
-  const kind = r.review ? `<span class="tb-k review">レビュー</span>` : `<span class="tb-k">タスク</span>`;
   const cats = categoryLabels(r.t);
   const catInner = cats.length ? cats.map((c) => `<span class="tb-cat" style="color:${categoryColor(c)};border-color:${categoryColor(c)}40">${esc(c.title)}</span>`).join(" ") : `<span class="tb-cat none">—</span>`;
   const catBtn = `<button class="tb-cell tb-catbtn" data-cat="${id}" title="クリックで分類を変更">${catInner}<span class="tb-cell-car">▾</span></button>`;
@@ -1948,12 +1952,20 @@ function rowHtml(r, members, i, manual) {
   const estBtn = `<button class="tb-cell tb-num tb-estbtn" data-est="${id}" title="クリックで見積を変更">${r.est ? fmtH(r.est) : "—"}<span class="tb-cell-car">▾</span></button>`;
   const st = `<button class="tb-st tb-stbtn ${r.status}" data-st="${id}" title="クリックでステータス変更">${STATUS[r.status].label}<span class="tb-st-car">▾</span></button>`;
   const sel = selectedIds.has(id);
-  // 列ごとの <td> をマップで持ち、cols() の順序（表示/非表示・並べ替え反映）で出力する。
+  // ── 階段セル: プロジェクト（上段）＞タスクグループ（中段）＞タスク名（下段）を1つの colspan セルに。
+  // 各段は表示中の階段列の位置（ヘッダー th と同じ STAIR_W 刻み）から始まり、右へ突き抜けて表示＝列幅が伸びない。
+  // 毎行にプロジェクト/グループを繰り返し表示（各行が自己完結＝どの列でソートしても成立）。
+  const stairCols = cols().filter((c) => c.stair);            // 表示中の階段列（1〜3個）
+  const STAIR_W = 110;                                         // th幅と一致させる定数（css() の width:110px と同値）
+  const sIdx = (k) => stairCols.findIndex((c) => c.k === k);
+  const stLines = [];
+  if (sIdx("proj") >= 0) stLines.push(`<div class="tb-st-line tb-st-proj" style="padding-left:${sIdx("proj") * STAIR_W}px"><button class="tb-cell tb-projbtn" data-proj="${id}" title="クリックでプロジェクト（親タスク）を変更">${r.parent ? esc(r.parent.title) : "—"}<span class="tb-cell-car">▾</span></button></div>`);
+  if (sIdx("group") >= 0 && r.group) stLines.push(`<div class="tb-st-line tb-st-group" style="padding-left:${sIdx("group") * STAIR_W}px">${esc(r.group.title)}</div>`);
+  stLines.push(`<div class="tb-st-line tb-st-title" style="padding-left:${sIdx("title") * STAIR_W}px"><span class="tb-tle">${esc(r.title)}</span>${r.review ? ` <span class="tb-k review">レビュー</span>` : ""}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">${icon("flag", { size: 12 })}</span>` : ""} <button type="button" class="tb-timer" data-timer="${id}" data-title="${esc(r.title)}" title="このタスクでタイマー開始" aria-label="このタスクでタイマー開始">${icon("timer", { size: 13 })}</button>${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">${icon("play", { size: 11 })}</button>` : ""}</div>`);
+  const stairTd = `<td class="tb-stair tb-gc" data-col="title" colspan="${stairCols.length}">${stLines.join("")}</td>`;
+  // 列ごとの <td> をマップで持ち、cols() の順序（表示/非表示・並べ替え反映）で出力する（階段3列は stairTd に統合済み）。
   const cellOf = {
-    proj: `<td class="tb-proj tb-gc" data-col="proj"><button class="tb-cell tb-projbtn" data-proj="${id}" title="クリックでプロジェクト（親タスク）を変更"><span class="tb-proj-text"><span class="tb-proj-name">${r.parent ? esc(r.parent.title) : "—"}</span>${r.group ? `<span class="tb-proj-group" title="タスクグループ: ${esc(r.group.title)}">${esc(r.group.title)}</span>` : ""}</span><span class="tb-cell-car">▾</span></button></td>`,
-    title: `<td class="tb-title tb-gc" data-col="title"><span class="tb-tle">${esc(r.title)}</span>${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">${icon("flag", { size: 12 })}</span>` : ""} <button type="button" class="tb-timer" data-timer="${id}" data-title="${esc(r.title)}" title="このタスクでタイマー開始" aria-label="このタスクでタイマー開始">${icon("timer", { size: 13 })}</button>${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">${icon("play", { size: 11 })}</button>` : ""}</td>`,
     who: `<td class="tb-gc" data-col="who">${whoBtn}</td>`,
-    kind: `<td>${kind}</td>`,
     cat: `<td class="tb-gc" data-col="cat">${catBtn}</td>`,
     prio: `<td class="tb-gc" data-col="prio">${prioBtn}</td>`,
     due: `<td class="tb-gc" data-col="due">${dueBtn}</td>`,
@@ -1961,7 +1973,7 @@ function rowHtml(r, members, i, manual) {
     pct: `<td><div class="tb-bar tb-pctbar" data-pct="${id}" role="slider" tabindex="0" aria-valuenow="${r.pct}" aria-valuemin="0" aria-valuemax="100" title="クリックで進捗を変更（0/25/50/75/100）"><i style="width:${r.pct}%"></i></div><span class="tb-pct">${r.pct}%</span></td>`,
     state: `<td class="tb-gc" data-col="state">${st}</td>`,
   };
-  const body = cols().map((c) => cellOf[c.k] || "").join("");
+  const body = stairTd + cols().filter((c) => !c.stair).map((c) => cellOf[c.k] || "").join("");
   return `<tr data-id="${id}" class="${manual ? "tb-draggable" : ""}${sel ? " tb-sel" : ""}">
     <td class="tb-selcol"><span class="tb-rowck${sel ? " on" : ""}" data-ck="${id}" role="checkbox" aria-checked="${sel}" title="選択">${sel ? icon("check", { size: 12 }) : ""}</span></td>
     ${body}
@@ -2312,12 +2324,13 @@ function css() {
   .tb td{padding:15px 12px;border-bottom:1px solid ${C.line};vertical-align:middle}
   .tb th:last-child,.tb td:last-child{padding-right:20px}
   .tb tbody tr:hover{background:#f7fbff}
-  .tb-title{font-weight:600;min-width:180px}
-  .tb-proj{color:${C.muted};font-size:12px;max-width:160px;overflow:hidden}
-  .tb-proj-text{display:flex;flex-direction:column;gap:1px;min-width:0;overflow:hidden}
-  .tb-proj-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .tb-proj-group{font-size:9.5px;font-weight:600;color:${C.muted};background:${C.track};border-radius:5px;padding:0 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;align-self:flex-start;max-width:100%}
-  .tb-projbtn{align-items:flex-start}
+  /* 階段セル（プロジェクト＞タスクグループ＞タスク）。110px は rowHtml の STAIR_W と同値＝th幅と揃える */
+  .tb th[data-k="proj"],.tb th[data-k="group"]{width:110px;min-width:110px}
+  .tb-stair{min-width:300px}
+  .tb-st-line{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.5}
+  .tb-st-proj .tb-cell{font-size:12px;color:${C.muted};padding-top:1px;padding-bottom:1px}
+  .tb-st-group{font-size:12px;color:${C.muted};padding-top:1px;padding-bottom:1px}
+  .tb-st-title{font-weight:600}
   .tb-sub{font-size:11px;color:${C.muted};font-weight:400;margin-top:2px}
   .tb-ava{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;color:#fff;font-size:10px;font-weight:700;margin-right:6px;vertical-align:-5px}
   .tb-k{font-size:10.5px;color:${C.muted};border:1px solid ${C.line};border-radius:5px;padding:1px 6px;white-space:nowrap}
