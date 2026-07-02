@@ -547,6 +547,12 @@ export async function render(root) {
     // ダブルクリック（bubble）: グリッド編集／行ダブルクリック編集。
     tbody.ondblclick = (e) => {
       if (gSwallowClick) { gSwallowClick = false; return; } // 編集を閉じたクリックの連打対策
+      // 階段セルの余白（タスク名・ボタン・バッジ以外）ダブルクリック → タスク編集フォーム（要望）。
+      // タスク名テキスト自体はシングルクリックでインライン編集が開くので対象外。
+      if (e.target.closest(".tb-stair") && !e.target.closest(".tb-tle, .tb-timer, .tb-fable, .tb-projbtn, .tb-grpbtn, .tb-k, .tb-fav, .tb-gedit")) {
+        const tr = e.target.closest("tr[data-id]");
+        if (tr) { openTaskForm({ taskId: +tr.dataset.id, onSaved: () => render(root) }); return; }
+      }
       const gc = e.target.closest(".tb-gc"); if (gc) { gridEditFromEl(gc, root); return; }
       if (e.target.closest(".tb-fable, .tb-timer, .tb-rowck, .tb-pctbar")) return; // 行編集フォームを誤起動させない
       const tr = e.target.closest("tr[data-id]"); if (tr) openTaskForm({ taskId: +tr.dataset.id, onSaved: () => render(root) });
