@@ -11,6 +11,13 @@ test("isAiUser: fable は AI、人間は false、null安全", () => {
   assert.ok(AI_USERNAMES.has("fable"));
 });
 
+test("isAiUser: taskstation-ai（協業用AIアカウント）も AI 判定＝人間キャパから除外", () => {
+  assert.equal(isAiUser({ username: "taskstation-ai" }), true);
+  assert.ok(AI_USERNAMES.has("taskstation-ai"));
+  const t = { assignees: [{ id: 14, username: "taskstation-ai" }, { id: 7, username: "森田" }] };
+  assert.deepEqual(humanAssignees(t).map((a) => a.id), [7]);
+});
+
 test("humanAssignees: AI(fable)を除外、assignees欠落は空配列", () => {
   const t = { assignees: [{ id: 1, username: "morita" }, { id: 9, username: "fable" }, { id: 2, username: "sato" }] };
   assert.deepEqual(humanAssignees(t).map((a) => a.id), [1, 2]);

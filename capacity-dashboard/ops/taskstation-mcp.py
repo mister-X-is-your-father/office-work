@@ -12,6 +12,12 @@ v2 追加ツール:
 v2.1 追加:
   set_due（期日変更の唯一の入口・reason 必須＝相談合意ゲート）
   変更履歴: safe_update の diff / 作成 を exec(:7020) の活動ログへ fire-and-forget 記録（log_activity）
+v2.2 追加:
+  create_task に priority / blocked_by、担当に taskstation-ai(id=14)、AI担当判定を AI_USERS で一般化
+  schedule_task の期間一括登録（end_date / skip_weekends・既定は土日スキップ）
+  依存関係: add_dependency / remove_dependency（既存 relations の follows/precedes に乗せる＝
+  SPA の依存グラフ・ガント依存線・「先行タスク」欄と同一規約。A が B に follows ＝ B の完了が A の前に必要）
+  my_agenda はブロック中（未完了の先行タスクあり）を「⛔ ブロック中」セクションに分離表示
 認証（2資格情報方式）:
   ~/.config/taskstation/fable.env  = 操作の名義（コメント・タスク更新・進捗・作成・担当・plans。
                                      AI発言と人間の区別＝UXの核なので fable 名義を維持）
@@ -25,7 +31,7 @@ import os
 import sys
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import taskstation_notes as notes
 
@@ -40,7 +46,9 @@ TASK_SCALARS = ["title", "description", "done", "due_date", "start_date", "end_d
 
 WAIT_LABEL = "連絡待ち"          # エスカレーション（人間待ち）ラベル
 CLASS_LABELS = ("AI+人間", "AI", "人間")  # 分類ラベル（表示優先順）
-USER_IDS = {"森田": 7, "fable": 8}       # 担当付与用（username → user_id）
+USER_IDS = {"森田": 7, "fable": 8,
+            "taskstation-ai": 14, "タスクステーションAI": 14}  # 担当付与用（username/日本語名 → user_id）
+AI_USERS = {"fable", "taskstation-ai"}   # AI担当とみなす username（my_agenda の対象判定）
 UNSET = "0001-01-01T00:00:00Z"           # 日付「未設定」センチネル
 
 _tokens = {}  # env パス別のトークンキャッシュ（遅延ログイン）
@@ -235,7 +243,21 @@ def sort_key(t):
     return (1, "", -(t.get("priority") or 0))
 
 
-def fmt_line(t, ref_date=None):
+def open_blocker_ids(t, by_id):
+    """未完了ブロッカー（related_tasks.follows で done=false）の id リスト。
+
+    related_tasks 内の斜め情報は古い可能性があるため、all_tasks() の byId で引き直して
+    done を判定する。byId に無い id（権限外・削除済み等）は無視。
+    """
+    ids = []
+    for x in ((t.get("related_tasks") or {}).get("follows") or []):
+        b = by_id.get(x.get("id"))
+        if b is not None and not b.get("done"):
+            ids.append(b["id"])
+    return ids
+
+
+def fmt_line(t, ref_date=None, by_id=None):
     """一覧の1行: #id [分類] タイトル ・期限 ・見積h ・進捗% ・ステータス"""
     labels = task_labels(t)
     cls = next((c for c in CLASS_LABELS if c in labels), "-")
@@ -246,6 +268,8 @@ def fmt_line(t, ref_date=None):
             f" ・進捗{t.get('percent_done') or 0}% ・{STATUS_JA[status_of(t)]}")
     if ref_date and has_date(due) and due[:10] < ref_date and not t.get("done"):
         line += " ⚠期限超過"
+    if by_id is not None and not t.get("done") and open_blocker_ids(t, by_id):
+        line += " ⛔ブロック中"
     return line
 
 
@@ -258,6 +282,7 @@ def total_est_hours(tasks):
 def t_get_task(a):
     t = ts(f"/tasks/{a['task_id']}")
     ai_notes = notes.list_for(a["task_id"])
+    rel = t.get("related_tasks") or {}
     return json.dumps({
         "id": t["id"], "title": t["title"], "description": t.get("description") or "",
         "done": t.get("done"), "percent_done": t.get("percent_done"),
@@ -265,7 +290,11 @@ def t_get_task(a):
         "due_date": t.get("due_date"), "project_id": t.get("project_id"),
         "assignees": [u.get("username") for u in (t.get("assignees") or [])],
         "subtasks": [{"id": x["id"], "title": x["title"], "done": x.get("done")}
-                     for x in ((t.get("related_tasks") or {}).get("subtask") or [])],
+                     for x in (rel.get("subtask") or [])],
+        "blocked_by": [{"id": x["id"], "title": x["title"], "done": x.get("done")}
+                       for x in (rel.get("follows") or [])],
+        "blocks": [{"id": x["id"], "title": x["title"]}
+                   for x in (rel.get("precedes") or [])],
         "ai_notes": [{"kind": n.get("kind"), "text": (n.get("text") or "")[:500]} for n in ai_notes[-10:]],
     }, ensure_ascii=False)
 
@@ -314,29 +343,44 @@ def t_complete_task(a):
 def t_my_agenda(a):
     ref = a.get("date") or datetime.now().strftime("%Y-%m-%d")
     tmpl = template_project_ids()
-    active, waiting = [], []
-    for t in all_tasks():
+    tasks = all_tasks()
+    by_id = {t["id"]: t for t in tasks}
+    active, waiting, blocked = [], [], []
+    for t in tasks:
         if t.get("done") or t.get("project_id") in tmpl:
             continue
         labels = task_labels(t)
-        if "fable" not in task_assignees(t) and "AI" not in labels and "AI+人間" not in labels:
+        if not (AI_USERS & set(task_assignees(t))) and "AI" not in labels and "AI+人間" not in labels:
             continue
-        (waiting if WAIT_LABEL in labels else active).append(t)
+        if WAIT_LABEL in labels:
+            waiting.append(t)  # 連絡待ち > ブロック中（両方該当は連絡待ち側）
+        elif open_blocker_ids(t, by_id):
+            blocked.append(t)
+        else:
+            active.append(t)
     active.sort(key=sort_key)
     waiting.sort(key=sort_key)
+    blocked.sort(key=sort_key)
     out = [f"📋 AIのアジェンダ（基準日 {ref}）: {len(active)}件 / 合計見積 {total_est_hours(active):g}h"]
-    out += [fmt_line(t, ref) for t in active] or ["（今やるべきタスクはありません）"]
+    out += [fmt_line(t, ref, by_id) for t in active] or ["（今やるべきタスクはありません）"]
+    if blocked:
+        out.append("")
+        out.append(f"⛔ ブロック中（先行タスク待ち）: {len(blocked)}件")
+        out += [fmt_line(t, ref, by_id) + " " + " ".join(f"←#{b}" for b in open_blocker_ids(t, by_id))
+                for t in blocked]
     if waiting:
         out.append("")
         out.append(f"⏳人間待ち（エスカレーション中）: {len(waiting)}件")
-        out += [fmt_line(t, ref) for t in waiting]
+        out += [fmt_line(t, ref, by_id) for t in waiting]
     return "\n".join(out)
 
 
 def t_list_tasks(a):
     tmpl = template_project_ids()
+    tasks = all_tasks()
+    by_id = {t["id"]: t for t in tasks}
     hits = []
-    for t in all_tasks():
+    for t in tasks:
         if t.get("project_id") in tmpl:
             continue
         if a.get("label") and a["label"] not in task_labels(t):
@@ -358,7 +402,7 @@ def t_list_tasks(a):
         hits.append(t)
     hits.sort(key=sort_key)
     out = [f"🔎 該当 {len(hits)}件 / 合計見積 {total_est_hours(hits):g}h"]
-    out += [fmt_line(t) for t in hits] or ["（該当タスクなし）"]
+    out += [fmt_line(t, by_id=by_id) for t in hits] or ["（該当タスクなし）"]
     return "\n".join(out)
 
 
@@ -406,6 +450,8 @@ def t_create_task(a):
         body["time_estimate"] = int(round(float(a["estimate_hours"]) * 3600))
     if a.get("due_date"):
         body["due_date"] = a["due_date"] + "T00:00:00Z"
+    if a.get("priority") is not None:
+        body["priority"] = max(0, min(4, int(a["priority"])))  # 0=なし〜4=MUST
     if a.get("parent_task_id"):
         parent = ts(f"/tasks/{a['parent_task_id']}")
         pid = parent["project_id"]
@@ -425,8 +471,11 @@ def t_create_task(a):
     for uname in a.get("assignees") or []:
         uid = USER_IDS.get(uname)
         if uid is None:
-            raise Exception(f"不明な担当: {uname}（森田 / fable のみ）")
+            raise Exception(f"不明な担当: {uname}（森田 / fable / taskstation-ai のみ）")
         ts(f"/tasks/{task['id']}/assignees", "PUT", {"user_id": uid})
+    for bid in a.get("blocked_by") or []:  # 先行タスクへの依存（follows）を張る
+        ts(f"/tasks/{task['id']}/relations", "PUT",
+           {"other_task_id": int(bid), "relation_kind": "follows"})
     where = f"親 #{a['parent_task_id']} 配下" if a.get("parent_task_id") else f"WS {pid}"
     return f"タスク #{task['id']} 「{a['title']}」を作成しました（{where}）"
 
@@ -443,14 +492,56 @@ def t_set_due(a):
 
 def t_schedule_task(a):
     sec = int(round(float(a["hours"]) * 3600))
-    ts(f"/tasks/{a['task_id']}/plans", "PUT",
-       {"seconds": sec, "plan_date": a["date"] + "T00:00:00Z", "note": ""})
-    return f"タスク #{a['task_id']} に {a['date']} {a['hours']}h の日別予定を登録しました（週プランナー/ガントに表示）"
+    if not a.get("end_date"):  # 単日登録（従来互換）
+        ts(f"/tasks/{a['task_id']}/plans", "PUT",
+           {"seconds": sec, "plan_date": a["date"] + "T00:00:00Z", "note": ""})
+        return f"タスク #{a['task_id']} に {a['date']} {a['hours']}h の日別予定を登録しました（週プランナー/ガントに表示）"
+    # 期間一括登録: date〜end_date の各日に hours/日（既定は土日スキップ）
+    start = date.fromisoformat(a["date"])
+    end = date.fromisoformat(a["end_date"])
+    if end < start:
+        raise Exception("end_date は date 以降にしてください")
+    skip = a.get("skip_weekends", True)
+    days, d = [], start
+    while d <= end:
+        if not (skip and d.weekday() >= 5):
+            days.append(d)
+        d += timedelta(days=1)
+    if not days:
+        raise Exception("登録対象日がありません（期間が全て土日です。skip_weekends=false を検討）")
+    for d in days:
+        ts(f"/tasks/{a['task_id']}/plans", "PUT",
+           {"seconds": sec, "plan_date": d.isoformat() + "T00:00:00Z", "note": ""})
+    total = round(sec * len(days) / 3600, 1)
+    skip_s = "土日除く・" if skip else ""
+    return (f"タスク #{a['task_id']} に {start.month}/{start.day}〜{end.month}/{end.day} の"
+            f"{len(days)}日分（{skip_s}計{total:g}h）の日別予定を登録しました（週プランナー/ガントに表示）")
+
+
+def t_add_dependency(a):
+    tid, bid = int(a["task_id"]), int(a["blocker_task_id"])
+    if tid == bid:
+        raise Exception("自己依存は張れません（task_id と blocker_task_id が同一）")
+    # A が B に follows ＝ B の完了が A の前に必要。逆向き precedes はバックエンドが自動付与
+    ts(f"/tasks/{tid}/relations", "PUT", {"other_task_id": bid, "relation_kind": "follows"})
+    return f"依存関係を登録しました: #{tid} は #{bid} の完了待ち（ガント/依存グラフに線が出ます）"
+
+
+def t_remove_dependency(a):
+    tid, bid = int(a["task_id"]), int(a["blocker_task_id"])
+    try:
+        ts(f"/tasks/{tid}/relations/follows/{bid}", "DELETE")
+    except urllib.error.HTTPError as e:
+        if e.code not in (400, 403, 404, 409):  # 張られていない等は冪等に無視
+            raise
+    return f"依存関係を解除しました: #{tid} は #{bid} の完了待ちではなくなりました"
 
 
 NUM = {"type": "number"}
 STR = {"type": "string"}
+BOOL = {"type": "boolean"}
 ARR_STR = {"type": "array", "items": {"type": "string"}}
+ARR_NUM = {"type": "array", "items": {"type": "number"}}
 TOOLS = [
     ("get_task", "タスクの詳細（説明・進捗・サブタスク・直近メモ）を取得する",
      {"task_id": NUM}, ["task_id"], t_get_task),
@@ -477,12 +568,18 @@ TOOLS = [
      {"task_id": NUM, "reason": STR, "options": STR}, ["task_id", "reason"], t_escalate),
     ("resume_task", "エスカレーション解除後の再開用。連絡待ちを外して進行中に戻す。note があればコメント投稿",
      {"task_id": NUM, "note": STR}, ["task_id"], t_resume_task),
-    ("create_task", "タスクを新規作成する。goal は説明末尾に[ゴール]として結合。labels は無ければ新規作成して付与。assignees は 森田 / fable。parent_task_id 指定でその配下（サブタスク）、無指定はインボックスWSに作成",
+    ("create_task", "タスクを新規作成する。goal は説明末尾に[ゴール]として結合。labels は無ければ新規作成して付与。assignees は 森田 / fable / taskstation-ai。priority は 0-4（0=なし〜4=MUST）。blocked_by=先行タスクid配列（依存関係を張る）。parent_task_id 指定でその配下（サブタスク）、無指定はインボックスWSに作成",
      {"title": STR, "description": STR, "goal": STR, "estimate_hours": NUM, "due_date": STR,
-      "labels": ARR_STR, "assignees": ARR_STR, "parent_task_id": NUM},
+      "priority": NUM, "labels": ARR_STR, "assignees": ARR_STR, "parent_task_id": NUM,
+      "blocked_by": ARR_NUM},
      ["title"], t_create_task),
-    ("schedule_task", "日別予定（task_time_plans）を登録する＝週プランナー/ガント/稼働プランに表示される。金3h/土3h/日3h のような日次計画に使う",
-     {"task_id": NUM, "date": STR, "hours": NUM}, ["task_id", "date", "hours"], t_schedule_task),
+    ("schedule_task", "日別予定（task_time_plans）を登録する＝週プランナー/ガント/稼働プランに表示される。金3h/土3h/日3h のような日次計画に使う。end_date（YYYY-MM-DD）指定で date〜end_date の各日に hours/日 を一括登録（skip_weekends=true 既定＝土日を飛ばす）",
+     {"task_id": NUM, "date": STR, "hours": NUM, "end_date": STR, "skip_weekends": BOOL},
+     ["task_id", "date", "hours"], t_schedule_task),
+    ("add_dependency", "依存関係を張る（blocker が完了するまで task は着手不可の意味）。ガント/依存グラフにも自動で線が出る。依存は説明文に手書きせずこのツールで構造化する",
+     {"task_id": NUM, "blocker_task_id": NUM}, ["task_id", "blocker_task_id"], t_add_dependency),
+    ("remove_dependency", "依存関係を解除する（task が blocker の完了待ちでなくなる）。張られていない場合も冪等に成功する",
+     {"task_id": NUM, "blocker_task_id": NUM}, ["task_id", "blocker_task_id"], t_remove_dependency),
     ("set_due", "タスクの期日を変更する（唯一の期日変更手段）。reason 必須＝事前に人間と相談・合意した内容を書く。無断変更は禁止。変更は履歴に記録され、タスクコメントにも旧→新と理由が投稿される",
      {"task_id": NUM, "date": STR, "reason": STR}, ["task_id", "date", "reason"], t_set_due),
 ]
@@ -500,6 +597,8 @@ INSTRUCTIONS = (
     "(5) 完了は complete_task に summary 必須(何をした・成果物の場所・検証状態)。"
     "進捗・報告はすべて post_comment(全員閲覧)へ。add_note は下書きメモ(作成者のみ閲覧)。"
     "期日の変更は set_due のみ・reason 必須(事前に相談か escalate で合意してから。無断変更は禁止)。"
+    "タスク間の依存関係は add_dependency で構造化する(説明文への手書き禁止)。"
+    "my_agenda の⛔ブロック中(先行タスク待ち)のタスクには着手しない。"
     "人間のタスク(分類=人間)は読み取り以外触らない。"
 )
 

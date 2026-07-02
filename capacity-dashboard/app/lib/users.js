@@ -3,7 +3,8 @@
 
 // AI 担当アカウント（副担当として選択可だが、人間のキャパ計算・メンバー列からは除外する）。
 // 実行系: taskstation-fable systemd タイマーが fable 担当タスクを巡回し Claude Code(MAXプラン) で提案コメント。
-export const AI_USERNAMES = new Set(["fable"]);
+// taskstation-ai(id14)=AI×人間協業（MCP）用のAI担当アカウント（2026-07-03 追加・docs/ai-collab-protocol.md）。
+export const AI_USERNAMES = new Set(["fable", "taskstation-ai"]);
 
 // AI（fable 等）担当かどうか。username で判定（id は WS により異なるため使わない）。
 export const isAiUser = (u) => !!u && AI_USERNAMES.has(u.username);
