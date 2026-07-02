@@ -104,11 +104,18 @@ function pushScalarEdit(label, taskId, before, after, applyPatch) {
 const HOUR = 3600;
 const MAX_SORTS = 5; // 組めるソート条件の上限（第1〜第5条件）
 const VKEY = (uid) => `ts.list.view.${uid ?? "anon"}`;
+// ── 狭幅（880px以下）判定: 列セットを広幅/狭幅で2面持ち（hiddenCols / hiddenColsNarrow）にするための SSoT。
+// CSS の自動間引きでなく JS 駆動＝ユーザーが列メニューで狭幅用セットを自由に入れ替えられる。
+const NARROW_MQ = window.matchMedia("(max-width:880px)");
+const isNarrow = () => NARROW_MQ.matches;
+const DEF_HIDDEN_NARROW = ["cat", "prio", "est", "pct", "start", "end"]; // 狭幅の初期非表示（state は表示のまま）
+let _mqWired = false; // ブレークポイント切替の再描画リスナは一度だけ
+
 function loadView(uid) {
   // doneMode: "show"=完了も表示 / "today"=完了は非表示だが今日の完了は表示 / "hide"=完了を非表示
   // preset: スマートリスト風プリセットタブの選択（""=すべて / BUILTIN_VIEWS の key）。最上位の絞込レイヤー。
   // colOrder: 列の表示順（COLDEF の key 配列）／hiddenCols: 非表示にした列の key 配列。既定は現状の全列・全表示。
-  const def = { sorts: [{ key: "due", dir: 1 }], manualMode: false, order: [], doneMode: "today", cat: "", qaWho: "", qaDue: "", mode: "table", q: "", preset: "", colOrder: [], hiddenCols: [] };
+  const def = { sorts: [{ key: "due", dir: 1 }], manualMode: false, order: [], doneMode: "today", cat: "", qaWho: "", qaDue: "", mode: "table", q: "", preset: "", colOrder: [], hiddenCols: [], hiddenColsNarrow: [...DEF_HIDDEN_NARROW] };
   try {
     const raw = JSON.parse(localStorage.getItem(VKEY(uid)) || "null");
     if (!raw) return { ...def };                       // 初回のみ既定（期限）
@@ -119,6 +126,7 @@ function loadView(uid) {
     if (raw.doneMode === undefined) { v.doneMode = raw.hideDone === false ? "show" : "hide"; delete v.hideDone; } // 旧 hideDone(bool) からの移行
     if (!Array.isArray(v.colOrder)) v.colOrder = [];
     if (!Array.isArray(v.hiddenCols)) v.hiddenCols = [];
+    if (!Array.isArray(v.hiddenColsNarrow)) v.hiddenColsNarrow = [...def.hiddenColsNarrow];
     return v;
   } catch { return { ...def }; }
 }
@@ -511,6 +519,8 @@ export async function render(root) {
     _stairResizeWired = true;
     window.addEventListener("resize", () => { clearTimeout(_stairT); _stairT = setTimeout(syncStairVars, 150); });
   }
+  // ブレークポイント切替（狭幅⇔広幅）で列セットが変わるため再描画（historyRerender は lastRoot.isConnected ガード済み）
+  if (!_mqWired) { _mqWired = true; NARROW_MQ.addEventListener("change", () => historyRerender()); }
 
   // ── 行内（tbody）: チップ7種・fable・進捗・行チェック・グリッド選択・行クリック編集 ──
   const tbody = root.querySelector("table tbody");
@@ -1209,8 +1219,9 @@ function openColumnsMenu(anchorEl, onApply) {
   m.className = "tb-ctx tb-colsmenu";
   const apply = () => { saveView(UID, V); onApply && onApply(); };
   const paint = () => {
+    const key = isNarrow() ? "hiddenColsNarrow" : "hiddenCols"; // 編集対象＝現在の画面幅のセット（2面化）
     const order = orderedColKeys(V);
-    const hidden = new Set(V.hiddenCols || []);
+    const hidden = new Set(V[key] || []);
     const rows = order.map((k, i) => {
       const c = colByKey(k); if (!c) return "";
       const on = c.fixed || !hidden.has(k);
@@ -1223,14 +1234,14 @@ function openColumnsMenu(anchorEl, onApply) {
         </span>
       </div>`;
     }).join("");
-    m.innerHTML = `<div class="tb-colhd">列の表示・並べ替え</div>${rows}
+    m.innerHTML = `<div class="tb-colhd">列の表示・並べ替え</div>${isNarrow() ? `<div class="tb-colnote">狭い画面用の表示設定（広い画面とは別に保存）</div>` : ""}${rows}
       <div class="tb-colft"><button class="tb-colreset" type="button">既定に戻す</button></div>`;
-    // 表示/非表示トグル
+    // 表示/非表示トグル（現在の画面幅のセットだけを読み書き）
     m.querySelectorAll(".tb-colck:not(.fixed)").forEach((b) => {
       b.onclick = (e) => {
         e.stopPropagation();
-        const k = b.dataset.ck; const h = new Set(V.hiddenCols || []);
-        h.has(k) ? h.delete(k) : h.add(k); V.hiddenCols = [...h];
+        const k = b.dataset.ck; const h = new Set(V[key] || []);
+        h.has(k) ? h.delete(k) : h.add(k); V[key] = [...h];
         apply(); paint();
       };
     });
@@ -1244,7 +1255,13 @@ function openColumnsMenu(anchorEl, onApply) {
     m.querySelectorAll(".tb-colup").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); reorder(b.dataset.up, -1); }; });
     m.querySelectorAll(".tb-coldn").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); reorder(b.dataset.dn, +1); }; });
     const reset = m.querySelector(".tb-colreset");
-    if (reset) reset.onclick = (e) => { e.stopPropagation(); V.colOrder = []; V.hiddenCols = []; apply(); paint(); };
+    // 既定に戻す＝現在編集中のセットだけリセット（narrow=狭幅既定 / wide=全表示＋並び順リセット）
+    if (reset) reset.onclick = (e) => {
+      e.stopPropagation();
+      if (isNarrow()) { V.hiddenColsNarrow = [...DEF_HIDDEN_NARROW]; }
+      else { V.colOrder = []; V.hiddenCols = []; }
+      apply(); paint();
+    };
   };
   document.body.appendChild(m);
   _ctxEl = m;
@@ -2038,8 +2055,10 @@ function orderedColKeys(v) {
   return [...STAIR_KEYS, ...saved, ...rest];
 }
 // 実際に描画する列（順序適用＋非表示除外）。タスク名(fixed)は常に表示。
+// 非表示セットは広幅=hiddenCols / 狭幅=hiddenColsNarrow の2面（colOrder=並び順は両モード共有）。
+const activeHidden = (v) => new Set((isNarrow() ? (v && v.hiddenColsNarrow) : (v && v.hiddenCols)) || []);
 const cols = (v = V) => {
-  const hidden = new Set((v && v.hiddenCols) || []);
+  const hidden = activeHidden(v);
   return orderedColKeys(v).filter((k) => { const c = colByKey(k); return c && (c.fixed || !hidden.has(k)); }).map(colByKey);
 };
 // 0件時の空状態行。フィルタがアクティブなら「条件に一致するタスクがありません」＋解除ボタン、無ければ「タスクがありません」のみ。
@@ -2414,6 +2433,7 @@ function css() {
   .tb-colsbtn:hover{border-color:#d7dde6;color:${C.ink}}
   .tb-colsmenu{min-width:236px;padding:6px}
   .tb-colhd{font-size:10.5px;font-weight:700;letter-spacing:.04em;color:${C.muted};padding:5px 8px 6px}
+  .tb-colnote{font-size:10.5px;color:${C.muted};padding:0 12px 6px}
   .tb-colrow{display:flex;align-items:center;gap:8px;padding:3px 6px;border-radius:7px}
   .tb-colrow:hover{background:${C.track}}
   .tb-colck{display:inline-grid;place-items:center;width:18px;height:18px;flex:none;border-radius:5px;border:1.5px solid ${C.line};background:#fff;color:#fff;cursor:pointer;padding:0}
@@ -2664,15 +2684,8 @@ function css() {
   html[data-theme="dark"] .tb tbody tr.st-doing:hover,html[data-theme="dark"] .ol-row.st-doing:hover{background:rgba(230,160,30,.18)}
   html[data-theme="dark"] .tb tbody tr.st-waiting:hover,html[data-theme="dark"] .ol-row.st-waiting:hover{background:rgba(58,134,255,.18)}
   html[data-theme="dark"] .tb tbody tr.st-done:hover,html[data-theme="dark"] .ol-row.st-done:hover{background:rgba(255,255,255,.08)}
-  /* ===== レスポンシブ（狭幅は列を自動間引き＋階段を細く畳む。列メニューの V.hiddenCols とは独立の CSS レイヤー） ===== */
+  /* ===== レスポンシブ（狭幅の列間引きは JS 駆動＝V.hiddenColsNarrow。ここは階段圧縮などの見た目だけ） ===== */
   @media (max-width:880px){
-    /* 列の自動間引き（残す=選択・階段・担当・期限・ステータス）。pct の td は data-col が無いので :has で拾う */
-    .tb th[data-k="cat"], .tb td[data-col="cat"],
-    .tb th[data-k="prio"], .tb td[data-col="prio"],
-    .tb th[data-k="est"], .tb td[data-col="est"],
-    .tb th[data-k="start"], .tb td[data-col="start"],
-    .tb th[data-k="end"], .tb td[data-col="end"],
-    .tb th[data-k="pct"], .tb td:has(.tb-pctbar){display:none}
     /* 階段の圧縮: proj/group ヘッダー列は 14px まで潰す（font-size:0 でラベルの min-content を消す）。
        --stair 実測同期が追随して段差14px刻みの「浅いツリーインデント」になる＝タスク名の実効幅を確保。
        ラベルはインデント＋内容で自明なので非表示。ソートは他ヘッダーで可能＝狭幅では割り切り */
@@ -2684,8 +2697,6 @@ function css() {
     .tb-st-proj .tb-cell, .tb-st-group .tb-cell{font-size:11px}
   }
   @media (max-width:560px){
-    /* ステータス列も非表示（行背景色がステータスを表すため冗長） */
-    .tb th[data-k="state"], .tb td[data-col="state"]{display:none}
     .tb-stair{min-width:190px}
     /* 階層モードの微調整（バッジは行背景で代替） */
     .ol-st{display:none}
