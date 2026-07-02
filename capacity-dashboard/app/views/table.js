@@ -203,6 +203,21 @@ function listSummaryText(rows, today) {
   return `${rows.length}件` + (overdueN ? `・期限切れ${overdueN}` : "") + (estTotal ? `・見積${fmtH(estTotal)}` : "");
 }
 
+// ── 階段インデントをヘッダー実測幅に同期（auto-layout の列膨張と固定pxのズレ対策・gantt の --mprail 方式） ──
+// 表示中の stair th を DOM 順に拾い、累積幅を --stair1/--stair2 にセット（i=0 は padding 0 なので不要）。
+// proj 非表示時は group th の実測幅が --stair1 になる＝rowHtml 側の「表示中 idx」と自然に一致する。
+// リサイズ・メディアクエリ切替でも th 幅が変わるため、resize からも（debounceして）再実行する。
+let _stairRoot = null, _stairResizeWired = false, _stairT = null;
+function syncStairVars() {
+  const root = _stairRoot;
+  if (!root || !root.isConnected) return;
+  const tbl = root.querySelector("table.tb");
+  if (!tbl) return;
+  const ths = [...tbl.querySelectorAll('th[data-k="proj"], th[data-k="group"], th[data-k="title"]')];
+  let acc = 0;
+  ths.forEach((el, i) => { if (i > 0) tbl.style.setProperty(`--stair${i}`, acc + "px"); acc += el.getBoundingClientRect().width; });
+}
+
 export async function render(root) {
   const { tasks, members, aiMembers = [], me = null, settings = {}, labels = [], recurrences = [], holidaysByDate = null } = await load();
   const presets = settings.sortPresets || [];   // グローバル共有プリセット
@@ -489,14 +504,12 @@ export async function render(root) {
     };
   }
 
-  // ── 階段インデントをヘッダー実測幅に同期（auto-layout の列膨張と固定pxのズレ対策・gantt の --mprail 方式） ──
-  // 表示中の stair th を DOM 順に拾い、累積幅を --stair1/--stair2 にセット（i=0 は padding 0 なので不要）。
-  // proj 非表示時は group th の実測幅が --stair1 になる＝rowHtml 側の「表示中 idx」と自然に一致する。
-  const tblStair = root.querySelector("table.tb");
-  if (tblStair) {
-    const stairThs = [...tblStair.querySelectorAll('th[data-k="proj"], th[data-k="group"], th[data-k="title"]')];
-    let acc = 0;
-    stairThs.forEach((el, i) => { if (i > 0) tblStair.style.setProperty(`--stair${i}`, acc + "px"); acc += el.getBoundingClientRect().width; });
+  // ── 階段インデントをヘッダー実測幅に同期（モジュール関数化＝resize でも再実行） ──
+  _stairRoot = root;
+  syncStairVars();
+  if (!_stairResizeWired) {
+    _stairResizeWired = true;
+    window.addEventListener("resize", () => { clearTimeout(_stairT); _stairT = setTimeout(syncStairVars, 150); });
   }
 
   // ── 行内（tbody）: チップ7種・fable・進捗・行チェック・グリッド選択・行クリック編集 ──
@@ -2650,5 +2663,32 @@ function css() {
   html[data-theme="dark"] .tb tbody tr.st-done,html[data-theme="dark"] .ol-row.st-done{background:rgba(255,255,255,.04)}
   html[data-theme="dark"] .tb tbody tr.st-doing:hover,html[data-theme="dark"] .ol-row.st-doing:hover{background:rgba(230,160,30,.18)}
   html[data-theme="dark"] .tb tbody tr.st-waiting:hover,html[data-theme="dark"] .ol-row.st-waiting:hover{background:rgba(58,134,255,.18)}
-  html[data-theme="dark"] .tb tbody tr.st-done:hover,html[data-theme="dark"] .ol-row.st-done:hover{background:rgba(255,255,255,.08)}`;
+  html[data-theme="dark"] .tb tbody tr.st-done:hover,html[data-theme="dark"] .ol-row.st-done:hover{background:rgba(255,255,255,.08)}
+  /* ===== レスポンシブ（狭幅は列を自動間引き＋階段を細く畳む。列メニューの V.hiddenCols とは独立の CSS レイヤー） ===== */
+  @media (max-width:880px){
+    /* 列の自動間引き（残す=選択・階段・担当・期限・ステータス）。pct の td は data-col が無いので :has で拾う */
+    .tb th[data-k="cat"], .tb td[data-col="cat"],
+    .tb th[data-k="prio"], .tb td[data-col="prio"],
+    .tb th[data-k="est"], .tb td[data-col="est"],
+    .tb th[data-k="start"], .tb td[data-col="start"],
+    .tb th[data-k="end"], .tb td[data-col="end"],
+    .tb th[data-k="pct"], .tb td:has(.tb-pctbar){display:none}
+    /* 階段の圧縮: proj/group ヘッダー列は 14px まで潰す（font-size:0 でラベルの min-content を消す）。
+       --stair 実測同期が追随して段差14px刻みの「浅いツリーインデント」になる＝タスク名の実効幅を確保。
+       ラベルはインデント＋内容で自明なので非表示。ソートは他ヘッダーで可能＝狭幅では割り切り */
+    .tb th[data-k="proj"], .tb th[data-k="group"]{width:14px;min-width:14px;max-width:14px;font-size:0;padding-left:0;padding-right:0;overflow:hidden}
+    .tb-stair{min-width:240px}
+    .tb-st-title{max-width:none}   /* 狭幅では折り返し上限を外し全幅活用 */
+    .tb th, .tb td{padding-left:8px;padding-right:8px}
+    /* 段が近接するのでプロジェクト/グループ段は少し小さく＝タイトルとの階層感を維持 */
+    .tb-st-proj .tb-cell, .tb-st-group .tb-cell{font-size:11px}
+  }
+  @media (max-width:560px){
+    /* ステータス列も非表示（行背景色がステータスを表すため冗長） */
+    .tb th[data-k="state"], .tb td[data-col="state"]{display:none}
+    .tb-stair{min-width:190px}
+    /* 階層モードの微調整（バッジは行背景で代替） */
+    .ol-st{display:none}
+    .ol-meta{gap:5px}
+  }`;
 }
