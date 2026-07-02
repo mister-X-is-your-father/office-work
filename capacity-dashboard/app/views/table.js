@@ -35,7 +35,7 @@ function canPatchInPlace(col) {
   if (col === "proj") return false;                 // 親子=他行/アウトライン/parent列に波及。初期実装は常にfallback
   if (V.preset) return false;                       // プリセット選択中は全列fallback（taskMatches依存列の列挙は脆い）
   if (!V.manualMode) {                              // 組み合わせソート時のみソート軸を見る（マイソートはV.order固定で順序不変）
-    const SORTMAP = { state: "state", prio: "prio", due: "due", est: "est", pct: "pct", who: "who", cat: "cat" };
+    const SORTMAP = { state: "state", prio: "prio", start: "start", end: "end", due: "due", est: "est", pct: "pct", who: "who", cat: "cat" };
     const sk = new Set(V.sorts.map((s) => s.key));
     if (SORTMAP[col] && sk.has(SORTMAP[col])) return false;
     if (col === "due" && (V.sorts.length === 0 || sk.has("due"))) return false; // tieBreak/既定期限順がdueを見る
@@ -147,12 +147,16 @@ let lastDeriveCtx = null, lastMembers = null;
 let historyUnsub = null; // Undo/Redo ボタンの活性同期（subscribe 解除関数。再描画ごとに張り替える）
 
 const dueISO = (t) => (t.due_date && !t.due_date.startsWith("0001") ? t.due_date.slice(0, 10) : "");
+const startISO = (t) => (t.start_date && !t.start_date.startsWith("0001") ? t.start_date.slice(0, 10) : ""); // 開始予定日
+const endISO = (t) => (t.end_date && !t.end_date.startsWith("0001") ? t.end_date.slice(0, 10) : "");         // 終了予定日
 // 本文(description)の HTML タグを除去してプレーンテキスト化（検索対象用）。空/未設定は ""。
 const descText = (html) => (html ? String(html).replace(/<[^>]*>/g, " ").replace(/&nbsp;/g, " ").trim() : "");
 
 // 軸の定義: ラベル＋比較関数（行 r を受ける）＋セレクトで選んだ時の既定の向き。
 const AXES = {
   due:     { label: "期限",      cmp: (a, b) => (a.due || "9999").localeCompare(b.due || "9999"), dir: 1 },
+  start:   { label: "開始予定",  cmp: (a, b) => (a.start || "9999").localeCompare(b.start || "9999"), dir: 1 },
+  end:     { label: "終了予定",  cmp: (a, b) => (a.end || "9999").localeCompare(b.end || "9999"), dir: 1 },
   prio:    { label: "重要度",    cmp: (a, b) => a.prio - b.prio, dir: -1 },
   cat:     { label: "分類",      cmp: (a, b) => ((a.cat && a.cat.title) || "～").localeCompare((b.cat && b.cat.title) || "～", "ja"), dir: 1 },
   who:     { label: "担当",      cmp: (a, b) => ((a.who && (a.who.name || a.who.username)) || "～").localeCompare((b.who && (b.who.name || b.who.username)) || "～", "ja"), dir: 1 },
@@ -188,7 +192,7 @@ function deriveRow(t, ctx) {
     fable: ctx.execOk && !t.done && (t.assignees || []).some((a) => isAiUser(a)) && ((t.created_by || {}).id || 0) === ctx.meId,
     parent, group,
     review: isReviewTask(t), prio: prioBucket(t.priority), cat: categoryLabels(t)[0] || null,
-    due: dueISO(t), est: (t.time_estimate || 0) / HOUR, pct: t.percent_done || 0,
+    due: dueISO(t), start: startISO(t), end: endISO(t), est: (t.time_estimate || 0) / HOUR, pct: t.percent_done || 0,
     done: !!t.done, status: statusOf(t),
   };
 }
@@ -485,6 +489,16 @@ export async function render(root) {
     };
   }
 
+  // ── 階段インデントをヘッダー実測幅に同期（auto-layout の列膨張と固定pxのズレ対策・gantt の --mprail 方式） ──
+  // 表示中の stair th を DOM 順に拾い、累積幅を --stair1/--stair2 にセット（i=0 は padding 0 なので不要）。
+  // proj 非表示時は group th の実測幅が --stair1 になる＝rowHtml 側の「表示中 idx」と自然に一致する。
+  const tblStair = root.querySelector("table.tb");
+  if (tblStair) {
+    const stairThs = [...tblStair.querySelectorAll('th[data-k="proj"], th[data-k="group"], th[data-k="title"]')];
+    let acc = 0;
+    stairThs.forEach((el, i) => { if (i > 0) tblStair.style.setProperty(`--stair${i}`, acc + "px"); acc += el.getBoundingClientRect().width; });
+  }
+
   // ── 行内（tbody）: チップ7種・fable・進捗・行チェック・グリッド選択・行クリック編集 ──
   const tbody = root.querySelector("table tbody");
   if (tbody) {
@@ -500,6 +514,8 @@ export async function render(root) {
       if ((el = e.target.closest(".tb-catbtn")))   { openCategoryMenu(el, +el.dataset.cat, tasks, labels, root); return; }
       if ((el = e.target.closest(".tb-priobtn")))  { openPrioMenu(el, +el.dataset.prio, tasks, root); return; }
       if ((el = e.target.closest(".tb-duebtn")))   { openDueMenu(el, +el.dataset.due, tasks, root, today); return; }
+      if ((el = e.target.closest(".tb-startbtn"))) { openStartMenu(el, +el.dataset.start, tasks, root, today); return; }
+      if ((el = e.target.closest(".tb-endbtn")))   { openEndMenu(el, +el.dataset.end, tasks, root, today); return; }
       if ((el = e.target.closest(".tb-estbtn")))   { openEstMenu(el, +el.dataset.est, tasks, root); return; }
       if ((el = e.target.closest(".tb-timer"))) {
         // タスク行から即・集中タイマー開始。行クリック編集と競合しないよう順序return（実質 stopPropagation）。
@@ -921,6 +937,58 @@ function openDueMenu(chipEl, id, tasks, root, today) {
   openMenu(r.left, r.bottom + 4, items);
 }
 
+// 開始予定日（start_date・開始期限）のワンクリック変更。openDueMenu をなぞる（対象フィールドと文言だけ違う）。
+function openStartMenu(chipEl, id, tasks, root, today) {
+  closeRowMenu();
+  const t = (tasks || []).find((x) => x.id === id); if (!t) return;
+  const ZERO = "0001-01-01T00:00:00Z";
+  const cur = startISO(t);
+  // before/after は "YYYY-MM-DD" or "" を ISO へ。undo/redo で同じ経路。
+  const applyStart = (taskId, iso) => updateTask(taskId, { start_date: iso ? iso + "T00:00:00Z" : ZERO });
+  const set = (iso) => applyStart(id, iso).then(() => { pushScalarEdit("開始日変更", id, cur, iso || "", applyStart); patchRow(id, root, { col: "start" }); }).catch(() => {});
+  const dow = new Date(today + "T00:00:00Z").getUTCDay();   // 0=日 … 6=土
+  const sat = shiftISO(today, (6 - dow + 7) % 7);           // 今週の土曜（今日以降）
+  const items = [
+    { label: "今日", check: cur === today, on: () => set(today) },
+    { label: "明日", check: cur === shiftISO(today, 1), on: () => set(shiftISO(today, 1)) },
+    { label: "今週末（土）", check: cur === sat, on: () => set(sat) },
+    { label: "1週間後", on: () => set(shiftISO(today, 7)) },
+    { label: "1ヶ月後", on: () => set(shiftISO(today, 30)) },
+    { sep: true },
+    { label: "日付指定", input: "date", value: cur, on: (v) => set(v || null) },
+    { sep: true },
+    { label: "クリア（開始日なし）", danger: !!cur, on: () => set(null) },
+  ];
+  const r = chipEl.getBoundingClientRect();
+  openMenu(r.left, r.bottom + 4, items);
+}
+
+// 終了予定日（end_date）のワンクリック変更。openStartMenu をなぞる（対象フィールドと文言だけ違う）。
+function openEndMenu(chipEl, id, tasks, root, today) {
+  closeRowMenu();
+  const t = (tasks || []).find((x) => x.id === id); if (!t) return;
+  const ZERO = "0001-01-01T00:00:00Z";
+  const cur = endISO(t);
+  // before/after は "YYYY-MM-DD" or "" を ISO へ。undo/redo で同じ経路。
+  const applyEnd = (taskId, iso) => updateTask(taskId, { end_date: iso ? iso + "T00:00:00Z" : ZERO });
+  const set = (iso) => applyEnd(id, iso).then(() => { pushScalarEdit("終了予定日変更", id, cur, iso || "", applyEnd); patchRow(id, root, { col: "end" }); }).catch(() => {});
+  const dow = new Date(today + "T00:00:00Z").getUTCDay();   // 0=日 … 6=土
+  const sat = shiftISO(today, (6 - dow + 7) % 7);           // 今週の土曜（今日以降）
+  const items = [
+    { label: "今日", check: cur === today, on: () => set(today) },
+    { label: "明日", check: cur === shiftISO(today, 1), on: () => set(shiftISO(today, 1)) },
+    { label: "今週末（土）", check: cur === sat, on: () => set(sat) },
+    { label: "1週間後", on: () => set(shiftISO(today, 7)) },
+    { label: "1ヶ月後", on: () => set(shiftISO(today, 30)) },
+    { sep: true },
+    { label: "日付指定", input: "date", value: cur, on: (v) => set(v || null) },
+    { sep: true },
+    { label: "クリア（終了予定なし）", danger: !!cur, on: () => set(null) },
+  ];
+  const r = chipEl.getBoundingClientRect();
+  openMenu(r.left, r.bottom + 4, items);
+}
+
 // 見積のワンクリック変更。開いた瞬間に時間(0〜10)と分(0/15/30/45)のボタンが並び、
 // ワンタップで選択（メニューは開いたまま即反映・閉じた時にサーバー同期）。
 function openEstMenu(chipEl, id, tasks, root) {
@@ -1205,9 +1273,9 @@ function setProgress(barEl, id, root, clientX, tasks) {
 // - テキスト系(タイトル/見積/期限)はセル内インライン入力、列挙(担当/分類/重要度/ステータス)は既存ポップアップ
 // - Ctrl+C/V=セル値コピペ（列の型ごとにテキスト解釈）/ Ctrl+D=選択範囲を上のセルで下方向フィル
 // - 適用は rawSet（履歴なし）＋バッチで history に1エントリ＝コピペ/フィルも1回のUndoで戻る
-const GCOLS = ["proj", "title", "who", "cat", "prio", "due", "est", "state"]; // ナビ対象＝編集可能列（描画順）
-const GTEXT = new Set(["title", "due", "est"]); // セル内インライン入力する列（他は列挙ポップアップ）
-const GLABEL = { proj: "プロジェクト変更", title: "タスク名変更", who: "担当変更", cat: "分類変更", prio: "重要度変更", due: "期限変更", est: "見積変更", state: "ステータス変更" };
+const GCOLS = ["proj", "title", "who", "cat", "prio", "due", "start", "end", "est", "state"]; // ナビ対象＝編集可能列（描画順）
+const GTEXT = new Set(["title", "start", "end", "due", "est"]); // セル内インライン入力する列（他は列挙ポップアップ）
+const GLABEL = { proj: "プロジェクト変更", title: "タスク名変更", who: "担当変更", cat: "分類変更", prio: "重要度変更", start: "開始日変更", end: "終了予定日変更", due: "期限変更", est: "見積変更", state: "ステータス変更" };
 const PRIO_NAME = { 0: "なし", 1: "低", 2: "中", 3: "高", 4: "MUST" };
 const PRIO_NUM = { "なし": 0, "低": 1, "中": 2, "高": 3, "must": 4, "MUST": 4 };
 const STATE_LABEL2KEY = { "未着手": "todo", "進行中": "doing", "連絡待ち": "waiting", "完了": "done" };
@@ -1241,6 +1309,8 @@ function gReadVal(col, t) {
   if (col === "who") return humanAssignees(t).map((a) => a.id).sort((a, b) => a - b);
   if (col === "cat") return userCats(t).map((l) => l.id).sort((a, b) => a - b);
   if (col === "prio") return t.priority || 0;
+  if (col === "start") return startISO(t);
+  if (col === "end") return endISO(t);
   if (col === "due") return dueISO(t);
   if (col === "est") return t.time_estimate || 0;
   if (col === "state") return statusOf(t);
@@ -1253,6 +1323,8 @@ function gValToText(col, t) {
   if (col === "who") return humanAssignees(t).map((a) => a.name || a.username).join(", ");
   if (col === "cat") return userCats(t).map((l) => l.title).join(", ");
   if (col === "prio") return PRIO_NAME[Math.min(t.priority || 0, 4)] ?? "なし";
+  if (col === "start") return startISO(t);
+  if (col === "end") return endISO(t);
   if (col === "due") return dueISO(t);
   if (col === "est") return t.time_estimate ? String(Math.round((t.time_estimate / 3600) * 100) / 100) : "";
   if (col === "state") return STATUS[statusOf(t)].label;
@@ -1268,7 +1340,7 @@ function gParseText(col, text) {
     return hit ? hit.id : null;
   }
   if (col === "title") return s ? s : null;
-  if (col === "due") { if (!s) return ""; const iso = parseSmartDate(s); return iso || null; }
+  if (col === "due" || col === "start" || col === "end") { if (!s) return ""; const iso = parseSmartDate(s); return iso || null; }
   if (col === "est") { if (!s) return 0; const hf = parseFloat(s.replace(/[hH時間\s]/g, "")); return isFinite(hf) && hf >= 0 ? Math.round(hf * 3600) : null; }
   if (col === "prio") { if (/^[0-4]$/.test(s)) return +s; const v = PRIO_NUM[s] ?? PRIO_NUM[s.toLowerCase()]; return v == null ? null : v; }
   if (col === "state") { const k = STATE_LABEL2KEY[s] || (["todo", "doing", "waiting", "done"].includes(s) ? s : null); return k; }
@@ -1301,6 +1373,8 @@ async function gRawSet(col, id, value) {
   }
   if (col === "title") return updateTask(id, { title: value });
   if (col === "prio") return updateTask(id, { priority: value });
+  if (col === "start") return updateTask(id, { start_date: value ? value + "T00:00:00Z" : ZERO_DUE });
+  if (col === "end") return updateTask(id, { end_date: value ? value + "T00:00:00Z" : ZERO_DUE });
   if (col === "due") return updateTask(id, { due_date: value ? value + "T00:00:00Z" : ZERO_DUE });
   if (col === "est") return updateTask(id, { time_estimate: value });
   if (col === "who") {
@@ -1402,7 +1476,7 @@ function gridInline(cell, id, col, initial) {
   input.className = "tb-gedit";
   input.value = initial != null ? initial : cur;
   if (col === "est") { input.inputMode = "decimal"; input.placeholder = "時間"; }
-  if (col === "due") input.placeholder = "例: 明日 / 6/20";
+  if (col === "due" || col === "start" || col === "end") input.placeholder = "例: 明日 / 6/20";
   cell.classList.add("tb-gc-editing");
   host.replaceChildren(input);
   input.focus();
@@ -1931,7 +2005,9 @@ const COLDEF = [
   { k: "group", label: "タスクグループ", stair: true },
   { k: "title", label: "タスク", fixed: true, stair: true },
   { k: "who", label: "担当" },
-  { k: "cat", label: "分類" }, { k: "prio", label: "重要度" }, { k: "due", label: "期限" },
+  { k: "cat", label: "分類" }, { k: "prio", label: "重要度" },
+  // 日付列: 期限（締切）が先、開始予定・終了予定（あくまで予定）が後（要望順）。
+  { k: "due", label: "期限" }, { k: "start", label: "開始予定" }, { k: "end", label: "終了予定" },
   { k: "est", label: "見積" }, { k: "pct", label: "進捗" }, { k: "state", label: "ステータス" },
 ];
 const COLDEF_KEYS = COLDEF.map((c) => c.k);
@@ -2020,27 +2096,35 @@ function rowHtml(r, members, i, manual) {
   const prioBtn = `<button class="tb-cell tb-priobtn" data-prio="${id}" title="クリックで重要度を変更">${prioInner}<span class="tb-cell-car">▾</span></button>`;
   const dueCls = r.due && r.due < todayISO() && !r.done ? "over" : "";
   const dueBtn = `<button class="tb-cell tb-duebtn ${dueCls}" data-due="${id}" title="クリックで期限を変更">${r.due ? r.due.slice(5).replace("-", "/") : "—"}<span class="tb-cell-car">▾</span></button>`;
+  const startCls = r.start && r.start <= todayISO() && !r.done && r.status === "todo" ? "over" : ""; // 開始日を過ぎて未着手=警告
+  const startBtn = `<button class="tb-cell tb-startbtn ${startCls}" data-start="${id}" title="クリックで開始予定日を変更">${r.start ? r.start.slice(5).replace("-", "/") : "—"}<span class="tb-cell-car">▾</span></button>`;
+  const endCls = r.end && r.end < todayISO() && !r.done ? "over" : ""; // 終了予定を過ぎて未完了=警告
+  const endBtn = `<button class="tb-cell tb-endbtn ${endCls}" data-end="${id}" title="クリックで終了予定日を変更">${r.end ? r.end.slice(5).replace("-", "/") : "—"}<span class="tb-cell-car">▾</span></button>`;
   const estBtn = `<button class="tb-cell tb-num tb-estbtn" data-est="${id}" title="クリックで見積を変更">${r.est ? fmtH(r.est) : "—"}<span class="tb-cell-car">▾</span></button>`;
   const st = `<button class="tb-st tb-stbtn ${r.status}" data-st="${id}" title="クリックでステータス変更">${STATUS[r.status].label}<span class="tb-st-car">▾</span></button>`;
   const sel = selectedIds.has(id);
   // ── 階段セル: プロジェクト（上段）＞タスクグループ（中段）＞タスク名（下段）を1つの colspan セルに。
-  // 各段は表示中の階段列の位置（ヘッダー th と同じ STAIR_W 刻み）から始まり、右へ突き抜けて表示＝列幅が伸びない。
+  // 各段のインデントは CSS 変数 --stair1/--stair2（render がヘッダー th の実測幅から累積セット）に追随し、
+  // auto-layout の列膨張とズレない（gantt.js の --mprail 実測方式と同じ）。フォールバック=STAIR_W 刻み。
   // 毎行にプロジェクト/グループを繰り返し表示（各行が自己完結＝どの列でソートしても成立）。
   const stairCols = cols().filter((c) => c.stair);            // 表示中の階段列（1〜3個）
-  const STAIR_W = 110;                                         // th幅と一致させる定数（css() の width:110px と同値）
+  const STAIR_W = 90;                                          // フォールバック値（css() の th width:90px と同値）
   const sIdx = (k) => stairCols.findIndex((c) => c.k === k);
+  const stPad = (k) => { const i = sIdx(k); return i > 0 ? `var(--stair${i}, ${i * STAIR_W}px)` : "0"; };
   const stLines = [];
-  if (sIdx("proj") >= 0) stLines.push(`<div class="tb-st-line tb-st-proj" style="padding-left:${sIdx("proj") * STAIR_W}px"><button class="tb-cell tb-projbtn" data-proj="${id}" title="クリックでプロジェクト（親タスク）を変更">${r.parent ? esc(r.parent.title) : "—"}<span class="tb-cell-car">▾</span></button></div>`);
+  if (sIdx("proj") >= 0) stLines.push(`<div class="tb-st-line tb-st-proj" style="padding-left:${stPad("proj")}"><button class="tb-cell tb-projbtn" data-proj="${id}" title="クリックでプロジェクト（親タスク）を変更">${r.parent ? esc(r.parent.title) : "—"}<span class="tb-cell-car">▾</span></button></div>`);
   // グループ段: プロジェクトがある行は常に表示（未所属は「—」）。クリックでグループ変更メニュー。
   // プロジェクトなしのタスクはグループを持てないので段自体を出さない（従来どおり）。
-  if (sIdx("group") >= 0 && r.parent) stLines.push(`<div class="tb-st-line tb-st-group" style="padding-left:${sIdx("group") * STAIR_W}px"><button class="tb-cell tb-grpbtn" data-grp="${id}" title="クリックでタスクグループを変更">${r.group ? esc(r.group.title) : "—"}<span class="tb-cell-car">▾</span></button></div>`);
-  stLines.push(`<div class="tb-st-line tb-st-title" style="padding-left:${sIdx("title") * STAIR_W}px"><span class="tb-tle">${esc(r.title)}</span>${r.review ? ` <span class="tb-k review">レビュー</span>` : ""}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">${icon("flag", { size: 12 })}</span>` : ""} <button type="button" class="tb-timer" data-timer="${id}" data-title="${esc(r.title)}" title="このタスクでタイマー開始" aria-label="このタスクでタイマー開始">${icon("timer", { size: 13 })}</button>${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">${icon("play", { size: 11 })}</button>` : ""}</div>`);
+  if (sIdx("group") >= 0 && r.parent) stLines.push(`<div class="tb-st-line tb-st-group" style="padding-left:${stPad("group")}"><button class="tb-cell tb-grpbtn" data-grp="${id}" title="クリックでタスクグループを変更">${r.group ? esc(r.group.title) : "—"}<span class="tb-cell-car">▾</span></button></div>`);
+  stLines.push(`<div class="tb-st-line tb-st-title" style="padding-left:${stPad("title")}"><span class="tb-tle">${esc(r.title)}</span>${r.review ? ` <span class="tb-k review">レビュー</span>` : ""}${r.t.is_favorite ? ` <span class="tb-fav" title="フラグ">${icon("flag", { size: 12 })}</span>` : ""} <button type="button" class="tb-timer" data-timer="${id}" data-title="${esc(r.title)}" title="このタスクでタイマー開始" aria-label="このタスクでタイマー開始">${icon("timer", { size: 13 })}</button>${r.fable ? ` <button type="button" class="tb-fable" data-fable="${id}" data-title="${esc(r.title)}" title="Fableに実行させる">${icon("play", { size: 11 })}</button>` : ""}</div>`);
   const stairTd = `<td class="tb-stair tb-gc" data-col="title" colspan="${stairCols.length}">${stLines.join("")}</td>`;
   // 列ごとの <td> をマップで持ち、cols() の順序（表示/非表示・並べ替え反映）で出力する（階段3列は stairTd に統合済み）。
   const cellOf = {
     who: `<td class="tb-gc" data-col="who">${whoBtn}</td>`,
     cat: `<td class="tb-gc" data-col="cat">${catBtn}</td>`,
     prio: `<td class="tb-gc" data-col="prio">${prioBtn}</td>`,
+    start: `<td class="tb-gc" data-col="start">${startBtn}</td>`,
+    end: `<td class="tb-gc" data-col="end">${endBtn}</td>`,
     due: `<td class="tb-gc" data-col="due">${dueBtn}</td>`,
     est: `<td class="tb-gc" data-col="est">${estBtn}</td>`,
     pct: `<td><div class="tb-bar tb-pctbar" data-pct="${id}" role="slider" tabindex="0" aria-valuenow="${r.pct}" aria-valuemin="0" aria-valuemax="100" title="クリックで進捗を変更（0/25/50/75/100）"><i style="width:${r.pct}%"></i></div><span class="tb-pct">${r.pct}%</span></td>`,
@@ -2408,13 +2492,14 @@ function css() {
   .tb tbody tr.st-doing:hover{background:#f9edc8}
   .tb tbody tr.st-waiting:hover{background:#e0edff}
   .tb tbody tr.st-done:hover{background:#ebedf0}
-  /* 階段セル（プロジェクト＞タスクグループ＞タスク）。110px は rowHtml の STAIR_W と同値＝th幅と揃える */
-  .tb th[data-k="proj"],.tb th[data-k="group"]{width:110px;min-width:110px}
-  .tb-stair{min-width:300px}
-  .tb-st-line{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.5}
-  .tb-st-proj .tb-cell{font-size:12px;color:${C.muted};padding-top:1px;padding-bottom:1px}
-  .tb-st-group .tb-cell{font-size:12px;color:${C.muted};padding-top:1px;padding-bottom:1px}
-  .tb-st-title{font-weight:600}
+  /* 階段セル（プロジェクト＞タスクグループ＞タスク）。90px は rowHtml の STAIR_W と同値＝th幅と揃える */
+  .tb th[data-k="proj"],.tb th[data-k="group"]{width:90px;min-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px;padding-left:8px;padding-right:8px}
+  .tb-stair{min-width:340px;padding-top:9px;padding-bottom:9px}
+  .tb-st-line{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.35}
+  .tb-st-proj .tb-cell{font-size:12px;color:${C.muted};padding-top:0;padding-bottom:0}
+  .tb-st-group .tb-cell{font-size:12px;color:${C.muted};padding-top:0;padding-bottom:0}
+  /* タイトル行だけ折り返し可（nowrap/ellipsis を上書き）＝長いタスク名は 30em で折り返して縦に伸びる */
+  .tb-st-title{font-weight:600;white-space:normal;word-break:break-word;overflow:visible;text-overflow:clip;max-width:30em}
   .tb-sub{font-size:11px;color:${C.muted};font-weight:400;margin-top:2px}
   .tb-who-list{display:flex;flex-direction:column;gap:1px;min-width:0;align-items:flex-start}
   .tb-who-nm{font-weight:700;white-space:nowrap}
