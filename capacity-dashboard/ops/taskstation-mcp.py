@@ -18,6 +18,9 @@ v2.2 追加:
   依存関係: add_dependency / remove_dependency（既存 relations の follows/precedes に乗せる＝
   SPA の依存グラフ・ガント依存線・「先行タスク」欄と同一規約。A が B に follows ＝ B の完了が A の前に必要）
   my_agenda はブロック中（未完了の先行タスクあり）を「⛔ ブロック中」セクションに分離表示
+v2.3 追加（#693 運用ルールの MCP 強制＝違反はエラーで正しい道を案内する決定論的ガード）:
+  complete_task の summary 必須化 / set_progress(100以上) 拒否→complete_task へ誘導 /
+  分類「人間」タスクへの変更系ツール拒否（guard_human）/ resume_task は連絡待ち解除専用 / start_task は完了済み拒否
 認証（2資格情報方式）:
   ~/.config/taskstation/fable.env  = 操作の名義（コメント・タスク更新・進捗・作成・担当・plans。
                                      AI発言と人間の区別＝UXの核なので fable 名義を維持）
@@ -191,6 +194,19 @@ def remove_label(task_id, title):
             raise
 
 
+def guard_human(cur):
+    """分類「人間」のタスクへの変更系操作を拒否する共通ガード（#693 運用ルールの強制）。
+
+    適用: start_task / set_progress / set_estimate / set_due / complete_task /
+    escalate / resume_task / schedule_task。
+    対象外（許可）: post_comment / add_dependency / remove_dependency /
+    create_subtask / get_task / add_note（読み取り・申し送り・構造化は妨げない）。
+    """
+    if "人間" in task_labels(cur):
+        raise Exception("このタスクは分類「人間」＝人間専用です。AIからの変更はできません"
+                        "（コメント post_comment と依存 add_dependency は可）")
+
+
 def comment(task_id, text):
     """本物のタスクコメント（全員閲覧・SPAのタスク編集モーダルに出る）を投稿。"""
     ts(f"/tasks/{task_id}/comments", "PUT", {"comment": text})
@@ -319,25 +335,31 @@ def t_create_subtask(a):
 
 
 def t_set_progress(a):
-    pct = max(0, min(100, int(a["percent"])))
+    pct = int(a["percent"])
+    if pct >= 100:  # 「100%なのに未完了」という状態を作らせない（#693）
+        raise Exception("進捗100%は complete_task(summary) を使ってください"
+                        "（「100%なのに未完了」という状態を作らない運用ルール）")
+    guard_human(ts(f"/tasks/{a['task_id']}"))
+    pct = max(0, pct)
     safe_update(a["task_id"], {"percent_done": pct})
     return f"進捗を {pct}% に更新しました"
 
 
 def t_set_estimate(a):
+    guard_human(ts(f"/tasks/{a['task_id']}"))
     sec = int(round(float(a["hours"]) * 3600))
     safe_update(a["task_id"], {"time_estimate": sec})
     return f"見積りを {a['hours']}h に更新しました"
 
 
 def t_complete_task(a):
-    if a.get("summary"):
-        comment(a["task_id"], f"🤖 ✅ 完了報告\n\n{a['summary']}")
-        safe_update(a["task_id"], {"done": True, "percent_done": 100})
-        remove_label(a["task_id"], WAIT_LABEL)
-        return f"タスク #{a['task_id']} を完了にし、完了報告コメントを投稿しました"
+    if not str(a.get("summary") or "").strip():  # summary 必須（#693。fable-runner は complete_task 未使用）
+        raise Exception("完了には summary（何をした・成果物の場所・検証状態）が必須です（運用ルール）")
+    guard_human(ts(f"/tasks/{a['task_id']}"))
+    comment(a["task_id"], f"🤖 ✅ 完了報告\n\n{a['summary']}")
     safe_update(a["task_id"], {"done": True, "percent_done": 100})
-    return f"タスク #{a['task_id']} を完了にしました"
+    remove_label(a["task_id"], WAIT_LABEL)
+    return f"タスク #{a['task_id']} を完了にし、完了報告コメントを投稿しました"
 
 
 def t_my_agenda(a):
@@ -412,6 +434,11 @@ def t_post_comment(a):
 
 
 def t_start_task(a):
+    cur = ts(f"/tasks/{a['task_id']}")
+    guard_human(cur)
+    if cur.get("done"):  # 完了済みの再開は不可（#693）
+        raise Exception(f"#{a['task_id']} は完了済みです。完了済みタスクの再開はできません"
+                        "（必要なら人間がUIで戻してください）")
     # doing化: percent は safe_update が既存値を維持。連絡待ちラベルは外す
     safe_update(a["task_id"], {"done": False, "started_at": now_iso()})
     remove_label(a["task_id"], WAIT_LABEL)
@@ -421,6 +448,7 @@ def t_start_task(a):
 
 
 def t_escalate(a):
+    guard_human(ts(f"/tasks/{a['task_id']}"))
     # waiting化: percent/started は維持
     safe_update(a["task_id"], {"done": False})
     add_label(a["task_id"], WAIT_LABEL)
@@ -432,6 +460,10 @@ def t_escalate(a):
 
 
 def t_resume_task(a):
+    cur = ts(f"/tasks/{a['task_id']}")
+    guard_human(cur)
+    if WAIT_LABEL not in task_labels(cur):  # 連絡待ち解除専用（#693）
+        raise Exception(f"#{a['task_id']} は連絡待ちではありません。着手は start_task を使ってください")
     remove_label(a["task_id"], WAIT_LABEL)
     safe_update(a["task_id"], {"done": False, "started_at": now_iso()})
     if a.get("note"):
@@ -483,6 +515,7 @@ def t_create_task(a):
 def t_set_due(a):
     """期日変更の唯一の入口（「相談の上」ゲート）。reason 必須＝合意内容を履歴とコメントに残す。"""
     cur = ts(f"/tasks/{a['task_id']}")
+    guard_human(cur)
     old = cur.get("due_date") or ""
     old_s = old[:10] if has_date(old) else "期日なし"
     safe_update(a["task_id"], {"due_date": a["date"] + "T00:00:00Z"})  # diff は safe_update が type:field で自動記録
@@ -491,6 +524,7 @@ def t_set_due(a):
 
 
 def t_schedule_task(a):
+    guard_human(ts(f"/tasks/{a['task_id']}"))
     sec = int(round(float(a["hours"]) * 3600))
     if not a.get("end_date"):  # 単日登録（従来互換）
         ts(f"/tasks/{a['task_id']}/plans", "PUT",
@@ -550,12 +584,12 @@ TOOLS = [
     ("create_subtask", "タスクを分割してサブタスクを作る（担当は付けない＝人間が割り振る）",
      {"parent_task_id": NUM, "title": STR, "estimate_hours": NUM, "description": STR},
      ["parent_task_id", "title"], t_create_subtask),
-    ("set_progress", "タスクの進捗率(0-100)を更新する",
+    ("set_progress", "タスクの進捗率(0-99)を更新する。100にするのは complete_task（summary必須）を使う",
      {"task_id": NUM, "percent": NUM}, ["task_id", "percent"], t_set_progress),
     ("set_estimate", "タスクの見積り(時間)を更新する",
      {"task_id": NUM, "hours": NUM}, ["task_id", "hours"], t_set_estimate),
-    ("complete_task", "タスクを完了にする（本当に完了したときだけ使う）。summary（何をした・成果物の場所・検証状態）を渡すと完了報告コメントを投稿してから完了化する",
-     {"task_id": NUM, "summary": STR}, ["task_id"], t_complete_task),
+    ("complete_task", "タスクを完了にする（本当に完了したときだけ使う）。summary 必須（何をした・成果物の場所・検証状態）＝完了報告コメントを投稿してから完了化する",
+     {"task_id": NUM, "summary": STR}, ["task_id", "summary"], t_complete_task),
     ("my_agenda", "AIが今やるべきタスク一覧（未完了で fable 担当 or ラベルAI/AI+人間）。連絡待ち＝人間待ちは末尾に分離表示。date は基準日(YYYY-MM-DD・省略=今日、期限超過判定に使う)",
      {"date": STR}, [], t_my_agenda),
     ("list_tasks", "全タスクから絞り込み一覧（テンプレートWSは除外）。label=ラベル名 / assignee=username / status=todo・doing・waiting・done・undone / query=タイトル部分一致 / due_before=YYYY-MM-DD(この日以前が期限)",
@@ -566,7 +600,7 @@ TOOLS = [
      {"task_id": NUM, "plan": STR}, ["task_id"], t_start_task),
     ("escalate", "人間の判断が必要になったら迷わず使う。reason=何に詰まったか、options=人間への選択肢提示。連絡待ち化して人間の一覧に『連絡待ち』として浮き上がる",
      {"task_id": NUM, "reason": STR, "options": STR}, ["task_id", "reason"], t_escalate),
-    ("resume_task", "エスカレーション解除後の再開用。連絡待ちを外して進行中に戻す。note があればコメント投稿",
+    ("resume_task", "エスカレーション解除後の再開専用（連絡待ちのタスクにのみ使える）。連絡待ちを外して進行中に戻す。note があればコメント投稿。通常の着手は start_task",
      {"task_id": NUM, "note": STR}, ["task_id"], t_resume_task),
     ("create_task", "タスクを新規作成する。goal は説明末尾に[ゴール]として結合。labels は無ければ新規作成して付与。assignees は 森田 / fable / taskstation-ai。priority は 0-4（0=なし〜4=MUST）。blocked_by=先行タスクid配列（依存関係を張る）。parent_task_id 指定でその配下（サブタスク）、無指定はインボックスWSに作成",
      {"title": STR, "description": STR, "goal": STR, "estimate_hours": NUM, "due_date": STR,
@@ -600,6 +634,9 @@ INSTRUCTIONS = (
     "タスク間の依存関係は add_dependency で構造化する(説明文への手書き禁止)。"
     "my_agenda の⛔ブロック中(先行タスク待ち)のタスクには着手しない。"
     "人間のタスク(分類=人間)は読み取り以外触らない。"
+    "運用ルール（ツールが強制）: ステータスは 未着手→進行中(start_task)→連絡待ち(escalate)→完了(complete_task) "
+    "の4値でツール経由のみ遷移。完了は complete_task+summary 必須（set_progress 100 は不可）。"
+    "resume_task は連絡待ち解除専用。分類「人間」のタスクはAIから変更不可。"
 )
 
 

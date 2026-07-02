@@ -40,6 +40,20 @@ set_progress + post_comment  … 節目ごとに進捗%と作業ログを記録
 
 `add_note`（AIノート）は下書き・思考メモ用（作成者のみ閲覧）。人間に見せる情報は必ず post_comment。
 
+### MCPが強制する運用ルール（2026-07-03〜・お願いではなくツールがエラーで拒否する）
+
+セッションごとに使い方がばらつかないよう、以下は MCP ツール自体が強制する:
+
+| ルール | 強制のされ方 |
+|---|---|
+| ステータスは4値（未着手→進行中→連絡待ち→完了）・遷移はツール経由のみ | 着手=start_task / 人間待ち=escalate / 再開=resume_task / 完了=complete_task |
+| 完了時は完了報告が必須 | complete_task の summary が必須引数（何をした・成果物の場所・検証状態） |
+| 「進捗100%なのに未完了」を作らない | set_progress(100) はエラー→ complete_task へ誘導 |
+| resume_task は連絡待ち解除専用 | 連絡待ちでないタスクにはエラー→ start_task へ誘導 |
+| 分類「人間」のタスクはAIから変更不可 | 変更系8ツール（start/progress/estimate/due/complete/escalate/resume/schedule）が拒否。コメント・依存付けは可 |
+| 完了済みタスクの再開はAIからしない | start_task が拒否（戻すのは人間がUIで） |
+| 期日の無断変更禁止 | set_due のみ・reason 必須・変更はコメント＋履歴に記録 |
+
 ## 3. 人間側の見え方（TaskStation で完結）
 
 - **進捗**: 一覧・かんばん・ホームの進捗%とステータスがそのまま AI の実施状況
