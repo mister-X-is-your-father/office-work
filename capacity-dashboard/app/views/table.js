@@ -507,6 +507,7 @@ export async function render(root) {
     tbody.onclick = (e) => {
       let el;
       if (gSwallowClick) { gSwallowClick = false; return; } // インライン編集を閉じただけのクリック＝何もしない
+      if (Date.now() < _menuSwallowUntil) { _menuSwallowUntil = 0; return; } // メニューを閉じたクリック＝何もしない
       if ((el = e.target.closest(".tb-stbtn")))   { openStatusMenu(el, +el.dataset.st, tasks, root); return; }
       if ((el = e.target.closest(".tb-projbtn")))  { openProjectMenu(el, +el.dataset.proj, tasks, root); return; }
       if ((el = e.target.closest(".tb-grpbtn")))   { openGroupMenu(el, +el.dataset.grp, tasks, root); return; }
@@ -563,6 +564,7 @@ export async function render(root) {
     // ダブルクリック（bubble）: グリッド編集／行ダブルクリック編集。
     tbody.ondblclick = (e) => {
       if (gSwallowClick) { gSwallowClick = false; return; } // 編集を閉じたクリックの連打対策
+      if (Date.now() < _menuSwallowUntil) { _menuSwallowUntil = 0; return; } // メニューを閉じたクリック＝何もしない
       // 階段セルの余白（タスク名・ボタン・バッジ以外）ダブルクリック → タスク編集フォーム（要望）。
       // タスク名テキスト自体はシングルクリックでインライン編集が開くので対象外。
       if (e.target.closest(".tb-stair") && !e.target.closest(".tb-tle, .tb-timer, .tb-fable, .tb-projbtn, .tb-grpbtn, .tb-k, .tb-fav, .tb-gedit")) {
@@ -609,6 +611,7 @@ export async function render(root) {
   const card = root.querySelector(".ol-card");
   if (card) {
     card.onclick = (e) => {
+      if (Date.now() < _menuSwallowUntil) { _menuSwallowUntil = 0; return; } // メニューを閉じたクリック＝何もしない
       // 1. 折りたたみトグル（.ol-tw[data-id]）。子なしプレースホルダ（.ol-tw.none＝data-id無し）は無反応。
       const tw = e.target.closest(".ol-tw");
       if (tw) { if (tw.dataset.id) { const id = +tw.dataset.id; olCollapsed.has(id) ? olCollapsed.delete(id) : olCollapsed.add(id); saveOlCollapsed(UID); render(root); } return; }
@@ -842,7 +845,7 @@ function openMenu(x, y, items, opts = {}) {
   const mw = m.offsetWidth, mh = m.offsetHeight;
   m.style.left = Math.max(6, Math.min(x, window.innerWidth - mw - 8)) + "px";
   m.style.top = Math.max(6, Math.min(y, window.innerHeight - mh - 8)) + "px";
-  const onDown = (ev) => { if (!m.contains(ev.target)) closeRowMenu(); };
+  const onDown = (ev) => { if (!m.contains(ev.target)) { closeRowMenu(); _menuSwallowUntil = Date.now() + 400; } }; // 外側クリック閉じ＝直後のclickを食う（Escape/スクロール/項目選択閉じではセットしない）
   const onKey = (ev) => { if (ev.key === "Escape") closeRowMenu(); };
   // ページ側スクロールでは閉じるが、メニュー内（時間グリッド等）のスクロールでは閉じない。
   const onScroll = (ev) => { if (ev && ev.target && ev.target.nodeType === 1 && m.contains(ev.target)) return; closeRowMenu(); };
@@ -1237,7 +1240,7 @@ function openColumnsMenu(anchorEl, onApply) {
   const r = anchorEl.getBoundingClientRect();
   m.style.left = Math.max(6, Math.min(r.left, window.innerWidth - mw - 8)) + "px";
   m.style.top = Math.max(6, Math.min(r.bottom + 4, window.innerHeight - mh - 8)) + "px";
-  const onDown = (ev) => { if (!m.contains(ev.target)) closeRowMenu(); };
+  const onDown = (ev) => { if (!m.contains(ev.target)) { closeRowMenu(); _menuSwallowUntil = Date.now() + 400; } }; // 外側クリック閉じ＝直後のclickを食う（Escape/スクロール/項目選択閉じではセットしない）
   const onKey = (ev) => { if (ev.key === "Escape") closeRowMenu(); };
   setTimeout(() => { document.addEventListener("pointerdown", onDown, true); document.addEventListener("keydown", onKey); }, 0);
   _ctxCleanup = () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); };
@@ -1284,6 +1287,7 @@ let gActive = null;   // {id, col} アクティブセル（タスクID＋列キ�
 let gAnchor = null;   // {id, col} 矩形選択のアンカー（null時はアクティブ＝単一セル）
 let gEditing = false; // インライン編集中か（グリッドのキー操作を止める）
 let gSwallowClick = false; // 編集中の外側クリック＝閉じるだけ（直後の click/dblclick を1回だけ無効化）
+let _menuSwallowUntil = 0; // メニューを外側クリックで閉じた直後のクリックを無効化する期限（timestamp方式＝click不発でも残留しない）
 let gClip = null;     // 内部クリップボード {cols:[colKey], rows:[[text,...],...]}
 let gKeyWired = false;
 let gCtx = null;      // {root, tasks, members, labels, today}
@@ -2501,9 +2505,9 @@ function css() {
   /* タイトル行だけ折り返し可（nowrap/ellipsis を上書き）＝長いタスク名は 30em で折り返して縦に伸びる */
   .tb-st-title{font-weight:600;white-space:normal;word-break:break-word;overflow:visible;text-overflow:clip;max-width:30em}
   .tb-sub{font-size:11px;color:${C.muted};font-weight:400;margin-top:2px}
-  .tb-who-list{display:flex;flex-direction:column;gap:1px;min-width:0;align-items:flex-start}
-  .tb-who-nm{font-weight:700;white-space:nowrap}
-  .tb-asbtn{white-space:nowrap;min-width:5.5em}  /* 4文字＋▾が確実に収まる幅 */
+  .tb-who-list{display:flex;flex-direction:column;gap:1px;min-width:0;align-items:flex-start;max-width:5.5em}
+  .tb-who-nm{font-weight:700;white-space:normal;word-break:break-word;line-height:1.3}  /* 入りきらない名前は改行（要望） */
+  .tb-asbtn{min-width:4em}
   .tb-k{font-size:10.5px;color:${C.muted};border:1px solid ${C.line};border-radius:5px;padding:1px 6px;white-space:nowrap}
   .tb-k.review{color:${C.fill};border-color:#cfe0ff}
   .tb-cat{font-size:10.5px;border:1px solid;border-radius:5px;padding:1px 7px;white-space:nowrap;font-weight:600}
