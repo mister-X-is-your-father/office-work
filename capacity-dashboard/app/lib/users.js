@@ -14,3 +14,8 @@ export const humanAssignees = (t) => (t.assignees || []).filter((a) => !isAiUser
 
 // 人間担当の先頭1人（なければ null）。「担当アバター1人を出す」系の SSoT。
 export const firstHuman = (t) => humanAssignees(t)[0] || null;
+
+// 表示用の担当（人間優先・人間がいなければAI担当・どちらも無ければ null）。
+// AI×人間協業（taskstation-ai）でAI単独担当のタスクが普通になったため、「未設定」とは区別して
+// 表示する。キャパ計算・未アサイン判定は従来どおり humanAssignees / firstHuman 基準（AIは載らない）。
+export const displayAssignee = (t) => firstHuman(t) || (t.assignees || []).find((a) => isAiUser(a)) || null;

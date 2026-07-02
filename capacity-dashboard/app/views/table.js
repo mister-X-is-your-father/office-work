@@ -14,7 +14,7 @@ import { taskMatches, next7End, EMPTY_FILTER, BUILTIN_VIEWS } from "../lib/smart
 import { icon } from "../lib/icons.js";
 import { startFocusFor } from "./pomodoro.js";
 import { statePatchFor } from "../lib/taskstate.js";
-import { humanAssignees } from "../lib/users.js";
+import { humanAssignees, displayAssignee } from "../lib/users.js";
 import { snapshotTask, restoreTask } from "../lib/tasksnapshot.js";
 import * as history from "../lib/history.js";
 
@@ -184,7 +184,7 @@ function deriveRow(t, ctx) {
   const immParent = immRel ? ((ctx.byId && ctx.byId.get(immRel.id)) || immRel) : null;
   const group = (immParent && parent && immParent.id !== parent.id) ? immParent : null;
   return {
-    t, title: t.title, who: (t.assignees || []).find((a) => !isAiUser(a)) || null,
+    t, title: t.title, who: displayAssignee(t), // 表示用SSoT: 人間優先→いなければAI担当→null（AI単独担当を「未設定」にしない）
     fable: ctx.execOk && !t.done && (t.assignees || []).some((a) => isAiUser(a)) && ((t.created_by || {}).id || 0) === ctx.meId,
     parent, group,
     review: isReviewTask(t), prio: prioBucket(t.priority), cat: categoryLabels(t)[0] || null,
@@ -200,7 +200,7 @@ function listSummaryText(rows, today) {
 }
 
 export async function render(root) {
-  const { tasks, members, me = null, settings = {}, labels = [], recurrences = [], holidaysByDate = null } = await load();
+  const { tasks, members, aiMembers = [], me = null, settings = {}, labels = [], recurrences = [], holidaysByDate = null } = await load();
   const presets = settings.sortPresets || [];   // グローバル共有プリセット
   const canEditPresets = !!settings.canEdit;     // 保存/削除は許可ユーザーのみ（適用は全員可）
   const today = todayISO();
@@ -496,7 +496,7 @@ export async function render(root) {
       if ((el = e.target.closest(".tb-stbtn")))   { openStatusMenu(el, +el.dataset.st, tasks, root); return; }
       if ((el = e.target.closest(".tb-projbtn")))  { openProjectMenu(el, +el.dataset.proj, tasks, root); return; }
       if ((el = e.target.closest(".tb-grpbtn")))   { openGroupMenu(el, +el.dataset.grp, tasks, root); return; }
-      if ((el = e.target.closest(".tb-asbtn")))    { openAssigneeMenu(el, +el.dataset.as, tasks, members, root); return; }
+      if ((el = e.target.closest(".tb-asbtn")))    { openAssigneeMenu(el, +el.dataset.as, tasks, members, aiMembers, root); return; }
       if ((el = e.target.closest(".tb-catbtn")))   { openCategoryMenu(el, +el.dataset.cat, tasks, labels, root); return; }
       if ((el = e.target.closest(".tb-priobtn")))  { openPrioMenu(el, +el.dataset.prio, tasks, root); return; }
       if ((el = e.target.closest(".tb-duebtn")))   { openDueMenu(el, +el.dataset.due, tasks, root, today); return; }
@@ -973,7 +973,8 @@ function pushSetEdit(label, before, after, getCur, addFn, removeFn) {
 }
 
 // 担当のワンクリック変更（メンバーを複数トグル・メニューは開いたまま即反映）。
-function openAssigneeMenu(chipEl, id, tasks, members, root) {
+// aiMembers = AI担当（taskstation-ai 等）。人間メンバーの後に 🤖 付きで並べ、トグル挙動は同一。
+function openAssigneeMenu(chipEl, id, tasks, members, aiMembers, root) {
   closeRowMenu();
   const t = (tasks || []).find((x) => x.id === id); if (!t) return;
   if (!t.assignees) t.assignees = [];
@@ -986,8 +987,8 @@ function openAssigneeMenu(chipEl, id, tasks, members, root) {
   // 閉じた時に onClose で before→最終集合の差分を1回だけ API へ収束適用＋履歴1アクション（順序逆転を防ぐ）。
   const commit = async () => { await applySetConverge(t.assignees.map((a) => a.id), () => before, addFn, removeFn); recordAssignees(); patchRow(id, root, { col: "who" }); };
   const build = () => {
-    const items = (members || []).map((m) => ({
-      label: m.name || m.username,
+    const mk = (m, ai) => ({
+      label: (ai ? "🤖 " : "") + (m.name || m.username),
       check: t.assignees.some((a) => a.id === m.id),
       toggle: true,
       on: () => {
@@ -995,7 +996,8 @@ function openAssigneeMenu(chipEl, id, tasks, members, root) {
         if (t.assignees.some((a) => a.id === m.id)) { t.assignees = t.assignees.filter((a) => a.id !== m.id); }
         else { t.assignees = [...t.assignees, { id: m.id, username: m.username, name: m.name }]; }
       },
-    }));
+    });
+    const items = [...(members || []).map((m) => mk(m, false)), ...(aiMembers || []).map((m) => mk(m, true))];
     if (t.assignees.length) items.push({ sep: true }, { label: "担当なし（全員外す）", danger: true, on: () => { dirty = true; t.assignees = []; commit(); } });
     return items;
   };
@@ -2004,9 +2006,12 @@ function bulkBarHtml(rows) {
 
 function rowHtml(r, members, i, manual) {
   const id = r.t.id;
-  const wn = r.who ? (r.who.name || r.who.username) : "";
-  // 担当: 丸チップ廃止＝名前テキスト（メンバー色）を4文字程度は横に見えるよう表示（要望）。
-  const whoBtn = `<button class="tb-cell tb-asbtn" data-as="${id}" title="クリックで担当を変更">${r.who ? `<span class="tb-who-nm" style="color:${member_color(r.who.id)}">${esc(wn)}</span>` : "未設定"}<span class="tb-cell-car">▾</span></button>`;
+  // 担当: 全担当を1行ずつ縦に表示（要望）。並び=人間（assignees順）→AI（🤖付き・担当メニューと整合）。
+  const whoList = [...humanAssignees(r.t), ...(r.t.assignees || []).filter((a) => isAiUser(a))];
+  const whoInner = whoList.length
+    ? `<span class="tb-who-list">${whoList.map((a) => `<span class="tb-who-nm" style="color:${member_color(a.id)}">${isAiUser(a) ? "🤖 " : ""}${esc(a.name || a.username)}</span>`).join("")}</span>`
+    : "未設定";
+  const whoBtn = `<button class="tb-cell tb-asbtn" data-as="${id}" title="クリックで担当を変更">${whoInner}<span class="tb-cell-car">▾</span></button>`;
   const cats = categoryLabels(r.t);
   const catInner = cats.length ? cats.map((c) => `<span class="tb-cat" style="color:${categoryColor(c)};border-color:${categoryColor(c)}40">${esc(c.title)}</span>`).join(" ") : `<span class="tb-cat none">—</span>`;
   const catBtn = `<button class="tb-cell tb-catbtn" data-cat="${id}" title="クリックで分類を変更">${catInner}<span class="tb-cell-car">▾</span></button>`;
@@ -2042,7 +2047,7 @@ function rowHtml(r, members, i, manual) {
     state: `<td class="tb-gc" data-col="state">${st}</td>`,
   };
   const body = stairTd + cols().filter((c) => !c.stair).map((c) => cellOf[c.k] || "").join("");
-  return `<tr data-id="${id}" class="${manual ? "tb-draggable" : ""}${sel ? " tb-sel" : ""}">
+  return `<tr data-id="${id}" class="${manual ? "tb-draggable" : ""}${sel ? " tb-sel" : ""} st-${r.status}">
     <td class="tb-selcol"><span class="tb-rowck${sel ? " on" : ""}" data-ck="${id}" role="checkbox" aria-checked="${sel}" title="選択">${sel ? icon("check", { size: 12 }) : ""}</span></td>
     ${body}
   </tr>`;
@@ -2080,15 +2085,15 @@ function olRowHtml(node, depth, counts) {
     : olKind === "group" ? `<span class="ol-kind ol-kind-group">タスクグループ</span>` : "";
   const open = !olCollapsed.has(t.id);
   const st = statusOf(t);
-  const who = (t.assignees || [])[0];
-  const wn = who ? (who.name || who.username) : "";
+  // 担当: 全担当を1行ずつ縦に表示（要望）。並び=人間（assignees順）→AI（🤖付き・担当メニューと整合）。
+  const whoList = [...humanAssignees(t), ...(t.assignees || []).filter((a) => isAiUser(a))];
   const cc = counts.get(t.id);
   const childInfo = has ? `<span class="ol-cc">${cc.done}/${cc.total}</span>` : "";
   const tw = has ? `<span class="ol-tw" data-id="${t.id}">${open ? "▾" : "▸"}</span>` : `<span class="ol-tw none"></span>`;
   const due = olDueLabel(t);
   // 親付け替え用: 現在の親(プロジェクト=親タスク)のID。related_tasks.parenttask の先頭。ルートなら空。
   const parentId = ((((t.related_tasks || {}).parenttask) || [])[0] || {}).id || "";
-  return `<div class="ol-row" data-id="${t.id}" data-parent="${parentId}" draggable="true" style="padding-left:${OL_INDENT_BASE + depth * OL_INDENT_STEP}px">
+  return `<div class="ol-row st-${st}" data-id="${t.id}" data-parent="${parentId}" draggable="true" style="padding-left:${OL_INDENT_BASE + depth * OL_INDENT_STEP}px">
     ${tw}
     <span class="ol-cb ${st}" data-id="${t.id}" data-done="${t.done ? 1 : 0}" title="クリックで完了を切替"></span>
     <span class="ol-name ${t.done ? "done" : ""}">${esc(t.title)}</span>
@@ -2096,7 +2101,7 @@ function olRowHtml(node, depth, counts) {
     ${childInfo}
     <span class="ol-meta">
       <button type="button" class="ol-addsub" data-pid="${t.id}" data-proj="${t.project_id || 0}" data-depth="${depth}" title="子タスクを追加">＋</button>
-      ${who ? `<span class="ol-who" style="color:${member_color(who.id)}">${esc(wn)}</span>` : ""}
+      ${whoList.length ? `<span class="ol-who-list">${whoList.map((a) => `<span class="ol-who" style="color:${member_color(a.id)}">${isAiUser(a) ? "🤖 " : ""}${esc(a.name || a.username)}</span>`).join("")}</span>` : ""}
       ${due ? `<span class="ol-due">${due}</span>` : ""}
       <span class="ol-st ${st}">${STATUS[st].label}</span>
     </span>
@@ -2394,6 +2399,15 @@ function css() {
   .tb td{padding:15px 12px;border-bottom:1px solid ${C.line};vertical-align:middle}
   .tb th:last-child,.tb td:last-child{padding-right:20px}
   .tb tbody tr:hover{background:#f7fbff}
+  /* ステータス行背景（要望: 進行中=クリーム/連絡待ち=青/完了=グレー非活性。todoは無色）。
+     tr:hover(同詳細度)より後に定義＝地色が勝ち、hoverは各色の少し濃い版。選択(.tb-sel)は td 背景なので常に最優先 */
+  .tb tbody tr.st-doing{background:#fdf6e0}
+  .tb tbody tr.st-waiting{background:#eef5ff}
+  .tb tbody tr.st-done{background:#f3f4f6}
+  .tb tbody tr.st-done td{opacity:.65}
+  .tb tbody tr.st-doing:hover{background:#f9edc8}
+  .tb tbody tr.st-waiting:hover{background:#e0edff}
+  .tb tbody tr.st-done:hover{background:#ebedf0}
   /* 階段セル（プロジェクト＞タスクグループ＞タスク）。110px は rowHtml の STAIR_W と同値＝th幅と揃える */
   .tb th[data-k="proj"],.tb th[data-k="group"]{width:110px;min-width:110px}
   .tb-stair{min-width:300px}
@@ -2402,6 +2416,7 @@ function css() {
   .tb-st-group .tb-cell{font-size:12px;color:${C.muted};padding-top:1px;padding-bottom:1px}
   .tb-st-title{font-weight:600}
   .tb-sub{font-size:11px;color:${C.muted};font-weight:400;margin-top:2px}
+  .tb-who-list{display:flex;flex-direction:column;gap:1px;min-width:0;align-items:flex-start}
   .tb-who-nm{font-weight:700;white-space:nowrap}
   .tb-asbtn{white-space:nowrap;min-width:5.5em}  /* 4文字＋▾が確実に収まる幅 */
   .tb-k{font-size:10.5px;color:${C.muted};border:1px solid ${C.line};border-radius:5px;padding:1px 6px;white-space:nowrap}
@@ -2464,6 +2479,13 @@ function css() {
   .ol-row{display:flex;align-items:center;gap:8px;padding:7px 14px 7px 0;border-bottom:1px solid ${C.line};font-size:13.5px;cursor:pointer}
   .ol-row:last-child{border-bottom:0}
   .ol-row:hover{background:#f7fbff}
+  /* ステータス行背景（表モードと同配色。todoは無色）。hover(同詳細度)より後に定義＝地色が勝つ */
+  .ol-row.st-doing{background:#fdf6e0}
+  .ol-row.st-waiting{background:#eef5ff}
+  .ol-row.st-done{background:#f3f4f6;opacity:.65}
+  .ol-row.st-doing:hover{background:#f9edc8}
+  .ol-row.st-waiting:hover{background:#e0edff}
+  .ol-row.st-done:hover{background:#ebedf0}
   .ol-tw{width:28px;height:28px;margin:-6px 0;flex:none;display:grid;place-items:center;color:${C.muted};cursor:pointer;font-size:16px;line-height:1;user-select:none;border-radius:6px}
   .ol-tw:not(.none):hover{background:#e7eef7;color:${C.fill}}
   .ol-tw.none{cursor:pointer;visibility:hidden}
@@ -2504,6 +2526,7 @@ function css() {
   .ol-name.done{color:${C.muted};text-decoration:line-through}
   .ol-cc{font-size:10.5px;color:${C.muted};background:#f0f1f4;border-radius:10px;padding:1px 7px;flex:none}
   .ol-meta{margin-left:auto;display:flex;align-items:center;gap:8px;flex:none}
+  .ol-who-list{display:flex;flex-direction:column;gap:0;align-items:flex-end}
   .ol-who{font-size:11.5px;font-weight:700;white-space:nowrap;max-width:6em;overflow:hidden;text-overflow:ellipsis}
   .ol-due{font-size:11.5px;color:${C.muted};font-variant-numeric:tabular-nums}
   .ol-st{font-size:10.5px;font-weight:600;border-radius:20px;padding:1px 8px}
@@ -2531,5 +2554,12 @@ function css() {
   html[data-theme="dark"] .tb-rowck.on,html[data-theme="dark"] .tb-rowck.part{background:${C.fill};border-color:${C.fill}}
   html[data-theme="dark"] .tb-bulk{background:var(--card);border-color:rgba(58,134,255,.4)}
   html[data-theme="dark"] .tb-bk-a{background:var(--card)}
-  html[data-theme="dark"] .tb-bk-a:hover{background:rgba(58,134,255,.18)}`;
+  html[data-theme="dark"] .tb-bk-a:hover{background:rgba(58,134,255,.18)}
+  /* ステータス行背景: ライトの淡色直書きは暗背景で浮くので半透明系へ（hover はやや濃く） */
+  html[data-theme="dark"] .tb tbody tr.st-doing,html[data-theme="dark"] .ol-row.st-doing{background:rgba(230,160,30,.10)}
+  html[data-theme="dark"] .tb tbody tr.st-waiting,html[data-theme="dark"] .ol-row.st-waiting{background:rgba(58,134,255,.10)}
+  html[data-theme="dark"] .tb tbody tr.st-done,html[data-theme="dark"] .ol-row.st-done{background:rgba(255,255,255,.04)}
+  html[data-theme="dark"] .tb tbody tr.st-doing:hover,html[data-theme="dark"] .ol-row.st-doing:hover{background:rgba(230,160,30,.18)}
+  html[data-theme="dark"] .tb tbody tr.st-waiting:hover,html[data-theme="dark"] .ol-row.st-waiting:hover{background:rgba(58,134,255,.18)}
+  html[data-theme="dark"] .tb tbody tr.st-done:hover,html[data-theme="dark"] .ol-row.st-done:hover{background:rgba(255,255,255,.08)}`;
 }
