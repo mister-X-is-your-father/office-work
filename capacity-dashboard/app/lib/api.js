@@ -77,25 +77,36 @@ export async function updateTask(taskId, patch) {
   for (const k of TASK_SCALARS) if (k in cur) body[k] = cur[k];
   Object.assign(body, patch);
   const res = await req(`/tasks/${taskId}`, { method: "POST", body });
-  logProgressChange(taskId, cur, patch); // 進捗/完了の活動ログ（ベストエフォート・非ブロッキング）
+  logTaskChanges(taskId, cur, patch); // 進捗/完了＋フィールド変更の活動ログ（ベストエフォート・非ブロッキング）
   return res;
 }
-// updateTask は SPA のスカラ更新の単一の関所（#9）。ここで percent_done/done の変化だけを活動ログ(exec /activity)へ
+// updateTask は SPA のスカラ更新の単一の関所（#9）。ここで変更を活動ログ(exec /activity)へ
 // 追記＝全編集経路（taskform/一覧グリッド/スマートリスト/かんばん 等）を個別フックせず網羅。fire-and-forget で
 // updateTask の戻り/挙動を一切妨げない（exec 未接続でも黙ってスキップ）。
-function logProgressChange(taskId, cur, patch) {
+// 記録: 進捗/完了（従来）＋ フィールド変更履歴（title/期日等・変更前後の生値＝ミス時のリカバリー用）。
+const LOGGED_FIELDS = ["title", "due_date", "start_date", "end_date", "time_estimate", "description", "priority"];
+function logTaskChanges(taskId, cur, patch) {
   try {
+    const entries = [];
     const oldPct = cur.percent_done || 0;
     const newPct = ("percent_done" in patch) ? (patch.percent_done || 0) : oldPct;
     const doneNow = ("done" in patch) && !!patch.done && !cur.done; // 未完了→完了
     const pctChanged = ("percent_done" in patch) && newPct !== oldPct;
-    if (!doneNow && !pctChanged) return;
+    if (doneNow || pctChanged) {
+      entries.push({ task_id: taskId, title: cur.title || "", type: doneNow ? "done" : "progress",
+        from: oldPct, to: doneNow ? 100 : newPct });
+    }
+    // フィールド変更（before/after は API 生値の文字列表現。表示整形は activity 画面の責務）
+    for (const k of LOGGED_FIELDS) {
+      if (!(k in patch)) continue;
+      const before = cur[k] ?? "", after = patch[k] ?? "";
+      if (String(before) === String(after)) continue;
+      entries.push({ task_id: taskId, title: cur.title || "", type: "field", field: k,
+        from: String(before), to: String(after) });
+    }
+    if (!entries.length) return;
     import("./exec.js").then((ex) => {
-      ex.logActivity({
-        task_id: taskId, title: cur.title || "",
-        type: doneNow ? "done" : "progress",
-        from: oldPct, to: doneNow ? 100 : newPct,
-      }).catch(() => {});
+      for (const e of entries) ex.logActivity(e).catch(() => {});
     }).catch(() => {});
   } catch { /* noop */ }
 }

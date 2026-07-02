@@ -1,13 +1,15 @@
 // アクティビティ（行動・進捗ログのフィード）
 // 「いつ・誰が・どのタスクに・どれだけ・どうなったか」を時系列フィードで見せる。
-// イベント源は 4 つを統合: 実績(getTimes) / 進捗差分・完了(getActivity) / 作成(task.created)。
-// 完了はログ(getActivity done)優先・無ければ task.done_at で historical 補完（重複防止）。
-// スコープは「自分（今日）」/「全体（直近2週間）」の 2 モード（localStorage 永続）。
+// イベント源は 4 つを統合: 実績(getTimes) / 進捗差分・完了・フィールド変更・作成・削除(getActivity) / 作成(task.created 補完)。
+// 完了はログ(getActivity done)優先・無ければ task.done_at で historical 補完（重複防止）。作成も同方式。
+// フィールド変更(type=field)は 旧→新 を整形表示＋「戻す」で updateTask によるリカバリー。期日変更は琥珀バッジで強調。
+// スコープは「自分（今日）」/「全体（直近2週間）」の 2 モード（localStorage 永続）＋種類チップ（モジュール変数・非永続）。
 // exec/API 失敗は握って空で続行＝画面を壊さない。route 登録/exec/api は指示役が済ませてある。
-import { load, isAiUser } from "../lib/store.js";
+import { load, invalidate, isAiUser } from "../lib/store.js";
 import { getActivity } from "../lib/exec.js";
-import { getTimes } from "../lib/api.js";
-import { C, esc, fmtH, todayISO, member_color } from "../lib/ui.js";
+import { getTimes, updateTask } from "../lib/api.js";
+import { C, esc, fmtH, todayISO, member_color, announce } from "../lib/ui.js";
+import { PRIO } from "../lib/kinds.js";
 import { dateOnly, shiftISO } from "../lib/capacity.js";
 import { DOW_JA } from "../lib/form.js";
 import { openTaskForm } from "./taskform.js";
@@ -15,6 +17,55 @@ import { icon } from "../lib/icons.js";
 
 const SCOPE_KEY = "ts.activity.scope"; // "me" | "team"（既定 "team"）
 const MAX_PER_DAY = 60; // 1 日あたりの表示上限（多すぎ防止）
+
+// ── フィールド変更(type=field)の定義 ──
+// フィールド名の日本語（未知 field は生名のまま表示＝行を壊さない）。
+const FIELD_JA = {
+  title: "タイトル", due_date: "期日", start_date: "開始予定日", end_date: "終了予定日",
+  time_estimate: "見積り", description: "説明", priority: "重要度",
+};
+const DATE_FIELDS = new Set(["due_date", "start_date", "end_date"]);
+// 「戻す」を出せる field（= 逆変換して updateTask に渡せるもの）。
+const REVERTIBLE = new Set(["title", "due_date", "start_date", "end_date", "time_estimate", "description", "priority"]);
+
+// 種類チップ（モジュール変数＝セッション内のみ・永続不要）。
+let typeFilter = "all"; // all | due | field | prog | cd
+const TYPE_CHIPS = [
+  ["all", "すべて"], ["due", "📅 期日変更"], ["field", "変更"], ["prog", "進捗・完了"], ["cd", "作成・削除"],
+];
+
+// field の生値（APIの文字列表現）→ 表示文字列。日付="M/D"（未設定は「未設定」）／見積り=秒→h／
+// 重要度=なし..MUST／説明=40字切詰め／タイトル等=そのまま（空は「（空）」）。
+function fmtFieldVal(field, raw) {
+  const s = raw == null ? "" : String(raw);
+  if (DATE_FIELDS.has(field)) {
+    if (!validDate(s)) return "未設定";
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return "未設定";
+    return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+  }
+  if (field === "time_estimate") {
+    const n = Number(s) || 0;
+    return n > 0 ? fmtH(n / 3600) : "未設定";
+  }
+  if (field === "priority") {
+    const n = Number(s) || 0;
+    return (PRIO[n] && PRIO[n].n) || String(n);
+  }
+  if (field === "description") {
+    const t = s.replace(/\s+/g, " ").trim();
+    if (!t) return "（空）";
+    return t.length > 40 ? t.slice(0, 40) + "…" : t;
+  }
+  return s || "（空）";
+}
+
+// 「戻す」用の逆変換: from は APIの生値文字列なのでほぼそのまま。数値系は Number、日付の空は未設定表現に。
+function revertValue(field, from) {
+  if (field === "time_estimate" || field === "priority") return Number(from) || 0;
+  if (DATE_FIELDS.has(field) && !from) return "0001-01-01T00:00:00Z";
+  return from;
+}
 
 // 有効な日付文字列か（""/"0001"始まり/未設定 は無効）。
 const validDate = (d) => !!d && typeof d === "string" && !d.startsWith("0001") && !d.startsWith("0000");
@@ -25,18 +76,30 @@ function loadScope() {
 function saveScope(s) { try { localStorage.setItem(SCOPE_KEY, s); } catch { /* noop */ } }
 
 export async function render(root) {
-  const { tasks, members, me } = await load();
+  const { tasks, members, aiMembers, me } = await load();
   const today = todayISO();
   const meId = me && me.id != null ? +me.id : null;
 
-  // ── 名簿（id→名前）。AI(fable)も actor として名前解決はするが、members には居ない場合があるため
-  //    members を基にしつつ無ければ user{id}。
+  // ── 名簿（id→名前）。members ＋ AI 担当(aiMembers=fable 等)を統合し、居ない uid は user{id}。
+  //    AI は表示時に 🤖 を付ける（aiIds で判定）。
   const nameById = new Map();
+  const aiIds = new Set();
   for (const m of members || []) if (m && m.id != null) nameById.set(+m.id, m.name || m.username || `user${m.id}`);
+  for (const m of aiMembers || []) {
+    if (!m || m.id == null) continue;
+    nameById.set(+m.id, m.name || m.username || `user${m.id}`);
+    if (isAiUser(m)) aiIds.add(+m.id);
+  }
   const memberName = (id) => {
     if (id == null) return "";
     const k = +id;
     return nameById.get(k) || `user${k}`;
+  };
+  // アクター表示名（AI は 🤖 前置き）。
+  const actorLabel = (id) => {
+    if (id == null) return "";
+    const nm = memberName(id);
+    return aiIds.has(+id) ? `🤖 ${nm}` : nm;
   };
 
   const taskById = new Map((tasks || []).map((t) => [+t.id, t]));
@@ -67,24 +130,42 @@ export async function render(root) {
     }
   }
 
-  // progress（進捗差分）＋ done（完了・ログ優先）。done がログにある taskId を控える（historical 補完の重複防止）。
+  // progress（進捗差分）＋ done（完了・ログ優先）＋ field（フィールド変更）＋ created/deleted（ログ発）。
+  // done/created がログにある taskId を控える（historical 補完の重複防止）。未知 type は無視＝行を壊さない。
   const loggedDoneTaskIds = new Set();
+  const loggedCreatedTaskIds = new Set();
   for (const a of activityLog || []) {
     if (!a || !validDate(a.at)) continue;
     const tid = a.task_id != null ? +a.task_id : null;
     const title = (tid != null && taskById.get(tid)?.title) || a.title || "";
+    const actorId = a.actor_uid != null ? +a.actor_uid : null;
     if (a.type === "progress") {
       events.push({
         kind: "progress", day: dateOnly(a.at), at: a.at, taskId: tid, taskTitle: title,
-        actorId: a.actor_uid != null ? +a.actor_uid : null, from: a.from, to: a.to,
+        actorId, from: a.from, to: a.to,
       });
     } else if (a.type === "done") {
       if (tid != null) loggedDoneTaskIds.add(tid);
       events.push({
-        kind: "done", day: dateOnly(a.at), at: a.at, taskId: tid, taskTitle: title,
-        actorId: a.actor_uid != null ? +a.actor_uid : null,
+        kind: "done", day: dateOnly(a.at), at: a.at, taskId: tid, taskTitle: title, actorId,
+      });
+    } else if (a.type === "field") {
+      if (!a.field) continue; // field 名不明は無視（防御）
+      events.push({
+        kind: "field", day: dateOnly(a.at), at: a.at, taskId: tid, taskTitle: title, actorId,
+        field: String(a.field), from: a.from == null ? "" : String(a.from), to: a.to == null ? "" : String(a.to),
+      });
+    } else if (a.type === "created") {
+      if (tid != null) loggedCreatedTaskIds.add(tid);
+      events.push({
+        kind: "created", day: dateOnly(a.at), at: a.at, taskId: tid, taskTitle: title, actorId,
+      });
+    } else if (a.type === "deleted") {
+      events.push({
+        kind: "deleted", day: dateOnly(a.at), at: a.at, taskId: tid, taskTitle: a.title || "", actorId,
       });
     }
+    // それ以外の type は黙って無視（後方互換）。
   }
 
   // done（historical 補完）: done かつ done_at 有効 かつ ログに done が無い taskId。
@@ -97,9 +178,10 @@ export async function render(root) {
     });
   }
 
-  // created（作成）
+  // created（historical 補完）: created 有効 かつ ログに created が無い taskId（ログ発と重複させない）。
   for (const t of tasks || []) {
     if (!validDate(t.created)) continue;
+    if (loggedCreatedTaskIds.has(+t.id)) continue;
     events.push({
       kind: "created", day: dateOnly(t.created), at: t.created,
       taskId: +t.id, taskTitle: t.title,
@@ -114,12 +196,24 @@ export async function render(root) {
   let scope = loadScope();
   const since = shiftISO(today, -13); // 直近2週間（今日含め14日）
 
+  // 種類チップの判定（time=実績記録 は「進捗・完了」に含める）。
+  const matchType = (ev) => {
+    if (typeFilter === "due") return ev.kind === "field" && ev.field === "due_date";
+    if (typeFilter === "field") return ev.kind === "field";
+    if (typeFilter === "prog") return ev.kind === "progress" || ev.kind === "done" || ev.kind === "time";
+    if (typeFilter === "cd") return ev.kind === "created" || ev.kind === "deleted";
+    return true; // all
+  };
+
   const filterEvents = () => {
+    let list;
     if (scope === "me") {
-      return events.filter((ev) => ev.actorId != null && meId != null && ev.actorId === meId && ev.day === today);
+      list = events.filter((ev) => ev.actorId != null && meId != null && ev.actorId === meId && ev.day === today);
+    } else {
+      // team: 直近2週間の全イベント
+      list = events.filter((ev) => ev.day && ev.day >= since);
     }
-    // team: 直近2週間の全イベント
-    return events.filter((ev) => ev.day && ev.day >= since);
+    return typeFilter === "all" ? list : list.filter(matchType);
   };
 
   // アバター（home/status 意匠）。id が null なら空。
@@ -139,11 +233,15 @@ export async function render(root) {
     return "";
   };
 
+  // 表示中イベントの索引（「戻す」が data-ei で参照。feedHtml のたびに詰め直す）。
+  let shownEvents = [];
+
   // 1 イベント行の HTML。
   const rowHtml = (ev) => {
-    const actor = memberName(ev.actorId);
+    const ei = shownEvents.push(ev) - 1;
+    const actor = actorLabel(ev.actorId);
     const tt = `〈${esc(ev.taskTitle || "（無題）")}〉`;
-    let ic = "", body = "";
+    let ic = "", body = "", rightExtra = "";
     if (ev.kind === "time") {
       ic = icon("timer", { size: 14 }) || "🕒";
       const who = actor ? `${esc(actor)} が ` : "";
@@ -159,14 +257,42 @@ export async function render(root) {
     } else if (ev.kind === "created") {
       ic = icon("plus", { size: 14 }) || "＋";
       body = `${tt} 作成${actor ? `（${esc(actor)}）` : ""}`;
+    } else if (ev.kind === "deleted") {
+      ic = icon("x", { size: 14 }) || "✕";
+      const who = actor ? `${esc(actor)} が ` : "";
+      const target = ev.taskTitle ? tt : `タスク #${ev.taskId ?? "?"}`;
+      body = `${who}${target} を削除`;
+    } else if (ev.kind === "field") {
+      ic = icon("pencil", { size: 14 }) || "✎";
+      const who = actor ? `${esc(actor)} が ` : "";
+      const fname = FIELD_JA[ev.field] || ev.field;
+      const isDue = ev.field === "due_date";
+      const badge = isDue ? `<span class="ac-due-badge">📅 期日変更</span>` : "";
+      body = `${who}${tt} の <b>${esc(fname)}</b> を変更${badge}
+        <span class="ac-diff">${esc(fmtFieldVal(ev.field, ev.from))} <span class="ac-arrow">→</span> <b>${esc(fmtFieldVal(ev.field, ev.to))}</b></span>`;
+      if (REVERTIBLE.has(ev.field)) {
+        rightExtra = `<button class="ac-undo" type="button" data-ei="${ei}" title="${esc(fname)}を変更前に戻す">${icon("undo", { size: 12 }) || "↩"}戻す</button>`;
+      }
+    } else {
+      // 未知 kind（後方互換の保険。events には積まれない想定だが行は壊さない）。
+      ic = icon("pencil", { size: 14 }) || "・";
+      body = `${tt} 更新${actor ? `（${esc(actor)}）` : ""}`;
     }
     const ava = avatarHtml(ev.actorId);
-    return `<button class="ac-row ac-${ev.kind}" data-id="${ev.taskId}" type="button">
+    const inner = `
       <span class="ac-ic">${ic}</span>
       ${ava}
       <span class="ac-body">${body}</span>
-      <span class="ac-right">${progressBadge(ev.taskId)}<span class="ac-time">${esc(clockOf(ev.at))}</span></span>
-    </button>`;
+      <span class="ac-right">${rightExtra}${progressBadge(ev.taskId)}<span class="ac-time">${esc(clockOf(ev.at))}</span></span>`;
+    if (ev.kind === "deleted") {
+      // 削除済み＝開けないので非クリック行（<button> にしない）。
+      return `<div class="ac-row ac-deleted ac-static">${inner}</div>`;
+    }
+    if (ev.kind === "field") {
+      // 「戻す」の入れ子ボタンを valid HTML にするため外側は div（role=button でキーボード対応）。
+      return `<div class="ac-row ac-field" data-id="${ev.taskId}" role="button" tabindex="0">${inner}</div>`;
+    }
+    return `<button class="ac-row ac-${ev.kind}" data-id="${ev.taskId}" type="button">${inner}</button>`;
   };
 
   // 日付見出し: 「6/20（金）」、今日は「今日 6/20（金）」。
@@ -180,9 +306,10 @@ export async function render(root) {
 
   // フィード本体（フィルタ→日付グルーピング→行）。
   const feedHtml = () => {
+    shownEvents = [];
     const list = filterEvents();
     if (!list.length) {
-      return `<div class="ac-empty">アクティビティはまだありません</div>`;
+      return `<div class="ac-empty">${typeFilter === "all" ? "アクティビティはまだありません" : "この種類のアクティビティはありません"}</div>`;
     }
     // day 降順でグルーピング（events は既に at 降順なので、出現順で Map に積めば day も降順）。
     const byDay = new Map();
@@ -209,16 +336,26 @@ export async function render(root) {
       <button class="seg-b${scope === "team" ? " on" : ""}" data-scope="team" type="button" role="tab" aria-selected="${scope === "team"}">全体（直近2週間）</button>
     </div>`;
 
+  // 種類チップ（すべて/期日変更/変更/進捗・完了/作成・削除）。
+  const chipsHtml = () => `
+    <div class="ac-chips" role="group" aria-label="種類で絞り込み">
+      ${TYPE_CHIPS.map(([k, label]) =>
+        `<button class="ac-chip${typeFilter === k ? " on" : ""}${k === "due" ? " due" : ""}" data-type="${k}" type="button" aria-pressed="${typeFilter === k}">${esc(label)}</button>`
+      ).join("")}
+    </div>`;
+
   // 初回描画。
   root.innerHTML = `
     <style>${css()}</style>
     <h1 class="vtitle">アクティビティ <small>${today}</small></h1>
     ${segHtml()}
+    ${chipsHtml()}
     <div class="ac-feed" id="ac-feed">${feedHtml()}</div>
   `;
 
   const feedEl = root.querySelector("#ac-feed");
   const segEl = root.querySelector(".ac-seg");
+  const chipsEl = root.querySelector(".ac-chips");
 
   // スコープ切替（再描画＝フィルタしてフィードだけ再構築）。
   if (segEl) {
@@ -238,14 +375,64 @@ export async function render(root) {
     });
   }
 
-  // 行クリック→タスク編集。
+  // 種類チップ切替（フィードだけ再構築）。
+  if (chipsEl) {
+    chipsEl.addEventListener("click", (e) => {
+      const b = e.target.closest(".ac-chip");
+      if (!b) return;
+      const next = b.getAttribute("data-type");
+      if (!next || next === typeFilter) return;
+      typeFilter = next;
+      for (const x of chipsEl.querySelectorAll(".ac-chip")) {
+        const on = x.getAttribute("data-type") === typeFilter;
+        x.classList.toggle("on", on);
+        x.setAttribute("aria-pressed", String(on));
+      }
+      if (feedEl) feedEl.innerHTML = feedHtml();
+    });
+  }
+
+  // 「戻す」＝フィールド変更のリカバリー。confirm → updateTask({field: 逆変換したfrom}) → 再描画。
+  const revertField = async (ev) => {
+    const fname = FIELD_JA[ev.field] || ev.field;
+    const tname = (ev.taskId != null && taskById.get(+ev.taskId)?.title) || ev.taskTitle || `#${ev.taskId}`;
+    const oldDisp = fmtFieldVal(ev.field, ev.from);
+    if (!confirm(`「${tname}」の${fname}を「${oldDisp}」に戻しますか？`)) return;
+    try {
+      await updateTask(ev.taskId, { [ev.field]: revertValue(ev.field, ev.from) });
+      invalidate();
+      announce("戻しました");
+      render(root);
+    } catch {
+      announce(`${fname}を戻せませんでした`, { assertive: true });
+    }
+  };
+
+  // 行クリック→タスク編集（.ac-undo は「戻す」、.ac-static=削除行 は開かない）。
+  const onRowActivate = (e) => {
+    const undo = e.target.closest(".ac-undo");
+    if (undo) {
+      const ev = shownEvents[+undo.getAttribute("data-ei")];
+      if (ev && ev.kind === "field") revertField(ev);
+      return;
+    }
+    const row = e.target.closest(".ac-row");
+    if (!row || row.classList.contains("ac-static")) return;
+    const id = +row.getAttribute("data-id");
+    if (!id) return;
+    openTaskForm({ taskId: id, onSaved: () => render(root) });
+  };
   if (feedEl) {
-    feedEl.addEventListener("click", (e) => {
-      const row = e.target.closest(".ac-row");
-      if (!row) return;
-      const id = +row.getAttribute("data-id");
-      if (!id) return;
-      openTaskForm({ taskId: id, onSaved: () => render(root) });
+    feedEl.addEventListener("click", onRowActivate);
+    // field 行は div[role=button] なので Enter/Space をクリック相当に。
+    feedEl.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      const t = e.target;
+      if (!(t instanceof Element)) return;
+      if (t.classList.contains("ac-row") && t.getAttribute("role") === "button") {
+        e.preventDefault();
+        onRowActivate(e);
+      }
     });
   }
 }
@@ -263,7 +450,13 @@ function clockOf(iso) {
 // 配色は全て C.* トークン（テーマ追従）。home/status の .st-* に倣う。
 function css() {
   return `
-  .ac-seg{margin:2px 0 16px}
+  .ac-seg{margin:2px 0 10px}
+  .ac-chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 16px}
+  .ac-chip{font:inherit;font-size:11.5px;font-weight:600;color:${C.muted};background:transparent;
+    border:1px solid ${C.line};border-radius:999px;padding:3px 11px;cursor:pointer;transition:background .12s,color .12s}
+  .ac-chip:hover{background:${C.track}}
+  .ac-chip.on{color:#fff;background:${C.fill};border-color:${C.fill}}
+  .ac-chip.due.on{color:#fff;background:${C.amber};border-color:${C.amber}}
   .ac-feed{display:flex;flex-direction:column;gap:18px}
   .ac-empty{font-size:13px;color:${C.muted};padding:24px 4px;text-align:center}
 
@@ -282,6 +475,11 @@ function css() {
   .ac-row.ac-done .ac-ic{color:${C.free}}
   .ac-row.ac-time .ac-ic{color:${C.fill}}
   .ac-row.ac-created .ac-ic{color:${C.muted}}
+  .ac-row.ac-field .ac-ic{color:${C.amber}}
+  .ac-row.ac-deleted .ac-ic{color:${C.over}}
+  .ac-row.ac-static{cursor:default}
+  .ac-row.ac-static:hover{background:transparent}
+  .ac-row.ac-deleted .ac-body{color:${C.muted}}
   .ac-ava{display:inline-grid;place-items:center;width:18px;height:18px;border-radius:50%;color:#fff;
     font-size:9.5px;font-weight:700;flex:none}
   .ac-body{font-size:13px;line-height:1.4;color:${C.ink};flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -291,6 +489,17 @@ function css() {
   .ac-badge{font-size:10.5px;font-weight:700;color:${C.muted};background:${C.track};border-radius:999px;
     padding:1px 8px;font-variant-numeric:tabular-nums}
   .ac-badge.done{color:${C.free};background:transparent;border:1px solid ${C.free}}
+
+  .ac-due-badge{display:inline-block;margin:0 4px;font-size:10.5px;font-weight:700;color:${C.amber};
+    background:rgba(245,166,35,.14);border:1px solid ${C.amber};
+    border-radius:999px;padding:1px 8px;vertical-align:1px;white-space:nowrap}
+  .ac-diff{color:${C.muted};margin-left:2px}
+  .ac-diff b{color:${C.ink}}
+  .ac-arrow{color:${C.muted}}
+  .ac-undo{display:inline-flex;align-items:center;gap:3px;font:inherit;font-size:10.5px;font-weight:700;
+    color:${C.muted};background:transparent;border:1px solid ${C.line};border-radius:999px;padding:1px 9px;
+    cursor:pointer;flex:none;transition:background .12s,color .12s}
+  .ac-undo:hover{color:${C.ink};background:${C.track};border-color:${C.lineStrong}}
   .ac-time{font-size:11px;color:${C.muted};font-variant-numeric:tabular-nums;flex:none}
   .ac-more{font-size:11.5px;color:${C.muted};padding:4px 10px 2px}
 

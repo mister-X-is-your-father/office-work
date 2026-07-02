@@ -9,6 +9,9 @@ Claude Code から --mcp-config 経由で起動され、fable アカウントで
 v2 追加ツール:
   my_agenda / list_tasks / post_comment / start_task / escalate / resume_task /
   create_task / schedule_task（complete_task は optional summary で強化）
+v2.1 追加:
+  set_due（期日変更の唯一の入口・reason 必須＝相談合意ゲート）
+  変更履歴: safe_update の diff / 作成 を exec(:7020) の活動ログへ fire-and-forget 記録（log_activity）
 認証（2資格情報方式）:
   ~/.config/taskstation/fable.env  = 操作の名義（コメント・タスク更新・進捗・作成・担当・plans。
                                      AI発言と人間の区別＝UXの核なので fable 名義を維持）
@@ -82,7 +85,57 @@ def safe_update(task_id, patch):
     cur = ts(f"/tasks/{task_id}")
     body = {k: cur[k] for k in TASK_SCALARS if k in cur}
     body.update(patch)
-    return ts(f"/tasks/{task_id}", "POST", body)
+    res = ts(f"/tasks/{task_id}", "POST", body)
+    _log_update_diff(task_id, cur, patch)  # 成功後の fire-and-forget（戻り値・例外挙動は不変）
+    return res
+
+
+# ---- 変更履歴（exec の活動ログへ追記） ----
+
+EXEC_API = "http://localhost:7020"
+# type=field で記録するフィールド whitelist（exec 側と同一。from/to は API 生値の str 化）
+ACTIVITY_FIELDS = ("title", "due_date", "start_date", "end_date", "time_estimate", "description", "priority")
+
+
+def _fable_token():
+    """fable の JWT を確実に得る（未ログインなら遅延ログインを 1 回起こす）。"""
+    if FABLE_ENV not in _tokens:
+        ts("/user")
+    return _tokens[FABLE_ENV]
+
+
+def log_activity(entry):
+    """exec の活動ログへ追記（fire-and-forget・失敗は握る）。認証は fable の JWT をそのまま送る。"""
+    try:
+        r = urllib.request.Request(
+            EXEC_API + "/activity", method="POST",
+            data=json.dumps(entry, ensure_ascii=False).encode(),
+            headers={"Content-Type": "application/json",
+                     "Authorization": "Bearer " + _fable_token()})
+        with urllib.request.urlopen(r, timeout=5):
+            pass
+    except Exception:
+        pass  # exec 停止時なども本処理を妨げない
+
+
+def _log_update_diff(task_id, cur, patch):
+    """safe_update の差分を変更履歴に記録する。done遷移 > 進捗変化 > whitelist フィールド変更。"""
+    try:
+        title = cur.get("title") or ""
+        if "done" in patch and bool(patch["done"]) and not cur.get("done"):
+            log_activity({"task_id": task_id, "type": "done",
+                          "from": cur.get("percent_done") or 0, "to": 100, "title": title})
+        elif "percent_done" in patch and (patch["percent_done"] or 0) != (cur.get("percent_done") or 0):
+            log_activity({"task_id": task_id, "type": "progress",
+                          "from": cur.get("percent_done") or 0, "to": patch["percent_done"] or 0,
+                          "title": title})
+        for f in ACTIVITY_FIELDS:
+            if f in patch and patch[f] != cur.get(f):
+                log_activity({"task_id": task_id, "type": "field", "field": f,
+                              "from": str(cur.get(f) or ""), "to": str(patch[f] or ""),
+                              "title": title})
+    except Exception:
+        pass  # 記録失敗は本処理を妨げない
 
 
 # ---- 共通ヘルパ（v2） ----
@@ -230,6 +283,7 @@ def t_create_subtask(a):
     if a.get("estimate_hours"):
         body["time_estimate"] = int(round(float(a["estimate_hours"]) * 3600))
     child = ts(f"/projects/{parent['project_id']}/tasks", "PUT", body)
+    log_activity({"task_id": child["id"], "type": "created", "title": a["title"]})
     ts(f"/tasks/{a['parent_task_id']}/relations", "PUT",
        {"other_task_id": child["id"], "relation_kind": "subtask"})
     return f"サブタスク #{child['id']} 「{a['title']}」を作成しました（親 #{a['parent_task_id']}）"
@@ -362,6 +416,7 @@ def t_create_task(a):
         if pid is None:
             raise Exception("作成先WS（インボックス/Inbox）が見つかりません")
     task = ts(f"/projects/{pid}/tasks", "PUT", body)
+    log_activity({"task_id": task["id"], "type": "created", "title": a["title"]})
     if a.get("parent_task_id"):
         ts(f"/tasks/{a['parent_task_id']}/relations", "PUT",
            {"other_task_id": task["id"], "relation_kind": "subtask"})
@@ -374,6 +429,16 @@ def t_create_task(a):
         ts(f"/tasks/{task['id']}/assignees", "PUT", {"user_id": uid})
     where = f"親 #{a['parent_task_id']} 配下" if a.get("parent_task_id") else f"WS {pid}"
     return f"タスク #{task['id']} 「{a['title']}」を作成しました（{where}）"
+
+
+def t_set_due(a):
+    """期日変更の唯一の入口（「相談の上」ゲート）。reason 必須＝合意内容を履歴とコメントに残す。"""
+    cur = ts(f"/tasks/{a['task_id']}")
+    old = cur.get("due_date") or ""
+    old_s = old[:10] if has_date(old) else "期日なし"
+    safe_update(a["task_id"], {"due_date": a["date"] + "T00:00:00Z"})  # diff は safe_update が type:field で自動記録
+    comment(a["task_id"], f"🤖 📅 期日変更: {old_s} → {a['date']}\n\n■ 理由（相談済み）\n{a['reason']}")
+    return f"#{a['task_id']} の期日を {old_s} → {a['date']} に変更しました（コメントに理由を記録）"
 
 
 def t_schedule_task(a):
@@ -418,6 +483,8 @@ TOOLS = [
      ["title"], t_create_task),
     ("schedule_task", "日別予定（task_time_plans）を登録する＝週プランナー/ガント/稼働プランに表示される。金3h/土3h/日3h のような日次計画に使う",
      {"task_id": NUM, "date": STR, "hours": NUM}, ["task_id", "date", "hours"], t_schedule_task),
+    ("set_due", "タスクの期日を変更する（唯一の期日変更手段）。reason 必須＝事前に人間と相談・合意した内容を書く。無断変更は禁止。変更は履歴に記録され、タスクコメントにも旧→新と理由が投稿される",
+     {"task_id": NUM, "date": STR, "reason": STR}, ["task_id", "date", "reason"], t_set_due),
 ]
 TOOL_DEFS = [{"name": n, "description": d,
               "inputSchema": {"type": "object", "properties": p, "required": r}}
@@ -432,6 +499,7 @@ INSTRUCTIONS = (
     "(4) 判断が必要になったら即 escalate(選択肢付き) → "
     "(5) 完了は complete_task に summary 必須(何をした・成果物の場所・検証状態)。"
     "進捗・報告はすべて post_comment(全員閲覧)へ。add_note は下書きメモ(作成者のみ閲覧)。"
+    "期日の変更は set_due のみ・reason 必須(事前に相談か escalate で合意してから。無断変更は禁止)。"
     "人間のタスク(分類=人間)は読み取り以外触らない。"
 )
 

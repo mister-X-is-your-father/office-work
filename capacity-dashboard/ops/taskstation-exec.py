@@ -67,6 +67,8 @@ def save_prep(d):
 # 進捗(percent_done)変更や完了をクライアント(api.updateTask)が追記。アクター uid はトークンから確定。
 ACTIVITY_PATH = f"{HOME}/.config/taskstation/activity.json"
 ACTIVITY_MAX = 2000
+# type=field で記録を許可するフィールドの whitelist（from/to は API 生値の文字列表現・表示整形は画面側の責務）
+ACTIVITY_FIELDS = ("title", "due_date", "start_date", "end_date", "time_estimate", "description", "priority")
 def load_activity():
     try:
         d = json.load(open(ACTIVITY_PATH))
@@ -571,7 +573,9 @@ class H(BaseHTTPRequestHandler):
             save_prep(prep)
             return self._json(200, {"prep": body})
         if self.path.split("?")[0].rstrip("/") == "/activity":
-            # 進捗/完了ログの追記（全ログインユーザー）。アクター uid はトークンから確定＝詐称不可。時刻はサーバ刻。
+            # 変更履歴ログの追記（全ログインユーザー）。アクター uid はトークンから確定＝詐称不可。時刻はサーバ刻。
+            # type: progress/done=進捗(百分率clamp) / field=フィールド変更(whitelist・生値をstr化500字) /
+            #       created/deleted=作成・削除。それ以外は 400。type 未指定は従来どおり progress 扱い。
             actor = uid or auth_any(tok)
             if not actor:
                 return self._json(401, {"error": "unauthorized"})
@@ -581,15 +585,35 @@ class H(BaseHTTPRequestHandler):
                 return self._json(400, {"error": "bad json"})
             if not isinstance(body, dict) or not body.get("task_id"):
                 return self._json(400, {"error": "task_id required"})
-            entry = {
-                "task_id": body.get("task_id"),
-                "type": body.get("type") if body.get("type") in ("progress", "done") else "progress",
-                "from": _clamp_pct(body.get("from")),
-                "to": _clamp_pct(body.get("to")),
+            typ = body.get("type") or "progress"
+            common = {
                 "title": str(body.get("title") or "")[:200],
                 "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "actor_uid": actor,
             }
+            if typ in ("progress", "done"):
+                entry = {
+                    "task_id": body.get("task_id"),
+                    "type": typ,
+                    "from": _clamp_pct(body.get("from")),
+                    "to": _clamp_pct(body.get("to")),
+                    **common,
+                }
+            elif typ == "field":
+                if body.get("field") not in ACTIVITY_FIELDS:
+                    return self._json(400, {"error": "bad field"})
+                entry = {
+                    "task_id": body.get("task_id"),
+                    "type": "field",
+                    "field": body.get("field"),
+                    "from": str(body.get("from") if body.get("from") is not None else "")[:500],
+                    "to": str(body.get("to") if body.get("to") is not None else "")[:500],
+                    **common,
+                }
+            elif typ in ("created", "deleted"):
+                entry = {"task_id": body.get("task_id"), "type": typ, **common}
+            else:
+                return self._json(400, {"error": "bad type"})
             items = load_activity()
             items.append(entry)
             save_activity(items)
