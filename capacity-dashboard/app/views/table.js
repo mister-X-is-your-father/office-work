@@ -2005,8 +2005,8 @@ function bulkBarHtml(rows) {
 function rowHtml(r, members, i, manual) {
   const id = r.t.id;
   const wn = r.who ? (r.who.name || r.who.username) : "";
-  const ava = r.who ? `<span class="tb-ava" style="background:${member_color(r.who.id)}">${esc((wn[0] || "?"))}</span>` : "";
-  const whoBtn = `<button class="tb-cell tb-asbtn" data-as="${id}" title="クリックで担当を変更">${ava}${esc(wn || "未設定")}<span class="tb-cell-car">▾</span></button>`;
+  // 担当: 丸チップ廃止＝名前テキスト（メンバー色）を4文字程度は横に見えるよう表示（要望）。
+  const whoBtn = `<button class="tb-cell tb-asbtn" data-as="${id}" title="クリックで担当を変更">${r.who ? `<span class="tb-who-nm" style="color:${member_color(r.who.id)}">${esc(wn)}</span>` : "未設定"}<span class="tb-cell-car">▾</span></button>`;
   const cats = categoryLabels(r.t);
   const catInner = cats.length ? cats.map((c) => `<span class="tb-cat" style="color:${categoryColor(c)};border-color:${categoryColor(c)}40">${esc(c.title)}</span>`).join(" ") : `<span class="tb-cat none">—</span>`;
   const catBtn = `<button class="tb-cell tb-catbtn" data-cat="${id}" title="クリックで分類を変更">${catInner}<span class="tb-cell-car">▾</span></button>`;
@@ -2096,7 +2096,7 @@ function olRowHtml(node, depth, counts) {
     ${childInfo}
     <span class="ol-meta">
       <button type="button" class="ol-addsub" data-pid="${t.id}" data-proj="${t.project_id || 0}" data-depth="${depth}" title="子タスクを追加">＋</button>
-      ${who ? `<span class="ol-ava" style="background:${member_color(who.id)}">${esc((wn[0] || "?"))}</span>` : ""}
+      ${who ? `<span class="ol-who" style="color:${member_color(who.id)}">${esc(wn)}</span>` : ""}
       ${due ? `<span class="ol-due">${due}</span>` : ""}
       <span class="ol-st ${st}">${STATUS[st].label}</span>
     </span>
@@ -2402,7 +2402,8 @@ function css() {
   .tb-st-group .tb-cell{font-size:12px;color:${C.muted};padding-top:1px;padding-bottom:1px}
   .tb-st-title{font-weight:600}
   .tb-sub{font-size:11px;color:${C.muted};font-weight:400;margin-top:2px}
-  .tb-ava{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;color:#fff;font-size:10px;font-weight:700;margin-right:6px;vertical-align:-5px}
+  .tb-who-nm{font-weight:700;white-space:nowrap}
+  .tb-asbtn{white-space:nowrap;min-width:5.5em}  /* 4文字＋▾が確実に収まる幅 */
   .tb-k{font-size:10.5px;color:${C.muted};border:1px solid ${C.line};border-radius:5px;padding:1px 6px;white-space:nowrap}
   .tb-k.review{color:${C.fill};border-color:#cfe0ff}
   .tb-cat{font-size:10.5px;border:1px solid;border-radius:5px;padding:1px 7px;white-space:nowrap;font-weight:600}
@@ -2503,7 +2504,7 @@ function css() {
   .ol-name.done{color:${C.muted};text-decoration:line-through}
   .ol-cc{font-size:10.5px;color:${C.muted};background:#f0f1f4;border-radius:10px;padding:1px 7px;flex:none}
   .ol-meta{margin-left:auto;display:flex;align-items:center;gap:8px;flex:none}
-  .ol-ava{width:19px;height:19px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:10px;font-weight:700}
+  .ol-who{font-size:11.5px;font-weight:700;white-space:nowrap;max-width:6em;overflow:hidden;text-overflow:ellipsis}
   .ol-due{font-size:11.5px;color:${C.muted};font-variant-numeric:tabular-nums}
   .ol-st{font-size:10.5px;font-weight:600;border-radius:20px;padding:1px 8px}
   .ol-st.todo{color:${C.muted};background:#f0f1f4}.ol-st.doing{color:${C.fill};background:#eaf2ff}.ol-st.waiting{color:#9a6a00;background:#fbf0d6}.ol-st.done{color:${C.free};background:#eaf7ef}
