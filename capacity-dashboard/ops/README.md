@@ -6,7 +6,7 @@
 |---|---|---|
 | `taskstation-spa-serve.py` | `~/.local/bin/` | SPA配信（7010・ThreadingHTTPServer・no-store） |
 | `taskstation-exec.py` | `~/.local/bin/` | Fable実行サービス（7020・直列キュー/スクリプト/SSE） |
-| `taskstation-mcp.py` | `~/.local/bin/` | TaskStation MCP（stdio・Fable自律操作: コメント/分割/進捗） |
+| `taskstation-mcp.py` | `~/.local/bin/` | TaskStation MCP v2（stdio・AI×人間協業: 既存6ツール＋my_agenda/list_tasks/post_comment/start_task/escalate/resume_task/create_task/schedule_task。complete_task は summary 対応。initialize に協業プロトコル instructions 同梱） |
 | `taskstation-fable-runner.py` | `~/.local/bin/` | 15分巡回の自動提案（タイマー起動） |
 | `taskstation-backup.sh` | `~/.local/bin/` | 日次バックアップ（毎日00:00・公式dumpで db+files+env を `~/backups/taskstation/vikunja-YYYYMMDD.zip`・前日ラベル・30日保持） |
 | `systemd/*` | `~/.config/systemd/user/` | 上記のユニット（spa/exec=常駐、fable/backup=timer） |
