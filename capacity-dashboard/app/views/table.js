@@ -1574,8 +1574,8 @@ function wireBulk(root, rows, tasks, members, today, labels) {
   const rerender = () => render(root);
   const reload = () => { invalidate(); render(root); };
   // 選択全件に fn を直列適用（失敗は握って続行）→ 完了後リロード。処理中は簡易表示。
-  const runAll = async (label, fn) => {
-    const ids = targetIds(); if (!ids.length) return;
+  const runAll = async (label, fn, idsOverride) => {
+    const ids = idsOverride || targetIds(); if (!ids.length) return;
     let ok = 0, fail = 0;
     bar.querySelectorAll(".tb-bk-a, .tb-bk-clr").forEach((b) => (b.disabled = true));
     if (busy) busy.textContent = `${label}中… 0/${ids.length}`;
@@ -1628,7 +1628,7 @@ function wireBulk(root, rows, tasks, members, today, labels) {
           const ids = targetIds();
           if (!confirm(`${ids.length}件のタスクを削除しますか？（元に戻せません）`)) return;
           selectedIds.clear(); anchorId = null;
-          runAll("削除", (id) => deleteTask(id));
+          runAll("削除", (id) => deleteTask(id), ids); // clear 後も対象を保持（clear が先だと targetIds() が空になる既存バグの修正）
           break;
         }
         case "due":
