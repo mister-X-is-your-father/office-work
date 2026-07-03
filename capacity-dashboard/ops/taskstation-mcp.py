@@ -27,6 +27,9 @@ v2.4 追加:
   #715 move_task（親の付け替え・SPA gRawSet("proj") と同一規約）／get_task に project/group（階層）／
        一覧行末に @プロジェクト/グループ を付記
   バグ修正: all_tasks() をページング化（サーバが per_page を 50 に丸めるため50件頭打ちだった）
+v2.5 追加（#729 運用規約の焼き込み＝どの AI セッションも memory 無しで規約どおり操作できる）:
+  INSTRUCTIONS に構造規約（階層3層モデル・Vikunja サブプロジェクト禁止・粒度規範・親無し浮きタスク禁止・
+  タイトル絵文字禁止・priority 運用 3/2/1・担当3者の区分・生POST禁止）を明記。create_task description にも反映
 認証（2資格情報方式）:
   ~/.config/taskstation/fable.env  = 操作の名義（コメント・タスク更新・進捗・作成・担当・plans。
                                      AI発言と人間の区別＝UXの核なので fable 名義を維持）
@@ -735,7 +738,7 @@ TOOLS = [
      {"task_id": NUM, "reason": STR, "options": STR}, ["task_id", "reason"], t_escalate),
     ("resume_task", "エスカレーション解除後の再開専用（連絡待ちのタスクにのみ使える）。連絡待ちを外して進行中に戻す。note があればコメント投稿。通常の着手は start_task",
      {"task_id": NUM, "note": STR}, ["task_id"], t_resume_task),
-    ("create_task", "タスクを新規作成する。goal は説明末尾に[ゴール]として結合。labels は無ければ新規作成して付与。assignees は 森田 / fable / taskstation-ai。priority は 0-4（0=なし〜4=MUST）。blocked_by=先行タスクid配列（依存関係を張る）。parent_task_id 指定でプロジェクト/タスクグループ直下に作る（移動は move_task）、無指定はインボックスWSに作成",
+    ("create_task", "タスクを新規作成する。原則 parent_task_id で適切なプロジェクト/タスクグループ配下に作る（親無しの浮きタスクを作らない・無指定はインボックスWS＝一時置き場行き。付け替えは move_task）。タイトルは絵文字禁止・端的に。goal は説明末尾に[ゴール]として結合。labels は無ければ新規作成して付与。assignees は 森田(人間) / fable(作業AI) / taskstation-ai(TaskStation改善)。priority は 3=必須 / 2=推奨 / 1=後回し可。blocked_by=先行タスクid配列（依存関係を張る）",
      {"title": STR, "description": STR, "goal": STR, "estimate_hours": NUM, "due_date": STR,
       "priority": NUM, "labels": ARR_STR, "assignees": ARR_STR, "parent_task_id": NUM,
       "blocked_by": ARR_NUM},
@@ -769,7 +772,22 @@ INSTRUCTIONS = (
     "タスク間の依存関係は add_dependency で構造化する(説明文への手書き禁止)。"
     "my_agenda の⛔ブロック中(先行タスク待ち)のタスクには着手しない。"
     "人間のタスク(分類=人間)は読み取り以外触らない。"
-    "運用ルール（ツールが強制）: ステータスは 未着手→進行中(start_task)→連絡待ち(escalate)→完了(complete_task) "
+    "\n\n【構造規約（違反すると人間の画面が壊れる・厳守）】"
+    "階層は「タスクの親子関係」だけで表現する3層モデル: "
+    "プロジェクト=最上位の親タスク ＞ タスクグループ=中間の親タスク(任意) ＞ 作業=葉タスク"
+    "（実体はすべてタスク・related_tasks.parenttask 鎖）。"
+    "Vikunja のサブプロジェクトは階層に使わない(SPA が解釈しない)。ワークスペース(API project)はただの箱。"
+    "粒度: 事業・取り組みの塊=プロジェクト / 機能・テーマの塊=タスクグループ / 実作業=タスク。"
+    "機能単位を最上位に置かない。新規タスクは必ず適切なプロジェクト/グループ配下に作る"
+    "(create_task の parent_task_id 指定。親無しの浮きタスクを作らない。付け替えは move_task)。"
+    "タイトル規約: 絵文字を使わない・端的に(構造や経緯の説明をタイトルに詰めない)。"
+    "重要度は priority フィールドで表現: 3=必須 / 2=推奨 / 1=後回し可。"
+    "「ローンチ必須」ラベル=ローンチ判定ゲート対象の意味。"
+    "担当者は3者: 森田=人間 / fable=作業AI(manademia 等の実作業) / taskstation-ai=TaskStation 自体の改善担当。"
+    "\n\n【更新の安全】タスク更新 API は全置換仕様。更新は必ずこの MCP のツール経由で行う"
+    "(内部で GET→merge→POST する safe_update を通り、未指定フィールドは既存値維持)。"
+    "API への生 POST は未指定フィールドを消失させるため禁止。"
+    "\n\n【運用ルール（ツールが強制）】ステータスは 未着手→進行中(start_task)→連絡待ち(escalate)→完了(complete_task) "
     "の4値でツール経由のみ遷移。完了は complete_task+summary 必須（set_progress 100 は不可）。"
     "resume_task は連絡待ち解除専用。分類「人間」のタスクはAIから変更不可。"
 )

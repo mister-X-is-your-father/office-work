@@ -54,6 +54,19 @@ set_progress + post_comment  … 節目ごとに進捗%と作業ログを記録
 | 完了済みタスクの再開はAIからしない | start_task が拒否（戻すのは人間がUIで） |
 | 期日の無断変更禁止 | set_due のみ・reason 必須・変更はコメント＋履歴に記録 |
 
+### 構造規約（2026-07-03〜・MCP instructions に焼き込み済み＝#729）
+
+どの AI セッションが memory 無しで接続しても同じ使い方になるよう、以下は `initialize` で配られる instructions と `create_task` の description に明記してある（SoT はこの表・実装は `ops/taskstation-mcp.py` の `INSTRUCTIONS`）:
+
+| 規約 | 内容 |
+|---|---|
+| 階層モデル | プロジェクト（最上位親タスク）＞ タスクグループ（中間親タスク・任意）＞ 作業（葉タスク）の3層。実体はすべてタスク（`related_tasks.parenttask` 鎖）。**Vikunja サブプロジェクトは階層に使わない**（SPA が解釈しない）。ワークスペースはただの箱 |
+| 粒度 | 事業の塊=プロジェクト / 機能の塊=グループ / 実作業=タスク。機能単位を最上位に置かない。新規タスクは必ず適切な親配下に作る（親無しの浮きタスク禁止・付け替えは move_task） |
+| タイトル | 絵文字禁止・端的に（構造や経緯の説明を詰めない） |
+| 重要度 | priority で表現: 3=必須 / 2=推奨 / 1=後回し可。「ローンチ必須」ラベル=ローンチ判定ゲート対象 |
+| 担当者 | 森田=人間 / fable=作業AI（manademia 等）/ taskstation-ai=TaskStation 自体の改善担当 |
+| 更新の安全 | タスク更新 API は全置換仕様。更新は必ず MCP ツール経由（safe_update が GET→merge→POST）。生 POST 禁止 |
+
 ## 3. 人間側の見え方（TaskStation で完結）
 
 - **進捗**: 一覧・かんばん・ホームの進捗%とステータスがそのまま AI の実施状況
