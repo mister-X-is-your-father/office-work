@@ -202,6 +202,9 @@ function deriveRow(t, ctx) {
     review: isReviewTask(t), prio: prioBucket(t.priority), cat: categoryLabels(t)[0] || null,
     due: dueISO(t), start: startISO(t), end: endISO(t), est: (t.time_estimate || 0) / HOUR, pct: t.percent_done || 0,
     done: !!t.done, status: statusOf(t),
+    // コンテナ＝byId に実在する子を持つ親タスク（プロジェクト/タスクグループ＝入れ物。buildTaskTree と同じ判定）。
+    // タスクとしてカウントしない: 表モードの行・件数/見積集計から除外（階層モードでは構造として表示継続）。
+    isContainer: ((((t.related_tasks || {}).subtask) || []).some((s) => ctx.byId && ctx.byId.has(s.id) && s.id !== t.id)),
   };
 }
 // ── B21: 件数内訳サマリ（純関数）。render と patchRow で共用（挙動同値）。 ──
@@ -258,30 +261,34 @@ export async function render(root) {
 
   // フリーワード検索（右上）。タイトル中心＋親(プロジェクト)名/分類/担当名を対象。
   // 他フィルタの後（＝絞り込み済み集合）にAND併用。表/階層どちらも rows 由来なので両モードに効く。
+  // 部分更新（applySearch＝#tb-q を壊さず結果だけ差し替え）でも同じ式を使うため、検索前の集合と判定を閉包に保持。
+  const baseRows = rows; // 検索前（doneMode/分類/クイック絞り込み適用済み）の集合
+  const qHit = (r, qq) => {
+    const parts = [
+      r.title,
+      r.parent && r.parent.title,
+      r.group && r.group.title,
+      r.cat && r.cat.title,
+      descText(r.t.description),   // 本文（HTMLタグを除去したテキスト）も検索対象＝smartlist と一致
+      ...(r.t.assignees || []).map((a) => a.name || a.username),
+    ];
+    return parts.some((s) => s && String(s).toLowerCase().includes(qq));
+  };
+  const applyQ = (rs, qq) => (qq ? rs.filter((r) => qHit(r, qq)) : rs);
   const q = (V.q || "").trim().toLowerCase();
-  if (q) {
-    const hit = (r) => {
-      const parts = [
-        r.title,
-        r.parent && r.parent.title,
-        r.group && r.group.title,
-        r.cat && r.cat.title,
-        descText(r.t.description),   // 本文（HTMLタグを除去したテキスト）も検索対象＝smartlist と一致
-        ...(r.t.assignees || []).map((a) => a.name || a.username),
-      ];
-      return parts.some((s) => s && String(s).toLowerCase().includes(q));
-    };
-    rows = rows.filter(hit);
-  }
+  rows = applyQ(rows, q);
 
   // スマートリスト風プリセットタブ（最上位の絞込レイヤー）。lib/smartlist.js の BUILTIN_VIEWS を流用し、
   // その view.filter を lib/smartlist.js applyFilter（=taskMatches）で行に適用＝他の絞込とAND。
   // 件数バッジは「他フィルタ適用後・プリセット適用前」の集合に対して各 view を当てて算出（タブ間で安定）。
   const slCtx = { today, next7: next7End(today) };
   const presetFilterOf = (v) => ({ ...EMPTY_FILTER, ...v.filter });
-  const presetCount = (v) => rows.filter((r) => taskMatches(r.t, presetFilterOf(v), slCtx)).length;
+  // コンテナ（子持ち親＝プロジェクト/タスクグループ）は「タスク」として数えない＝件数バッジ・集計・表の行は葉のみ。
+  // フィルタ処理自体は rows 全体に効いたまま（階層モードのツリー構築が親も必要とするため）。
+  const leaf = (rs) => rs.filter((r) => !r.isContainer);
+  const presetCount = (v) => leaf(rows).filter((r) => taskMatches(r.t, presetFilterOf(v), slCtx)).length;
   const presetCounts = BUILTIN_VIEWS.map((v) => ({ view: v, count: presetCount(v) }));
-  const presetAllCount = rows.length;
+  const presetAllCount = leaf(rows).length;
   // 選択中プリセットを適用（""=すべて＝プリセット無し）。
   const activePreset = BUILTIN_VIEWS.find((v) => v.key === V.preset) || null;
   if (activePreset) rows = rows.filter((r) => taskMatches(r.t, presetFilterOf(activePreset), slCtx));
@@ -293,9 +300,9 @@ export async function render(root) {
   // 選択は表モード全般で有効（チェックボックス＋一括操作）。マイソート中はドラッグ移動にも併用。
   // アウトライン中は選択を無効化。表示中のタスクに限定（フィルタ/モード変更で掃除）。
   if (isOutline) { selectedIds.clear(); anchorId = null; }
-  else { const vis = new Set(rows.map((r) => r.t.id)); selectedIds.forEach((id) => { if (!vis.has(id)) selectedIds.delete(id); }); }
+  else { const vis = new Set(leaf(rows).map((r) => r.t.id)); selectedIds.forEach((id) => { if (!vis.has(id)) selectedIds.delete(id); }); }
   if (manual) {
-    const allIds = rows.map((r) => r.t.id);
+    const allIds = leaf(rows).map((r) => r.t.id); // 手動順の保存対象も葉のみ（コンテナIDを V.order に混ぜない）
     const have = new Set(V.order), allSet = new Set(allIds);
     V.order = [...V.order.filter((id) => allSet.has(id)), ...allIds.filter((id) => !have.has(id))];
     saveView(UID, V);
@@ -308,6 +315,10 @@ export async function render(root) {
       return tieBreak(a, b);
     });
   }
+  // 表モードの行・集計・選択・一括操作・グリッドが使う集合＝葉のみ（ソート順は rows から継承）。
+  // 階層モードのツリー構築（buildOutlineHtml/wireOutlineDnD）はコンテナも必要なので rows のまま。
+  // let なのは検索の部分更新（applySearch）が再代入して閉包（委譲ハンドラ等）を追随させるため。
+  let leafRows = leaf(rows);
 
   const usedCats = [...new Map(rows.concat([]).map((r) => r.cat).filter(Boolean).map((c) => [c.title, c])).values()]
     .sort((a, b) => a.title.localeCompare(b.title, "ja"));
@@ -336,7 +347,7 @@ export async function render(root) {
     : (manual ? "・ 行をどこでもドラッグして自分用に並べ替え" : `・ ソート条件を重ねて並べ替え（列ヘッダ: クリック=第1条件 / Shift+クリック=条件を追加・最大${MAX_SORTS}）`);
   // vtitle の件数内訳サマリ（表示中の集合に対して）: 件数・期限切れ（未完了で期限が今日より前）・見積合計h。
   // B21: listSummaryText（純関数）に集約＝patchRow が再fetchなしで同じ式で更新できる。
-  const summary = listSummaryText(rows, today);
+  const summary = listSummaryText(leafRows, today); // 集計は葉のみ（コンテナは数えない・両モード共通）
   // B21: patchRow が render と同じコンテキスト／メンバーで1行だけ作り直せるよう直近値を退避。
   lastDeriveCtx = deriveCtx;
   lastMembers = members;
@@ -409,10 +420,10 @@ export async function render(root) {
     ${isOutline
       ? `<div class="card ol-card">${olBody || `<div class="ol-empty">${filtersActive ? "条件に一致するタスクがありません。" : "タスクがありません。"}</div>`}</div>`
       : `<div class="card tb-wrap"><table class="tb">
-      <thead><tr><th scope="col" class="tb-selcol">${selAllHeadHtml(rows)}</th>${cols().map((c) => th(c, manual)).join("")}</tr></thead>
-      <tbody>${rows.length ? rows.map((r, i) => rowHtml(r, members, i, manual)).join("") : emptyRow(filtersActive)}</tbody>
+      <thead><tr><th scope="col" class="tb-selcol">${selAllHeadHtml(leafRows)}</th>${cols().map((c) => th(c, manual)).join("")}</tr></thead>
+      <tbody>${leafRows.length ? leafRows.map((r, i) => rowHtml(r, members, i, manual)).join("") : emptyRow(filtersActive)}</tbody>
     </table></div>`}
-    ${isOutline ? "" : bulkBarHtml(rows)}`;
+    ${isOutline ? "" : bulkBarHtml(leafRows)}`;
 
   const persist = () => saveView(UID, V);
   const reRender = () => { persist(); render(root); };
@@ -448,14 +459,80 @@ export async function render(root) {
     };
   });
   root.querySelector("#tb-done").onchange = (e) => { V.doneMode = e.target.value; reRender(); };
-  // 検索（右上）: インクリメンタル絞り込み。再描画後にフォーカス＋キャレット位置を復元（入力が途切れない）。
+  // ── 検索（右上）: 部分更新方式。#tb-q のDOMノードを壊さない＝モバイルの仮想キーボードが閉じない・
+  // IME変換を破壊しない（render の innerHTML 総入替が原因でフォーカス消失していたのを根治）。
+  // V.q で変わるもの（tbody/階層カード・集計・バッジ・全選択ヘッダ・×ボタン）だけを in-place 差し替え。
+  const applySearch = () => {
+    persist();
+    const q2 = (V.q || "").trim().toLowerCase();
+    const qRows = applyQ(baseRows, q2); // プリセット適用前（件数バッジはこの集合の葉で数える＝render と同じ規則）
+    let rows2 = activePreset ? qRows.filter((r) => taskMatches(r.t, presetFilterOf(activePreset), slCtx)) : qRows;
+    // 並べ替え（render と同じ規則）。V.order の保守（保存）は transient な検索では行わない＝手動順を壊さない。
+    if (manual) {
+      const pos = new Map(V.order.map((id, i) => [id, i]));
+      rows2 = [...rows2].sort((a, b) => (pos.get(a.t.id) ?? 1e9) - (pos.get(b.t.id) ?? 1e9));
+    } else {
+      rows2 = [...rows2].sort((a, b) => {
+        for (const s of V.sorts) { const ax = AXES[s.key]; if (ax) { const c = ax.cmp(a, b) * (s.dir || 1); if (c) return c; } }
+        return tieBreak(a, b);
+      });
+    }
+    leafRows = leaf(rows2); // 閉包（selH 再生成・以降の参照）を新集合へ追随させる
+    // 検索文字列が変わったら選択はクリア（見えない行の選択残りが不自然）→ バルクバーも消す。
+    selectedIds.clear(); anchorId = null;
+    const bulkEl = root.querySelector("#tb-bulk"); if (bulkEl) bulkEl.remove();
+    const fActive = !!(V.cat || V.qaWho || V.qaDue || V.doneMode !== "today" || q2 || activePreset);
+    if (isOutline) {
+      const card = root.querySelector(".ol-card");
+      if (card) {
+        const body = buildOutlineHtml(rows2.map((r) => r.t));
+        card.innerHTML = body || `<div class="ol-empty">${fActive ? "条件に一致するタスクがありません。" : "タスクがありません。"}</div>`;
+        // 行リスナは新要素へ再配線。card レベルは onXXX 代入（下の wireOutlineDnD 参照）＝再実行しても二重化しない。
+        wireOutlineDnD(root, rows2, () => render(root));
+      }
+    } else {
+      const tb = root.querySelector("table tbody");
+      if (tb) tb.innerHTML = leafRows.length ? leafRows.map((r, i) => rowHtml(r, members, i, manual)).join("") : emptyRow(fActive);
+      const selTh = root.querySelector("thead th.tb-selcol");
+      if (selTh) selTh.innerHTML = selAllHeadHtml(leafRows); // クリックは thead 委譲（#tb-selall closest）＝再配線不要
+      selH = leafRows.length ? selectionHandlers(leafRows, () => render(root)) : null; // ids 固定コピー対策＝作り直し
+      if (manual) wireDrag(root, () => render(root)); // 行ごとの pointerdown を新要素へ再配線（wireDrag は行リスナのみ）
+      const emptyClr2 = root.querySelector("#tb-empty-clr");
+      if (emptyClr2) emptyClr2.onclick = () => { V.cat = ""; V.qaWho = ""; V.qaDue = ""; V.doneMode = "hide"; V.preset = ""; reRender(); };
+      gridHighlight(); // gActive が消えた行を指す場合は gridHighlight 内の既存ガードが解除する
+    }
+    // 集計＋プリセット件数バッジ（patchRow の更新と同じ式）
+    const sumEl = root.querySelector(".tb-summary");
+    if (sumEl) sumEl.textContent = listSummaryText(leafRows, today);
+    const setBadge = (key, count) => { const b = root.querySelector(`.tb-ptab[data-preset="${key}"] .tb-ptcnt`); if (b) b.textContent = String(count); };
+    setBadge("", leaf(qRows).length);
+    for (const v of BUILTIN_VIEWS) setBadge(v.key, leaf(qRows).filter((r) => taskMatches(r.t, presetFilterOf(v), slCtx)).length);
+    updateQClr(); // ×ボタンの出現/消滅（#tb-q ノード自体は不変）
+  };
+  const clearSearch = () => { V.q = ""; const el = root.querySelector("#tb-q"); if (el) el.value = ""; applySearch(); };
+  // ×ボタン（#tb-q-clr）は JS で出し入れ（周辺を innerHTML で書き換えない＝入力欄を巻き込まない）。
+  const updateQClr = () => {
+    const wrap = root.querySelector(".tb-search"); if (!wrap) return;
+    let x = wrap.querySelector("#tb-q-clr");
+    if (V.q && !x) {
+      x = document.createElement("button");
+      x.id = "tb-q-clr"; x.className = "tb-search-x"; x.type = "button"; x.title = "検索をクリア"; x.textContent = "×";
+      x.onclick = clearSearch;
+      wrap.appendChild(x);
+    } else if (!V.q && x) { x.remove(); }
+  };
   const qIn = root.querySelector("#tb-q");
   if (qIn) {
-    qIn.oninput = (e) => { V.q = e.target.value; const pos = e.target.selectionStart; reRender(); restoreSearchFocus(root, pos); };
-    qIn.onkeydown = (e) => { if (e.key === "Escape" && V.q) { V.q = ""; reRender(); restoreSearchFocus(root, 0); } };
+    // IME組成中は更新しない（変換を壊さない）。確定（compositionend）で1回だけ反映。
+    let composing = false, qT = null;
+    const queueSearch = () => { clearTimeout(qT); qT = setTimeout(() => { if (!composing) applySearch(); }, 200); };
+    qIn.addEventListener("compositionstart", () => { composing = true; });
+    qIn.addEventListener("compositionend", () => { composing = false; V.q = qIn.value; queueSearch(); });
+    qIn.oninput = () => { V.q = qIn.value; if (!composing) queueSearch(); }; // 200ms デバウンス（連打時の負荷とちらつき防止）
+    qIn.onkeydown = (e) => { if (e.key === "Escape" && V.q) clearSearch(); };
   }
   const qClr = root.querySelector("#tb-q-clr");
-  if (qClr) qClr.onclick = () => { V.q = ""; reRender(); restoreSearchFocus(root, 0); };
+  if (qClr) qClr.onclick = clearSearch;
   // 0件の空状態にある「絞り込みを解除」: 全フィルタをクリア＋完了表示を既定(hide)に戻して再描画
   const emptyClr = root.querySelector("#tb-empty-clr");
   if (emptyClr) emptyClr.onclick = () => { V.cat = ""; V.qaWho = ""; V.qaDue = ""; V.doneMode = "hide"; V.preset = ""; reRender(); };
@@ -489,7 +566,8 @@ export async function render(root) {
   // ─────────────────────────────────────────────────────────────────────
 
   // 表モードの選択ロジック（toggle/range/all）。行チェック・全選択ヘッダの委譲から呼ぶ。
-  const selH = (!isOutline && rows.length) ? selectionHandlers(rows, () => render(root)) : null;
+  // let なのは applySearch が新しい表示集合で作り直すため（selectionHandlers は ids を内部に固定コピーする）。
+  let selH = (!isOutline && leafRows.length) ? selectionHandlers(leafRows, () => render(root)) : null;
 
   // ── 列ヘッダ（thead）: ソート切替＋全選択 ──
   const thead = root.querySelector("table thead");
@@ -686,10 +764,10 @@ export async function render(root) {
   };
 
   // 一括操作バー（sticky・単発）。表モードのみ。
-  if (!isOutline) wireBulk(root, rows, tasks, members, today, labels);
+  if (!isOutline) wireBulk(root, leafRows, tasks, members, today, labels);
   // Excel風グリッド編集（キーボード移動・インライン編集・コピペ・フィルダウン）。表モードのみ。
   // ※ アクティブセル同期の per-button capture mousedown は上の tbody capture 委譲へ移管済み。
-  if (!isOutline) wireGrid(root, rows, tasks, members, labels, today);
+  if (!isOutline) wireGrid(root, leafRows, tasks, members, labels, today);
   // 余白クリックで選択解除（document全体＝コンテンツ右側の地まで拾う）。一覧表示中のみ作動。
   lastRoot = root;
   if (!docDeselectWired) {
@@ -1993,21 +2071,22 @@ function wireOutlineDnD(root, rows, rerender) {
   });
 
   // ルート化ドロップ領域（カード余白＝最上位へ）。既存親があるタスクだけ受け付ける。
-  card.addEventListener("dragover", (e) => {
+  // onXXX 代入（addEventListener でなく）＝検索の部分更新（applySearch）が再実行しても二重登録にならない。
+  card.ondragover = (e) => {
     if (dragId == null || !dragParent) return;        // 既にルートなら無視
     if (e.target.closest(".ol-row")) return;          // 行の上は各行が処理
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
     if (!card.classList.contains("ol-drop-root")) { clearHints(); card.classList.add("ol-drop-root"); }
-  });
-  card.addEventListener("dragleave", (e) => { if (!card.contains(e.relatedTarget)) card.classList.remove("ol-drop-root"); });
-  card.addEventListener("drop", (e) => {
+  };
+  card.ondragleave = (e) => { if (!card.contains(e.relatedTarget)) card.classList.remove("ol-drop-root"); };
+  card.ondrop = (e) => {
     if (dragId == null || !dragParent) return;
     if (e.target.closest(".ol-row")) return;          // 行ドロップは各行が処理済み
     e.preventDefault();
     clearHints();
     reparent(dragId, dragParent, null, rerender);     // newParent=null＝ルート化（付与なし）
-  });
+  };
 }
 
 // 付け替えの実体: 旧親(あれば)から外し、新親(あれば)へ subtask 追加。完了後 invalidate→再描画、新親を自動展開。
@@ -2067,13 +2146,7 @@ const emptyRow = (filtersActive) => `<tr><td colspan="${cols().length + 1}" clas
     ? `条件に一致するタスクがありません <button id="tb-empty-clr" class="tb-qa tb-qclr" type="button">絞り込みを解除</button>`
     : `タスクがありません`)
   + `</td></tr>`;
-// 検索ボックスのフォーカス＋キャレットを再描画後に復元（入力中に集中が外れないように）。
-function restoreSearchFocus(root, pos) {
-  const el = root.querySelector("#tb-q");
-  if (!el) return;
-  el.focus();
-  try { const p = Math.min(pos ?? el.value.length, el.value.length); el.setSelectionRange(p, p); } catch { /* noop */ }
-}
+// （旧 restoreSearchFocus は削除: 検索が部分更新方式＝#tb-q を壊さなくなり、フォーカス復元自体が不要になった）
 // ヘッダに何番目のソート軸かを小さく表示（組み合わせの見える化）
 // aria-sort: 現在のソート軸に連動（昇順=ascending / 降順=descending / それ以外=none）＝スクリーンリーダーで並び状態が伝わる。
 const th = (c, manual) => {
