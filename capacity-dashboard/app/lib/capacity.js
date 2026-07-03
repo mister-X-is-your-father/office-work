@@ -281,6 +281,13 @@ export function dependencyEdges(tasks) {
   return edges;
 }
 
+// コンテナ＝byId に実在する子(related_tasks.subtask)を持つ親タスク（プロジェクト/タスクグループ＝入れ物）。
+// 一覧系ビューは作業行からコンテナを除外する（#732）。byId は「フィルタ前の全タスク」から作ること
+// （絞った後の集合だと子が見えず誤って葉扱いになる）。buildTaskTree・table.js と同じ判定式＝SSoT。
+export function isContainer(t, byId) {
+  return ((((t || {}).related_tasks || {}).subtask) || []).some((s) => byId && byId.has(s.id) && s.id !== t.id);
+}
+
 // related_tasks.subtask から親子フォレストを構築。返り値: [{task, children:[...]}]。
 // ルート=どの subtask にもならないタスク。循環は guard で打ち切り。
 export function buildTaskTree(tasks) {

@@ -8,7 +8,7 @@ import { updateTask } from "../lib/api.js";
 import { C, esc, fmtH, member_color, todayISO, announce, avatar } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
 import { icon } from "../lib/icons.js";
-import { shiftISO } from "../lib/capacity.js";
+import { shiftISO, isContainer } from "../lib/capacity.js";
 
 const HOUR = 3600;
 const DAYS_KEY = "ts.quad.urgentDays";
@@ -65,7 +65,9 @@ export async function render(root) {
   const { tasks, projects, members, me } = await load();
   const today = todayISO();
   const days = urgentDays();
-  let rows = (tasks || []).filter((t) => !t.done);
+  // コンテナ（子持ち親）は作業行に出さない（#732）。判定 Map はフィルタ前の全タスクから構築。
+  const byId = new Map((tasks || []).map((t) => [t.id, t]));
+  let rows = (tasks || []).filter((t) => !t.done && !isContainer(t, byId));
   if (FILTER.who) rows = rows.filter((t) => (t.assignees || []).some((a) => String(a.id) === FILTER.who));
   const sort = sortMode();
   const cmp = cmpInQuad(sort);

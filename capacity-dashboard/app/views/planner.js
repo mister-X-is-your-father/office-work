@@ -5,7 +5,7 @@
 // B16: store.plansByTask を流用（重複fetch廃止）。追加成功時は invalidate→再描画で局所反映。
 import { load, invalidate } from "../lib/store.js";
 import * as vik from "../lib/api.js";
-import { sumByMemberDay, toMemberDayEntries, toH, dateOnly } from "../lib/capacity.js";
+import { sumByMemberDay, toMemberDayEntries, toH, dateOnly, isContainer } from "../lib/capacity.js";
 import { capacityOn } from "../lib/recurrence.js";
 import { C, fmtH, esc, todayISO } from "../lib/ui.js";
 
@@ -20,7 +20,10 @@ function weekDates(iso) {
 }
 
 export async function render(root) {
-  const { tasks, members, settings, holidaysSet, unavailabilityByMember, plansByTask } = await load();
+  const { tasks: allTasks, members, settings, holidaysSet, unavailabilityByMember, plansByTask } = await load();
+  // コンテナ（子持ち親）は作業行に出さない（#732）: セル合算・追加候補・セルポップの前に一括除外
+  const byId = new Map((allTasks || []).map((t) => [t.id, t]));
+  const tasks = (allTasks || []).filter((t) => !isContainer(t, byId));
   const capH = (settings && settings.capH) || 8;
   const today = todayISO();
   // B15: 基準＝今日に weekOffset 週を足した日。weekDates でその週の月〜金を得る。

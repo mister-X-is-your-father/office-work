@@ -5,7 +5,7 @@
 import { load, invalidate, projectName } from "../lib/store.js";
 import { openTaskForm } from "./taskform.js";
 import { dailyThroughput, projectTotals, labelTotals, overallStats } from "../lib/summary.js";
-import { estimateVsActual, shiftISO, dateOnly, hasDate } from "../lib/capacity.js";
+import { estimateVsActual, shiftISO, dateOnly, hasDate, isContainer } from "../lib/capacity.js";
 import { categoryColor } from "../lib/kinds.js";
 import { C, esc, fmtH, avatar, todayISO } from "../lib/ui.js";
 import { DOW_JA } from "../lib/form.js";
@@ -51,7 +51,9 @@ function inPeriod(t, today, period) {
 }
 
 function applyFilters(tasks, today, pf) {
+  const byId = new Map((tasks || []).map((t) => [t.id, t]));
   return (tasks || []).filter((t) => {
+    if (isContainer(t, byId)) return false; // コンテナ（子持ち親）は作業行に出さない（#732）
     if (!pf.includeDone && t.done) return false;
     if (pf.who && !(t.assignees || []).some((a) => String(a.id) === String(pf.who))) return false;
     return inPeriod(t, today, pf.period);

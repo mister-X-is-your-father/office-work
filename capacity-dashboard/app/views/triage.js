@@ -1,7 +1,7 @@
 // 優先度・トリアージ（mock 46 相当・実データ）
 import { load, invalidate } from "../lib/store.js";
 import { firstHuman } from "../lib/users.js";
-import { triage, shiftISO, projectAncestor } from "../lib/capacity.js";
+import { triage, shiftISO, projectAncestor, isContainer } from "../lib/capacity.js";
 import { updateTask } from "../lib/api.js";
 import { C, fmtH, esc, todayISO, avatar, announce } from "../lib/ui.js";
 import { categoryLabels, categoryColor } from "../lib/kinds.js";
@@ -52,10 +52,12 @@ export async function render(root) {
   const today = todayISO();
 
   // 担当者フィルタ（自分/全員/各人）。triage() は assignees を持たない slim なので、生タスクで先に絞ってから分類する。
+  // 祖先解決・コンテナ判定には全タスクの id→task が要る（フィルタ後 rows ではなく tasks 全体から構築）。
+  const byId = new Map((tasks || []).map((t) => [t.id, t]));
   let rows = tasks || [];
   if (FILTER.who) rows = rows.filter((t) => (t.assignees || []).some((a) => String(a.id) === String(FILTER.who)));
-  // 祖先解決には全タスクの id→task が要る（フィルタ後 rows ではなく tasks 全体から構築）。
-  const byId = new Map((tasks || []).map((t) => [t.id, t]));
+  // コンテナ（子持ち親）は作業行に出さない（#732）
+  rows = rows.filter((t) => !isContainer(t, byId));
   const meta = buildMeta(rows, byId);
   const items = triage(rows, today)
     .sort((a, b) => (b.priority - a.priority) || ((a.slack ?? 99) - (b.slack ?? 99)));

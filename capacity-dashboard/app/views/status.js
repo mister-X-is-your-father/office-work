@@ -3,7 +3,7 @@
 // 状況把握に効く順で 1 枚に集約: KPI / 遅延 / 今日のメンバー状況 / 今週の締切 / 直近の完了。
 // データは load() の共有キャッシュから算出（追加 fetch なし）。ロジックは home/report/capacity から再利用。
 import { load, invalidate } from "../lib/store.js";
-import { loadByMember, triage, shiftISO, dowOf } from "../lib/capacity.js";
+import { loadByMember, triage, shiftISO, dowOf, isContainer } from "../lib/capacity.js";
 import { firstHuman } from "../lib/users.js";
 import { DOW_JA } from "../lib/form.js";
 import { capacityOn } from "../lib/recurrence.js";
@@ -69,8 +69,12 @@ export async function render(root) {
 
   // 今日の人別負荷（営業日割り＋人別容量＝週末/祝日/休暇=0）。home.js と同じ計算。
   const capacityFor = (m, d) => capacityOn(m, d, { holidays: holidaysSet, unavailabilityByMember, capH: settings.capH });
-  const rows = loadByMember(tasks, members, day, settings.capH, plansByTask, { holidays: holidaysSet, capacityFor });
-  const tri = triage(tasks, day);
+  // id→task（フィルタ前の全タスクから。コンテナ判定と手順の突合に使う）。
+  const taskById = new Map((tasks || []).map((t) => [t.id, t]));
+  // コンテナ（子持ち親）は作業タスクとして数えない（#732）: 負荷・トリアージ・一覧すべて除外
+  const workTasks = (tasks || []).filter((t) => !isContainer(t, taskById));
+  const rows = loadByMember(workTasks, members, day, settings.capH, plansByTask, { holidays: holidaysSet, capacityFor });
+  const tri = triage(workTasks, day);
 
   // ── 集計 ──
   const totCap = rows.reduce((s, r) => s + r.capH, 0);
@@ -79,12 +83,12 @@ export async function render(root) {
   const must = tri.filter((t) => t.cls === "must");
 
   // 遅延（期限超過）: 未完了 かつ 期限 < 今日。期限の古い順（超過日数の大きい順）。
-  const open = (tasks || []).filter(isOpen);
+  // workTasks はコンテナ除外済み（#732）
+  const open = workTasks.filter((t) => isOpen(t));
 
   // E5: 着手準備の「今日やる手順」（due<=today の未完了手順・遅れ含む）をチーム横断で集約＋進行中数。
   let stepsByTask = {};
   try { stepsByTask = (await getPrepScores())?.steps_by_task || {}; } catch { stepsByTask = {}; }
-  const taskById = new Map((tasks || []).map((t) => [t.id, t]));
   const todaySteps = [];
   for (const [tidStr, steps] of Object.entries(stepsByTask)) {
     const t = taskById.get(+tidStr);
@@ -108,7 +112,7 @@ export async function render(root) {
   // 直近の完了: 過去 7 日（今日含む）に done 化したもの。done_at 新しい順、不明は末尾。
   const weekStartISO = shiftISO(day, -6);
   const recentDone = (tasks || [])
-    .filter((t) => statusOf(t) === "done")
+    .filter((t) => statusOf(t) === "done" && !isContainer(t, taskById))
     .filter((t) => { const d = doneAtISO(t); return d == null || d >= weekStartISO; })
     .sort((a, b) => (doneAtISO(b) || "").localeCompare(doneAtISO(a) || "") || b.id - a.id);
 

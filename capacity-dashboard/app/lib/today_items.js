@@ -2,7 +2,7 @@
 // タスク(予定/見積り日割り)＋会議/定例(RRULE展開)を統合し、メンバー別に WorkItem として列挙。
 // WorkItem は「種別(kind) × 時間属性(flags: adhoc/advanced)」の2軸（ADR-012）。色/模様はビュー側。
 // 並び: 会議 → 定例 → レビュー → タスク(重要度 MUST→低)。
-import { toH, dateOnly, hasDate, taskPlannedHoursByMemberOn, assigneeIds, shiftISO, planEntriesFor, capStatus } from "./capacity.js";
+import { toH, dateOnly, hasDate, taskPlannedHoursByMemberOn, assigneeIds, shiftISO, planEntriesFor, capStatus, isContainer } from "./capacity.js";
 import { expandRecurrences, occurrenceLoadEntries, freeByMemberDay, capacityOn } from "./recurrence.js";
 import { kindOf, kindRank, prioBucket, isReviewTask } from "./kinds.js";
 
@@ -27,7 +27,10 @@ export function todayItemsByMember(data, isoDay, capH = 8) {
   const push = (mid, item) => { const r = map.get(mid); if (r) { r.items.push(item); r.usedH += item.h; } };
 
   // 通常タスク／レビュー（予定 or 見積り営業日割り）。kind=種別, flags=時間属性。
+  // コンテナ（子持ち親＝プロジェクト/タスクグループ）は作業タイルに出さない（#732）。
+  const byId = new Map(tasks.map((t) => [t.id, t]));
   for (const t of tasks) {
+    if (isContainer(t, byId)) continue;
     const planEntries = planEntriesFor(plansByTask, t.id);
     const byMember = taskPlannedHoursByMemberOn(t, isoDay, planEntries, { holidays: holidaysSet });
     if (!byMember.size) continue;

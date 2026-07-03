@@ -1,6 +1,6 @@
 // 見積り vs 実績（mock 23 相当・実データ。fork の time_estimate/time_spent）
 import { load } from "../lib/store.js";
-import { estimateVsActual, dateOnly, hasDate, shiftISO } from "../lib/capacity.js";
+import { estimateVsActual, dateOnly, hasDate, shiftISO, isContainer } from "../lib/capacity.js";
 import { C, fmtH, esc, todayISO } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
 
@@ -39,7 +39,9 @@ export async function render(root) {
     if (!a) return true;          // 日付なし＝常に対象
     return a >= since && a <= today;
   };
-  const scoped = (tasks || []).filter(inPeriod);
+  const byId = new Map((tasks || []).map((t) => [t.id, t]));
+  // コンテナ（子持ち親）は作業行に出さない（#732）
+  const scoped = (tasks || []).filter((t) => inPeriod(t) && !isContainer(t, byId));
 
   const r = estimateVsActual(scoped);
   const overall = r.totEst ? Math.round((r.ratio - 1) * 100) : null;

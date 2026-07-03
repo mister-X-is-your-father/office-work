@@ -9,7 +9,7 @@ import { load } from "../lib/store.js";
 import { getPrepScores, getActivity } from "../lib/exec.js";
 import { getTimes } from "../lib/api.js";
 import { C, esc, fmtH, todayISO } from "../lib/ui.js";
-import { dateOnly, dowOf } from "../lib/capacity.js";
+import { dateOnly, dowOf, isContainer } from "../lib/capacity.js";
 import { openTaskForm } from "./taskform.js";
 import { icon } from "../lib/icons.js";
 import { DOW_JA } from "../lib/form.js";
@@ -65,9 +65,12 @@ export async function render(root) {
   } catch { timeEntries = []; }
 
   // メトリクス計算（純関数）。空入力でも 0/[] で落ちない。
+  // コンテナ（子持ち親）は作業行に出さない（#732）: 未着手ピックアップと消化系列から除外
+  const byId = new Map((tasks || []).map((t) => [t.id, t]));
+  const workTasks = (tasks || []).filter((t) => !isContainer(t, byId));
   const step = stepDigestion(sbt, today);
-  const eng = taskEngagement(tasks, plansByTask, today);
-  const series = dailyExecSeries(tasks, timeEntries, today, 14);
+  const eng = taskEngagement(workTasks, plansByTask, today);
+  const series = dailyExecSeries(workTasks, timeEntries, today, 14);
   const todayRow = series.length ? series[series.length - 1] : null;
 
   // 未着手（今日やる予定）の拾い上げ。eng.items の engaged=false のみ。
@@ -77,7 +80,7 @@ export async function render(root) {
   // getActivity 失敗は握って空＝停滞は created/started/time だけで算出継続。
   let activityLog = [];
   try { activityLog = (await getActivity())?.activity || []; } catch { activityLog = []; }
-  const stalled = stalledTasks(tasks, timeEntries, activityLog, today, { thresholdDays: 7 });
+  const stalled = stalledTasks(workTasks, timeEntries, activityLog, today, { thresholdDays: 7 });
 
   // 週バーの正規化最大値（実働h）。0除算/空回避で必ず >0。
   const maxWorkedH = Math.max(1, ...series.map((d) => d.workedH || 0));

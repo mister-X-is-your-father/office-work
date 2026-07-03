@@ -11,7 +11,7 @@
 // UI のアイコンは icon()（絵文字非使用）。コピペテキスト内の ✅⚠ 等は「データ」なので許可。
 import { load } from "../lib/store.js";
 import { humanAssignees } from "../lib/users.js";
-import { shiftISO, dowOf } from "../lib/capacity.js";
+import { shiftISO, dowOf, isContainer } from "../lib/capacity.js";
 import { statusOf } from "../lib/kinds.js";
 import { C, esc, fmtH, todayISO } from "../lib/ui.js";
 import { openTaskForm } from "./taskform.js";
@@ -222,9 +222,12 @@ export async function render(root) {
     : (target === "self" ? (me ? (me.name || me.username) : "自分") : (targetMember ? (targetMember.name || targetMember.username) : `user${targetId}`));
 
   // 母集合: 全員=全タスク、個人=対象が人間担当に含まれるタスク。
-  const scoped = (target === "all" || targetId == null)
+  // コンテナ（子持ち親）は作業行に出さない（#732）。byId はフィルタ前の全タスクから作る。
+  const byId = new Map((tasks || []).map((t) => [t.id, t]));
+  const scoped = ((target === "all" || targetId == null)
     ? tasks
-    : tasks.filter((t) => humanAssignees(t).some((a) => a.id === targetId));
+    : tasks.filter((t) => humanAssignees(t).some((a) => a.id === targetId))
+  ).filter((t) => !isContainer(t, byId));
 
   let buckets = bucketize(scoped, day, weekEnd, doneRange);
 

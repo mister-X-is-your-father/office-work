@@ -5,7 +5,7 @@ import { load, invalidate, isAiUser, ensureInbox } from "../lib/store.js";
 import { updateTask, getTask, setTaskWaiting, createTaskInProject, createProject, addRelation, removeRelation } from "../lib/api.js";
 import { PRIO, prioBucket, STATUS, statusOf } from "../lib/kinds.js";
 import { C, fmtH, esc, todayISO, announce, avatar } from "../lib/ui.js";
-import { shiftISO, projectAncestor } from "../lib/capacity.js";
+import { shiftISO, projectAncestor, isContainer } from "../lib/capacity.js";
 import { taskMatches, next7End } from "../lib/smartlist.js";
 import { icon } from "../lib/icons.js";
 import { statePatchFor } from "../lib/taskstate.js";
@@ -61,10 +61,15 @@ export async function render(root) {
   const swim = loadSwim();
   const who = loadWho(); // ""=全員 / メンバーid文字列
 
+  // 祖先解決（projectAncestor）・コンテナ判定用に全タスクの id→task インデックスを作る（4層以上でも最上位プロジェクトへ集約）。
+  // 直近親[0]ではなく親鎖を遡るため、visible ではなくロード済み全タスク（フィルタ前）から引く必要がある。
+  const byId = new Map((tasks || []).map((t) => [t.id, t]));
+
   // 絞り込み（完了は status を触らず別制御）。preset.filter を taskMatches へ。
+  // コンテナ（子持ち親）は作業行に出さない（#732）＝列カウントにも効く。
   const ctx = { today: _today, next7: next7End(_today) };
   const presetDef = PRESETS.find((p) => p.key === preset) || PRESETS[0];
-  let filtered = (tasks || []).filter((t) => taskMatches(t, presetDef.filter, ctx));
+  let filtered = (tasks || []).filter((t) => taskMatches(t, presetDef.filter, ctx) && !isContainer(t, byId));
 
   // B4: 担当フィルタ（自分/全員/各人）。選択した担当者がアサインされたタスクのみ。
   if (who) filtered = filtered.filter((t) => (t.assignees || []).some((a) => String(a.id) === who));
@@ -80,10 +85,6 @@ export async function render(root) {
     return doneToday || (u && u >= shiftISO(_today, -7));
   };
   const visible = filtered.filter(doneVisible);
-
-  // 祖先解決（projectAncestor）用に全タスクの id→task インデックスを作る（4層以上でも最上位プロジェクトへ集約）。
-  // 直近親[0]ではなく親鎖を遡るため、visible ではなくロード済み全タスクから引く必要がある。
-  const byId = new Map((tasks || []).map((t) => [t.id, t]));
 
   root.innerHTML = `
     <style>${css()}</style>

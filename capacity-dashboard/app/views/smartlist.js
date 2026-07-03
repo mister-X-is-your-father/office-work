@@ -5,7 +5,7 @@
 import { load, invalidate, isAiUser } from "../lib/store.js";
 import { updateTask, deleteTask, getTask, addAssignee, removeAssignee, addTaskLabel, removeTaskLabel, setTaskWaiting } from "../lib/api.js";
 import { taskMatches, next7End, EMPTY_FILTER, BUILTIN_VIEWS } from "../lib/smartlist.js";
-import { shiftISO } from "../lib/capacity.js";
+import { shiftISO, isContainer } from "../lib/capacity.js";
 import { PRIO, categoryLabels, categoryColor, REVIEW_LABEL, WAITING_LABEL } from "../lib/kinds.js";
 import { openTaskForm } from "./taskform.js";
 import { C, esc, fmtH, todayISO, emptyState, announce } from "../lib/ui.js";
@@ -59,9 +59,11 @@ export async function render(root) {
   // 担当フィルタはビュー横断で適用（保存リスト固有の assignee より個人選択を優先）。
   state.filter.assignee = state.who || "";
 
+  // コンテナ（子持ち親）は作業行に出さない（#732）。byId はフィルタ前の全タスクから作る。
+  const byId = new Map((tasks || []).map((t) => [t.id, t]));
   // 一致＋分類（kinds 依存は view 側）＋ソート
   const catTitle = state.filter._cat || "";
-  const matched = (tasks || []).filter((t) => taskMatches(t, state.filter, ctx) && (!catTitle || categoryLabels(t).some((l) => l.title === catTitle)));
+  const matched = (tasks || []).filter((t) => taskMatches(t, state.filter, ctx) && !isContainer(t, byId) && (!catTitle || categoryLabels(t).some((l) => l.title === catTitle)));
   const sorted = sortTasks(matched, state.sort, today);
   const sumH = sorted.reduce((s, t) => s + (t.time_estimate || 0), 0) / 3600; // ビュー内の見積り合計
   // 表示外になった選択を捨てる（フィルタ/ビュー切替で見えなくなった id は選択解除）。
@@ -69,10 +71,10 @@ export async function render(root) {
 
   // タブ件数（組み込み）。担当フィルタはビュー横断なので件数にも反映＝タブを開いた時の件数と一致させる。
   const who = state.who || "";
-  const countOf = (v) => (tasks || []).filter((t) => taskMatches(t, { ...presetOf(v), assignee: who }, ctx)).length;
+  const countOf = (v) => (tasks || []).filter((t) => taskMatches(t, { ...presetOf(v), assignee: who }, ctx) && !isContainer(t, byId)).length;
   const countOfList = (l) => {
     const f = { ...EMPTY_FILTER, ...l.filter, assignee: who }, cat = f._cat || "";
-    return (tasks || []).filter((t) => taskMatches(t, f, ctx) && (!cat || categoryLabels(t).some((x) => x.title === cat))).length;
+    return (tasks || []).filter((t) => taskMatches(t, f, ctx) && !isContainer(t, byId) && (!cat || categoryLabels(t).some((x) => x.title === cat))).length;
   };
 
   const curName = currentViewName(state, lists);

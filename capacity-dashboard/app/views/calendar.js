@@ -6,7 +6,7 @@ import { load, invalidate } from "../lib/store.js";
 import { todayItemsByMember } from "../lib/today_items.js";
 import { expandRecurrences } from "../lib/recurrence.js";
 import { PRIO, NEUTRAL, KINDS } from "../lib/kinds.js";
-import { dateOnly, shiftISO } from "../lib/capacity.js";
+import { dateOnly, shiftISO, isContainer } from "../lib/capacity.js";
 import { deletePlan, logPlan, updateRecurrence } from "../lib/api.js";
 import { C, fmtH, esc, member_color, todayISO, announce, openOverlay } from "../lib/ui.js";
 import { splitMeta, DOW_JA } from "../lib/form.js"; // note の "[資料] URL" 行を抽出
@@ -45,6 +45,7 @@ function buildModel() {
   const placed = [];
   const placedKey = new Set();
   for (const t of (tasks || [])) {
+    if (isContainer(t, byTask)) continue; // コンテナ（子持ち親）は作業行に出さない（#732）
     const plans = (plansByTask && plansByTask.get && plansByTask.get(t.id)) || [];
     for (const p of plans) {
       if (dateOnly(p.plan_date) !== _day || p.start_minute == null) continue;
@@ -63,6 +64,8 @@ function buildModel() {
     if (!st) continue;
     for (const it of st.items) {
       if (!it.taskId) continue;                       // occurrence(会議/定例)は配置対象外
+      const tt = byTask.get(it.taskId);
+      if (tt && isContainer(tt, byTask)) continue;    // コンテナ（子持ち親）は作業行に出さない（#732）
       if (placedKey.has(it.taskId + ":" + m.id)) continue;
       tray.push({ taskId: it.taskId, memberId: m.id, mins: Math.round(it.h * 60), title: it.title, kind: it.kind, prio: it.prio });
     }
@@ -85,7 +88,7 @@ function buildModel() {
       meetings.push({ memberId: uid, startMin, mins, title: rec.title || "会議", kind, prio: null, fixed: true, links, recId: rec.id, origISO, hasOverride: !!override });
     }
   }
-  return { members, placed, tray, meetings };
+  return { members, placed, tray, meetings, byTask };
 }
 function bucketFromItem(itemMap, mid, taskId) {
   const st = itemMap.get(mid);
@@ -122,7 +125,7 @@ function layoutLanes(items) {
 }
 
 function paint() {
-  const { members, placed, tray, meetings } = buildModel();
+  const { members, placed, tray, meetings, byTask } = buildModel();
   const nowMin = nowMinutes();
 
   const hours = [];
@@ -157,7 +160,7 @@ function paint() {
   const usedIds = new Set([...placed.map((b) => b.taskId), ...tray.map((it) => it.taskId)]);
   const dayMins = (H1 - H0) * 60;
   const pool = (_data.tasks || [])
-    .filter((t) => !t.done && !usedIds.has(t.id))
+    .filter((t) => !t.done && !usedIds.has(t.id) && !isContainer(t, byTask)) // コンテナ（子持ち親）は作業行に出さない（#732）
     .sort((a, b) => (b.priority || 0) - (a.priority || 0) || a.title.localeCompare(b.title, "ja"));
   const poolHtml = pool.length ? pool.map((t) => {
     const estMin = Math.round((t.time_estimate || 0) / 60);

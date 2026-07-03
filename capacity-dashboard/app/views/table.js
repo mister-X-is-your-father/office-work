@@ -6,7 +6,7 @@ import { savePresets } from "../lib/exec.js";
 import { updateTask, deleteTask, addAssignee, removeAssignee, addTaskLabel, removeTaskLabel, createLabel, setTaskWaiting, createTaskInProject, addRelation, removeRelation, getTask } from "../lib/api.js";
 import { PRIO, prioBucket, isReviewTask, categoryLabels, categoryColor, REVIEW_LABEL, WAITING_LABEL, statusOf, STATUS } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color, todayISO, announce } from "../lib/ui.js";
-import { shiftISO, buildTaskTree, projectAncestor } from "../lib/capacity.js";
+import { shiftISO, buildTaskTree, projectAncestor, isContainer as isContainerTask } from "../lib/capacity.js";
 import { openTaskForm, ensureStyle as ensureFormStyle } from "./taskform.js";
 import { summarizeRecurrence, openRecurrenceForm } from "./recurrenceform.js";
 import { hourInputHtml, wireHourInput, parseSmartDate } from "../lib/form.js";
@@ -202,9 +202,8 @@ function deriveRow(t, ctx) {
     review: isReviewTask(t), prio: prioBucket(t.priority), cat: categoryLabels(t)[0] || null,
     due: dueISO(t), start: startISO(t), end: endISO(t), est: (t.time_estimate || 0) / HOUR, pct: t.percent_done || 0,
     done: !!t.done, status: statusOf(t),
-    // コンテナ＝byId に実在する子を持つ親タスク（プロジェクト/タスクグループ＝入れ物。buildTaskTree と同じ判定）。
-    // タスクとしてカウントしない: 表モードの行・件数/見積集計から除外（階層モードでは構造として表示継続）。
-    isContainer: ((((t.related_tasks || {}).subtask) || []).some((s) => ctx.byId && ctx.byId.has(s.id) && s.id !== t.id)),
+    // コンテナ（子持ち親）は作業行に出さない（#732）。判定は lib/capacity.js の isContainer に一本化。
+    isContainer: isContainerTask(t, ctx.byId),
   };
 }
 // ── B21: 件数内訳サマリ（純関数）。render と patchRow で共用（挙動同値）。 ──

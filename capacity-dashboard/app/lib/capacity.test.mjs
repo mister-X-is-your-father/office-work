@@ -4,7 +4,7 @@ import {
   toH, dateOnly, hasDate, taskHoursOn, isBusinessDay, businessDays,
   loadByMember, weekLoadByMember, estimateVsActual, triage, sumByMemberDay,
   shiftISO, taskRanges, dependencyEdges, dayScale, toMemberDayEntries, taskPlannedHoursByMemberOn,
-  buildTaskTree, depLayers, applyBarDrag, committedHoursByDayInRange, todayISO,
+  buildTaskTree, isContainer, depLayers, applyBarDrag, committedHoursByDayInRange, todayISO,
   dueISO, capStatus, planEntriesFor,
 } from "./capacity.js";
 
@@ -423,4 +423,18 @@ test("weekLoadByMember: plansByTask で日別 plans/見積り混在", () => {
   assert.equal(m.days.find((d) => d.day === "2026-06-11").h, 0); // plans有・当日無→0（見積りにしない）
   assert.equal(m.days.find((d) => d.day === "2026-06-12").h, 2); // plan 2h
   assert.equal(m.weekH, 3);
+});
+
+test("isContainer: byId に実在する子を持つ親のみコンテナ（#732）", () => {
+  const p = { id: 1, related_tasks: { subtask: [{ id: 2 }] } };
+  const c = { id: 2, related_tasks: { parenttask: [{ id: 1 }] } };
+  const ghost = { id: 3, related_tasks: { subtask: [{ id: 999 }] } }; // 子が byId に無い＝葉扱い
+  const self = { id: 4, related_tasks: { subtask: [{ id: 4 }] } };    // 自己参照は無視
+  const byId = new Map([[1, p], [2, c], [3, ghost], [4, self]]);
+  assert.equal(isContainer(p, byId), true);
+  assert.equal(isContainer(c, byId), false);
+  assert.equal(isContainer(ghost, byId), false);
+  assert.equal(isContainer(self, byId), false);
+  assert.equal(isContainer(null, byId), false);
+  assert.equal(isContainer(p, null), false);
 });

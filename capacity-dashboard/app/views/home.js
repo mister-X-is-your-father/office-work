@@ -1,7 +1,7 @@
 // 総合ホーム（実データ）。縦積み: KPI / やること / 今日の稼働予定 / 稼働プラン / 月間ガント。
 // 各セクションは折りたたみヘッダ付き。開閉状態は本人ごと localStorage に保存・復元。
 import { load } from "../lib/store.js";
-import { loadByMember, estimateVsActual, triage, weekLoadByMember, dateOnly, shiftISO, dowOf } from "../lib/capacity.js";
+import { loadByMember, estimateVsActual, triage, weekLoadByMember, dateOnly, shiftISO, dowOf, isContainer } from "../lib/capacity.js";
 import { humanAssignees, firstHuman } from "../lib/users.js";
 import { capacityOn } from "../lib/recurrence.js";
 import { statusOf } from "../lib/kinds.js";
@@ -28,7 +28,9 @@ const isOpen = (t) => statusOf(t) !== "done";
 // 「やること」4バケットを tasks から算出。重複を避けるため 1W は「明日〜7日」。
 // 先頭=期限超過（due<today の未完了）。今日期限/1W は超過を含まない（===day / >=明日）ので重複なし。
 function todoBuckets(tasks, day) {
-  const open = (tasks || []).filter(isOpen);
+  // コンテナ（子持ち親）は作業行に出さない（#732）。判定 Map はフィルタ前の全タスク（load().tasks）から構築。
+  const byId = new Map((tasks || []).map((t) => [t.id, t]));
+  const open = (tasks || []).filter((t) => isOpen(t) && !isContainer(t, byId));
   const tomorrow = shiftISO(day, 1), in7 = shiftISO(day, 7);
   const overdue = open.filter((t) => { const d = dueISO(t); return d && d < day; });
   const unassigned = open.filter((t) => humanAssignees(t).length === 0);

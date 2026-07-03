@@ -5,6 +5,7 @@ import { load, invalidate } from "../lib/store.js";
 import { firstHuman } from "../lib/users.js";
 import { updateTask } from "../lib/api.js";
 import { expandRecurrences } from "../lib/recurrence.js";
+import { isContainer } from "../lib/capacity.js";
 import { monthMatrix, DOW_JA } from "../lib/form.js";
 import { C, esc, member_color, todayISO, avatar } from "../lib/ui.js";
 import { icon } from "../lib/icons.js";
@@ -59,9 +60,12 @@ export async function render(root) {
     const min = override && override.start_minute != null ? override.start_minute : baseMin;
     add(dateISO, { kind: "rec", title: rec.title || "会議", min: min || null, sort: min || 0 });
   }
+  // コンテナ（子持ち親）は作業行に出さない（#732）。byId はフィルタ前の全タスクから作る。
+  const byId = new Map((tasks || []).map((t) => [t.id, t]));
   if (FILTER.task) for (const t of tasks || []) {
     const due = dueISO(t);
     if (!due || due < firstISO || due > lastISO) continue;
+    if (isContainer(t, byId)) continue;
     if (FILTER.who && !(t.assignees || []).some((a) => String(a.id) === FILTER.who)) continue;
     const who = firstHuman(t);
     const overdue = !t.done && due < today; // 未完了かつ期限切れ

@@ -3,7 +3,7 @@
 // 期間で粒度自動切替（≤14日=日別 / それ超=週別集計）。容量線は列ごと（=capH×営業日数）。
 // 集計は capacity.js を変更せず weekLoadByMember を重要度バケット×メンバーで呼んで再利用。重要度色は kinds.PRIO(SSoT)。
 import { load, invalidate } from "../lib/store.js";
-import { weekLoadByMember, taskPlannedHoursByMemberOn, shiftISO, isBusinessDay, daysUntil, todayISO, dowOf } from "../lib/capacity.js";
+import { weekLoadByMember, taskPlannedHoursByMemberOn, shiftISO, isBusinessDay, daysUntil, todayISO, dowOf, isContainer } from "../lib/capacity.js";
 import { capacityOn } from "../lib/recurrence.js";
 import { PRIO, prioBucket } from "../lib/kinds.js";
 import { C, fmtH, esc, member_color } from "../lib/ui.js";
@@ -179,7 +179,10 @@ async function renderState(root, state, rerender, view = {}) {
   else if (WHO === "self") targets = selfMember ? [selfMember] : [];
   else { const one = activeMembers.find((m) => String(m.id) === String(WHO)) || selfMember; targets = one ? [one] : []; }
 
-  const perMember = targets.map((m) => ({ m, cols: colsForMember(m, bdays, granularity, tasks, plansByTask, holidaysSet, unavailabilityByMember) }));
+  // コンテナ（子持ち親）は作業行に出さない（#732）: 列工数と寄与ポップ行の両方から除外
+  const byId = new Map((tasks || []).map((t) => [t.id, t]));
+  const workTasks = (tasks || []).filter((t) => !isContainer(t, byId));
+  const perMember = targets.map((m) => ({ m, cols: colsForMember(m, bdays, granularity, workTasks, plansByTask, holidaysSet, unavailabilityByMember) }));
   const allCols = perMember.flatMap((x) => x.cols);
   const yMax = Math.max(1, ...allCols.map((c) => Math.max(c.cap, c.total))) * 1.12;
   // 既定の各チャート高（全員=190 / 個人=300）。fluid(ホーム埋め込み)=固定px箱をやめ、
