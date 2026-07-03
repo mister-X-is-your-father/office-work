@@ -68,7 +68,7 @@ def save_prep(d):
 ACTIVITY_PATH = f"{HOME}/.config/taskstation/activity.json"
 ACTIVITY_MAX = 2000
 # type=field で記録を許可するフィールドの whitelist（from/to は API 生値の文字列表現・表示整形は画面側の責務）
-ACTIVITY_FIELDS = ("title", "due_date", "start_date", "end_date", "time_estimate", "description", "priority")
+ACTIVITY_FIELDS = ("title", "due_date", "start_date", "end_date", "time_estimate", "description", "priority", "parent")
 def load_activity():
     try:
         d = json.load(open(ACTIVITY_PATH))

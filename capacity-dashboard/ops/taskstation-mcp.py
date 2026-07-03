@@ -21,6 +21,12 @@ v2.2 追加:
 v2.3 追加（#693 運用ルールの MCP 強制＝違反はエラーで正しい道を案内する決定論的ガード）:
   complete_task の summary 必須化 / set_progress(100以上) 拒否→complete_task へ誘導 /
   分類「人間」タスクへの変更系ツール拒否（guard_human）/ resume_task は連絡待ち解除専用 / start_task は完了済み拒否
+v2.4 追加:
+  #689 safe_update を「タスク更新の唯一の関所（生POST禁止）」として正式化＋消失防波堤（stderr警告）
+       ＋回帰テスト test_taskstation_mcp.py（部分更新セマンティクス・ガードを固定）
+  #715 move_task（親の付け替え・SPA gRawSet("proj") と同一規約）／get_task に project/group（階層）／
+       一覧行末に @プロジェクト/グループ を付記
+  バグ修正: all_tasks() をページング化（サーバが per_page を 50 に丸めるため50件頭打ちだった）
 認証（2資格情報方式）:
   ~/.config/taskstation/fable.env  = 操作の名義（コメント・タスク更新・進捗・作成・担当・plans。
                                      AI発言と人間の区別＝UXの核なので fable 名義を維持）
@@ -42,6 +48,8 @@ TS_API = "http://localhost:7005/api/v1"
 FABLE_ENV = os.path.expanduser("~/.config/taskstation/fable.env")
 MORITA_ENV = os.path.expanduser("~/.config/taskstation/morita.env")  # ラベル管理専用（森田名義）
 # タスクのスカラ更新は全置換仕様（#9）: 既存値を全部送ってから patch を載せる
+# ⚠ タスク更新は safe_update 経由のみ（/tasks/{id} への生POST禁止・#689）。
+#   生POSTは未指定フィールドを消失させる（実害あり: 31タスクの description/time_estimate 消失）
 # started_at は SPA 拡張フィールド（doing 状態の判定に使う）
 TASK_SCALARS = ["title", "description", "done", "due_date", "start_date", "end_date",
                 "priority", "percent_done", "repeat_after", "repeat_mode", "hex_color",
@@ -93,19 +101,44 @@ def _req(path, method, body, token):
 
 
 def safe_update(task_id, patch):
+    """タスク更新の唯一の関所（生POST禁止・#689）。
+
+    GET → TASK_SCALARS を全送 → patch 上書き → POST。バックエンドは全置換仕様のため、
+    この経路を通らない生 POST（例: {title, priority} だけ送る）は未指定フィールドを
+    消失させる（実害: 別セッションの API 直叩きで31タスクの description/time_estimate 消失）。
+    ＝**未指定フィールドは既存値維持**（部分更新セマンティクス）。テストで固定
+    （ops/test_taskstation_mcp.py）。
+    """
     cur = ts(f"/tasks/{task_id}")
     body = {k: cur[k] for k in TASK_SCALARS if k in cur}
     body.update(patch)
+    _warn_silent_loss(task_id, cur, patch)
     res = ts(f"/tasks/{task_id}", "POST", body)
     _log_update_diff(task_id, cur, patch)  # 成功後の fire-and-forget（戻り値・例外挙動は不変）
     return res
+
+
+def _warn_silent_loss(task_id, cur, patch):
+    """#689 消失防波堤: 非空だった値が空になる更新を stderr で検知する（検知のみ・ブロックしない）。
+
+    set_due のクリア等、意図的な空化もあるため更新自体は実行する。diff は既存の
+    _log_update_diff が type:"field" で活動ログに記録する（担保）。
+    """
+    checks = (("description", lambda v: bool((v or "").strip())),
+              ("time_estimate", lambda v: (v or 0) > 0))
+    for field, nonempty in checks:
+        if field in patch and nonempty(cur.get(field)) and not nonempty(patch[field]):
+            print(f"[warn] #689 silent-loss-guard: task {task_id} {field} が非空→空に更新されます",
+                  file=sys.stderr)
 
 
 # ---- 変更履歴（exec の活動ログへ追記） ----
 
 EXEC_API = "http://localhost:7020"
 # type=field で記録するフィールド whitelist（exec 側と同一。from/to は API 生値の str 化）
-ACTIVITY_FIELDS = ("title", "due_date", "start_date", "end_date", "time_estimate", "description", "priority")
+# "parent" は move_task の親付け替え記録用（safe_update の patch には現れない）
+ACTIVITY_FIELDS = ("title", "due_date", "start_date", "end_date", "time_estimate", "description",
+                   "priority", "parent")
 
 
 def _fable_token():
@@ -198,7 +231,7 @@ def guard_human(cur):
     """分類「人間」のタスクへの変更系操作を拒否する共通ガード（#693 運用ルールの強制）。
 
     適用: start_task / set_progress / set_estimate / set_due / complete_task /
-    escalate / resume_task / schedule_task。
+    escalate / resume_task / schedule_task / move_task。
     対象外（許可）: post_comment / add_dependency / remove_dependency /
     create_subtask / get_task / add_note（読み取り・申し送り・構造化は妨げない）。
     """
@@ -243,7 +276,16 @@ STATUS_JA = {"todo": "未着手", "doing": "進行中", "waiting": "連絡待ち
 
 
 def all_tasks():
-    return ts("/tasks/all?per_page=250") or []
+    """全タスク取得（ページング対応）。サーバは per_page を 50 に丸めるため単発では50件頭打ちになる。"""
+    out = []
+    for page in range(1, 201):  # フェイルセーフ最大200ページ
+        batch = ts(f"/tasks/all?per_page=250&page={page}") or []
+        if not batch:
+            break
+        out.extend(batch)
+        if len(batch) < 50:  # サーバ上限(50)未満=最終ページ
+            break
+    return out
 
 
 def template_project_ids():
@@ -257,6 +299,52 @@ def sort_key(t):
     if has_date(due):
         return (0, due, -(t.get("priority") or 0))
     return (1, "", -(t.get("priority") or 0))
+
+
+def parent_task_of(t):
+    """直近親（related_tasks.parenttask[0]）。無ければ None。"""
+    pt = (t.get("related_tasks") or {}).get("parenttask") or []
+    return pt[0] if pt else None
+
+
+def project_ancestor(t, by_id):
+    """SPA の projectAncestor 相当: (最上位祖先=プロジェクト, 直近親=グループ) を返す（#715）。
+
+    parenttask 鎖を byId で辿る（訪問済みセットで循環ガード・byId に無い id で打ち切り）。
+    祖先が無ければ (None, None)。直近親＝最上位（グループ層なし）のときは group=None。
+    """
+    seen = {t.get("id")}
+    chain, cur = [], t
+    while True:
+        p = parent_task_of(cur)
+        if not p:
+            break
+        node = by_id.get(p.get("id"))
+        if node is None or node["id"] in seen:
+            break
+        seen.add(node["id"])
+        chain.append(node)
+        cur = node
+    if not chain:
+        return None, None
+    project = chain[-1]
+    group = chain[0] if len(chain) >= 2 else None
+    return project, group
+
+
+def _descendant_ids(root_id, by_id):
+    """root_id 配下（subtask ツリー）の全タスク id 集合（循環ガード付き）。move_task の循環防止用。"""
+    seen, stack = set(), [root_id]
+    while stack:
+        cur = by_id.get(stack.pop())
+        if not cur:
+            continue
+        for x in ((cur.get("related_tasks") or {}).get("subtask") or []):
+            xid = x.get("id")
+            if xid and xid not in seen:
+                seen.add(xid)
+                stack.append(xid)
+    return seen
 
 
 def open_blocker_ids(t, by_id):
@@ -286,6 +374,10 @@ def fmt_line(t, ref_date=None, by_id=None):
         line += " ⚠期限超過"
     if by_id is not None and not t.get("done") and open_blocker_ids(t, by_id):
         line += " ⛔ブロック中"
+    if by_id is not None:  # 所属（プロジェクト/グループ）を行末に付記（#715）
+        proj, grp = project_ancestor(t, by_id)
+        if proj:
+            line += f" @{proj['title']}" + (f"/{grp['title']}" if grp else "")
     return line
 
 
@@ -299,11 +391,15 @@ def t_get_task(a):
     t = ts(f"/tasks/{a['task_id']}")
     ai_notes = notes.list_for(a["task_id"])
     rel = t.get("related_tasks") or {}
+    by_id = {x["id"]: x for x in all_tasks()}
+    proj, grp = project_ancestor(t, by_id)
     return json.dumps({
         "id": t["id"], "title": t["title"], "description": t.get("description") or "",
         "done": t.get("done"), "percent_done": t.get("percent_done"),
         "estimate_hours": round((t.get("time_estimate") or 0) / 3600, 2),
         "due_date": t.get("due_date"), "project_id": t.get("project_id"),
+        "project": {"id": proj["id"], "title": proj["title"]} if proj else None,
+        "group": {"id": grp["id"], "title": grp["title"]} if grp else None,
         "assignees": [u.get("username") for u in (t.get("assignees") or [])],
         "subtasks": [{"id": x["id"], "title": x["title"], "done": x.get("done")}
                      for x in (rel.get("subtask") or [])],
@@ -552,6 +648,43 @@ def t_schedule_task(a):
             f"{len(days)}日分（{skip_s}計{total:g}h）の日別予定を登録しました（週プランナー/ガントに表示）")
 
 
+def t_move_task(a):
+    """親（プロジェクト/タスクグループ）の付け替え。SPA の gRawSet("proj") と同一規約（#715）:
+    subtask relation は**親側に**張る/消す（addRelation(parentId, id, "subtask") と同じ向き）。"""
+    tid = int(a["task_id"])
+    cur = ts(f"/tasks/{tid}")
+    guard_human(cur)
+    raw = a.get("new_parent_task_id")
+    npid = int(raw) if raw else None  # 省略/null = 最上位化
+    if npid == tid:
+        raise Exception("自分自身を親にはできません")
+    by_id = {t["id"]: t for t in all_tasks()}
+    if npid is not None:
+        if npid not in by_id:
+            raise Exception(f"新しい親 #{npid} が見つかりません")
+        if npid in _descendant_ids(tid, by_id):
+            raise Exception(f"#{npid} は #{tid} の子孫のため親にできません（循環）")
+    old = parent_task_of(cur)
+    old_id = old.get("id") if old else None
+    if old_id is None and npid is None:
+        return f"タスク #{tid} は既に最上位です（変更なし）"
+    if old_id is not None:  # 旧親から subtask relation を消す（親側から・SPAと同じ向き）
+        try:
+            ts(f"/tasks/{old_id}/relations/subtask/{tid}", "DELETE")
+        except urllib.error.HTTPError as e:
+            if e.code not in (400, 403, 404, 409):  # 既に外れている等は冪等に無視
+                raise
+    if npid is not None:  # 新親に subtask relation を張る（親側に）
+        ts(f"/tasks/{npid}/relations", "PUT", {"other_task_id": tid, "relation_kind": "subtask"})
+    old_title = ((by_id.get(old_id) or old or {}).get("title") or "") if old_id is not None else ""
+    new_title = (by_id[npid].get("title") or "") if npid is not None else ""
+    log_activity({"task_id": tid, "type": "field", "field": "parent",
+                  "from": old_title, "to": new_title, "title": cur.get("title") or ""})
+    if npid is not None:
+        return f"タスク #{tid} を #{npid} 「{new_title}」配下へ移動しました"
+    return f"タスク #{tid} を最上位化しました（親から外しました）"
+
+
 def t_add_dependency(a):
     tid, bid = int(a["task_id"]), int(a["blocker_task_id"])
     if tid == bid:
@@ -602,7 +735,7 @@ TOOLS = [
      {"task_id": NUM, "reason": STR, "options": STR}, ["task_id", "reason"], t_escalate),
     ("resume_task", "エスカレーション解除後の再開専用（連絡待ちのタスクにのみ使える）。連絡待ちを外して進行中に戻す。note があればコメント投稿。通常の着手は start_task",
      {"task_id": NUM, "note": STR}, ["task_id"], t_resume_task),
-    ("create_task", "タスクを新規作成する。goal は説明末尾に[ゴール]として結合。labels は無ければ新規作成して付与。assignees は 森田 / fable / taskstation-ai。priority は 0-4（0=なし〜4=MUST）。blocked_by=先行タスクid配列（依存関係を張る）。parent_task_id 指定でその配下（サブタスク）、無指定はインボックスWSに作成",
+    ("create_task", "タスクを新規作成する。goal は説明末尾に[ゴール]として結合。labels は無ければ新規作成して付与。assignees は 森田 / fable / taskstation-ai。priority は 0-4（0=なし〜4=MUST）。blocked_by=先行タスクid配列（依存関係を張る）。parent_task_id 指定でプロジェクト/タスクグループ直下に作る（移動は move_task）、無指定はインボックスWSに作成",
      {"title": STR, "description": STR, "goal": STR, "estimate_hours": NUM, "due_date": STR,
       "priority": NUM, "labels": ARR_STR, "assignees": ARR_STR, "parent_task_id": NUM,
       "blocked_by": ARR_NUM},
@@ -610,6 +743,8 @@ TOOLS = [
     ("schedule_task", "日別予定（task_time_plans）を登録する＝週プランナー/ガント/稼働プランに表示される。金3h/土3h/日3h のような日次計画に使う。end_date（YYYY-MM-DD）指定で date〜end_date の各日に hours/日 を一括登録（skip_weekends=true 既定＝土日を飛ばす）",
      {"task_id": NUM, "date": STR, "hours": NUM, "end_date": STR, "skip_weekends": BOOL},
      ["task_id", "date", "hours"], t_schedule_task),
+    ("move_task", "タスクを別の親（プロジェクト/タスクグループ）配下へ移動する。new_parent_task_id 省略で最上位化（親から外す）。自分自身・自分の子孫への移動はエラー",
+     {"task_id": NUM, "new_parent_task_id": NUM}, ["task_id"], t_move_task),
     ("add_dependency", "依存関係を張る（blocker が完了するまで task は着手不可の意味）。ガント/依存グラフにも自動で線が出る。依存は説明文に手書きせずこのツールで構造化する",
      {"task_id": NUM, "blocker_task_id": NUM}, ["task_id", "blocker_task_id"], t_add_dependency),
     ("remove_dependency", "依存関係を解除する（task が blocker の完了待ちでなくなる）。張られていない場合も冪等に成功する",
