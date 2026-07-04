@@ -154,7 +154,7 @@ async function mount(root, opts) {
   // 持ち上げた純ビルダー（gridHead/barsHTML/aggRange/aggBarHTML/memberTaskRow）へ渡す共有 ctx。
   // scale/byIdAll/today/tier/weekStart/rangeByTask は mount ローカルで確定済み。mode はモード切替で
   // paint 単独再実行され変わる（remount しない）ため、paint() 冒頭で毎回 ctx.mode を最新化する。
-  const ctx = { scale, byIdAll, today, tier, weekStart, rangeByTask, mode: state.mode };
+  const ctx = { scale, byIdAll, today, tier, weekStart, rangeByTask, mode: state.mode, editable };
   // B40: クリティカルパス（依存グラフの最長鎖）。窓に依存しないので render 単位で一度だけ算出。
   const critById = depLayers(tasks.map((t) => t.id), edges).critical;
   const memberIdx = new Map(members.map((m, i) => [m.id, i]));
@@ -682,7 +682,7 @@ async function mount(root, opts) {
 
   // 編集系ハンドラ（ラベルクリックで編集／バードラッグ／日別予定ポップアップ）は editable のときだけ配線。
   // 埋め込み(閲覧主体)では一切張らず、リスナーもポップアップ DOM も生成しない＝安定・無副作用。
-  let drag = null, dlabel = null;
+  let drag = null, dlabel = null, linkDrag = null;
   const reload = () => { invalidate(); render(root); };
   if (editable) {
   // 左の固定ラベル列（タスク名）クリックで編集モーダル。バーの有無に関わらず全タスク行で編集可能に。
@@ -703,6 +703,30 @@ async function mount(root, opts) {
   const hideLabel = () => { if (dlabel) dlabel.style.display = "none"; };
 
   rowsEl.addEventListener("pointerdown", (e) => {
+    // #760: リンクハンドル＝依存作成ドラッグ。日程ドラッグ(drag)は開始しない完全分離の経路。
+    const link = e.target.closest(".bar-link");
+    if (link) {
+      const lbar = link.closest(".bar[data-task]");
+      if (!lbar) return;
+      e.preventDefault();
+      // capture は rowsEl へ（バーに capture すると elementFromPoint は使えるが、rowsEl でも同様に使える＝
+      // move/up が確実に rowsEl のリスナーへ届く方を採る）。
+      try { rowsEl.setPointerCapture(e.pointerId); } catch { /* capture 不可でも move/up は届く */ }
+      // ゴースト線: rowsEl(絶対配置の基準)ローカル座標で始点を固定し、move で終点だけ更新。
+      const rr = rowsEl.getBoundingClientRect();
+      const hb = link.getBoundingClientRect();
+      const x0 = hb.left + hb.width / 2 - rr.left, y0 = hb.top + hb.height / 2 - rr.top;
+      const SVG_NS = "http://www.w3.org/2000/svg";
+      const svg = document.createElementNS(SVG_NS, "svg");
+      svg.setAttribute("class", "gv-linkghost");
+      const line = document.createElementNS(SVG_NS, "line");
+      line.setAttribute("x1", x0); line.setAttribute("y1", y0);
+      line.setAttribute("x2", x0); line.setAttribute("y2", y0);
+      svg.appendChild(line);
+      rowsEl.appendChild(svg);
+      linkDrag = { fromId: +lbar.dataset.task, svg, line, overBar: null, toId: 0 };
+      return;
+    }
     if (e.target.closest(".bar-shift")) return;   // 移動メニュー用ボタンはドラッグ開始しない（タップで開く）
     const bar = e.target.closest(".bar.draggable");
     if (!bar) return;
@@ -718,6 +742,28 @@ async function mount(root, opts) {
   });
 
   rowsEl.addEventListener("pointermove", (e) => {
+    // #760: リンクドラッグ中＝ゴースト線の終点更新＋ドロップ候補バーのハイライト＋説明ラベル。
+    if (linkDrag) {
+      const rr = rowsEl.getBoundingClientRect();
+      linkDrag.line.setAttribute("x2", e.clientX - rr.left);
+      linkDrag.line.setAttribute("y2", e.clientY - rr.top);
+      // ゴーストは pointer-events:none なのでカーソル直下の実要素からバーを判定できる。
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const over = el ? el.closest(".bar.draggable[data-task]") : null;   // 集約バー(agg)は data-task 無し＝対象外
+      const tid = over ? +over.dataset.task : 0;
+      if (linkDrag.overBar && linkDrag.overBar !== over) {
+        linkDrag.overBar.classList.remove("link-target");
+        linkDrag.overBar = null; linkDrag.toId = 0;
+      }
+      if (over && tid && tid !== linkDrag.fromId) {
+        if (linkDrag.overBar !== over) { over.classList.add("link-target"); linkDrag.overBar = over; linkDrag.toId = tid; }
+        const tt = byIdAll.get(tid);
+        showLabel(`→ ドロップで「${tt ? tt.title : "このタスク"}」の先行に設定`, e.clientX, e.clientY);
+      } else {
+        showLabel("依存を張る相手のバーへドロップ", e.clientX, e.clientY);
+      }
+      return;
+    }
     if (!drag) return;
     const dx = e.clientX - drag.startX;
     if (Math.abs(dx) > 4) drag.moved = true;
@@ -731,6 +777,13 @@ async function mount(root, opts) {
   });
 
   rowsEl.addEventListener("pointerup", async (e) => {
+    // #760: リンクドラッグの終端＝後始末してからドロップ確定処理へ。
+    if (linkDrag) {
+      const ld = linkDrag; linkDrag = null;
+      cleanupLinkDrag(ld, e);
+      await dropLink(ld);
+      return;
+    }
     const d = drag; drag = null; hideLabel();
     if (!d) return;
     d.bar.classList.remove("dragging");
@@ -745,6 +798,55 @@ async function mount(root, opts) {
     catch (err) { alert("日程の更新に失敗: " + err.message); }
     reload();
   });
+
+  // #760: ブラウザ都合の中断（スクロール奪取等）でもゴースト/ハイライトを残さない。
+  rowsEl.addEventListener("pointercancel", (e) => {
+    if (linkDrag) { const ld = linkDrag; linkDrag = null; cleanupLinkDrag(ld, e); }
+  });
+
+  // #760: リンクドラッグの後始末（ゴースト線・ハイライト・ラベル・pointer capture）。多重呼び出し安全。
+  function cleanupLinkDrag(ld, e) {
+    hideLabel();
+    if (ld.svg) ld.svg.remove();
+    if (ld.overBar) ld.overBar.classList.remove("link-target");
+    if (e) { try { rowsEl.releasePointerCapture(e.pointerId); } catch { /* 未captureでもOK */ } }
+  }
+
+  // #760: ドロップ確定＝「to は from の完了待ち」(to follows from) を作成。
+  // 自己・重複・循環はガードし、結果は announce（aria-live トースト）で告知。成功時 reload で矢印まで反映。
+  async function dropLink(ld) {
+    const toId = ld.toId;
+    if (!toId || toId === ld.fromId) return;   // ドロップ先なし／自分自身＝何もしない
+    const toT = byIdAll.get(toId), fromT = byIdAll.get(ld.fromId);
+    if ((((toT || {}).related_tasks || {}).follows || []).some((r) => r.id === ld.fromId)) {
+      announce("この依存は既に設定されています"); return;
+    }
+    // 循環ガード: from の先行鎖（follows を遡る）に to がいる＝to→…→from が既存なので from→to を足すと循環。
+    if (followsChainHas(ld.fromId, toId)) {
+      announce("循環になるため設定できません"); return;
+    }
+    try {
+      await vik.addRelation(toId, ld.fromId, "follows");   // 逆向き precedes はバックエンドが自動付与
+      announce(`依存を作成しました: 「${toT ? toT.title : toId}」は「${fromT ? fromT.title : ld.fromId}」の完了待ち`);
+      reload();
+    } catch (err) {
+      announce("依存の作成に失敗しました: " + err.message);
+    }
+  }
+
+  // startId の follows 鎖（related_tasks.follows を byIdAll で辿る・訪問済みSetでBFS）に targetId が現れるか。
+  function followsChainHas(startId, targetId) {
+    const seen = new Set([startId]);
+    const stack = [startId];
+    while (stack.length) {
+      const t = byIdAll.get(stack.pop());
+      for (const rel of (((t || {}).related_tasks || {}).follows) || []) {
+        if (rel.id === targetId) return true;
+        if (!seen.has(rel.id)) { seen.add(rel.id); stack.push(rel.id); }
+      }
+    }
+    return false;
+  }
 
   // ソース別のコミット。dates/due=updateTask（非破壊）、plans=全エントリを delta 日ずらす（整合）。
   async function commitDrag(taskId, src, nb, dayDelta) {
@@ -979,9 +1081,11 @@ function barsHTML(ctx, r, taskId) {
     // タッチ環境では (hover:none)/(pointer:coarse) で常時可視。マウス環境ではホバー/フォーカス時のみ
     // 小さく出す控えめなボタン。クリックで日付シフトの小メニューを開く（既存DnDの日付更新を流用）。
     const shiftBtn = `<button class="bar-shift" type="button" data-task="${taskId}" aria-label="${esc((tName ? tName + " " : "") + "の日程をずらす")}" title="日程をずらす">⋮</button>`;
+    // #760: 依存作成のリンクハンドル（バー右端の外の小円）。editable のときだけ描く（埋め込み閲覧では出さない）。
+    const linkHandle = ctx.editable ? `<span class="bar-link" title="ドラッグで依存を張る（この先に完了が必要なタスクへ）"></span>` : "";
     // スクリーンリーダー向け: タスク名＋予定（時間・由来）。視覚的 title はホバー用に従来どおり保持。
     const planAria = `${tName ? tName + " " : ""}予定 ${fmtH(r.planned.h)}（${srcLabel(r.planned.source)}）`;
-    bars += `<div class="bar plan draggable${clip}" role="img" aria-label="${esc(planAria)}" data-task="${taskId}" data-src="${r.planned.source}" style="left:${left}px;width:${w}px" title="予定 ${fmtH(r.planned.h)}（${srcLabel(r.planned.source)}）・ドラッグで移動${resizable ? "／端で伸縮" : ""}・クリックで編集">${handles}${shiftBtn}</div>`;
+    bars += `<div class="bar plan draggable${clip}" role="img" aria-label="${esc(planAria)}" data-task="${taskId}" data-src="${r.planned.source}" style="left:${left}px;width:${w}px" title="予定 ${fmtH(r.planned.h)}（${srcLabel(r.planned.source)}）・ドラッグで移動${resizable ? "／端で伸縮" : ""}・クリックで編集">${handles}${shiftBtn}${linkHandle}</div>`;
   }
   if (r.actual.start) {
     const ag = ctx.scale.range(r.actual.start, r.actual.end);
@@ -1206,6 +1310,18 @@ function ganttStyles() {
   .gv .bar-h.l{left:-5px}.gv .bar-h.r{right:-5px}
   /* hover 時のみ、左右の掴み代を淡青で示す（plan は overflow:visible なので外側張り出し分も見える） */
   .gv .bar.plan.draggable:hover .bar-h{background:rgba(58,134,255,.22);border-radius:4px}
+  /* #760: 依存作成のリンクハンドル（バー右端の外の小円）。bar-h.r(right:-5px/幅14px=外側+5pxまで)と
+     重ならない right:-14px・縦中央。通常は薄く、バー/行 hover で明瞭化。editable のときだけ描画される。 */
+  .gv .bar-link{position:absolute;top:50%;right:-14px;transform:translateY(-50%);width:10px;height:10px;
+    box-sizing:border-box;border-radius:50%;border:2px solid ${C.fill};background:#fff;opacity:.22;
+    cursor:crosshair;z-index:2;touch-action:none}
+  .gv .row:hover .bar-link{opacity:.55}
+  .gv .bar.plan.draggable:hover .bar-link,.gv .bar-link:hover{opacity:1}
+  /* リンクドラッグ中のドロップ候補バー＝外枠ハイライト */
+  .gv .bar.link-target{box-shadow:0 0 0 2px ${C.fill}, inset 0 0 0 1px rgba(58,134,255,.35)}
+  /* ゴースト線（rowsEl 直下の絶対配置 SVG・当たり判定なし＝elementFromPoint を邪魔しない） */
+  .gv-linkghost{position:absolute;left:0;top:0;width:100%;height:100%;overflow:visible;pointer-events:none;z-index:8}
+  .gv-linkghost line{stroke:${C.fill};stroke-width:2;stroke-dasharray:5 4;stroke-linecap:round}
   /* タップ端末向け「⋮」日程シフトボタン（プログレッシブ拡張）。バー右端に小さく重ねる。
      マウス環境では既定 非表示で、行/バーのホバー or フォーカス時のみ控えめに出す（DnD の邪魔をしない）。
      タッチ環境（hover:none / pointer:coarse）では常時可視＝唯一の操作手段になる。 */
