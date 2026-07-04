@@ -35,7 +35,7 @@ function canPatchInPlace(col) {
   if (col === "proj") return false;                 // 親子=他行/アウトライン/parent列に波及。初期実装は常にfallback
   if (V.preset) return false;                       // プリセット選択中は全列fallback（taskMatches依存列の列挙は脆い）
   if (!V.manualMode) {                              // 組み合わせソート時のみソート軸を見る（マイソートはV.order固定で順序不変）
-    const SORTMAP = { state: "state", prio: "prio", start: "start", end: "end", due: "due", est: "est", pct: "pct", who: "who", cat: "cat" };
+    const SORTMAP = { state: "state", prio: "prio", start: "start", end: "end", due: "due", est: "est", pct: "pct", who: "who", cat: "cat", dep: "dep" };
     const sk = new Set(V.sorts.map((s) => s.key));
     if (SORTMAP[col] && sk.has(SORTMAP[col])) return false;
     if (col === "due" && (V.sorts.length === 0 || sk.has("due"))) return false; // tieBreak/既定期限順がdueを見る
@@ -108,7 +108,7 @@ const VKEY = (uid) => `ts.list.view.${uid ?? "anon"}`;
 // CSS の自動間引きでなく JS 駆動＝ユーザーが列メニューで狭幅用セットを自由に入れ替えられる。
 const NARROW_MQ = window.matchMedia("(max-width:880px)");
 const isNarrow = () => NARROW_MQ.matches;
-const DEF_HIDDEN_NARROW = ["cat", "prio", "est", "pct", "start", "end"]; // 狭幅の初期非表示（state は表示のまま）
+const DEF_HIDDEN_NARROW = ["cat", "prio", "est", "pct", "start", "end", "dep"]; // 狭幅の初期非表示（state は表示のまま）
 let _mqWired = false; // ブレークポイント切替の再描画リスナは一度だけ
 
 function loadView(uid) {
@@ -171,6 +171,8 @@ const AXES = {
   proj:    { label: "プロジェクト", cmp: (a, b) => ((a.parent && a.parent.title) || "～").localeCompare((b.parent && b.parent.title) || "～", "ja"), dir: 1 },
   group:   { label: "タスクグループ", cmp: (a, b) => ((a.group && a.group.title) || "～").localeCompare((b.group && b.group.title) || "～", "ja"), dir: 1 },
   state:   { label: "ステータス",      cmp: (a, b) => stateRank(a) - stateRank(b), dir: 1 },
+  // 先行タスク（依存: follows）: 未完了の先行数→総数で比較（既定は「待ち」が多い順＝詰まりが上に来る）。
+  dep:     { label: "先行",      cmp: (a, b) => (openPredCount(a) - openPredCount(b)) || ((a.preds || []).length - (b.preds || []).length), dir: -1 },
   pct:     { label: "進捗",      cmp: (a, b) => a.pct - b.pct, dir: -1 },
   est:     { label: "見積",      cmp: (a, b) => a.est - b.est, dir: -1 },
   flag:    { label: "フラグ",    cmp: (a, b) => (a.t.is_favorite ? 1 : 0) - (b.t.is_favorite ? 1 : 0), dir: -1 },
@@ -178,6 +180,7 @@ const AXES = {
   title:   { label: "タスク名",  cmp: (a, b) => a.title.localeCompare(b.title, "ja"), dir: 1 },
 };
 const stateRank = (r) => STATUS[r.status].rank; // 未着手→進行中→完了（kinds.js が SSoT）
+const openPredCount = (r) => (r.preds || []).filter((p) => !p.done).length; // 未完了の先行タスク数（dep 軸・セル警告色で共用）
 const tieBreak = (a, b) => (a.due || "9999").localeCompare(b.due || "9999") || a.t.id - b.t.id;
 
 // スマートリスト風プリセットタブ（icon＋ラベル＋件数バッジ＋アクティブ下線）。views/smartlist.js の tabItem と同趣旨。
@@ -202,6 +205,11 @@ function deriveRow(t, ctx) {
     review: isReviewTask(t), prio: prioBucket(t.priority), cat: categoryLabels(t)[0] || null,
     due: dueISO(t), start: startISO(t), end: endISO(t), est: (t.time_estimate || 0) / HOUR, pct: t.percent_done || 0,
     done: !!t.done, status: statusOf(t),
+    // 先行タスク（related_tasks.follows）。byId に実在するものだけ・done は byId の最新値で引き直す（relation 埋め込みの古い done を信用しない）。
+    preds: (((t.related_tasks || {}).follows) || [])
+      .map((p) => (ctx.byId && ctx.byId.get(p.id)) || null)
+      .filter(Boolean)
+      .map((p) => ({ id: p.id, title: p.title || "", done: !!p.done })),
     // コンテナ（子持ち親）は作業行に出さない（#732）。判定は lib/capacity.js の isContainer に一本化。
     isContainer: isContainerTask(t, ctx.byId),
   };
@@ -618,6 +626,7 @@ export async function render(root) {
       if ((el = e.target.closest(".tb-startbtn"))) { openStartMenu(el, +el.dataset.start, tasks, root, today); return; }
       if ((el = e.target.closest(".tb-endbtn")))   { openEndMenu(el, +el.dataset.end, tasks, root, today); return; }
       if ((el = e.target.closest(".tb-estbtn")))   { openEstMenu(el, +el.dataset.est, tasks, root); return; }
+      if ((el = e.target.closest(".tb-depbtn")))   { openDepMenu(el, +el.dataset.dep, tasks, root); return; }
       if ((el = e.target.closest(".tb-timer"))) {
         // タスク行から即・集中タイマー開始。行クリック編集と競合しないよう順序return（実質 stopPropagation）。
         e.preventDefault();
@@ -1174,6 +1183,74 @@ function openAssigneeMenu(chipEl, id, tasks, members, aiMembers, root) {
   };
   const r = chipEl.getBoundingClientRect();
   openMenu(r.left, r.bottom + 4, build(), { keepOpen: true, rebuild: build, onClose: () => { if (dirty) commit(); } });
+}
+
+// 先行タスク（依存: related_tasks.follows＝先行の完了がこのタスクの前に必要）のワンクリック編集。
+// 既存の先行を1件ずつ外す＋テキスト検索して追加。逆向き precedes はバックエンド（lib/api.js）が自動管理
+// するので API 呼び出しは follows 側だけ。追加/削除の都度メニューは閉じて patchRow で行を差し替える
+// （keepOpen 再描画型よりアイテム構成の増減に強い＝壊れにくい単純型を採用）。undo/redo 履歴は対象外。
+function openDepMenu(chipEl, id, tasks, root) {
+  closeRowMenu();
+  const byId = new Map((tasks || []).map((x) => [x.id, x]));
+  const self = byId.get(id); if (!self) return;
+  const rel = () => (self.related_tasks || (self.related_tasks = {}));
+  const preds = () => ((rel().follows) || []).filter((p) => byId.has(p.id));
+  const clip = (s) => { const v = String(s || "(無題)"); return v.length > 60 ? v.slice(0, 60) + "…" : v; };
+  const r0 = chipEl.getBoundingClientRect();
+  const openAt = (items) => openMenu(r0.left, r0.bottom + 4, items);
+  // 循環ガード: 候補 P の先行鎖（follows を byId で辿る BFS・訪問済み Set で循環打ち切り）に self が
+  // 現れる＝P は self の（間接）後続 → P を self の先行にすると循環するので候補から除外。
+  const reachesSelf = (startId) => {
+    const seen = new Set([startId]); const queue = [startId];
+    while (queue.length) {
+      const cur = byId.get(queue.shift()); if (!cur) continue;
+      for (const f of (((cur.related_tasks || {}).follows) || [])) {
+        if (f.id === id) return true;
+        if (!seen.has(f.id)) { seen.add(f.id); queue.push(f.id); }
+      }
+    }
+    return false;
+  };
+  const fail = () => announce("依存の更新に失敗しました", { assertive: true });
+  const removePred = (predId) => {
+    removeRelation(id, "follows", predId).then(() => {
+      rel().follows = (rel().follows || []).filter((p) => p.id !== predId); // ローカル整合（自分側）
+      const other = byId.get(predId);                                       // ローカル整合（相手の precedes）
+      if (other) { const orel = other.related_tasks || (other.related_tasks = {}); orel.precedes = (orel.precedes || []).filter((p) => p.id !== id); }
+      patchRow(id, root, { col: "dep" });
+      announce("先行タスクを外しました");
+    }).catch(fail);
+  };
+  const addPred = (cand) => {
+    addRelation(id, cand.id, "follows").then(() => {
+      rel().follows = [...(rel().follows || []), { id: cand.id, title: cand.title, done: !!cand.done }]; // ローカル整合（自分側）
+      const orel = cand.related_tasks || (cand.related_tasks = {});                                       // ローカル整合（相手の precedes）
+      orel.precedes = [...(orel.precedes || []), { id, title: self.title, done: !!self.done }];
+      patchRow(id, root, { col: "dep" });
+      announce("先行タスクを追加しました");
+    }).catch(fail);
+  };
+  // 検索して追加: 未完了・自分以外・未登録・タイトル部分一致（大小無視）・循環しない候補を期限昇順→idで上位10件。
+  const search = (v) => {
+    const q = (v || "").trim().toLowerCase();
+    if (!q) return;
+    const curIds = new Set(preds().map((p) => p.id));
+    const cands = (tasks || []).filter((x) =>
+      !x.done && x.id !== id && !curIds.has(x.id)
+      && (x.title || "").toLowerCase().includes(q)
+      && !reachesSelf(x.id));
+    if (!cands.length) { announce("該当タスクがありません", { assertive: true }); openDepMenu(chipEl, id, tasks, root); return; }
+    cands.sort((a, b) => (dueISO(a) || "9999").localeCompare(dueISO(b) || "9999") || a.id - b.id);
+    openAt([
+      { header: true, label: "追加する先行タスクを選択" },
+      ...cands.slice(0, 10).map((x) => ({ label: `#${x.id} ${clip(x.title)}`, on: () => addPred(x) })),
+    ]);
+  };
+  const items = [{ header: true, label: "先行タスク（前に完了が必要）" }];
+  for (const p of preds()) items.push({ label: `外す: ${clip(p.title)}`, danger: true, on: () => removePred(p.id) });
+  items.push({ sep: true });
+  items.push({ input: "text", label: "検索して追加", placeholder: "タスク名の一部を入力して Enter", on: search });
+  openAt(items);
 }
 
 // 分類（ラベル）のワンクリック変更（複数トグル＋新規作成）。レビューは予約語なので除外。
@@ -2121,6 +2198,7 @@ const COLDEF = [
   // 日付列: 期限（締切）が先、開始予定・終了予定（あくまで予定）が後（要望順）。
   { k: "due", label: "期限" }, { k: "start", label: "開始予定" }, { k: "end", label: "終了予定" },
   { k: "est", label: "見積" }, { k: "pct", label: "進捗" }, { k: "state", label: "ステータス" },
+  { k: "dep", label: "先行" }, // 先行タスク（依存: follows）。orderedColKeys が保存済み並びの末尾へ自動補完＝マイグレーション不要。
 ];
 const COLDEF_KEYS = COLDEF.map((c) => c.k);
 const STAIR_KEYS = ["proj", "group", "title"]; // 階段3列＝常にこの順で先頭固定（並べ替え対象外）
@@ -2209,6 +2287,11 @@ function rowHtml(r, members, i, manual) {
   const endCls = r.end && r.end < todayISO() && !r.done ? "over" : ""; // 終了予定を過ぎて未完了=警告
   const endBtn = `<button class="tb-cell tb-endbtn ${endCls}" data-end="${id}" title="クリックで終了予定日を変更">${r.end ? r.end.slice(5).replace("-", "/") : "—"}<span class="tb-cell-car">▾</span></button>`;
   const estBtn = `<button class="tb-cell tb-num tb-estbtn" data-est="${id}" title="クリックで見積を変更">${r.est ? fmtH(r.est) : "—"}<span class="tb-cell-car">▾</span></button>`;
+  // 先行タスク: 件数表示（0件は—）。未完了の先行が1つでもあれば警告色（期限切れ over と同系）。title に一覧。
+  const depN = (r.preds || []).length;
+  const depOpen = openPredCount(r) > 0 && !r.done;
+  const depTitle = depN ? `先行: ${(r.preds || []).map((p) => p.title).join(", ")}（クリックで変更）` : "クリックで先行タスクを追加";
+  const depBtn = `<button class="tb-cell tb-num tb-depbtn${depOpen ? " tb-dep-open" : ""}" data-dep="${id}" title="${esc(depTitle)}">${depN || "—"}<span class="tb-cell-car">▾</span></button>`;
   const st = `<button class="tb-st tb-stbtn ${r.status}" data-st="${id}" title="クリックでステータス変更">${STATUS[r.status].label}<span class="tb-st-car">▾</span></button>`;
   const sel = selectedIds.has(id);
   // ── 階段セル: プロジェクト（上段）＞タスクグループ（中段）＞タスク名（下段）を1つの colspan セルに。
@@ -2237,6 +2320,8 @@ function rowHtml(r, members, i, manual) {
     est: `<td class="tb-gc" data-col="est">${estBtn}</td>`,
     pct: `<td><div class="tb-bar tb-pctbar" data-pct="${id}" role="slider" tabindex="0" aria-valuenow="${r.pct}" aria-valuemin="0" aria-valuemax="100" title="クリックで進捗を変更（0/25/50/75/100）"><i style="width:${r.pct}%"></i></div><span class="tb-pct">${r.pct}%</span></td>`,
     state: `<td class="tb-gc" data-col="state">${st}</td>`,
+    // dep はマウスのドロップダウン専用＝pct と同じく tb-gc を付けない（キーボードグリッド編集の対象外）。
+    dep: `<td data-col="dep">${depBtn}</td>`,
   };
   const body = stairTd + cols().filter((c) => !c.stair).map((c) => cellOf[c.k] || "").join("");
   return `<tr data-id="${id}" class="${manual ? "tb-draggable" : ""}${sel ? " tb-sel" : ""} st-${r.status}">
@@ -2635,6 +2720,7 @@ function css() {
   .tb-cell:hover{background:#eef4ff;border-color:#dbe7ff}
   .tb-cell.tb-num{font-variant-numeric:tabular-nums}
   .tb-cell.over{color:${C.over};font-weight:600}
+  .tb-depbtn.tb-dep-open{color:${C.over};font-weight:600}  /* 未完了の先行あり＝着手ブロック中の警告（期限切れと同系色） */
   .tb-cell-car{font-size:11px;opacity:0;color:${C.muted};transition:opacity .1s;margin-left:auto;padding-left:2px}
   .tb-cell:hover .tb-cell-car{opacity:.6}
   @media (hover:none){.tb-cell-car{opacity:.45}}  /* タッチ端末はhoverが無いので▾を常時薄く表示＝編集可能と分かる */
