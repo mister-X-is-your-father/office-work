@@ -250,6 +250,68 @@ function asgStatusHtml(info) {
   return `<span class="k-asg ok">${esc(info.label)}</span>`;
 }
 
+// ── 純ビルダー（モジュールスコープ）。render のクロージャ状態は ctx 引数で受け取る（gantt 手法の踏襲）。
+const TYPE_OPTS = [["project", "プロジェクト"], ["PJ", "PJ（子）"], ["定常", "定常（子）"]];
+
+function msgHtml(errors, warnings) {
+  const e = errors.length
+    ? `<div class="keikaku-msg err">${icon("alertTriangle") || ""}<div>${errors.map(esc).join("<br>")}</div></div>` : "";
+  const w = warnings.length
+    ? `<div class="keikaku-msg warn">${icon("alertTriangle") || ""}<div>${warnings.map(esc).join("<br>")}</div></div>` : "";
+  return e + w;
+}
+
+function periodCellHtml(r, ctx) {
+  const pi = periodInfo(r, ctx.capH, ctx.holiSet);
+  if (pi) return `<span class="k-period">${fmtMd(pi.start)}〜${fmtMd(pi.end)}<small>${pi.days}営業日</small></span>`;
+  if (isValidYmd(r.due)) return `<span class="k-period">〜${fmtMd(r.due)}<small>点</small></span>`;
+  return `<span class="k-period none">—</span>`;
+}
+
+// 改修F: 親列の選択肢（空=WS直下＋他行の localId。自分自身は除外）。ラベルは「localId: タスク名」。
+function parentOptionsHtml(r, ctx) {
+  const opts = [`<option value=""${!r.parent ? " selected" : ""}>WS直下</option>`];
+  for (const o of ctx.state.rows) {
+    if (o.localId === r.localId) continue;
+    opts.push(`<option value="${esc(o.localId)}"${r.parent === o.localId ? " selected" : ""}>${esc(o.localId + ": " + (o.task || "(無題)"))}</option>`);
+  }
+  // 表内に無い親を指している場合も選択状態を保持（CSVの親が表外＝警告対象だが消さない）。
+  if (r.parent && !ctx.state.rows.some((o) => o.localId === r.parent))
+    opts.push(`<option value="${esc(r.parent)}" selected>${esc(r.parent)}（表内に無し）</option>`);
+  return opts.join("");
+}
+
+function summaryHtml(ctx) {
+  const projectCount = ctx.state.rows.filter(isProjectRow).length;
+  const childCount = ctx.state.rows.length - projectCount;
+  const depCount = ctx.state.rows.reduce((s, r) => s + r.depends_on.length, 0);
+  const totalEst = ctx.state.rows.reduce((s, r) => { const e = parseFloat(r.est_hours); return s + (Number.isNaN(e) ? 0 : e); }, 0);
+  return `<span class="k-sum-it"><b>${projectCount}</b> プロジェクト親</span>
+      <span class="k-sum-it"><b>${childCount}</b> 子タスク</span>
+      <span class="k-sum-it"><b>${depCount}</b> 依存</span>
+      <span class="k-sum-it">見積計 <b>${fmtH(totalEst)}</b></span>
+      <span class="k-sum-it">投入先 <b>${esc(ctx.wsName())}</b></span>`;
+}
+
+function rowHtml(r, idx, ctx) {
+  const info = ctx.state.asgInfo.get(r.localId);
+  const typeOpts = TYPE_OPTS.map(([v, l]) => `<option value="${v}"${r.type === v ? " selected" : ""}>${esc(l)}</option>`).join("");
+  return `<tr class="${isProjectRow(r) ? "is-project" : "is-child"}">
+      <td><select class="k-in k-type" data-idx="${idx}" data-field="type">${typeOpts}</select></td>
+      <td class="k-localid">${esc(r.localId)}</td>
+      <td><select class="k-in k-parent" data-idx="${idx}" data-field="parent">${parentOptionsHtml(r, ctx)}</select></td>
+      <td><input class="k-in k-task" data-idx="${idx}" data-field="task" value="${esc(r.task)}" placeholder="タスク名"></td>
+      <td><input class="k-in k-asg-in" data-idx="${idx}" data-field="assignee" value="${esc(r.assignee)}" placeholder="自分 / 森田 / 7">
+        <div class="k-asg-st" data-asg-lid="${esc(r.localId)}">${asgStatusHtml(info)}</div></td>
+      <td><input class="k-in k-est" type="number" min="0" step="0.25" data-idx="${idx}" data-field="est_hours" value="${esc(r.est_hours)}"></td>
+      <td><input class="k-in k-due" type="date" data-idx="${idx}" data-field="due" value="${esc(r.due)}"></td>
+      <td class="k-period-td" data-period="${idx}">${periodCellHtml(r, ctx)}</td>
+      <td><input class="k-in k-dep" data-idx="${idx}" data-field="depends_on" value="${esc(r.depends_on.join(","))}" placeholder="例: 2,3"></td>
+      <td><input class="k-in k-done" data-idx="${idx}" data-field="done_criteria" value="${esc(r.done_criteria)}" placeholder="Done基準"></td>
+      <td class="k-del-td"><button class="k-del" data-act="del" data-idx="${idx}" type="button" title="行を削除" aria-label="行を削除">${icon("x") || "✕"}</button></td>
+    </tr>`;
+}
+
 export async function render(root) {
   const { projects, me, settings, holidaysSet } = await load();
   const capH = (settings && settings.capH) || 8;
@@ -323,6 +385,12 @@ export async function render(root) {
   const currentPlanId = () => sanitizePlanId(planEl.value);
   const wsName = () => { const w = wsList.find((p) => p.id === state.wsId); return w ? w.title : "（未選択）"; };
 
+  // 純ビルダー（モジュールスコープ）へ渡す共有コンテキスト。state はオブジェクト参照ごと渡すので
+  // rows/asgInfo の再代入（parse 時・342/334行）に追従する＝gantt の state.mode のような snapshot
+  // 陳腐化は起きない（paint 頭での ctx 更新は不要）。capH/holiSet は render 冒頭で確定・不変。
+  // wsName は state.wsId 依存ゆえ関数で持つ（呼び出し時に最新を解決）。
+  const ctx = { state, capH, holiSet, wsName };
+
   wsEl.onchange = () => { state.wsId = wsEl.value ? Number(wsEl.value) : null; if (state.loaded) updateDerived(); };
   planEl.oninput = () => { if (state.loaded) updateDerived(); };
 
@@ -387,48 +455,6 @@ export async function render(root) {
     let n = 1; while (ids.has("T" + n)) n++; return "T" + n;
   }
 
-  // ── 描画ヘルパ（クロージャ＝state/refs を参照） ───────────────────────────
-  const TYPE_OPTS = [["project", "プロジェクト"], ["PJ", "PJ（子）"], ["定常", "定常（子）"]];
-
-  function periodCellHtml(r) {
-    const pi = periodInfo(r, capH, holiSet);
-    if (pi) return `<span class="k-period">${fmtMd(pi.start)}〜${fmtMd(pi.end)}<small>${pi.days}営業日</small></span>`;
-    if (isValidYmd(r.due)) return `<span class="k-period">〜${fmtMd(r.due)}<small>点</small></span>`;
-    return `<span class="k-period none">—</span>`;
-  }
-
-  // 改修F: 親列の選択肢（空=WS直下＋他行の localId。自分自身は除外）。ラベルは「localId: タスク名」。
-  function parentOptionsHtml(r) {
-    const opts = [`<option value=""${!r.parent ? " selected" : ""}>WS直下</option>`];
-    for (const o of state.rows) {
-      if (o.localId === r.localId) continue;
-      opts.push(`<option value="${esc(o.localId)}"${r.parent === o.localId ? " selected" : ""}>${esc(o.localId + ": " + (o.task || "(無題)"))}</option>`);
-    }
-    // 表内に無い親を指している場合も選択状態を保持（CSVの親が表外＝警告対象だが消さない）。
-    if (r.parent && !state.rows.some((o) => o.localId === r.parent))
-      opts.push(`<option value="${esc(r.parent)}" selected>${esc(r.parent)}（表内に無し）</option>`);
-    return opts.join("");
-  }
-
-  function rowHtml(r, idx) {
-    const info = state.asgInfo.get(r.localId);
-    const typeOpts = TYPE_OPTS.map(([v, l]) => `<option value="${v}"${r.type === v ? " selected" : ""}>${esc(l)}</option>`).join("");
-    return `<tr class="${isProjectRow(r) ? "is-project" : "is-child"}">
-      <td><select class="k-in k-type" data-idx="${idx}" data-field="type">${typeOpts}</select></td>
-      <td class="k-localid">${esc(r.localId)}</td>
-      <td><select class="k-in k-parent" data-idx="${idx}" data-field="parent">${parentOptionsHtml(r)}</select></td>
-      <td><input class="k-in k-task" data-idx="${idx}" data-field="task" value="${esc(r.task)}" placeholder="タスク名"></td>
-      <td><input class="k-in k-asg-in" data-idx="${idx}" data-field="assignee" value="${esc(r.assignee)}" placeholder="自分 / 森田 / 7">
-        <div class="k-asg-st" data-asg-lid="${esc(r.localId)}">${asgStatusHtml(info)}</div></td>
-      <td><input class="k-in k-est" type="number" min="0" step="0.25" data-idx="${idx}" data-field="est_hours" value="${esc(r.est_hours)}"></td>
-      <td><input class="k-in k-due" type="date" data-idx="${idx}" data-field="due" value="${esc(r.due)}"></td>
-      <td class="k-period-td" data-period="${idx}">${periodCellHtml(r)}</td>
-      <td><input class="k-in k-dep" data-idx="${idx}" data-field="depends_on" value="${esc(r.depends_on.join(","))}" placeholder="例: 2,3"></td>
-      <td><input class="k-in k-done" data-idx="${idx}" data-field="done_criteria" value="${esc(r.done_criteria)}" placeholder="Done基準"></td>
-      <td class="k-del-td"><button class="k-del" data-act="del" data-idx="${idx}" type="button" title="行を削除" aria-label="行を削除">${icon("x") || "✕"}</button></td>
-    </tr>`;
-  }
-
   // テーブルのみ再構築（行の追加・削除時のみ呼ぶ。編集中は呼ばない＝フォーカスを飛ばさない）。
   function renderTable() {
     if (!tblEl) return;
@@ -439,7 +465,7 @@ export async function render(root) {
             <th>種別</th><th>ID</th><th>親</th><th>タスク名</th><th>担当</th><th>見積(h)</th>
             <th>due</th><th>期間</th><th>依存(先行)</th><th>Done基準</th><th></th>
           </tr></thead>
-          <tbody>${state.rows.map((r, i) => rowHtml(r, i)).join("")}</tbody>
+          <tbody>${state.rows.map((r, i) => rowHtml(r, i, ctx)).join("")}</tbody>
         </table>
       </div>
       <div class="keikaku-tbl-actions">
@@ -447,26 +473,6 @@ export async function render(root) {
       </div>`;
     const addBtn = tblEl.querySelector("#keikaku-addrow");
     if (addBtn) addBtn.onclick = addRow;
-  }
-
-  function summaryHtml() {
-    const projectCount = state.rows.filter(isProjectRow).length;
-    const childCount = state.rows.length - projectCount;
-    const depCount = state.rows.reduce((s, r) => s + r.depends_on.length, 0);
-    const totalEst = state.rows.reduce((s, r) => { const e = parseFloat(r.est_hours); return s + (Number.isNaN(e) ? 0 : e); }, 0);
-    return `<span class="k-sum-it"><b>${projectCount}</b> プロジェクト親</span>
-      <span class="k-sum-it"><b>${childCount}</b> 子タスク</span>
-      <span class="k-sum-it"><b>${depCount}</b> 依存</span>
-      <span class="k-sum-it">見積計 <b>${fmtH(totalEst)}</b></span>
-      <span class="k-sum-it">投入先 <b>${esc(wsName())}</b></span>`;
-  }
-
-  function msgHtml(errors, warnings) {
-    const e = errors.length
-      ? `<div class="keikaku-msg err">${icon("alertTriangle") || ""}<div>${errors.map(esc).join("<br>")}</div></div>` : "";
-    const w = warnings.length
-      ? `<div class="keikaku-msg warn">${icon("alertTriangle") || ""}<div>${warnings.map(esc).join("<br>")}</div></div>` : "";
-    return e + w;
   }
 
   const importDisabled = (errors) => {
@@ -491,7 +497,7 @@ export async function render(root) {
     const warnings = [...val.warnings, ...asgWarn, ...(state.parseWarnings || [])];
     state._errors = errors;
     if (msgsEl) msgsEl.innerHTML = msgHtml(errors, warnings);
-    if (summaryEl) summaryEl.innerHTML = summaryHtml();
+    if (summaryEl) summaryEl.innerHTML = summaryHtml(ctx);
     if (warnboxEl) {
       warnboxEl.className = "keikaku-warnbox" + (planId ? " ok" : "");
       warnboxEl.innerHTML = planId
@@ -520,7 +526,7 @@ export async function render(root) {
     const r = state.rows[idx];
     if (!r) return;
     const cell = tblEl && tblEl.querySelector(`[data-period="${idx}"]`);
-    if (cell) cell.innerHTML = periodCellHtml(r);
+    if (cell) cell.innerHTML = periodCellHtml(r, ctx);
   }
 
   // セル編集（input/change 委譲）。該当フィールドだけ state.rows に反映し、軽い派生のみ更新。
