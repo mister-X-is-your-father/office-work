@@ -47,8 +47,11 @@ def sheet_to_markdown(ws) -> str:
     grid = trim_grid(expand_merged(ws))
     if not grid:
         return "（空シート）\n"
+    # 先頭列に元 Excel の行番号を付ける（指摘の「箇所」を実セルに辿れるように）。
+    # 表構造が崩れた行(コメント混在)も落とさずそのまま出す＝ロスレス。
+    header = ["xlsx-row"] + grid[0]
+    body = [[f"{i + 2}"] + row for i, row in enumerate(grid[1:])]
     lines = []
-    header, *body = grid
     lines.append("| " + " | ".join(header) + " |")
     lines.append("|" + "|".join([" --- "] * len(header)) + "|")
     for row in body:
