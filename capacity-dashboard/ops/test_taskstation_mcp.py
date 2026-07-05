@@ -103,5 +103,73 @@ class GuardRegression(unittest.TestCase):
             mcp.t_complete_task({"task_id": 1, "summary": "   "})
 
 
+class RenameAndDescription(unittest.TestCase):
+    """#791: rename_task / set_description が safe_update 経路（部分更新）で正しく patch すること＋
+    タイトル規約の機械ガード（絵文字・空の拒否）。"""
+
+    def setUp(self):
+        self._ts, self._log, self._comment = mcp.ts, mcp.log_activity, mcp.comment
+        mcp.log_activity = lambda entry: None
+        self.comments = []
+        mcp.comment = lambda tid, text: self.comments.append((tid, text))
+
+    def tearDown(self):
+        mcp.ts, mcp.log_activity, mcp.comment = self._ts, self._log, self._comment
+
+    def test_check_title_rejects_emoji_and_empty(self):
+        with self.assertRaisesRegex(Exception, "絵文字"):
+            mcp.check_title("🚀 リリース準備")
+        with self.assertRaisesRegex(Exception, "絵文字"):
+            mcp.check_title("完了 ✅")
+        with self.assertRaisesRegex(Exception, "空"):
+            mcp.check_title("   ")
+        # 矢印・記号など既存タイトルで使う文字は許容
+        self.assertEqual(mcp.check_title("審査 → 納付 ▾ (B2)"), "審査 → 納付 ▾ (B2)")
+
+    def test_rename_patches_title_and_keeps_others(self):
+        fake = FakeTs(make_cur())
+        mcp.ts = fake
+        out = mcp.t_rename_task({"task_id": 1, "new_title": "B"})
+        _, body = fake.posts[0]
+        self.assertEqual(body["title"], "B")
+        self.assertEqual(body["description"], "D")     # 未指定は既存値のまま（消えない）
+        self.assertEqual(body["time_estimate"], 3600)
+        self.assertEqual(len(self.comments), 1)        # 改名はコメントに記録される
+        self.assertIn("「A」→「B」", self.comments[0][1])
+        self.assertIn("改名しました", out)
+
+    def test_rename_same_title_is_noop(self):
+        fake = FakeTs(make_cur())
+        mcp.ts = fake
+        out = mcp.t_rename_task({"task_id": 1, "new_title": "A"})
+        self.assertEqual(fake.posts, [])               # POST しない
+        self.assertEqual(self.comments, [])
+        self.assertIn("変更なし", out)
+
+    def test_rename_rejects_emoji_before_api(self):
+        fake = FakeTs(make_cur())
+        mcp.ts = fake
+        with self.assertRaisesRegex(Exception, "絵文字"):
+            mcp.t_rename_task({"task_id": 1, "new_title": "🔥 A"})
+        self.assertEqual(fake.posts, [])
+
+    def test_set_description_patches_description_only(self):
+        fake = FakeTs(make_cur())
+        mcp.ts = fake
+        out = mcp.t_set_description({"task_id": 1, "description": "新しい説明"})
+        _, body = fake.posts[0]
+        self.assertEqual(body["description"], "新しい説明")
+        self.assertEqual(body["title"], "A")            # 未指定は既存値のまま
+        self.assertIn("更新しました", out)
+
+    def test_set_description_requires_description(self):
+        with self.assertRaisesRegex(Exception, "description"):
+            mcp.t_set_description({"task_id": 1})
+
+    def test_create_task_rejects_emoji_title(self):
+        with self.assertRaisesRegex(Exception, "絵文字"):
+            mcp.t_create_task({"title": "🎉 新機能"})
+
+
 if __name__ == "__main__":
     unittest.main()

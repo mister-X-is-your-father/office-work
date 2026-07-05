@@ -30,6 +30,9 @@ v2.4 追加:
 v2.5 追加（#729 運用規約の焼き込み＝どの AI セッションも memory 無しで規約どおり操作できる）:
   INSTRUCTIONS に構造規約（階層3層モデル・Vikunja サブプロジェクト禁止・粒度規範・親無し浮きタスク禁止・
   タイトル絵文字禁止・priority 運用 3/2/1・担当3者の区分・生POST禁止）を明記。create_task description にも反映
+v2.6 追加（#791 タイトル/説明の編集ツール＝生 API 直叩き（全置換で消失リスク）を強いられていたギャップの解消）:
+  rename_task（safe_update 経由・改名はコメント＋変更履歴に記録）/ set_description（全文置換・safe_update 経由）
+  タイトル規約の機械ガード check_title（絵文字拒否）を rename_task / create_task / create_subtask に適用
 認証（2資格情報方式）:
   ~/.config/taskstation/fable.env  = 操作の名義（コメント・タスク更新・進捗・作成・担当・plans。
                                      AI発言と人間の区別＝UXの核なので fable 名義を維持）
@@ -234,7 +237,7 @@ def guard_human(cur):
     """分類「人間」のタスクへの変更系操作を拒否する共通ガード（#693 運用ルールの強制）。
 
     適用: start_task / set_progress / set_estimate / set_due / complete_task /
-    escalate / resume_task / schedule_task / move_task。
+    escalate / resume_task / schedule_task / move_task / rename_task / set_description。
     対象外（許可）: post_comment / add_dependency / remove_dependency /
     create_subtask / get_task / add_note（読み取り・申し送り・構造化は妨げない）。
     """
@@ -246,6 +249,26 @@ def guard_human(cur):
 def comment(task_id, text):
     """本物のタスクコメント（全員閲覧・SPAのタスク編集モーダルに出る）を投稿。"""
     ts(f"/tasks/{task_id}/comments", "PUT", {"comment": text})
+
+
+# タイトル規約の機械ガード（#791）: 絵文字ブロックの範囲。矢印(→ U+2192)や記号(▾ U+25BE)など
+# 既存タイトルで使う文字は含めない。コメント本文は対象外（🤖 等の運用絵文字は許容）。
+EMOJI_RANGES = ((0x1F000, 0x1FAFF), (0x2600, 0x26FF), (0x2700, 0x27BF), (0x2B00, 0x2BFF), (0xFE00, 0xFE0F))
+
+
+def check_title(title):
+    """タイトル規約の機械ガード: 空と絵文字を拒否し、trim したタイトルを返す。
+
+    適用: rename_task / create_task / create_subtask（v2.3 の思想＝規約はお願いでなくツールが強制する）。
+    """
+    t = str(title or "").strip()
+    if not t:
+        raise Exception("タイトルが空です")
+    for ch in t:
+        cp = ord(ch)
+        if any(a <= cp <= b for a, b in EMOJI_RANGES):
+            raise Exception(f"タイトルに絵文字（{ch}）は使えません（タイトル規約: 絵文字を使わない・端的に）")
+    return t
 
 
 def now_iso():
@@ -421,7 +444,7 @@ def t_add_note(a):
 
 def t_create_subtask(a):
     parent = ts(f"/tasks/{a['parent_task_id']}")
-    body = {"title": a["title"]}
+    body = {"title": check_title(a["title"])}
     if a.get("description"):
         body["description"] = a["description"]
     if a.get("estimate_hours"):
@@ -571,7 +594,7 @@ def t_resume_task(a):
 
 
 def t_create_task(a):
-    body = {"title": a["title"]}
+    body = {"title": check_title(a["title"])}
     desc = a.get("description") or ""
     if a.get("goal"):  # SPA の [ゴール] 規約: 説明末尾に結合
         desc = f"{desc}\n\n[ゴール]\n{a['goal']}" if desc else f"[ゴール]\n{a['goal']}"
@@ -609,6 +632,30 @@ def t_create_task(a):
            {"other_task_id": int(bid), "relation_kind": "follows"})
     where = f"親 #{a['parent_task_id']} 配下" if a.get("parent_task_id") else f"WS {pid}"
     return f"タスク #{task['id']} 「{a['title']}」を作成しました（{where}）"
+
+
+def t_rename_task(a):
+    """タイトル変更の正規手段（#791）。生 API 直叩き（全置換で未指定フィールド消失）を不要にする。"""
+    cur = ts(f"/tasks/{a['task_id']}")
+    guard_human(cur)
+    new = check_title(a["new_title"])
+    old = cur.get("title") or ""
+    if new == old:
+        return f"#{a['task_id']} のタイトルは既に「{new}」です（変更なし）"
+    safe_update(a["task_id"], {"title": new})  # diff は ACTIVITY_FIELDS("title") 経由で変更履歴に自動記録
+    comment(a["task_id"], f"🤖 ✏️ 改名: 「{old}」→「{new}」")
+    return f"#{a['task_id']} を改名しました: 「{old}」→「{new}」"
+
+
+def t_set_description(a):
+    """説明文の更新（#791）。全文置換＝渡した内容がそのまま新しい説明になる（safe_update 経由）。"""
+    if a.get("description") is None:
+        raise Exception("description は必須です（クリアするには明示的に空文字を渡す）")
+    cur = ts(f"/tasks/{a['task_id']}")
+    guard_human(cur)
+    desc = str(a["description"])
+    safe_update(a["task_id"], {"description": desc})  # 非空→空は _warn_silent_loss が stderr 警告
+    return f"#{a['task_id']} の説明文を更新しました（{len(desc)}文字）"
 
 
 def t_set_due(a):
@@ -754,6 +801,10 @@ TOOLS = [
      {"task_id": NUM, "blocker_task_id": NUM}, ["task_id", "blocker_task_id"], t_remove_dependency),
     ("set_due", "タスクの期日を変更する（唯一の期日変更手段）。reason 必須＝事前に人間と相談・合意した内容を書く。無断変更は禁止。変更は履歴に記録され、タスクコメントにも旧→新と理由が投稿される",
      {"task_id": NUM, "date": STR, "reason": STR}, ["task_id", "date", "reason"], t_set_due),
+    ("rename_task", "タスクのタイトルを変更する（改名の正規手段・API 直叩き禁止）。タイトル規約を機械ガード（絵文字は拒否・端的に）。改名はコメントと変更履歴に記録される",
+     {"task_id": NUM, "new_title": STR}, ["task_id", "new_title"], t_rename_task),
+    ("set_description", "タスクの説明文を更新する（全文置換＝渡した内容がそのまま新しい説明になる）。部分修正でも先に get_task で現状を読み、編集後の全文を渡すこと",
+     {"task_id": NUM, "description": STR}, ["task_id", "description"], t_set_description),
 ]
 TOOL_DEFS = [{"name": n, "description": d,
               "inputSchema": {"type": "object", "properties": p, "required": r}}
