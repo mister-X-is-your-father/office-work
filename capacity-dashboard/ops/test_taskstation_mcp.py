@@ -255,5 +255,58 @@ class AssigneesAndClass(unittest.TestCase):
         self.assertIn("分類を AI+人間 → 人間 に変更", out)
 
 
+class PriorityAndDates(unittest.TestCase):
+    """#794: set_priority のクランプと set_dates の検証・クリア・整合ガード。"""
+
+    def setUp(self):
+        self._ts, self._log = mcp.ts, mcp.log_activity
+        mcp.log_activity = lambda entry: None
+
+    def tearDown(self):
+        mcp.ts, mcp.log_activity = self._ts, self._log
+
+    def test_set_priority_patches_and_clamps(self):
+        fake = FakeTs(make_cur(priority=1))
+        mcp.ts = fake
+        out = mcp.t_set_priority({"task_id": 1, "priority": 9})   # 9 → 4 にクランプ
+        _, body = fake.posts[0]
+        self.assertEqual(body["priority"], 4)
+        self.assertEqual(body["description"], "D")                # 未指定は既存値のまま
+        self.assertIn("低(1) → MUST(4)", out)
+
+    def test_set_priority_noop_and_required(self):
+        fake = FakeTs(make_cur(priority=3))
+        mcp.ts = fake
+        out = mcp.t_set_priority({"task_id": 1, "priority": 3})
+        self.assertEqual(fake.posts, [])
+        self.assertIn("変更なし", out)
+        with self.assertRaisesRegex(Exception, "必須"):
+            mcp.t_set_priority({"task_id": 1})
+
+    def test_set_dates_partial_update_and_clear(self):
+        fake = FakeTs(make_cur(start_date="2026-07-01T00:00:00Z", end_date="2026-07-10T00:00:00Z"))
+        mcp.ts = fake
+        out = mcp.t_set_dates({"task_id": 1, "start_date": "2026-07-03"})  # start のみ更新
+        _, body = fake.posts[0]
+        self.assertEqual(body["start_date"], "2026-07-03T00:00:00Z")
+        self.assertEqual(body["end_date"], "2026-07-10T00:00:00Z")        # end は既存値維持
+        self.assertIn("開始 2026-07-03 / 終了 2026-07-10", out)
+        out2 = mcp.t_set_dates({"task_id": 1, "end_date": ""})            # 空文字=クリア
+        _, body2 = fake.posts[1]
+        self.assertEqual(body2["end_date"], mcp.UNSET)
+        self.assertIn("終了 なし", out2)
+
+    def test_set_dates_guards(self):
+        fake = FakeTs(make_cur(start_date="0001-01-01T00:00:00Z", end_date="2026-07-05T00:00:00Z"))
+        mcp.ts = fake
+        with self.assertRaisesRegex(Exception, "少なくとも一方"):
+            mcp.t_set_dates({"task_id": 1})
+        with self.assertRaisesRegex(Exception, "YYYY-MM-DD"):
+            mcp.t_set_dates({"task_id": 1, "start_date": "7月3日"})
+        with self.assertRaisesRegex(Exception, "より後"):                 # 既存 end(7/5) より後の start は拒否
+            mcp.t_set_dates({"task_id": 1, "start_date": "2026-07-06"})
+        self.assertEqual(fake.posts, [])                                  # いずれも API 到達前に拒否
+
+
 if __name__ == "__main__":
     unittest.main()

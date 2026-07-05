@@ -37,6 +37,9 @@ v2.7 追加（#793 担当と分類の変更ツール＝協業プロトコル「�
   set_assignees（差分適用の担当付け替え・変更はコメント記録）/
   set_class（分類3値の付け替え＋任意ラベル add/remove。「人間」タスクは guard_human で変更不可＝
   人間への引き渡しは可・人間からの引き剥がしは不可。連絡待ち/分類ラベルの add/remove 直接指定は拒否）
+v2.8 追加（#794 重要度と開始・終了予定の変更ツール＝フィールド編集ギャップ解消の最終盤）:
+  set_priority（0-4 クランプ・safe_update 経由）/ set_dates（start/end の個別更新・空文字でクリア・
+  start>end 拒否・safe_update 経由）。期日 due_date は従来どおり set_due（reason 必須ゲート）のみ
 認証（2資格情報方式）:
   ~/.config/taskstation/fable.env  = 操作の名義（コメント・タスク更新・進捗・作成・担当・plans。
                                      AI発言と人間の区別＝UXの核なので fable 名義を維持）
@@ -731,6 +734,54 @@ def t_set_description(a):
     return f"#{a['task_id']} の説明文を更新しました（{len(desc)}文字）"
 
 
+PRIO_JA = {0: "なし", 1: "低", 2: "中", 3: "高", 4: "MUST"}
+
+
+def t_set_priority(a):
+    """重要度の変更（#794）。create_task と同一規約の 0-4 クランプ・safe_update 経由。"""
+    if a.get("priority") is None:
+        raise Exception("priority は必須です（0=なし / 1=後回し可 / 2=推奨 / 3=必須 / 4=MUST）")
+    cur = ts(f"/tasks/{a['task_id']}")
+    guard_human(cur)
+    new = max(0, min(4, int(a["priority"])))
+    old = cur.get("priority") or 0
+    if new == old:
+        return f"#{a['task_id']} の重要度は既に {PRIO_JA[new]}({new}) です（変更なし）"
+    safe_update(a["task_id"], {"priority": new})  # diff は ACTIVITY_FIELDS("priority") で変更履歴に自動記録
+    return f"#{a['task_id']} の重要度を {PRIO_JA.get(old, old)}({old}) → {PRIO_JA[new]}({new}) に変更しました"
+
+
+def _parse_day(s, name):
+    """YYYY-MM-DD を検証して ISO(Z) に。空文字はクリア（UNSET センチネル）。"""
+    if s == "":
+        return UNSET
+    try:
+        return date.fromisoformat(s).isoformat() + "T00:00:00Z"
+    except ValueError:
+        raise Exception(f"{name} は YYYY-MM-DD で指定してください（クリアは空文字）: {s!r}")
+
+
+def t_set_dates(a):
+    """開始予定・終了予定の変更（#794）。片方だけの更新可・空文字でクリア・start>end は拒否。
+    期日（締切）は対象外＝set_due（reason 必須ゲート）を使う。"""
+    if a.get("start_date") is None and a.get("end_date") is None:
+        raise Exception("start_date / end_date の少なくとも一方を指定してください（YYYY-MM-DD・クリアは空文字）")
+    cur = ts(f"/tasks/{a['task_id']}")
+    guard_human(cur)
+    patch = {}
+    if a.get("start_date") is not None:
+        patch["start_date"] = _parse_day(str(a["start_date"]), "start_date")
+    if a.get("end_date") is not None:
+        patch["end_date"] = _parse_day(str(a["end_date"]), "end_date")
+    fin_start = patch.get("start_date", cur.get("start_date") or UNSET)
+    fin_end = patch.get("end_date", cur.get("end_date") or UNSET)
+    if has_date(fin_start) and has_date(fin_end) and fin_start > fin_end:
+        raise Exception(f"開始予定（{fin_start[:10]}）が終了予定（{fin_end[:10]}）より後になります")
+    safe_update(a["task_id"], patch)  # diff は ACTIVITY_FIELDS(start_date/end_date) で変更履歴に自動記録
+    show = lambda v: v[:10] if has_date(v) else "なし"
+    return f"#{a['task_id']} の予定を更新しました: 開始 {show(fin_start)} / 終了 {show(fin_end)}"
+
+
 def t_set_due(a):
     """期日変更の唯一の入口（「相談の上」ゲート）。reason 必須＝合意内容を履歴とコメントに残す。"""
     cur = ts(f"/tasks/{a['task_id']}")
@@ -883,6 +934,10 @@ TOOLS = [
      ["task_id"], t_set_class),
     ("set_description", "タスクの説明文を更新する（全文置換＝渡した内容がそのまま新しい説明になる）。部分修正でも先に get_task で現状を読み、編集後の全文を渡すこと",
      {"task_id": NUM, "description": STR}, ["task_id", "description"], t_set_description),
+    ("set_priority", "タスクの重要度を変更する（0=なし / 1=後回し可 / 2=推奨 / 3=必須 / 4=MUST）。変更は履歴に記録される",
+     {"task_id": NUM, "priority": NUM}, ["task_id", "priority"], t_set_priority),
+    ("set_dates", "開始予定・終了予定（ガント/一覧の日付）を変更する。YYYY-MM-DD・片方だけの更新可・空文字でクリア。期日（締切）は set_due（reason 必須）を使う",
+     {"task_id": NUM, "start_date": STR, "end_date": STR}, ["task_id"], t_set_dates),
 ]
 TOOL_DEFS = [{"name": n, "description": d,
               "inputSchema": {"type": "object", "properties": p, "required": r}}
