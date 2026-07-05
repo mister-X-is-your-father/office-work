@@ -33,6 +33,10 @@ v2.5 追加（#729 運用規約の焼き込み＝どの AI セッションも me
 v2.6 追加（#791 タイトル/説明の編集ツール＝生 API 直叩き（全置換で消失リスク）を強いられていたギャップの解消）:
   rename_task（safe_update 経由・改名はコメント＋変更履歴に記録）/ set_description（全文置換・safe_update 経由）
   タイトル規約の機械ガード check_title（絵文字拒否）を rename_task / create_task / create_subtask に適用
+v2.7 追加（#793 担当と分類の変更ツール＝協業プロトコル「担当を人間に寄せる」「分類は後から付け替え」をツールで実行可能に）:
+  set_assignees（差分適用の担当付け替え・変更はコメント記録）/
+  set_class（分類3値の付け替え＋任意ラベル add/remove。「人間」タスクは guard_human で変更不可＝
+  人間への引き渡しは可・人間からの引き剥がしは不可。連絡待ち/分類ラベルの add/remove 直接指定は拒否）
 認証（2資格情報方式）:
   ~/.config/taskstation/fable.env  = 操作の名義（コメント・タスク更新・進捗・作成・担当・plans。
                                      AI発言と人間の区別＝UXの核なので fable 名義を維持）
@@ -634,6 +638,75 @@ def t_create_task(a):
     return f"タスク #{task['id']} 「{a['title']}」を作成しました（{where}）"
 
 
+def t_set_assignees(a):
+    """担当の付け替え（#793）。渡した集合へ差分適用（追加＋除去）＝協業プロトコルの
+    「AIは自分のパートを終えたら担当を人間に寄せる」をツールで実行可能にする。"""
+    if a.get("assignees") is None:
+        raise Exception("assignees は必須です（全員外すには空配列を渡す）")
+    cur = ts(f"/tasks/{a['task_id']}")
+    guard_human(cur)
+    want_ids = []
+    for uname in a["assignees"]:
+        uid = USER_IDS.get(uname)
+        if uid is None:
+            raise Exception(f"不明な担当: {uname}（森田 / fable / taskstation-ai のみ）")
+        if uid not in want_ids:
+            want_ids.append(uid)
+    cur_users = {u.get("id"): u.get("username") for u in (cur.get("assignees") or [])}
+    id2name = {v: k for k, v in USER_IDS.items() if not k.endswith("AI")}  # 表示用（username 優先）
+    for uid in want_ids:
+        if uid not in cur_users:
+            ts(f"/tasks/{a['task_id']}/assignees", "PUT", {"user_id": uid})
+    for uid in list(cur_users):
+        if uid not in want_ids:
+            ts(f"/tasks/{a['task_id']}/assignees/{uid}", "DELETE")
+    old_s = "・".join(cur_users.values()) or "（なし）"
+    new_s = "・".join(id2name.get(uid, str(uid)) for uid in want_ids) or "（なし）"
+    if set(cur_users) == set(want_ids):
+        return f"#{a['task_id']} の担当は既に {new_s} です（変更なし）"
+    comment(a["task_id"], f"🤖 👤 担当変更: {old_s} → {new_s}")
+    return f"#{a['task_id']} の担当を変更しました: {old_s} → {new_s}"
+
+
+def t_set_class(a):
+    """分類ラベルの付け替え（#793）。class は AI / 人間 / AI+人間 の3値。任意ラベルは
+    add_labels / remove_labels で（連絡待ち・分類3値の直接指定は拒否＝専用経路を迂回させない）。
+    分類「人間」のタスクは guard_human が拒否＝人間への引き渡し（→人間）は可・引き剥がしは不可。"""
+    cls = a.get("class")
+    add_extra = a.get("add_labels") or []
+    rm_extra = a.get("remove_labels") or []
+    if not cls and not add_extra and not rm_extra:
+        raise Exception("class / add_labels / remove_labels のいずれかを指定してください")
+    if cls and cls not in CLASS_LABELS:
+        raise Exception(f"不明な分類: {cls}（{' / '.join(CLASS_LABELS)} のみ）")
+    for name in list(add_extra) + list(rm_extra):
+        if name == WAIT_LABEL:
+            raise Exception("「連絡待ち」は escalate / resume_task で遷移してください（直接操作は不可）")
+        if name in CLASS_LABELS:
+            raise Exception(f"分類ラベル「{name}」は class 引数で変更してください")
+    cur = ts(f"/tasks/{a['task_id']}")
+    guard_human(cur)  # 分類「人間」は AI から変更不可（引き剥がしの抜け道を作らない）
+    done_msgs = []
+    if cls:
+        old_cls = next((c for c in CLASS_LABELS if c in task_labels(cur)), None)
+        if old_cls == cls:
+            done_msgs.append(f"分類は既に「{cls}」")
+        else:
+            for c in CLASS_LABELS:
+                if c != cls and c in task_labels(cur):
+                    remove_label(a["task_id"], c)
+            add_label(a["task_id"], cls, create=True)
+            comment(a["task_id"], f"🤖 🏷️ 分類変更: {old_cls or '（なし）'} → {cls}")
+            done_msgs.append(f"分類を {old_cls or '（なし）'} → {cls} に変更")
+    for name in add_extra:
+        add_label(a["task_id"], name, create=True)
+        done_msgs.append(f"ラベル「{name}」を付与")
+    for name in rm_extra:
+        remove_label(a["task_id"], name)
+        done_msgs.append(f"ラベル「{name}」を除去")
+    return f"#{a['task_id']}: " + "・".join(done_msgs)
+
+
 def t_rename_task(a):
     """タイトル変更の正規手段（#791）。生 API 直叩き（全置換で未指定フィールド消失）を不要にする。"""
     cur = ts(f"/tasks/{a['task_id']}")
@@ -803,6 +876,11 @@ TOOLS = [
      {"task_id": NUM, "date": STR, "reason": STR}, ["task_id", "date", "reason"], t_set_due),
     ("rename_task", "タスクのタイトルを変更する（改名の正規手段・API 直叩き禁止）。タイトル規約を機械ガード（絵文字は拒否・端的に）。改名はコメントと変更履歴に記録される",
      {"task_id": NUM, "new_title": STR}, ["task_id", "new_title"], t_rename_task),
+    ("set_assignees", "担当者を付け替える（渡した集合へ差分適用・全員外すには空配列）。担当は 森田 / fable / taskstation-ai。AI+人間タスクで自分のパートを終えたら、申し送りコメントとともに担当を森田へ寄せる用途が典型。変更はコメントに記録される",
+     {"task_id": NUM, "assignees": ARR_STR}, ["task_id", "assignees"], t_set_assignees),
+    ("set_class", "分類ラベルを付け替える（class = AI / 人間 / AI+人間）。人間への引き渡し（→人間）は可、分類「人間」タスクの変更は不可。add_labels / remove_labels で任意ラベル（ローンチ必須等）の付与・除去も可（連絡待ち・分類3値の直接指定は拒否）。分類変更はコメントに記録される",
+     {"task_id": NUM, "class": STR, "add_labels": ARR_STR, "remove_labels": ARR_STR},
+     ["task_id"], t_set_class),
     ("set_description", "タスクの説明文を更新する（全文置換＝渡した内容がそのまま新しい説明になる）。部分修正でも先に get_task で現状を読み、編集後の全文を渡すこと",
      {"task_id": NUM, "description": STR}, ["task_id", "description"], t_set_description),
 ]
@@ -819,6 +897,8 @@ INSTRUCTIONS = (
     "(4) 判断が必要になったら即 escalate(選択肢付き) → "
     "(5) 完了は complete_task に summary 必須(何をした・成果物の場所・検証状態)。"
     "進捗・報告はすべて post_comment(全員閲覧)へ。add_note は下書きメモ(作成者のみ閲覧)。"
+    "AI+人間タスクは自分のパートを終えたら post_comment で申し送り＋set_assignees で担当を森田へ寄せる"
+    "(分類の付け替えは set_class。人間への引き渡しは可・分類「人間」の変更は不可)。"
     "期日の変更は set_due のみ・reason 必須(事前に相談か escalate で合意してから。無断変更は禁止)。"
     "タスク間の依存関係は add_dependency で構造化する(説明文への手書き禁止)。"
     "my_agenda の⛔ブロック中(先行タスク待ち)のタスクには着手しない。"

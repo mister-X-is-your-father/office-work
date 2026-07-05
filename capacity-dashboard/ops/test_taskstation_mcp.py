@@ -171,5 +171,89 @@ class RenameAndDescription(unittest.TestCase):
             mcp.t_create_task({"title": "🎉 新機能"})
 
 
+class RecordingTs:
+    """GET は固定タスクを返し、全メソッドの呼び出しを記録する ts の代役（#793 用）。"""
+
+    def __init__(self, cur):
+        self.cur = cur
+        self.calls = []
+
+    def __call__(self, path, method="GET", body=None):
+        self.calls.append((method, path, body))
+        if method == "GET":
+            return dict(self.cur)
+        return {}
+
+
+class AssigneesAndClass(unittest.TestCase):
+    """#793: set_assignees の差分適用と set_class のガード。"""
+
+    def setUp(self):
+        self._ts, self._log, self._comment = mcp.ts, mcp.log_activity, mcp.comment
+        self._add, self._rm = mcp.add_label, mcp.remove_label
+        mcp.log_activity = lambda entry: None
+        self.comments, self.added, self.removed = [], [], []
+        mcp.comment = lambda tid, text: self.comments.append(text)
+        mcp.add_label = lambda tid, title, create=False: self.added.append(title)
+        mcp.remove_label = lambda tid, title: self.removed.append(title)
+
+    def tearDown(self):
+        mcp.ts, mcp.log_activity, mcp.comment = self._ts, self._log, self._comment
+        mcp.add_label, mcp.remove_label = self._add, self._rm
+
+    def test_set_assignees_diff_apply(self):
+        """森田(7)のみ → fable(8)＋taskstation-ai(14): 7 を DELETE・8/14 を PUT。"""
+        fake = RecordingTs(make_cur(assignees=[{"id": 7, "username": "森田"}]))
+        mcp.ts = fake
+        out = mcp.t_set_assignees({"task_id": 1, "assignees": ["fable", "taskstation-ai"]})
+        puts = [(m, p) for m, p, b in fake.calls if m == "PUT"]
+        dels = [(m, p) for m, p, b in fake.calls if m == "DELETE"]
+        self.assertEqual(len(puts), 2)
+        self.assertIn(("DELETE", "/tasks/1/assignees/7"), dels)
+        self.assertEqual(len(self.comments), 1)   # 変更はコメント記録
+        self.assertIn("担当を変更しました", out)
+
+    def test_set_assignees_noop_and_unknown(self):
+        fake = RecordingTs(make_cur(assignees=[{"id": 7, "username": "森田"}]))
+        mcp.ts = fake
+        out = mcp.t_set_assignees({"task_id": 1, "assignees": ["森田"]})
+        self.assertIn("変更なし", out)
+        self.assertEqual(self.comments, [])
+        with self.assertRaisesRegex(Exception, "不明な担当"):
+            mcp.t_set_assignees({"task_id": 1, "assignees": ["capdemo"]})
+        with self.assertRaisesRegex(Exception, "assignees は必須"):
+            mcp.t_set_assignees({"task_id": 1})
+
+    def test_set_class_replaces_class_label(self):
+        fake = RecordingTs(make_cur(labels=[{"title": "AI"}]))
+        mcp.ts = fake
+        out = mcp.t_set_class({"task_id": 1, "class": "AI+人間"})
+        self.assertIn("AI", self.removed)          # 旧分類を除去
+        self.assertIn("AI+人間", self.added)       # 新分類を付与
+        self.assertIn("分類を AI → AI+人間 に変更", out)
+        self.assertEqual(len(self.comments), 1)
+
+    def test_set_class_guards(self):
+        fake = RecordingTs(make_cur(labels=[{"title": "人間"}]))
+        mcp.ts = fake
+        with self.assertRaisesRegex(Exception, "人間"):   # 分類「人間」は変更不可（引き剥がし禁止）
+            mcp.t_set_class({"task_id": 1, "class": "AI"})
+        with self.assertRaisesRegex(Exception, "不明な分類"):
+            mcp.t_set_class({"task_id": 1, "class": "ロボ"})
+        with self.assertRaisesRegex(Exception, "escalate"):
+            mcp.t_set_class({"task_id": 1, "add_labels": ["連絡待ち"]})
+        with self.assertRaisesRegex(Exception, "class 引数"):
+            mcp.t_set_class({"task_id": 1, "remove_labels": ["AI"]})
+        with self.assertRaisesRegex(Exception, "いずれか"):
+            mcp.t_set_class({"task_id": 1})
+
+    def test_set_class_hand_over_to_human_allowed(self):
+        """AI+人間 → 人間（引き渡し方向）は許可される。"""
+        fake = RecordingTs(make_cur(labels=[{"title": "AI+人間"}]))
+        mcp.ts = fake
+        out = mcp.t_set_class({"task_id": 1, "class": "人間"})
+        self.assertIn("分類を AI+人間 → 人間 に変更", out)
+
+
 if __name__ == "__main__":
     unittest.main()
