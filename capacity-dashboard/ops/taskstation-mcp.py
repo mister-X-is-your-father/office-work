@@ -40,6 +40,10 @@ v2.7 追加（#793 担当と分類の変更ツール＝協業プロトコル「�
 v2.8 追加（#794 重要度と開始・終了予定の変更ツール＝フィールド編集ギャップ解消の最終盤）:
   set_priority（0-4 クランプ・safe_update 経由）/ set_dates（start/end の個別更新・空文字でクリア・
   start>end 拒否・safe_update 経由）。期日 due_date は従来どおり set_due（reason 必須ゲート）のみ
+v2.9 変更（#797 人間タスクの期日変更を AI が代行可能に）:
+  set_due だけ分類「人間」ガードの対象外とする（期日は作業内容でなく運用メタデータ・reason 必須＝
+  人間の明示指示の記録が必ず残るため）。人間タスクへの実行はコメントに「代行」と明示。
+  他の変更系ツールのガードは不変＝AI が人間の作業領域（タイトル/説明/進捗/ステータス等）を触れない設計は維持
 認証（2資格情報方式）:
   ~/.config/taskstation/fable.env  = 操作の名義（コメント・タスク更新・進捗・作成・担当・plans。
                                      AI発言と人間の区別＝UXの核なので fable 名義を維持）
@@ -243,8 +247,11 @@ def remove_label(task_id, title):
 def guard_human(cur):
     """分類「人間」のタスクへの変更系操作を拒否する共通ガード（#693 運用ルールの強制）。
 
-    適用: start_task / set_progress / set_estimate / set_due / complete_task /
-    escalate / resume_task / schedule_task / move_task / rename_task / set_description。
+    適用: start_task / set_progress / set_estimate / complete_task / escalate / resume_task /
+    schedule_task / move_task / rename_task / set_description / set_assignees / set_class /
+    set_priority / set_dates。
+    対象外（#797）: set_due — 期日は作業内容でなく運用メタデータで、reason 必須＝人間の明示指示の
+    記録が必ず残るため、人間タスクへの代行を許可（コメントに「代行」と明示）。無断変更禁止は不変。
     対象外（許可）: post_comment / add_dependency / remove_dependency /
     create_subtask / get_task / add_note（読み取り・申し送り・構造化は妨げない）。
     """
@@ -783,13 +790,20 @@ def t_set_dates(a):
 
 
 def t_set_due(a):
-    """期日変更の唯一の入口（「相談の上」ゲート）。reason 必須＝合意内容を履歴とコメントに残す。"""
+    """期日変更の唯一の入口（「相談の上」ゲート）。reason 必須＝合意内容を履歴とコメントに残す。
+
+    分類「人間」も対象（#797・guard_human 対象外）: 期日は運用メタデータで reason に指示の記録が
+    残るため、人間の明示指示による一括変更などを AI が代行できる。コメントで「代行」と明示する。
+    """
+    if not str(a.get("reason") or "").strip():
+        raise Exception("reason は必須です（事前に相談・合意した内容、または人間の明示指示を書く）")
     cur = ts(f"/tasks/{a['task_id']}")
-    guard_human(cur)
+    is_human = "人間" in task_labels(cur)  # ガードはしないが、代行であることをコメントに明示する
     old = cur.get("due_date") or ""
     old_s = old[:10] if has_date(old) else "期日なし"
     safe_update(a["task_id"], {"due_date": a["date"] + "T00:00:00Z"})  # diff は safe_update が type:field で自動記録
-    comment(a["task_id"], f"🤖 📅 期日変更: {old_s} → {a['date']}\n\n■ 理由（相談済み）\n{a['reason']}")
+    head = "期日変更（人間タスク・指示による代行）" if is_human else "期日変更"
+    comment(a["task_id"], f"🤖 📅 {head}: {old_s} → {a['date']}\n\n■ 理由（相談済み）\n{a['reason']}")
     return f"#{a['task_id']} の期日を {old_s} → {a['date']} に変更しました（コメントに理由を記録）"
 
 
@@ -923,7 +937,7 @@ TOOLS = [
      {"task_id": NUM, "blocker_task_id": NUM}, ["task_id", "blocker_task_id"], t_add_dependency),
     ("remove_dependency", "依存関係を解除する（task が blocker の完了待ちでなくなる）。張られていない場合も冪等に成功する",
      {"task_id": NUM, "blocker_task_id": NUM}, ["task_id", "blocker_task_id"], t_remove_dependency),
-    ("set_due", "タスクの期日を変更する（唯一の期日変更手段）。reason 必須＝事前に人間と相談・合意した内容を書く。無断変更は禁止。変更は履歴に記録され、タスクコメントにも旧→新と理由が投稿される",
+    ("set_due", "タスクの期日を変更する（唯一の期日変更手段）。reason 必須＝事前に人間と相談・合意した内容か、人間の明示指示を書く。無断変更は禁止。変更は履歴に記録され、タスクコメントにも旧→新と理由が投稿される。分類「人間」のタスクにも使える唯一の変更ツール（人間の指示による代行・コメントに代行と明示される）",
      {"task_id": NUM, "date": STR, "reason": STR}, ["task_id", "date", "reason"], t_set_due),
     ("rename_task", "タスクのタイトルを変更する（改名の正規手段・API 直叩き禁止）。タイトル規約を機械ガード（絵文字は拒否・端的に）。改名はコメントと変更履歴に記録される",
      {"task_id": NUM, "new_title": STR}, ["task_id", "new_title"], t_rename_task),
@@ -957,7 +971,8 @@ INSTRUCTIONS = (
     "期日の変更は set_due のみ・reason 必須(事前に相談か escalate で合意してから。無断変更は禁止)。"
     "タスク間の依存関係は add_dependency で構造化する(説明文への手書き禁止)。"
     "my_agenda の⛔ブロック中(先行タスク待ち)のタスクには着手しない。"
-    "人間のタスク(分類=人間)は読み取り以外触らない。"
+    "人間のタスク(分類=人間)は読み取り以外触らない"
+    "(唯一の例外: 人間の明示指示による期日変更は set_due で代行可＝reason に指示内容を記録)。"
     "\n\n【構造規約（違反すると人間の画面が壊れる・厳守）】"
     "階層は「タスクの親子関係」だけで表現する3層モデル: "
     "プロジェクト=最上位の親タスク ＞ タスクグループ=中間の親タスク(任意) ＞ 作業=葉タスク"
@@ -975,7 +990,8 @@ INSTRUCTIONS = (
     "API への生 POST は未指定フィールドを消失させるため禁止。"
     "\n\n【運用ルール（ツールが強制）】ステータスは 未着手→進行中(start_task)→連絡待ち(escalate)→完了(complete_task) "
     "の4値でツール経由のみ遷移。完了は complete_task+summary 必須（set_progress 100 は不可）。"
-    "resume_task は連絡待ち解除専用。分類「人間」のタスクはAIから変更不可。"
+    "resume_task は連絡待ち解除専用。分類「人間」のタスクはAIから変更不可"
+    "（例外は set_due の期日代行のみ）。"
 )
 
 

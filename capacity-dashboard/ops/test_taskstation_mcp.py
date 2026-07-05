@@ -255,6 +255,51 @@ class AssigneesAndClass(unittest.TestCase):
         self.assertIn("分類を AI+人間 → 人間 に変更", out)
 
 
+class SetDueHumanDelegation(unittest.TestCase):
+    """#797: set_due だけは分類「人間」でも実行できる（代行）。他ツールのガードは不変。"""
+
+    def setUp(self):
+        self._ts, self._log, self._comment = mcp.ts, mcp.log_activity, mcp.comment
+        mcp.log_activity = lambda entry: None
+        self.comments = []
+        mcp.comment = lambda tid, text: self.comments.append(text)
+
+    def tearDown(self):
+        mcp.ts, mcp.log_activity, mcp.comment = self._ts, self._log, self._comment
+
+    def test_set_due_on_human_task_succeeds_with_daiko_marker(self):
+        fake = FakeTs(make_cur(labels=[{"title": "人間"}], due_date="2026-07-01T00:00:00Z"))
+        mcp.ts = fake
+        out = mcp.t_set_due({"task_id": 1, "date": "2026-07-05", "reason": "森田さんの明示指示（全タスク7/5へ）"})
+        _, body = fake.posts[0]
+        self.assertEqual(body["due_date"], "2026-07-05T00:00:00Z")
+        self.assertEqual(body["description"], "D")            # 未指定は既存値のまま
+        self.assertIn("代行", self.comments[0])               # 人間タスクは「代行」とコメントに明示
+        self.assertIn("変更しました", out)
+
+    def test_set_due_on_normal_task_has_no_daiko_marker(self):
+        fake = FakeTs(make_cur(labels=[{"title": "AI"}]))
+        mcp.ts = fake
+        mcp.t_set_due({"task_id": 1, "date": "2026-07-05", "reason": "相談済み"})
+        self.assertNotIn("代行", self.comments[0])
+
+    def test_set_due_requires_reason(self):
+        with self.assertRaisesRegex(Exception, "reason"):
+            mcp.t_set_due({"task_id": 1, "date": "2026-07-05", "reason": "  "})
+
+    def test_other_tools_still_guarded_on_human_task(self):
+        """期日以外（作業領域）のガードが緩んでいないこと。"""
+        fake = FakeTs(make_cur(labels=[{"title": "人間"}]))
+        mcp.ts = fake
+        for fn, args in ((mcp.t_set_progress, {"task_id": 1, "percent": 50}),
+                         (mcp.t_rename_task, {"task_id": 1, "new_title": "X"}),
+                         (mcp.t_set_priority, {"task_id": 1, "priority": 2}),
+                         (mcp.t_set_dates, {"task_id": 1, "start_date": "2026-07-06"})):
+            with self.assertRaisesRegex(Exception, "人間専用"):
+                fn(args)
+        self.assertEqual(fake.posts, [])
+
+
 class PriorityAndDates(unittest.TestCase):
     """#794: set_priority のクランプと set_dates の検証・クリア・整合ガード。"""
 

@@ -50,7 +50,7 @@ set_progress + post_comment  … 節目ごとに進捗%と作業ログを記録
 | 完了時は完了報告が必須 | complete_task の summary が必須引数（何をした・成果物の場所・検証状態） |
 | 「進捗100%なのに未完了」を作らない | set_progress(100) はエラー→ complete_task へ誘導 |
 | resume_task は連絡待ち解除専用 | 連絡待ちでないタスクにはエラー→ start_task へ誘導 |
-| 分類「人間」のタスクはAIから変更不可 | 変更系8ツール（start/progress/estimate/due/complete/escalate/resume/schedule）が拒否。コメント・依存付けは可 |
+| 分類「人間」のタスクはAIから変更不可 | 変更系ツール（start/progress/estimate/complete/escalate/resume/schedule/move/rename/set_description/set_assignees/set_class/set_priority/set_dates）が拒否。コメント・依存付けは可。**唯一の例外 = set_due（#797・2026-07-05〜）**: 期日は運用メタデータで reason 必須＝人間の明示指示の記録が残るため、人間タスクの期日変更を AI が代行できる（コメントに「代行」と明示） |
 | 完了済みタスクの再開はAIからしない | start_task が拒否（戻すのは人間がUIで） |
 | 期日の無断変更禁止 | set_due のみ・reason 必須・変更はコメント＋履歴に記録 |
 
