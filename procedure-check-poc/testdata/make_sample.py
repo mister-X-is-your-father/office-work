@@ -21,6 +21,7 @@ HEADER = ["No", "作業区分", "対象環境", "対象サーバ", "作業内容
 # コメント行（No 列に "#"）を挟み、実物の非システマチックさを模す
 COMMENT_AP = ("#", "", "", "", "★AP サーバ作業（作業者: インフラ担当）", "", "")
 COMMENT_DB = ("#", "", "", "", "★DB サーバ作業（メンテナンス枠内で実施）", "", "")
+COMMENT_RB = ("#", "", "", "", "★切り戻し手順（問題発生時）", "", "")
 
 
 def ap_block(server):
@@ -168,10 +169,25 @@ def inject_F1(steps):
     return steps[:idx] + [extra] + steps[idx:]
 
 
+def inject_D4(steps):
+    """D4 切り戻し未追随: 末尾に切り戻し節を足すが、戻し値が変更前(200)でなく別値(250)。
+
+    共有ベースには切り戻し節を持たせず、この注入時だけ「壊れた切り戻し」を追加する
+    （他ケースへ影響を与えないため）。変更は 200→300 なので、正しい切り戻しは 300→200。
+    ここでは 300→250 に戻す＝元の変更を正しく打ち消せていない。
+    """
+    broken = [COMMENT_RB]
+    for server in ("ap-prd-01", "ap-prd-02"):
+        broken.append(("切り戻し", "本番", server, "app.conf の max_connections を元に戻す",
+                       "sed -i 's/max_connections = 300/max_connections = 250/' /etc/myapp/app.conf",
+                       "grep で max_connections = 250 を確認"))
+    return steps + broken
+
+
 INJECTORS = {
     "A1": inject_A1, "A2": inject_A2, "B1": inject_B1, "B2": inject_B2, "B3": inject_B3,
     "C1": inject_C1, "C2": inject_C2, "D2": inject_D2, "D3": inject_D3,
-    "E1": inject_E1, "E2": inject_E2, "F1": inject_F1,
+    "E1": inject_E1, "E2": inject_E2, "F1": inject_F1, "D4": inject_D4,
 }
 
 
