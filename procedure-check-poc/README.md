@@ -17,11 +17,13 @@ procedure-check-poc/
 │   └── check_prompt.md         # 判定プロンプト v1
 ├── scripts/
 │   ├── extract_excel.py        # Excel 手順書 → Markdown 整形（依存: openpyxl のみ）
-│   └── run_check.sh            # 一括実行（整形 → 入力束ね → AI 判定）
+│   ├── run_check.sh            # 一括実行（整形 → 入力束ね → AI 判定）
+│   └── run_tests.sh            # 誤り埋め込みテストの一括ハーネス（全観点→PASS/FAIL 行列）
 ├── testdata/
 │   ├── sample_request.md       # 模擬 特殊手順追加指示
 │   ├── make_sample.py          # 正しいベース＋観点別の誤り注入で模擬手順書 xlsx を生成（--list 参照）
 │   └── sample_procedure.xlsx   # 生成済み模擬手順書（既定=複合ケース mix）
+├── docs/test-results.md        # ハーネスの結果マトリクス（run_tests.sh が生成）
 └── work/                       # 実行時の中間・結果ファイル（git 管理外）
 ```
 
@@ -49,6 +51,14 @@ python3 testdata/make_sample.py   # 誤り埋め込み模擬手順書を生成
 
 観点別の単一障害テスト・負制御（誤検出0）の初回計測は `docs/test-spec.md` §2.6 参照。
 ケース別生成: `python3 testdata/make_sample.py --case B1 -o work/x.xlsx`（`--list` で一覧）。
+
+全観点を一括で回すには（7/8 レビューでの再現用）:
+
+```bash
+./scripts/run_tests.sh          # 全13観点＋負制御を判定 → docs/test-results.md に PASS/FAIL 行列
+```
+
+再開可能（`work/tests/` の既存結果を再利用）・アトミック書込。再計測は `work/tests/` を消してから。
 
 ## 社内環境への持ち込み
 
