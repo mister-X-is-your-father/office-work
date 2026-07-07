@@ -81,6 +81,17 @@ def inject_B1(steps):
     return out
 
 
+def inject_B2(steps):
+    """B2 対象外環境への手順: 除外の検証環境(db-stg-01)への追加作業を挿入。
+
+    本番 DB 作業は正しいまま残し、対象外の検証環境への手順を「追加」する点が B1 と異なる。
+    """
+    extra = ("事前検証", "検証", "db-stg-01", "検証環境でパッチを事前適用",
+             "psql myappdb < /patch/patch-99.9.0.sql", "適用ログにエラーが無いこと")
+    idx = steps.index(COMMENT_DB) + 1  # DB コメントの直後に差し込む
+    return steps[:idx] + [extra] + steps[idx:]
+
+
 def inject_B3(steps):
     """B3 環境名の転記ミス: ap-prd-02 を一箇所だけ ap-prd-002 と誤記。"""
     out, done = [], False
@@ -158,7 +169,7 @@ def inject_F1(steps):
 
 
 INJECTORS = {
-    "A1": inject_A1, "A2": inject_A2, "B1": inject_B1, "B3": inject_B3,
+    "A1": inject_A1, "A2": inject_A2, "B1": inject_B1, "B2": inject_B2, "B3": inject_B3,
     "C1": inject_C1, "C2": inject_C2, "D2": inject_D2, "D3": inject_D3,
     "E1": inject_E1, "E2": inject_E2, "F1": inject_F1,
 }
