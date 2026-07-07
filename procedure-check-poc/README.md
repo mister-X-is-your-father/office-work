@@ -11,16 +11,17 @@
 ```
 procedure-check-poc/
 ├── docs/
-│   └── check-perspectives.md   # チェック観点リスト（A1〜E2・ドラフト v1）
+│   ├── check-perspectives.md   # チェック観点リスト（A〜F・ドラフト v2）
+│   └── test-spec.md            # テスト仕様書（#763・ドラフト。誤り埋め込み＋過去実データ再現）
 ├── prompts/
 │   └── check_prompt.md         # 判定プロンプト v1
 ├── scripts/
 │   ├── extract_excel.py        # Excel 手順書 → Markdown 整形（依存: openpyxl のみ）
 │   └── run_check.sh            # 一括実行（整形 → 入力束ね → AI 判定）
 ├── testdata/
-│   ├── sample_request.md       # 模擬開発依頼
-│   ├── make_sample.py          # 誤り 4 件を埋め込んだ模擬手順書 xlsx の生成
-│   └── sample_procedure.xlsx   # 生成済み模擬手順書
+│   ├── sample_request.md       # 模擬 特殊手順追加指示
+│   ├── make_sample.py          # 正しいベース＋観点別の誤り注入で模擬手順書 xlsx を生成（--list 参照）
+│   └── sample_procedure.xlsx   # 生成済み模擬手順書（既定=複合ケース mix）
 └── work/                       # 実行時の中間・結果ファイル（git 管理外）
 ```
 
@@ -45,6 +46,9 @@ python3 testdata/make_sample.py   # 誤り埋め込み模擬手順書を生成
 2026-07-06 実行（プロンプト v2）: 埋め込んだ誤り（環境取り違え / 対象サーバの部分欠落 / 停止手順漏れ /
 除外指示への違反=nginx 残存）をすべて検出、誤検出 0 件。指摘には実 Excel の行番号（xlsx-row）が付く。
 結果例は `work/result.md`。
+
+観点別の単一障害テスト・負制御（誤検出0）の初回計測は `docs/test-spec.md` §2.6 参照。
+ケース別生成: `python3 testdata/make_sample.py --case B1 -o work/x.xlsx`（`--list` で一覧）。
 
 ## 社内環境への持ち込み
 
