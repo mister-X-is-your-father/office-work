@@ -24,6 +24,7 @@ procedure-check-poc/
 │   ├── make_sample.py          # 正しいベース＋観点別の誤り注入で模擬手順書 xlsx を生成（--list 参照）
 │   └── sample_procedure.xlsx   # 生成済み模擬手順書（既定=複合ケース mix）
 ├── docs/test-results.md        # ハーネスの結果マトリクス（run_tests.sh が生成）
+├── docs/review-brief.md        # 7/8 レビュー用ブリーフ（小西さん向け1枚）
 └── work/                       # 実行時の中間・結果ファイル（git 管理外）
 ```
 
