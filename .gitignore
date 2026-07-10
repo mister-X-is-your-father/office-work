@@ -13,3 +13,6 @@ out/
 # local tooling artifacts
 .playwright-mcp/
 capmock-collapsed.png
+
+# tmux pane-capture junk (accidental)
+*current pane*
