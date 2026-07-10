@@ -36,8 +36,20 @@ export async function register(username, email, password) {
   return req("/register", { method: "POST", auth: false, body: { username, email, password } });
 }
 
-// 全タスク（time_estimate / time_spent / assignees / 日付 / priority / done 等を含む）
-export async function getTasks() { return req("/tasks/all?per_page=250"); }
+// 全タスク（time_estimate / time_spent / assignees / 日付 / priority / done 等を含む）。
+// サーバは per_page を maxitemsperpage(=50) に丸めるため、単発 GET だと 50 件で頭打ちになり
+// タスク総数 >50 で取りこぼす（2026-07-03 実害: プロジェクト/グループ層タスクが欠けて
+// projectAncestor が辿れず、グループが「プロジェクト」に化けて表示された）。全ページ送りで取る。
+export async function getTasks() {
+  const out = [];
+  for (let page = 1; page <= 200; page++) { // 200ページ=最大1万件のフェイルセーフ
+    const batch = await req(`/tasks/all?per_page=250&page=${page}`);
+    if (!Array.isArray(batch) || batch.length === 0) break;
+    out.push(...batch);
+    if (batch.length < 50) break; // サーバ上限(50)未満=最終ページ
+  }
+  return out;
+}
 export async function getTask(id) { return req(`/tasks/${id}`); }
 // 投入先WS内の全タスクを done 込みで全ページ取得する（サーバの per_page 既定は 50 で頭打ちのためページ送り）。
 // keikaku 冪等投入の既存検出に使う。/tasks/all は全WS横断＋50件窓で取りこぼすため WS スコープのこちらを使う。
